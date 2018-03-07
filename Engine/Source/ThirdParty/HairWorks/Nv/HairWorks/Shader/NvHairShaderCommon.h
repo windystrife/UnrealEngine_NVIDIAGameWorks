@@ -1,0 +1,939 @@
+/* Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
+* NVIDIA CORPORATION and its licensors retain all intellectual property
+* and proprietary rights in and to this software, related documentation
+* and any modifications thereto.  Any use, reproduction, disclosure or
+* distribution of this software and related documentation without an express
+* license agreement from NVIDIA CORPORATION is strictly prohibited. */
+
+#ifndef NV_HAIR_SHADER_COMMON_H
+#define NV_HAIR_SHADER_COMMON_H
+
+#include "NvHairShaderCommonTypes.h"
+
+#ifdef _CPP
+#	error "Can only be included in HLSL"
+#endif
+
+// Codes below are for use with HLSL shaders only
+#ifndef SAMPLE_LEVEL
+#define SAMPLE_LEVEL( _texture, _sampler, _coord, _level )	_texture.SampleLevel( _sampler, _coord, _level )
+#endif
+
+#ifndef SYS_POSITION
+#define SYS_POSITION					SV_Position
+#endif
+
+#ifndef NOINTERPOLATION
+#define	NOINTERPOLATION					nointerpolation
+#endif
+
+//////////////////////////////////////////////////////////////////////////////
+// return normalized noise (0..1) from a unique hash id
+float NvHair_GetNormalizedNoise(unsigned int hash, NvHair_ConstantBuffer hairConstantBuffer)
+{
+	unsigned int id = hash % (NvHair_ConstantBuffer::NOISE_TABLE_SIZE * 4);
+
+	unsigned int noiseIdx1 = id / 4;
+	unsigned int noiseIdx2 = id % 4;
+
+	return hairConstantBuffer.noiseTable[noiseIdx1][noiseIdx2];
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// return signed noise (-1 .. 1) from a unique hash id
+float NvHair_GetSignedNoise(unsigned int hash, NvHair_ConstantBuffer hairConstantBuffer)
+{
+	float v = NvHair_GetNormalizedNoise(hash, hairConstantBuffer);
+	return 2.0f * (v - 0.5f);
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// return vector noise [-1..1, -1..1, -1..1] from a unique hash id
+float3 NvHair_GetVectorNoise(unsigned int seed, NvHair_ConstantBuffer hairConstantBuffer)
+{
+	float x = NvHair_GetSignedNoise(seed, hairConstantBuffer);
+	float y = NvHair_GetSignedNoise(seed + 1229, hairConstantBuffer);
+	float z = NvHair_GetSignedNoise(seed + 2131, hairConstantBuffer);
+
+	return float3(x,y,z);
+}
+
+//////////////////////////////////////////////////////////////////////////////
+float3 NvHair_ComputeHairShading(
+	float3 Lcolor, // light color and illumination
+	float3 Ldir, // light direction
+
+	float3 V, // view vector
+	float3 N, // surface normal
+	float3 T, // hair tangent
+
+	float3 diffuseColor, // diffuse albedo
+	float3 specularColor, // specularity
+
+	float diffuseBlend,
+	float primaryScale,
+	float primaryShininess,
+	float secondaryScale,
+	float secondaryShininess,
+	float secondaryOffset
+	)
+{
+	// diffuse hair shading
+	float TdotL = clamp(dot( T , Ldir), -1.0f, 1.0f);
+	float diffuseSkin = max(0, dot( N, Ldir));
+	float diffuseHair = sqrt( 1.0f - TdotL*TdotL );
+	
+	float diffuseSum = lerp(diffuseHair, diffuseSkin, diffuseBlend);
+	
+	// primary specular
+	float3 H = normalize(V + Ldir);
+	float TdotH = clamp(dot(T, H), -1.0f, 1.0f);
+	float specPrimary = sqrt(1.0f - TdotH*TdotH);
+	specPrimary = pow(max(0, specPrimary), primaryShininess);
+
+	// secondary
+	TdotH = clamp(TdotH + secondaryOffset, -1.0, 1.0);
+	float specSecondary = sqrt(1 - TdotH*TdotH);
+	specSecondary = pow(max(0, specSecondary), secondaryShininess);
+
+	// specular sum
+	float specularSum = primaryScale * specPrimary + secondaryScale * specSecondary;
+
+	float3 output = diffuseSum * (Lcolor * diffuseColor) + specularSum * (Lcolor * specularColor);
+
+	return output;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Compute shaded color for hair (diffuse + specular)
+//////////////////////////////////////////////////////////////////////////////
+float3 NvHair_ComputeHairShading(
+	float3						Lcolor,
+	float3						Ldir,
+	NvHair_ShaderAttributes	attr,
+	NvHair_Material			mat,
+	float3						hairColor
+	)
+{
+	return NvHair_ComputeHairShading(
+		Lcolor, Ldir,
+		attr.V, attr.N, attr.T,
+		hairColor,
+		mat.specularColor.rgb,
+		mat.diffuseBlend,
+		mat.specularPrimaryScale,
+		mat.specularPrimaryPower,
+		mat.specularSecondaryScale,
+		mat.specularSecondaryPower,
+		mat.specularSecondaryOffset);
+}
+
+//////////////////////////////////////////////////////////////////////////////
+float NvHair_SampleBilinear(
+	float val00, float val10, float val01, float val11, float u, float v)
+{
+	float val0 = lerp(val00, val10, u);
+	float val1 = lerp(val01, val11, u);
+	float val  = lerp(val0, val1, v);
+	return val;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Compute structured noise in 1D
+//////////////////////////////////////////////////////////////////////////////
+float NvHair_ComputeStructuredNoise(
+	float						noiseCount,
+	float						seed,
+	NvHair_ConstantBuffer	hairConstantBuffer
+)
+{
+	// seed along hair length
+	float hash = noiseCount * seed;
+	float noiseSeed = floor(hash);
+	float noiseFrac = hash - noiseSeed - 0.5f;
+	
+	// seed for neighboring sample
+	float seedNeighbor = (noiseFrac < 0) ? noiseSeed - 1.0f : noiseSeed + 1.0f;
+	seedNeighbor = max(0, seedNeighbor);
+
+	// sample 4 noise values for bilinear interpolation
+	float seedSample0 = noiseSeed;
+	float seedSample1 = seedNeighbor;
+
+	float noise0 = NvHair_GetNormalizedNoise(seedSample0, hairConstantBuffer);
+	float noise1 = NvHair_GetNormalizedNoise(seedSample1, hairConstantBuffer);
+
+	// interpolated noise sample
+	float noise = lerp(noise0, noise1, abs(noiseFrac));
+
+	// scale noise by user param
+	return noise;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Compute glint (dirty sparkels) term
+//////////////////////////////////////////////////////////////////////////////
+float NvHair_ComputeHairGlint(
+	NvHair_ConstantBuffer	hairConstantBuffer,
+	NvHair_Material			mat,
+	NvHair_ShaderAttributes	attr
+)
+{
+	// read material parameters
+	float glintSize			= mat.glintCount;
+	float glintPower		= mat.glintExponent;
+
+	// seed along hair length
+	float lengthHash = glintSize * attr.texcoords.z;
+	float lengthSeed = floor(lengthHash);
+	float lengthFrac = lengthHash - lengthSeed - 0.5f;
+	
+	// seed for neighboring sample
+	float lengthSeedNeighbor = (lengthFrac < 0) ? lengthSeed - 1.0f : lengthSeed + 1.0f;
+	lengthSeedNeighbor = max(0, lengthSeedNeighbor);
+
+	// sample 4 noise values for bilinear interpolation
+	float seedSample0 = attr.hairID + lengthSeed;
+	float seedSample1 = attr.hairID + lengthSeedNeighbor;
+
+	float noise0 = NvHair_GetNormalizedNoise(seedSample0, hairConstantBuffer);
+	float noise1 = NvHair_GetNormalizedNoise(seedSample1, hairConstantBuffer);
+
+	// interpolated noise sample
+	float noise = lerp(noise0, noise1, abs(lengthFrac));
+
+	// apply gamma like power function
+	noise = pow(noise, glintPower);
+
+	// scale noise by user param
+	return noise;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Compute diffuse shading term only (no albedo is used)
+//////////////////////////////////////////////////////////////////////////////
+float NvHair_ComputeHairDiffuseShading(
+	float3		Ldir, // light direction
+	float3		T,
+	float3		N,
+	float		diffuseScale,
+	float		diffuseBlend
+	)
+{
+	// diffuse hair shading
+	float TdotL = clamp(dot( T , Ldir), -1.0f, 1.0f);
+
+	float diffuseSkin = max(0, dot( N, Ldir));
+	float diffuseHair = sqrt( 1.0f - TdotL*TdotL );
+
+	float diffuse = lerp(diffuseHair, diffuseSkin, diffuseBlend);
+	float result = diffuseScale * saturate(diffuse);
+
+	return max(0,result);
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Apply glint
+//////////////////////////////////////////////////////////////////////////////
+void NvHair_ApplyGlint(const float glintScale, const float glint, const float3 lightColor, inout float3 ambientInOut, inout float specularInOut)
+{
+	// Glint scale is typically 'mat.glintStrength'. If it is <=0 then this method should not be applied
+	// Apply to ambient
+	float luminance = dot(lightColor, float3(0.3, 0.5, 0.2));
+	ambientInOut += glintScale * glint * float3(luminance, luminance, luminance);
+	// Apply to specular
+	specularInOut *= lerp(1.0f, glint, glintScale);
+}
+
+//////////////////////////////////////////////////////////////////////////////
+float3 NvHair_ComputeHairShadingWithGlint(
+	float3 lightColor, // light color and illumination
+	float3 lightDir, // light direction
+	float3 lightAmbient,
+
+	float3 V, // view vector
+	float3 N, // surface normal
+	float3 T, // hair tangent
+
+	float3 diffuseColor, // diffuse albedo
+	float3 specularColor, // specularity
+
+	float diffuseBlend,
+	float primaryScale,
+	float primaryShininess,
+	float secondaryScale,
+	float secondaryShininess,
+	float secondaryOffset,
+
+	float glintScale, 
+	float glint	
+	)
+{
+	// diffuse hair shading
+	float TdotL = clamp(dot(T, lightDir), -1.0f, 1.0f);
+	float diffuseSkin = max(0, dot(N, lightDir));
+	float diffuseHair = sqrt(1.0f - TdotL*TdotL);
+
+	float diffuseSum = lerp(diffuseHair, diffuseSkin, diffuseBlend);
+
+	// primary specular
+	float3 H = normalize(V + lightDir);
+	float TdotH = clamp(dot(T, H), -1.0f, 1.0f);
+	float specPrimary = sqrt(1.0f - TdotH*TdotH);
+	specPrimary = pow(max(0, specPrimary), primaryShininess);
+
+	// secondary
+	TdotH = clamp(TdotH + secondaryOffset, -1.0, 1.0);
+	float specSecondary = sqrt(1 - TdotH*TdotH);
+	specSecondary = pow(max(0, specSecondary), secondaryShininess);
+
+	// specular sum
+	float specularSum = primaryScale * specPrimary + secondaryScale * specSecondary;
+	
+	float3 ambient = lightAmbient;
+	
+	if (glintScale > 0.0f)
+	{
+		NvHair_ApplyGlint(glintScale, glint, lightColor, ambient, specularSum);
+	}
+
+	float3 output = (ambient + diffuseSum * lightColor )* diffuseColor + specularSum * (lightColor * specularColor);
+
+	return output;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Compute shaded color for hair (diffuse + specular) with Glint
+//////////////////////////////////////////////////////////////////////////////
+float3 NvHair_ComputeHairShadingWithGlint(float3 lightColor, float3 lightDir, float3 lightAmbient, NvHair_ShaderAttributes attr, NvHair_Material mat, float3 hairColor, float glint)
+{
+	return NvHair_ComputeHairShadingWithGlint(
+		lightColor, lightDir, lightAmbient,
+		attr.V, attr.N, attr.T,
+		hairColor, mat.specularColor.rgb,
+		mat.diffuseBlend,
+		mat.specularPrimaryScale, mat.specularPrimaryPower, mat.specularSecondaryScale, mat.specularSecondaryPower, mat.specularSecondaryOffset, 
+		mat.glintStrength, glint);
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Compute specular shading term only
+//////////////////////////////////////////////////////////////////////////////
+float NvHair_ComputeHairSpecularShading(
+	float		hairID,
+
+	float3		Ldir, 
+	float3		V,
+	float3		T,
+	float3		N,
+
+	float		primaryScale,
+	float		primaryShininess,
+	float		secondaryScale,
+	float		secondaryShininess,
+	float		secondaryOffset,
+	float		diffuseBlend,
+
+	float		primaryBreakup = 0.0f
+	)
+{
+	uint	hash = asuint(hairID * 17938401.0f);
+	float	noiseVal = float(hash % 1024) / 1024.0f;
+	float	signedNoise = noiseVal - 0.5f;
+
+	float specPrimaryOffset = primaryBreakup * signedNoise;
+
+	// primary specular
+	float3 H				= normalize(V + Ldir);
+	float TdotH				= clamp(dot(T, H), -1.0f, 1.0f);
+
+	float TdotHshifted		= clamp(TdotH + specPrimaryOffset, -1.0f, 1.0f);
+	float specPrimary		= sqrt(1.0f - TdotHshifted*TdotHshifted);
+
+	specPrimary				= pow(max(0, specPrimary), primaryShininess);
+
+	// secondary
+	TdotH					= clamp(TdotH + secondaryOffset, -1.0, 1.0);
+	float specSecondary		= sqrt(1 - TdotH*TdotH);
+	specSecondary			= pow(max(0, specSecondary), secondaryShininess);
+
+	// specular sum
+	float specularSum = primaryScale * specPrimary + secondaryScale * specSecondary;
+
+	// visibility due to diffuse normal
+	float visibilityScale = lerp(1.0f, saturate(dot(N, Ldir)), diffuseBlend);
+	specularSum *= visibilityScale;
+
+	return max(0,specularSum);
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Compute specular shading term only
+//////////////////////////////////////////////////////////////////////////////
+float NvHair_ComputeHairSpecularShading(
+	float3 Ldir, // light direction
+	NvHair_ShaderAttributes	attr,
+	NvHair_Material			mat)
+{
+	return  NvHair_ComputeHairSpecularShading(
+		attr.hairID,
+		Ldir,
+		attr.V, attr.T, attr.N,
+		mat.specularPrimaryScale,
+		mat.specularPrimaryPower,
+		mat.specularSecondaryScale,
+		mat.specularSecondaryPower,
+		mat.specularSecondaryOffset,
+		mat.diffuseBlend,
+		mat.specularPrimaryBreakup
+		);
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+// Computes blending factor between root and tip
+//////////////////////////////////////////////////////////////////////////////////////////////
+float NvHair_GetRootTipRatio(const float s, NvHair_Material mat)
+{
+	float ratio = s;
+
+	// add bias for root/tip color variation
+	if (mat.rootTipColorWeight < 0.5f)
+	{
+		float slope = 2.0f * mat.rootTipColorWeight;
+		ratio = slope * ratio;
+	}
+	else
+	{
+		float slope = 2.0f * (1.0f - mat.rootTipColorWeight) ;
+		ratio = slope * (ratio - 1.0f) + 1.0f;
+	}
+
+	// modify ratio for falloff
+	float slope = 1.0f / (mat.rootTipColorFalloff + 0.001f);
+	ratio = saturate(0.5f + slope * (ratio - 0.5f));
+
+	return ratio;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+// Returns hair color from textures for this hair fragment.
+//////////////////////////////////////////////////////////////////////////////////////////////
+float3 NvHair_SampleHairColorTex(
+	NvHair_ConstantBuffer	hairConstantBuffer,
+	NvHair_Material			mat, 
+	SamplerState				texSampler, 
+	Texture2D					rootColorTex, 
+	Texture2D					tipColorTex, 
+	float3						texcoords)
+{
+	float3 rootColor = mat.rootColor.rgb;
+	float3 tipColor = mat.tipColor.rgb;
+
+	if (hairConstantBuffer.useRootColorTexture)
+		rootColor = (SAMPLE_LEVEL( rootColorTex, texSampler, texcoords.xy, 0 )).rgb;  
+	if (hairConstantBuffer.useTipColorTexture)
+		tipColor = (SAMPLE_LEVEL( tipColorTex, texSampler, texcoords.xy, 0 )).rgb;  
+
+	float ratio = NvHair_GetRootTipRatio(texcoords.z, mat);
+
+	float3 hairColor = lerp(rootColor, tipColor, ratio);
+
+	return hairColor;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+// Returns hair color from textures for this hair fragment.
+//////////////////////////////////////////////////////////////////////////////////////////////
+float3 NvHair_SampleHairColorStrandTex(
+	NvHair_ConstantBuffer	hairConstantBuffer,
+	NvHair_Material			mat, 
+	SamplerState				texSampler, 
+	Texture2D					rootColorTex, 
+	Texture2D					tipColorTex, 
+	Texture2D					strandColorTex, 
+	float4						texcoords)
+{
+	float3 rootColor = mat.rootColor.rgb;
+	float3 tipColor = mat.tipColor.rgb;
+
+	if (hairConstantBuffer.useRootColorTexture)
+		rootColor = (SAMPLE_LEVEL( rootColorTex, texSampler, texcoords.xy, 0 )).rgb;  
+	if (hairConstantBuffer.useTipColorTexture)
+		tipColor = (SAMPLE_LEVEL( tipColorTex, texSampler, texcoords.xy, 0 )).rgb;  
+
+	float ratio = NvHair_GetRootTipRatio(texcoords.z, mat);
+
+	float3 hairColor = lerp(rootColor, tipColor, ratio);
+
+	if (hairConstantBuffer.useStrandTexture)
+	{
+		float3 strandColor = (SAMPLE_LEVEL( strandColorTex, texSampler, texcoords.zw, 0 )).rgb;  
+
+		switch(hairConstantBuffer.strandBlendMode)
+		{
+			case 0:
+				hairColor = mat.strandBlendScale * strandColor;
+				break;
+			case 1:
+				hairColor = lerp(hairColor, hairColor * strandColor, mat.strandBlendScale);
+				break;
+			case 2:
+				hairColor += mat.strandBlendScale * strandColor;
+				break;
+			case 3:
+				hairColor += mat.strandBlendScale * (strandColor - 0.5f);
+				break;
+		}
+	}
+
+	return hairColor;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+// Returns blended hair color between root and tip color
+//////////////////////////////////////////////////////////////////////////////////////////////
+float3 NvHair_SampleHairColor(NvHair_Material mat, float4 texcoords)
+{
+	float3 rootColor = mat.rootColor.rgb;
+	float3 tipColor = mat.tipColor.rgb;
+
+	float ratio = NvHair_GetRootTipRatio(texcoords.z, mat);
+
+	float3 hairColor = lerp(rootColor, tipColor, ratio);
+
+	return hairColor;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+// Computes target alpha based on hair length alpha control
+//////////////////////////////////////////////////////////////////////////////////////////////
+float NvHair_ComputeAlpha(
+	NvHair_ConstantBuffer	hairConstantBuffer,
+	NvHair_Material		mat,
+	NvHair_ShaderAttributes attr )
+{
+	float lengthScale = attr.texcoords.z;
+
+	const float epsilon = 0.00000001f;
+	float rootWeight = saturate((lengthScale + epsilon) / (mat.rootAlphaFalloff + epsilon));
+	float rootAlpha = lerp(0.0f, 1.0f, rootWeight);
+
+	float lodAlpha = 1.0f - hairConstantBuffer.lodAlphaFactor;
+
+	float alpha = rootAlpha * lodAlpha;
+
+	return alpha;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+float NvHair_SoftDepthCmpGreater(float sampledDepth, float calcDepth)
+{
+	return max(0.0, sampledDepth - calcDepth);
+}
+
+float NvHair_SoftDepthCmpLess(float sampledDepth, float calcDepth)
+{
+	return max(0.0, calcDepth - sampledDepth);
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+// Compute hair to hair shadow
+//////////////////////////////////////////////////////////////////////////////////////////////
+float NvHair_ShadowPcf(
+	float2 texcoord, 
+	float calcDepth, 
+	SamplerState texSampler, 
+	Texture2D shadowTexture, 
+	int shadowUseLeftHanded)
+{
+	float shadow = 0;
+	float wsum = 0;
+
+	float w, h;
+	uint numMipLevels;
+	shadowTexture.GetDimensions(0, w, h, numMipLevels);
+
+	float invResolution = 1.0f / float(w);
+
+	[unroll]
+	for (int dx = - 1; dx <= 1; dx ++) {
+		for (int dy = -1; dy <= 1; dy ++) {
+			
+			float w = 1.0f / (1.0f + dx * dx + dy * dy);
+			float2 coords = texcoord + float2(float(dx) * invResolution, float(dy) * invResolution);
+
+			float sampleDepth = SAMPLE_LEVEL(shadowTexture, texSampler, coords, 0).r;  
+			float shadowDepth = NvHair_SoftDepthCmpLess(sampleDepth, calcDepth);
+
+			if (shadowUseLeftHanded == 0)
+				shadowDepth = NvHair_SoftDepthCmpGreater(sampleDepth, calcDepth);
+
+			shadow += w * shadowDepth;
+			wsum += w;
+		}
+	}
+	 
+	float s = shadow / wsum;
+	return s;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+// Use gain = 1.0 for R.H.S light camera (depth is greater for closer object)
+// Use gain = -1.0f for L.H.S light camera (depth is greater for far object)
+/////////////////////////////////////////////////////////////////////////////////////////////
+float NvHair_ShadowPenetrationDepth(float sampledDepth, float calcDepth, float gain = -1.0f)
+{
+	return max(0.0f, gain * (sampledDepth - calcDepth));
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+// Given a shadow texture that stores linear depth, we filter depth by comparing against stored depth of neigbhors of the point.
+// Use gain = 1.0 for R.H.S light camera (depth is greater for closer object)
+// Use gain = -1.0f for L.H.S light camera (depth is greater for far object)
+/////////////////////////////////////////////////////////////////////////////////////////////
+float NvHair_ShadowFilterDepth(Texture2D shadowTexture, SamplerState texSampler, float2 texcoord, float depth, float gain = -1.0f )
+{
+	float filteredDepth = 0;
+	float n = 0;
+
+	[unroll]
+	for (int dx = - 1; dx <= 1; dx += 2) {
+		for (int dy = -1; dy <= 1; dy += 2) {
+
+		    float4 S = shadowTexture.Gather(texSampler, texcoord, int2(dx, dy));
+
+			filteredDepth += NvHair_ShadowPenetrationDepth(S.x, depth, gain);
+			filteredDepth += NvHair_ShadowPenetrationDepth(S.y, depth, gain);
+			filteredDepth += NvHair_ShadowPenetrationDepth(S.z, depth, gain);
+			filteredDepth += NvHair_ShadowPenetrationDepth(S.w, depth, gain);
+
+			n += 4;
+		}
+	}
+	 
+	return filteredDepth / n;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+float NvHair_ShadowLitFactor(NvHair_ConstantBuffer constBuf, NvHair_Material mat, float filteredDepth)
+{
+	if (!constBuf.receiveShadows)
+		return 1.0f;
+	return exp( -filteredDepth * mat.shadowSigma);
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+// Compute some visualization color option
+//////////////////////////////////////////////////////////////////////////////////////////////
+bool NvHair_VisualizeColor(
+	NvHair_ConstantBuffer	hairConstantBuffer,
+	NvHair_Material			hairMaterial,
+	NvHair_ShaderAttributes attr,
+	inout float3				outColor
+	)
+{
+	switch (hairConstantBuffer.colorizeMode)
+	{
+	case 1: // LOD
+		{
+			float3 zeroColor = float3(0.0, 0.0f, 1.0f);
+			float3 distanceColor	= float3(1.0f, 0.0f, 0.0f);
+			float3 detailColor	= float3(0.0f, 1.0f, 0.0f);
+			float3 alphaColor	= float3(1.0f, 1.0f, 0.0f);
+
+			float distanceFactor = hairConstantBuffer.lodDistanceFactor;
+			float detailFactor = hairConstantBuffer.lodDetailFactor;
+			float alphaFactor = hairConstantBuffer.lodAlphaFactor;
+
+			outColor.rgb = zeroColor; 
+
+			if (distanceFactor > 0.0f)
+				outColor.rgb = lerp(zeroColor, distanceColor, distanceFactor);
+
+			if (alphaFactor > 0.0f)
+				outColor.rgb = lerp(zeroColor, alphaColor, alphaFactor);
+
+			if (detailFactor > 0.0f)
+				outColor.rgb = lerp(zeroColor, detailColor, detailFactor);
+
+			break;
+		}
+	case 2: // tangent
+		{
+			outColor.rgb = 0.5f + 0.5f * attr.T.xyz; // colorize hair with its tangnet vector
+			break;
+		}
+	case 3: // normal
+		{
+			outColor.rgb = 0.5f + 0.5f * attr.N.xyz; // colorize hair with its normal vector
+			break;
+		}
+	default:
+		return false;
+	}
+
+	return true; // color computed 
+}
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+// Convert screen space position (SV_Position) to clip space
+//////////////////////////////////////////////////////////////////////////////////////////////
+float4 NvHair_ScreenToClip(float4 input, NvHair_ConstantBuffer hairConstantBuffer)
+{
+	float4 sp;
+
+	// convert to ndc
+	sp.xy = mul( float4(input.x, input.y, 0.0f, 1.0f), hairConstantBuffer.inverseViewport).xy;
+	sp.zw = input.zw;
+
+	// undo perspective division to get clip
+	sp.xyz *= input.w; 
+
+	return sp;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+// Convert screen space position (SV_Position) to view space position
+//////////////////////////////////////////////////////////////////////////////////////////////
+float4 NvHair_ScreenToView(float4 pixelPosition, NvHair_ConstantBuffer hairConstantBuffer)
+{
+	float4 ndc = NvHair_ScreenToClip(pixelPosition, hairConstantBuffer);
+	return mul( ndc, hairConstantBuffer.inverseProjection);
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+// Convert screen space position (SV_Position) to world space position
+//////////////////////////////////////////////////////////////////////////////////////////////
+float3 NvHair_ScreenToWorld(float4 pixelPosition, NvHair_ConstantBuffer	hairConstantBuffer)
+{
+	float4 wp = mul(float4(pixelPosition.xyz, 1.0f), hairConstantBuffer.inverseViewProjectionViewport);
+	wp.xyz /= wp.w;
+	return wp.xyz;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+// given a world space position, compute screen coord
+//////////////////////////////////////////////////////////////////////////////////////////////
+float4 NvHair_WorldToScreen(float3 worldPos, NvHair_ConstantBuffer	hairConstantBuffer)
+{
+	float4 np = mul(float4(worldPos.xyz, 1.0f), hairConstantBuffer.viewProjection);
+	np.xyz /= np.w;
+
+	float4 vp = mul(float4(np.xyz, 1), hairConstantBuffer.viewport);
+	return float4(vp.xyz, np.w);
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+// given a world space position, compute screen coord of previous camera
+//////////////////////////////////////////////////////////////////////////////////////////////
+float4 NvHair_WorldToScreenPrev(float3 worldPos, NvHair_ConstantBuffer hairConstantBuffer)
+{
+	float4 np = mul(float4(worldPos.xyz, 1.0f), hairConstantBuffer.prevViewProjection);
+	np.xyz /= np.w;
+
+	float4 vp = mul(float4(np.xyz, 1), hairConstantBuffer.prevViewport);
+	return float4(vp.xyz, np.w);
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+// DO NOT MODIFY FUNCTIONS BELOW
+// THESE ARE RESERVED FOR HAIRWORKS INTERNAL USE AND SUBJECT TO CHANGE FREQUENTLY WITHOUT NOTICE
+/////////////////////////////////////////////////////////////////////////////////////////////
+float NvHair_PackFloat2(float2 v)
+{
+	const float base = 2048;
+
+	float basey = floor(base * v.y);
+	float packed = basey + v.x;
+
+	return packed;
+}
+
+float2 NvHair_UnpackFloat2(float packedVal)
+{
+	const float inv_base = 1.0f / 2048.0f;
+
+	float ubase = floor(packedVal);
+	float unpackedy = ubase * inv_base;
+	float unpackedx = packedVal - ubase;
+
+	return float2(unpackedx, unpackedy);
+}
+
+float NvHair_PackSignedFloat(float x)
+{
+	return 0.5f + 0.5f * clamp(x, -1.0, 1.0);
+}
+
+float NvHair_PackSignedFloat2(float2 v)
+{
+	float sx = NvHair_PackSignedFloat(v.x);
+	float sy = NvHair_PackSignedFloat(v.y);
+
+	return NvHair_PackFloat2(float2(sx,sy));
+}
+
+float NvHair_UnpackSignedFloat(float x)
+{
+	return clamp(2.0f * (x - 0.5f), -1.0f, 1.0f);
+}
+
+float2 NvHair_unpackSignedFloat2(float x)
+{
+	float2 unpacked = NvHair_UnpackFloat2(x);
+	float sx = NvHair_UnpackSignedFloat(unpacked.x);
+	float sy = NvHair_UnpackSignedFloat(unpacked.y);
+	return float2(sx, sy);
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// input to this pixel shader (output from eariler geometry/vertex stages)
+// These values are packed/compressed to minimize shader overhead
+// Do NOT use these values directly from your shader. Use NvHair_GetShaderAttributes() below.
+//////////////////////////////////////////////////////////////////////////////
+
+struct NvHair_PixelShaderInput
+{
+	float4 position : SYS_POSITION;
+	float hairtex : HAIR_TEX;
+	NOINTERPOLATION	float compTexcoord : COMP_TEXCOORD;
+
+	NOINTERPOLATION	uint primitiveId : C;
+	NOINTERPOLATION	float coords : COORDS;
+};
+
+struct NvHair_CubemapPixelShaderInput: NvHair_PixelShaderInput
+{
+	uint cubeMapIdx	: SV_RenderTargetArrayIndex;
+};
+
+//////////////////////////////////////////////////////////////////////////////
+// DO NOT USE.
+NvHair_ShaderAttributes NvHair_GetShaderAttributesInternal(NvHair_PixelShaderInput input, NvHair_ConstantBuffer	hairConstantBuffer)
+{
+	NvHair_ShaderAttributes attr;
+
+	attr.P		= NvHair_ScreenToWorld(input.position, hairConstantBuffer);
+
+	attr.texcoords.xy = NvHair_UnpackFloat2(input.compTexcoord.x);
+	attr.texcoords.z = input.hairtex;
+	attr.texcoords.w = 0.5f;
+
+	attr.T = 0;
+	attr.N = 0;
+
+	attr.V = normalize(hairConstantBuffer.camPosition.xyz - attr.P);
+
+	attr.hairID = floor(attr.texcoords.x * 2048 * 2048 + 2048 * attr.texcoords.y);
+
+	return attr;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// DO NOT USE.
+#define NV_HAIR_INDICES_BUFFER_TYPE	Buffer<float3>
+#define NV_HAIR_TANGENT_BUFFER_TYPE	Buffer<float4>
+#define NV_HAIR_NORMAL_BUFFER_TYPE	Buffer<float4>
+#define NV_HAIR_POSITION_BUFFER_TYPE	Buffer<float4>
+
+#define NV_HAIR_DECLARE_INTERPOLATED_VAR(BUFFER, VAR, INDEX) \
+	float3 VAR; \
+	{ \
+		float3 v0 = BUFFER.Load( INDEX[0] ).xyz; \
+		float3 v1 = BUFFER.Load( INDEX[1] ).xyz; \
+		float3 v2 = BUFFER.Load( INDEX[2] ).xyz; \
+		VAR = coords.x * v0 + coords.y * v1 + (1.0f - coords.x - coords.y) * v2; \
+	} 
+
+// used below, don't modify or use
+#if defined(NV_HAIR_DECLARE_VELOCITY_ATTR)
+#define NV_HAIR_DECLARE_INTERPOLATED_VELOCITY \
+	NV_HAIR_DECLARE_INTERPOLATED_VAR(NvHair_resourceMasterPositions, P0, vertexIndices0); \
+	NV_HAIR_DECLARE_INTERPOLATED_VAR(NvHair_resourceMasterPositions, P1, vertexIndices1); \
+	float3 wP = lerp(P0, P1, hairFrac); \
+	\
+	NV_HAIR_DECLARE_INTERPOLATED_VAR(NvHair_resourceMasterPrevPositions, PP0, vertexIndices0); \
+	NV_HAIR_DECLARE_INTERPOLATED_VAR(NvHair_resourceMasterPrevPositions, PP1, vertexIndices1); \
+	float3 wPP = lerp(PP0, PP1, hairFrac); \
+	\
+	float3 sP = NvHair_WorldToScreen(wP, hairConstantBuffer).xyz;\
+	float3 sPP = NvHair_WorldToScreenPrev(wPP, hairConstantBuffer).xyz;\
+	attr.wVel = sP - sPP;
+#else
+#define	NV_HAIR_DECLARE_INTERPOLATED_VELOCITY
+#endif
+/*
+	This macro derived function fills all the attributes needed for hair shading.
+	To get attributes for shaders, use this function defined as
+
+	NvHair_ShaderAttributes NvHair_getShaderAttributes(NvHair_PixelShaderInput input, NvHair_ConstantBuffer	hairConstantBuffer);
+
+	, where input is the pixel shader input and hairConstantBuffer is constant buffer defined for HairWorks.
+	The output (NvHair_ShaderAttributes) contains all the attributes needed for hair shading such as
+		world position (P), 
+		tangent (T), 
+		surface normal (N), 
+		view vector (V), 
+		texture coordinates (texcoords)
+		NvHair_getShaderAttributesInternal(INPUT, CBUFFER, NV_HAIR_RESOUCES_VAR)
+
+		float		hairFrac	= hairCoord - float(vertexID0); \
+
+	*/
+#define NV_HAIR_DECLARE_DEFAULT_SHADER_ATTRIBUTE_FUNC \
+	NvHair_ShaderAttributes NvHair_GetShaderAttributes(const NvHair_PixelShaderInput input, const NvHair_ConstantBuffer hairConstantBuffer) \
+	{ \
+		NvHair_ShaderAttributes attr = NvHair_GetShaderAttributesInternal(input, hairConstantBuffer); \
+		\
+		float		hairtex		= attr.texcoords.z; \
+		const int	numPoints	= hairConstantBuffer.strandPointCount; \
+		float		hairCoord	= hairtex * float(numPoints-1); \
+		int			vertexId0	= floor(hairCoord); \
+		int			vertexId1	= min(vertexId0 + 1, numPoints-1); \
+		float		hairFrac	= frac(hairCoord); \
+		\
+		int3 hairIndices = floor(NvHair_resourceFaceHairIndices.Load(input.primitiveId)); \
+		int3 rootIndices =  hairIndices * numPoints; \
+		\
+		int3	vertexIndices0 = rootIndices + int3(vertexId0, vertexId0, vertexId0); \
+		int3	vertexIndices1 = rootIndices + int3(vertexId1, vertexId1, vertexId1); \
+		\
+		float2	coords = NvHair_UnpackFloat2(input.coords); \
+		\
+		NV_HAIR_DECLARE_INTERPOLATED_VAR(NvHair_resourceTangents, T0, vertexIndices0); \
+		NV_HAIR_DECLARE_INTERPOLATED_VAR(NvHair_resourceTangents, T1, vertexIndices1); \
+		attr.T = normalize(lerp(T0, T1, hairFrac)); \
+		\
+		NV_HAIR_DECLARE_INTERPOLATED_VAR(NvHair_resourceNormals, N0, vertexIndices0); \
+		NV_HAIR_DECLARE_INTERPOLATED_VAR(NvHair_resourceNormals, N1, vertexIndices1); \
+		attr.N = normalize(lerp(N0, N1, hairFrac)); \
+		\
+		NV_HAIR_DECLARE_INTERPOLATED_VELOCITY;\
+		\
+		return attr; \
+	} 
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+// Shader Resources need to be declared in first section of the shader. See sampler shader codes.
+#if defined(NV_HAIR_DECLARE_VELOCITY_ATTR) // use pixel velocity attributes
+
+#define NV_HAIR_DECLARE_SHADER_RESOURCES(SLOT0, SLOT1, SLOT2, SLOT3, SLOT4) \
+	NV_HAIR_INDICES_BUFFER_TYPE	NvHair_resourceFaceHairIndices	: register(SLOT0); \
+	NV_HAIR_TANGENT_BUFFER_TYPE	NvHair_resourceTangents			: register(SLOT1); \
+	NV_HAIR_NORMAL_BUFFER_TYPE	NvHair_resourceNormals			: register(SLOT2); \
+	NV_HAIR_POSITION_BUFFER_TYPE	NvHair_resourceMasterPositions	: register(SLOT3); \
+	NV_HAIR_POSITION_BUFFER_TYPE	NvHair_resourceMasterPrevPositions: register(SLOT4); \
+	NV_HAIR_DECLARE_DEFAULT_SHADER_ATTRIBUTE_FUNC;
+
+#else // don't use pixel velocity attributes
+
+#define NV_HAIR_DECLARE_SHADER_RESOURCES(SLOT0, SLOT1, SLOT2) \
+	NV_HAIR_INDICES_BUFFER_TYPE	NvHair_resourceFaceHairIndices: register(SLOT0); \
+	NV_HAIR_TANGENT_BUFFER_TYPE	NvHair_resourceTangents		: register(SLOT1); \
+	NV_HAIR_NORMAL_BUFFER_TYPE	NvHair_resourceNormals		: register(SLOT2); \
+	NV_HAIR_DECLARE_DEFAULT_SHADER_ATTRIBUTE_FUNC;
+
+#endif
+
+#endif // NV_HAIR_SHADER_COMMON_H
