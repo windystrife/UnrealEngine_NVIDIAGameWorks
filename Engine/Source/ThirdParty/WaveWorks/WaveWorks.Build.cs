@@ -40,8 +40,8 @@ public class WaveWorks : ModuleRules
         Definitions.Add("__GFSDK_DX11__=1");
         Definitions.Add("__GFSDK_GL__=0");
 
-        string WaveWorksDir = UEBuildConfiguration.UEThirdPartySourceDirectory + "WaveWorks/";
-		string WaveWorksBinDir = UEBuildConfiguration.UEThirdPartyBinariesDirectory + "WaveWorks/";
+        string WaveWorksDir = Target.UEThirdPartySourceDirectory + "WaveWorks/";
+		string WaveWorksBinDir = Target.UEThirdPartyBinariesDirectory + "WaveWorks/";
 
         string Platform = "unknown";
         if (Target.Platform == UnrealTargetPlatform.Win64)
