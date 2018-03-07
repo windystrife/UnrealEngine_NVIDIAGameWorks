@@ -1,0 +1,92 @@
+
+# use build_html.sh to set/build the following variables
+#	OPTIMIZATION=
+#	LIB1=
+#	LIB2=
+
+LIBOGG=../../../Ogg/libogg-1.2.2
+
+
+CC=emcc
+NOWARN=-Wno-unused-variable -Wno-unused-function -Wno-shift-op-parentheses -Wno-comment
+# use the WIN32 defines -- even when building on non-windows hosts
+CFLAGS= $(CFLAGS_EXTRA) $(OPTIMIZATION) -I../include -I$(LIBOGG)/include -Wall $(NOWARN) -DNDEBUG -D_WIN32 -D__MINGW32__
+LDFLAGS= $(CFLAGS_EXTRA) $(OPTIMIZATION)
+
+MKDIR=mkdir -p
+RM=rm -f
+CP=cp -vf
+
+# ----------------------------------------
+
+INTERMEDIATE=Intermediate/lib
+
+$(INTERMEDIATE):
+	$(MKDIR) $(INTERMEDIATE)
+
+# ----------------------------------------
+
+SOURCES1 = analysis.c \
+		  bitrate.c \
+		  block.c \
+		  codebook.c \
+		  envelope.c \
+		  floor0.c \
+		  floor1.c \
+		  info.c \
+		  lookup.c \
+		  lpc.c \
+		  lsp.c \
+		  mapping0.c \
+		  mdct.c \
+		  psy.c \
+		  registry.c \
+		  res0.c \
+		  sharedbook.c \
+		  smallft.c \
+		  synthesis.c \
+		  window.c \
+		  
+SOURCES2 = vorbisfile.c
+
+# ----------------------------------------
+
+OBJECTS1=$(SOURCES1:%.c=$(INTERMEDIATE)/%.bc)
+
+OBJECTS2=$(SOURCES2:%.c=$(INTERMEDIATE)/%.bc)
+
+$(INTERMEDIATE)/%.bc : %.c
+	$(CC) $(CFLAGS) $< -o $@
+
+TARGET1=$(INTERMEDIATE)/$(LIB1)
+
+TARGET2=$(INTERMEDIATE)/$(LIB2)
+
+$(TARGET1): $(INTERMEDIATE) $(OBJECTS1)
+	$(CC) $(LDFLAGS) $(OBJECTS1) -o $@
+
+$(TARGET2): $(INTERMEDIATE) $(OBJECTS2)
+	$(CC) $(LDFLAGS) $(OBJECTS2) -o $@
+
+all: $(SOURCES1) $(TARGET1) $(SOURCES2) $(TARGET2)
+#all: $(SOURCES1) $(TARGET1) $(SOURCES2) $(TARGET2) $(LIBVORBIS_JS)
+
+install: $(TARGET1) $(TARGET2)
+	$(CP) $(TARGET1) $(TARGET2) ../Lib/HTML5/.
+#	$(CP) $(LIBVORBIS_JS) ../Lib/HTML5/.
+
+uninstall:
+	$(RM) ../Lib/HTML5/$(LIB1) ../Lib/HTML5/$(LIB2)
+#	$(RM) ../Lib/HTML5/$(LIBVORBIS_JS)
+
+clean:
+	$(RM) $(OBJECTS1) $(TARGET1) $(OBJECTS2) $(TARGET2)
+
+# ----------------------------------------
+
+# the following isn't really used -- left here for historical purposes
+LIBVORBIS_JS = libvorbis.js
+
+$(LIBVORBIS_JS): $(TARGET1) $(TARGET2)
+	$(CC) $(OPTIMIZATION) -o $(LIBVORBIS_JS) $(TARGET1) $(TARGET2)
+
