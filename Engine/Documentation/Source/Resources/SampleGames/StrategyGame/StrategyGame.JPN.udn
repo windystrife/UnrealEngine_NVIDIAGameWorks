@@ -1,0 +1,284 @@
+﻿INTSourceChangelist:3151861
+Availability:Public
+Title:戦略ゲームのサンプル
+Crumbs:%ROOT%, Resources
+Description:タワー ディフェンス ゲームのドキュメント
+Related:Gameplay/AI
+Related:Programming/Slate
+Related:Engine/Blueprints/UserGuide/Types/LevelBlueprint
+Related:Engine/Blueprints/Editor
+Related:Programming/Slate
+Related:Gameplay/Framework/UIAndHUD
+Related:Gameplay/Input
+Related:Engine/Rendering/ParticleSystems
+Version:4.9
+
+
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Resources/SampleGames/StrategyGame:title%](StrategyGameTopic.png)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/StrategyGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/StrategyGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/StrategyGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Resources/SampleGames/StrategyGame:title%](StrategyGameTopic.png)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/StrategyGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/StrategyGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/StrategyGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+[REGION:fullwidth]
+![](StragetyGame.png)
+[/REGION]
+
+
+[TOC(start:2 end:2)]
+
+**タワー ディフェンス** のサンプルはリアルタイム ストラテジー (RTS) / Tower Defense ゲームを例に使用しています。 
+
+取り上げているコンセプトの全リストは以下となります。
+
+* 簡単な AI ロジック
+* ポーンの自動化
+* トップビュー カメラ
+ 建造物の構築
+* メインメニュー
+* キャンバス描画とスレート ウィジェットを組み合わせたインゲーム HUD
+* インゲーム メニュー
+
+タワー ディフェンスは、プレイヤーが石弓、自動石弓、フレームスロワー (火炎放射器) などの砲塔を構築して醸造所を攻撃から防御しなくてはいけません。これらはミニオン ポーンで補完することができます。醸造所のアップグレードが購入されると、
+ポーンにはハンマーとシールドが装備されます。砲塔、ミニオン、アップグレードには全てゴールドが必要です。ゴールドは Gold ノードから受け取って、敵を殺すと収集できます。プレイヤーが、
+最後のボス敵と自分の 3 つのライフを使用せずに敵の波を 5 回かわすことができたら、ゲームで勝利となります。
+
+## AI ロジックおよびポーンの自動化
+
+![](minion_attack.png)
+
+タワーディフェンスは、AI ロジックにシンプルな FSM (有限状態マシン) を実装しています。可能な 2 つのステートは、敵ベースへの接近と敵の攻撃です。 
+どちらのステートも `StrategyAIAction` から継承する独立したクラスです。ステートは最も重要なアクションを一番に優先順位配列に置かれます。この配列は反復し、実行に最も適したアクションが選択されます。
+優先度の高いアクションがあれば、現在のアクションは停止して、優先度の高いアクションを実行することができます。
+
+敵や味方のポーンは AI ロジックで動作します。敵対するベースへ移動したり、敵チームのポーンに遭遇したらこれらを攻撃します。プレイヤーは自身の味方のポーンの移動や挙動制御はできない一方で、
+スポーンするために新しいユニット (部隊) を購入することができます。  
+
+ブループリントはミニオンポーンにロジックを追加するためにも使用します。味方のポーンと敵のポーンは両方ともシールドを装備しています。味方のポーンは、醸造所の武器工場がアップグレードされるとシールドを受け取ります。
+敵のポーンは _Level ブループリント_ で SpawnHeavyFunction または SpawnEndBossFunction が呼ばれると、結果としてスポーンされてシールドを受け取ります。ポーンがシールドを装備している場合、自動石弓からの発射物は破壊されてダメージを受けません。このロジックは _ブループリント インターフェース_ で実行します。デリゲートタイプの宣言をしたり、
+チャージされた砲塔からの発砲がヒットした時に敵のポーンを減速させるネットワークも格納しています。  
+
+## 建造物の構築
+
+タワー ディフェンスには、`StrategyBuilding` と `StrategyBuilding_Brewery` の 2 つの building クラスがあります。タワー ディフェンスの全砲塔タイプに加え無人の建造物のスロットは、 
+`StrategyBuilding` を親クラスとしてブループリントでデザインします。プレイヤーはコンテキスト メニューを表示するために無人の建造物スロットをクリックして、新たに建造する建物を選択することができます。建造物が建設されると、空の建造物スロットは破壊されて、新規の建物がスポーンされます。  
+
+建造物をアップグレードするためのメカニズムも備わっています。`StrategyBuilding_Brewery` クラスは、醸造所ベースに近接したスロットにアップグレード構築するように実装されています。
+
+繰り返しになりますが、タワーディフェンスのコードは単にベースとなる building クラスを作成します。タワーディフェンスの全てのロジックとビルのデザインは、レベルデザイナーがブループリントで作成しました。
+
+### Brewery (醸造所)
+
+**Brewery** ブループリント には `StrategyBuilding_Brewery` と呼ばれる親クラスがあり、AIDirector コンポーネントも格納しています。TowerDefenseMap には 2 つの醸造所が配置されています。
+1 つは敵のポーンがスポーンされる敵専用の醸造所で、もう一つは武器工場と鍛冶工場のアップグレードをビルドして、味方のポーンがスポーンされる醸造所です。**Brewery** ブループリント にはグラフ ロジックは存在せず、 
+building プロパティのデフォルト設定と、AIDirector、TriggerBox、そしてスタティックメッシュを含んだコンポーネント リストのみが格納されています。 
+
+#### アップグレード
+
+![](upgraded_brewery.png)
+
+味方の醸造所には 2 つのアップグレード スロットがアタッチされています。この 2 つのスロットも `StrategyBuilding` クラスから派生する _Blueprint クラス_ です。[Brewery] メニューからアップグレードが選択されると、
+1 つのスロットがこのアップグレードと置き換えられます。1 つの鍛冶場のアップグレード、そして武器工場のアップグレードのみを購入することができます。 
+
+一度鍛冶場のアップグレードが購入されると、ビルドが開始して **Wall_Smithy** ブループリントで OnBuildStarted event を発行します。このブループリントは、一度ビルドが完了すると、
+アップグレードのビルドをシステムに伝えます。この後スポーンされたフレンドのスポーンは、`StrategyAttachment` クラスから派生したブループリントのシールド アタッチメントを装備します。武器工場からのレポート後に「シールドをアタッチする」挙動を代入するネットワークです。 
+この建築は、TowerDefenseMap _Level Blueprint_ の PlayerBaseUpgrades 折りたたみグラフに存在します。`StrategyAttachment` クラスは単に `SkeletalMeshComponent` のみを格納します。 
+アタッチメント用のメッシュと点は、**Attachment_Armorer** ブループリントのデフォルトに設定されます。
+
+armory ブループリントは、OnBuildStarted および OnBuildFinished イベントと同じロジック設定が格納されています。武器工場を建築後、スポーンされた味方のポーンは  
+`StrategyAttachment` クラスから派生したハンマーを装備します。鍛冶場の構築を告げるレポート後に「ハンマーをアタッチする」挙動を代入するネットワークも、TowerDefenseMap _Level ブループリント_ の PlayerBaseUpgrades 折りたたみグラフに存在します。
+
+### 砲塔
+
+#### 空のスロット
+
+![](building_empty_slot.png)
+
+空のスロットも、`StrategyBuilding` 親クラスの Wall_EmptySlot がある _ブループリント_ です。ブループリント グラフにロジックは存在しません。これは building プロパティとスタティックメッシュの Defaults 設定と、 
+コンポーネントとして設定されたトリガーボックスを備えた _Blueprint クラス_ です。
+
+実行できる砲塔アップグレードは、Building カテゴリの Upgrades セクションに Wall_EmptySlot _Blueprint_ のデフォルトとして全て設定されています。  
+
+
+#### 石弓
+
+![](building_arbalest_shooting.png)
+
+**Wall_arbalest** ブループリントは、基本的な砲塔タイプの石弓のロジックを格納します。石弓は中程度の強度の発射物で、デフォルトモードの自動発射する弓で一番近くの敵を撃ちます。プレイヤーは
+石弓をクリックして、発射方向へこれをドラッグすることにより、自動的に弓を発射することもできます。マウスによるドラッグ操作が長ければ長いほど、射撃の強度が増します。  
+
+
+弓の発射物は別のブループリントの Projectile_arbalest に格納されます。これは `StrategyProjectile` を格納するブループリント TestProjectile から派生します。Wall_arbalest ブループリントには多数のサブネットワークがあり、これらは全て EventGraph 内に収容されています。ConstructionScript にブループリント ロジックは存在しません。   
+
+
+
+#### 自動弓
+
+![](building_auto-arbalest_shooting.png)
+
+**Wall_arbalest_auto** ブループリントは、自動石弓のロジックを格納します。自動弓は壁から発射物を直線に撃ちます。発射物が通過する全てのユニット (部隊) に
+少量のダメージを与えます。自動弓は、壁に衝突またはシールドを装備した敵に当たらない限り破壊されません。自動弓を自身の設定方向へ向けるために、これをクリックしてドラッグさせて照準を合わせることも可能です。
+マウスボタンが押されている間、自動弓は照準が合わせられた方向へ発射し続け、ボタンが解放されるとデフォルトの発射位置へ戻ります。 
+
+石弓同様に砲塔は別のブループリントに格納された弓を発射します。Projectile_arbalest_auto 自動弓は、シールドを装備した敵のポーンまたは壁に当たらない限り破壊されません。
+このビヘイビアは、_ブループリント インターフェース_、_Interface_Auto_Arbalest_ そして _Interface_Auto_Projectile_ を活用して実行します。 
+
+#### Flamethrower
+
+![](building_fire_shooting_normal.png)
+
+フレームスロワー (火災放射器) は砲塔タイプのようにプロジェクタイルを発射しません。代わりにフレーム領域の敵を全て燃やします。プレイヤーはフレームスロワーをクリックして押し続けた状態でこれをチャージ (充電) することができます。 
+マウスボタンをどの位押し続けるかによって、チャージ後のフレームは 3 倍大きなダメージを与えることができるうえ、炎に撃たれた敵のポーンを減速させることができます。プレイヤーがフレームスロワーをチャージした場合、 
+短いクールダウン時間を置いて、その後通常の炎の攻撃が継続します。   
+
+## カメラ
+
+タワー ディフェンスのカメラは固定視点のアングルを持ち、マウスのスクロールボタンでズームインまたはズームアウトさせることができます。カメラ計算は `StrategyPlayerController` クラスの `CalcCamera` 関数内で計算されますが、
+カメラの最小そして最大オフセット、アングル、カメラ速度などの定数は、「DefaultGame.ini」ファイルに設定されています。
+
+Spectator (観戦) ポーンは、可視的なポーン無しでプレイヤーを作成するために使用します。  
+
+## インゲームの HUD
+
+インゲームの HUD は Canvas 描画とスレートウィジェットを併用して作成します。  
+
+![](StrategyGameHUDcallouts.png)
+
+画面の左上隅に、SStrategySlateHUDWidget クラスの GetGameTime 関数を使用したゲームタイマーがゲームのウォームアップ時間をカウントダウンします。ゲーム開始後にカウントダウンは非表示になります。 
+そして残りのライフ数が表示されます。「ライフ残数」表示のプロパティは `AStrategyHUD` クラスの `DrawLives` 関数に設定されます。 
+デフォルトライフ数は、TowerDefenseMap _Level ブループリント_ の PlayerBaseUpgrades サブグラフに設定されています。  
+
+現在のゴールド数はスクリーン上部に表示されます (2)。ゲームタイマーとゴールド数表示は両方とも `SStrategySlateHUDWidget` の基本ウィジェットで定義されます。同クラスは最上位のレベルウィジェットの作成に使用しますが、
+デフォルトで表示される全てのウィジェットではありません。
+
+HUD (3) の左下隅にはミニマップが表示されます。ミニマップは不可視のスレートウィジェットオーバーレイから構築されて、入力値と実際のマップ画像を処理します。画像は Canvas を使用して描画されます。
+`SStrategyMiniMapWidget` はボタンがクリックされたり、ミニマップ領域でボタンが押下されるとカメラを移動させます。
+
+建造物スロットがクリックされると、`SStrategyActionGrid` メニューが表示されます。このウィジェットにはインスタンスが 1 つしかありません。位置はアクティブな建造物スロットによって決定します。
+メニューのスクリーン位置の計算は `DrawHUD` メソッドで処理されます。選択したアクタの位置を 2D 座標へ投影します。このメニューの外観とアクション ボタンのイベント マッピングは `ShowActionMenu` メソッドか、 
+`ShowCustomAction` メソッドの`AStrategyBuilding` クラスで定義されます。`Button` ウィジェットは `SStrategyButtonWidget` クラスで定義されます。
+またアクションボタンに結合する追加情報は `FActionButton` 構造体に格納されます。
+
+ポーンと建造物のヘルスバーは `DrawActorsHealth` メソッドを使用してキャンバスに描画されます。それぞれのチームは異なるヘルスバー テクスチャとなっています。
+
+[REGION:fullwidth]
+![](health_bar_textures.png)
+[/REGION]
+
+HUD の右下隅には、ゲームの一時停止とゲーム内のメニュー表示をトグルするPauseButton (4) が表示されます。
+
+ゲーム終了後、またはベースの 1 つが破壊されると、ゲームは一時停止して「Victory」または「Defeat」テキストがスクリーン中央にアニメートされます。アニメーションは時間経過と共にフォントサイズを変更します。
+このテキストは、可視性、フォント、テキストに使用するデリゲートと一緒に、シンプルな `STextBlock` ウィジェットで作成します。
+
+
+## メニュー
+
+### メイン メニュー
+
+![](StrategyGameMainMenu1.png)(w:700)
+
+
+メインメニューは、メインメニュー特有の HUD をロードする **StrategyMenu** マップに格納されています。メニューはメインメニューのアニメーション、レイアウト、
+イベント処理に関与する `SStrategyMenuWidget` が備わったスレートに基づいています。`SStrategyMenuItem` クラスはゲーム内の HUD で使用し、単一メニューアイテムを説明する `SStrategyButtonWidget` から継承されます。それぞれのメニューアイテム (およびアイテムにアタッチされたイベント) は、
+`StrategyMenuHUD` で定義されます。  
+
+前のメニューへ戻るために、メニューのシェアードポインタの配列は `MenuHistory` 変数に格納されます。変数は以前表示したメニューを保持するスタックのような振る舞いをします。
+メニューをさまざまな場所で再利用するために、メニューの親を格納する要件を削除すると同時に、元のメニューへ簡単に戻ることができます。
+
+<!-- ![](StrategyGameMainMenu2.png)(w:700) -->
+
+Menu アニメーションは、`SStrategyMenuWidget::SetupAnimations` で定義された補間カーブを使用します。それぞれのカーブには開始時間、継続期間、そして補間メソッドが定義されていて、再生または逆再生することができます。
+特定の時間にアニメーション属性を再生するには、値 0.0f と 1.0f 間の値を返す `GetLerp()` を使用します。
+
+### インゲーム メニュー
+
+[REGION:fullwidth]
+![](StrategyGamePauseMenu.png)
+[/REGION]
+
+インゲームメニューがアクティブな時、半透明なフルスクリーンのスレートオーバーレイが表示されて、ゲームが一時停止します。`PauseMenuButtons` は `SStrategySlateHUDWidget` で定義されます。インゲームの一時停止メニューにはボタンが 2 つあります。
+1 つのボタンはゲームを終了して、もう 1 つのボタンはメインメニューへ戻ります。インゲームメニューを終了するには、プレイヤーは右下隅にある一時停止ボタンを 2 回押します。
+
+## Level ブループリント
+
+_Level ブループリント_ には、それぞれの敵の波のスポーンに加えて、初期化やゲームの勝敗条件のためのモジュラー式構造体があります。
+
+### 敵のスポーン
+
+敵の波は、spawn fast、spawn normal、spawn heavy の 3 つの _ブループリント マクロ_ を使用して構成されます。それぞれのマクロは設定ユニット (部隊) のパラメータとアタッチメントを設定してから、
+発砲のために `StrategyAIDirector` で`SpawnMinions` 関数を待機します。マクロは敵の波がスポーンされたことを報告するために敵の醸造所の `StrategyAIDirector` を待って、実行によってサブネットワークから去ることができます。
+
+各スポーンマクロは、マクロの開始と OnWaveSpawned event 発行後に、**ゲート** を開くための 2 つの実行入力値と、スポーンするポーンの数を示す整数入力値を受け取ります。  
+ポーンの波のタイプ別に固有の入力値と一緒にクラス `StrategyAIDirector` から関数が呼ばれます。3 つの関数は、`SetDefaultWeapon`、`SetDefaultArmor`、そして`SetBuffModifier` 関数です。  
+`SetDefaultWeapon` と `SetDefaultArmor` は _ブループリント_ を入力値として受け取り、これらのブループリントを新規デフォルトの武器、またはスポーンのデフォルトのアーマーとして代入します。例えば SpawnFastMacro にスポーンされた敵ポーンは、 
+デフォルトの武器に Attachment_Smithy hammer ブループリント、そして SpawnHeavyMacro にスポーンされた敵ポーンは全てデフォルトアーマーに Attachment_Armorer shield ブループリントを代入します。 
+
+スポーンする _Blueprint_ 関数によって呼ばれる最後の `StrategyAIDirector` 関数は、`SetBuffModifier` です。この関数には攻撃能力、ヘルスボーナス、速度、そしてポーンの速度などを含めた
+たくさんのデータ入力値が格納されています。これらの入力値は全てブループリントへ公開されるため、レベルデザイナーはスポーンする敵ポーンの新規クラスの作成を容易に行うことができます。最後に、スポーンするそれぞれの Blueprint 関数は、
+敵の醸造所の `StrategyAIDirector` の `WaveSize` プロパティを設定します。   
+
+敵の波は 5 回発生し、それぞれの波は速い、普通、そして大量の敵ポーンの組み合わせがあります。敵の波が開始すると、Show Wave Title ノードは波の回数を表示します。次に、最初の敵の 
+スポーンの波が呼び出されます。スポーン後に、Delay ノードで設定したタイマー遅延、または WaitForWaveMacro マクロで設定したポーンベースの遅延どちらかが発生します。WaitForWaveMacro マクロはまだ生き残っている敵ポーンの数を継続的にチェックして、
+遅延時間が終了、もしくは敵ポーンが全て消滅しない限り、マクロ実行を終了しません。敵の波全てのスポーンが終了、そして波の敵ポーンが全て消滅したら (もしくは 2 分経過後)、 
+_Remote Event_ ノードを使用して、次の波を発生させる _Custom Event_ を呼び出します。
+
+
+### 勝敗条件
+
+ユーザーのベースには 3 つのライフがあります。敵ポーンが味方の醸造所へ到達した時、そして全てのライフがなくなってゲームに負けたときにライフが減算されます。敵ボスが味方の醸造所へ到達した場合も、 
+ゲームは負けとなります。ゲームに勝つには、自分のライフが全てなくなる前に、5 つの敵の波全てに勝たなくてはいけません。勝敗条件両方を設定しているネットワークは **TowerDefenseMap** の _Level ブループリント_ にあり、
+クラス `StrategyGameMode` で設定された関数を呼びます。このクラスは `AGameModeBase` クラスから派生しました。`StrategyGameMode` クラスには、InitGame 関数も格納されています。この関数はゲームを初期化して、アクタの PreInitializeComponents、`SetGamePaused`、`SetGameDifficulty` 前に呼ばれます。
+
+5 番目の波でスポーンされた最後のボスが殺された後に、Winning _Custom Event_ を呼び出すために _Remote Event_ ノードを使用します。**Win Condition** コメント欄に位置する _Custom Event_ は、その後サブネットワーク WaitForWin の実行を発行してトリガーします。
+このサブネットワークは、敵ポーンの生き残りがいないことをチェックします。_true_ の場合、「Player」に設定し WinningTeam 入力値と一緒に `Finish Game` 関数が呼ばれます。  
+
+**Lose Condition** コメント欄には 2 つのノードがあります。ノードは「Enemy」に設定した WinningTeam 入力値と一緒に `Finish Game` 関数を呼び出して、プレイヤーがゲームに敗れたことを告げます。3 つのライフが無くなった時、敵ポーンが味方の醸造所へ到達するため、 
+最初のノードがトリガーされます。敵ポーンが味方の醸造所へ到達するたびに、**MultiGate** ノードがトリガーされます。MultiGate ノードの 1、2 番目の出力実行ピンは、それぞれフレンドの醸造所の NumberOfLives を更新するノードと接続されて、 
+値を 1 つずつ減算します。最後の出力実行ピンは味方の醸造所のライフ数を 0 に設定します。その後「Enemy」に設定した WinningTeam と一緒に `Finish Game` 関数を
+トリガーします。   敵ボスがスポーンされたら、BossSpawned _Custom Event_ が Gate ノードを閉じて、「3 ライフバージョン」の MultiGate と接続します。そして「Enemy」に設定した WinningTeam と一緒に2番目の `Finish Game` 関数と接続する
+トリガーします。最終ボスが味方の醸造所へ到達した場合、FinishGame 関数がアクティベートされてプレイヤーの負けが決定するため、オープンネットワークを作成します。  
+ 
+
+  
+
+## Resource ノード - Gold
+
+gold ノードは親クラスが `StrategyResourceNode` のブループリントです。このクラスには、public 関数の `GetAvailableResources` と `GetInitialResources`、protected 関数の `OnDepleted` が格納されています。 
+リソースが使い果たされて、protected プロパティの `NumResources` がノードに存在するリソース量を設定したら、`BlueprintImplementableEvent` がこれをレポートします。  
+
+gold ノードのブループリントは、ノードをタイマーに表示または非表示にするためにサブネットワークを格納します。ブループリントの **ConstructionScript** は、ノードがレベルに配置された時、自動的に非表示となるノードとして設定します。
+gold ノードが出現すると、出現ノイズと共に AppearFX パーティクル エフェクトが再生されます。ノードがうまく収集された結果として OnDepleted イベントが発行された場合、ノードにある現在のゴールの数が
+プレイヤーの合計ゴールド数に加算されます。CollectFX パーティクルエフェクトと CoinSound の再生後に、ノードは再び非表示になります。プレイヤーがノードをクリックして、時間内にノードの収集に失敗すると、
+FadeFX パーティクルエフェクトと適切なサウンドが再生されます。  
+

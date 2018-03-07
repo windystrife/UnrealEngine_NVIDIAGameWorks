@@ -1,0 +1,58 @@
+//-----------------------------------------------------------------------------
+// File:		LPVInject_GenerateVplLists.usf
+//
+// Summary:		Compute shader to generate linked lists of 
+//				VPLs from an RSM for LPV injection. 
+//
+//				Runs once per light per LPV
+//
+// Created:		2013-03-01
+//
+// Author:		mailto:benwood@microsoft.com
+//
+//				Copyright (C) Microsoft. All rights reserved.
+//-----------------------------------------------------------------------------
+
+/*------------------------------------------------------------------------------
+	Compile time parameters:
+------------------------------------------------------------------------------*/
+
+#include "Common.ush"
+#include "LPVWriteVplCommon.ush"
+
+#define DEBUG_SHOW_CAMERAPOS 0
+
+//------------------------------------------------------------------------------
+
+Texture2D								gRsmFluxTex;
+Texture2D								gRsmNormalTex;
+Texture2D								gRsmDepthTex;
+
+SamplerState							LinearSampler;
+SamplerState							PointSampler;
+
+//------------------------------------------------------------------------------
+
+[numthreads(8,8,1)]
+void CSGenerateVplLists_LightDirectional(uint3 DTid : SV_DispatchThreadID) 
+{
+	float4 normalBiasTex = gRsmNormalTex.Load( int3(DTid.xy,0) );
+
+	float3 normal		 = normalize( normalBiasTex.xyz * 2.0f - 1.0f );
+	float3 flux			 = gRsmFluxTex.Load( int3(DTid.xy,0) ).xyz;
+	float depth			 = gRsmDepthTex.Load( int3(DTid.xy,0) ).x;
+
+	float primitiveBiasMultiplier = normalBiasTex.w * 32.0f;
+	float biasFactor = min( 1.0f, 1.0f/primitiveBiasMultiplier );
+
+	flux *= biasFactor;
+
+	float2 texCoord = float2( DTid.xy ) * LpvWrite.RsmPixelToTexcoordMultiplier;
+
+	float3 rsmPos = float3( texCoord, depth );
+	float3 worldPos = mul( float4(rsmPos,1), LpvWrite.mRsmToWorld ).xyz;
+
+	worldPos += normal * LpvWrite.VplInjectionBias * primitiveBiasMultiplier;
+
+	AddToVplList( worldPos, flux*LpvWrite.mLightColour.rgb, normal, false );
+}

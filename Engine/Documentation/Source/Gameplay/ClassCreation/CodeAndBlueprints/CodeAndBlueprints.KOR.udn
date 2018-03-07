@@ -1,0 +1,212 @@
+﻿INTSourceChangelist:3238697
+Availability:Public
+Title:C++ 와 블루프린트
+Crumbs: %ROOT%, Gameplay, Gameplay/ClassCreation
+Description:언리얼 엔진 작업을 시작하는 게임플레이 프로그래머를 위한 입문 정보입니다.
+Version: 4.9
+
+프로그래머가 C++ 클래스를 블루프린트로 확장시켜 새로운 게임플레이 클래스를 코드로 구성하면, 레벨 디자이너는 이것을 기반으로 블루프린트를 통해 작업 및 변경이 가능합니다.
+C++ 클래스와 블루프린트 시스템간의 상호작용에 영향을 끼치는 지정자가 여러가지 있는데, 이 예제에서는 그들 중 일부를 살펴보도록 하겠습니다.
+
+## 클래스 셋업
+
+클래스 셋업 시작 부분으로, [](Programming\Development\ManagingGameCode\CppClassWizard) 를 사용하여 LightSwitchBoth 라는 클래스를 만듭니다. 
+
+LightSwitchBoth 클래스에 구성된 대부분의 코드는 C++ 전용 LightSwitch 예제의 코드와 비슷합니다. LightSwitchCodeOnly 클래스를 블루프린트로 
+확장시킬 수 있기는 하지만, 해당 클래스에 생성된 컴포넌트, 변수, 함수는 블루프린트 그래프에 접근할 수 없게 될 것입니다. 이 예제에서는 LightSwitchBoth 가 거기서 파생되는 블루프린트의 
+템플릿으로 활용되도록 만드는 `UPROPERTY()` 와 `UFUNCTION()` 지정자에 대해 다뤄보도록 하겠습니다.
+
+아마도 C++ 전용 LightSwitch 예제를 먼저 참고해 보면, 헤더 파일과 소스 파일이 어떻게 구성되어 LightSwitchComponent, SphereComponent, 
+DesiredBrightness 변수, OnOverlap 함수가 생성되는지 확인해 보는 데 도움이 될 수 있습니다.
+
+이 헤더 파일은 C++ 전용 LightSwitch 예제에서 가져와 다음 기능을 추가하기 위한 것입니다:
+
+* PointLightComponent 와 SphereComponent 는 BlueprintReadOnly 이며, **내 블루프린트** 탭의 **Switch Components** 카테고리에 표시됩니다.
+* OnOverlapBegin 과 OnOverlapEnd 은 이제 BlueprintNativeEvent 로, **내 블루프린트** 탭의 **Switch Functions** 카테고리에 표시됩니다.
+* DesiredIntensity 는 BlueprintReadWrite 로, **내 블루프린트** 탭의 **Switch Variables** 카테고리에 표시됩니다.
+* DesiredIntensity 는 이제 VisibleAnywhere 가 아닌 EditAnywhere 입니다.
+
+[REGION:tip]
+`UCLASS()` 매크로에 `Blueprintable` 지정자가 있습니다. 여기서는 필수는 아닌데, LightSwitchBoth 가 직접 상속하는 Actor 가 Blueprintable 이라, 그 Blueprintable 지정자가 상속되기 때문입니다.
+[/REGION]
+
+`UPROPERTY()` 와 `UFUNCTION()` 매크로에 부가된 지정자와 함께, LightSwitchBoth 클래스의 헤더 파일은 이렇습니다:
+
+[REGION:codetitlebar]
+LightSwitchBoth.h
+[/REGION:codetitlebar]
+		
+		// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+		#pragma once
+
+		#include "GameFramework/Actor.h"
+		#include "LightSwitchBoth.generated.h"
+
+		/**
+		 * 
+		 */
+		UCLASS()
+		class [PROJECTNAME]_API ALightSwitchBoth : public AActor
+		{
+			GENERATED_BODY()
+			public:
+			/** 포인트 라이트 컴포넌트 */
+			UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Switch Components")
+			class UPointLightComponent* PointLight1;
+
+			/** 구체 컴포넌트 */
+			UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Switch Components")
+			class USphereComponent* Sphere1;
+
+			ALightSwitchBoth();
+
+			/** 무언가 구체 컴포넌트에 들어설 때 호출 */
+			UFUNCTION(BlueprintNativeEvent, Category="Switch Functions")
+			void OnOverlapBegin(class UPrimitiveComponent* OverlappedComp, class AActor* OtherActor, class UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+			
+			void OnOverlapBegin_Implementation(class UPrimitiveComponent* OverlappedComp, class AActor* OtherActor, class UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+
+			/** 무언가 구체 컴포넌트를 나설 때 호출 */
+			UFUNCTION(BlueprintNativeEvent, Category="Switch Functions")
+			void OnOverlapEnd(class UPrimitiveComponent* OverlappedComp, class AActor* OtherActor, class UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+
+			void OnOverlapEnd_Implementation(class UPrimitiveComponent* OverlappedComp, class AActor* OtherActor, class UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+
+			/** 라이트 컴포넌트의 표시여부 토글*/
+			UFUNCTION()
+			void ToggleLight();
+	
+			/** 라이트에 원하는 세기 */
+			UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Switch Variables")
+			float DesiredIntensity;
+	
+		};
+
+
+LightSwitchBoth 의 소스 파일에서 생성자는 그대로입니다. 하지만 `OnOverlapBegin` 및 `OnOverlapEnd` 함수에는 변경이 필요합니다. 이 함수는 이제 BlueprintNativeEvent 입니다. 즉 이 클래스에서 파생되는 
+블루프린트에서는, `OnOverlapBegin` 및 `OnOverlapEnd` 함수를 덮어쓰는 이벤트 배치가 가능하며, 함수가 정상적으로 호출될 때 실행된다는 뜻입니다. 그 이벤트 중 하나가 존재하지 않으면, 그 함수의 C++ 구현이 대신 실행됩니다.
+이러한 구성의 작동을 위해 C++ 함수 이름을 각각 `OnOverlapBegin_Implementation` 와 `OnOverlapEnd_Implementation` 으로 변경해 줘야 합니다. 블루프린트 구성은 이 예제 후반부에 다루도록 하겠습니다. `OnOverlapBegin` 과 `OnOverlapEnd` 정의를 변경한 상태의 
+LightSwitchBoth 에 대한 소스 파일 모습은 이렇습니다:
+
+[REGION:codetitlebar]
+LightSwitchBoth.cpp
+[/REGION:codetitlebar]
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+	#include "BasicClasses.h"
+	#include "LightSwitchBoth.h"
+
+	ALightSwitchBoth::ALightSwitchBoth()
+	{
+
+		DesiredIntensity = 3000.0f;
+
+		PointLight1 = CreateDefaultSubobject<UPointLightComponent>(TEXT("PointLight1"));
+		PointLight1->Intensity = DesiredIntensity;
+		PointLight1->bVisible = true;
+		RootComponent = PointLight1;
+
+		Sphere1 = CreateDefaultSubobject<USphereComponent>(this, TEXT("Sphere1"));
+		Sphere1->InitSphereRadius(250.0f);
+		Sphere1->SetupAttachment(RootComponent);
+
+		Sphere1->OnComponentBeginOverlap.AddDynamic(this, &ALightSwitchBoth::OnOverlapBegin);		// set up a notification for when this component overlaps something
+		Sphere1->OnComponentEndOverlap.AddDynamic(this, &ALightSwitchBoth::OnOverlapEnd);		// set up a notification for when this component overlaps something
+	}
+
+	void ALightSwitchBoth::OnOverlapBegin_Implementation(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+	{
+		if (OtherActor && (OtherActor != this) && OtherComp)
+		{
+			ToggleLight();
+		}
+	}
+
+	void ALightSwitchBoth::OnOverlapEnd_Implementation(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+	{
+		if (OtherActor && (OtherActor != this) && OtherComp)
+		{
+			ToggleLight();
+		}
+	}
+
+	void ALightSwitchBoth::ToggleLight()
+	{
+		PointLight1->ToggleVisibility();
+	}
+
+
+빈 프로젝트에 처음 코드를 추가한 경우, 언리얼 에디터를 닫고, Visual Studio 나 XCode 에서 프로젝트를 컴파일한 다음 언리얼 에디터를 열고 프로젝트를 다시 열면 게임 모듈이 제대로 
+생성 및 로드됩니다. 또 한가지 중요한 점은, **Build Configuration** (빌드 환경설정)이 프로젝트를 여는 데 사용중인 언리얼 에디터 실행파일 버전에 일치해야 한다는 점입니다. 빌드 환경설정과 프로젝트 컴파일에 대한 상세 정보는 
+[](Programming\Development\CompilingProjects) 문서를 참고해 주시기 바랍니다.
+
+기존 C++ 프로젝트에 코드를 추가하는 경우, 핫 리로드 기능을 사용하여 언리얼 에디터 안에서 새 코드를 컴파일할 수 있습니다.
+
+이 새로운 클래스를 컴파일한 이후에는, 새로운 [블루프린트 클래스](Engine/Blueprints\UserGuide\Types\ClassBlueprint) 를 [생성](Engine/Blueprints\UserGuide\Types\ClassBlueprint\Creation) 하는 것이 가능합니다.
+이 경우, LightSwitchBoth 가 블루프린트의 부모 클래스로 선택되며, 그 이름은 **LightSwitchBoth_BP** 가 됩니다.
+
+![](BPBoth_ParentClass.png)
+
+C++ 에 추가된 PointLightComponent 와 SphereComponent 역시도 **블루프린트 에디터** 의 **컴포넌트** 탭에 표시됩니다.
+아이콘 색이 진파랑인 것은, LightSwitchBoth 부모 클래스에서 상속된 네이티브 컴포넌트임을 나타냅니다. **LightSwitchBoth_BP** 블루프린트에만 새로 추가된 컴포넌트의 아이콘 색은 
+연파랑입니다. **컴포넌트** 탭을 사용한 컴포넌트 추가 및 정리 관련 상세 정보는, [](Engine/Blueprints\UserGuide\Components) 문서를 참고해 주시기 바랍니다.
+
+![](Both_ComponentList.png)
+
+**블루프린트 에디터** 의 **그래프 패널** 은 블루프린트 편집의 핵심입니다. **그래프 패널** 에서는 새로운 
+[변수](Engine/Blueprints\UserGuide\Variables), [함수](Engine/Blueprints\UserGuide\Functions), [매크로](Engine/Blueprints\UserGuide\Macros) 를 추가할 수 있습니다. 블루프린트 클래스에 포함된 모든 [그래프](Engine/Blueprints\UserGuide\Graphs) 에 접근할 수도 있습니다.
+그래프에서는, [노드](Engine/Blueprints\UserGuide\Nodes) 를 서로 연결시켜 클래스 변수와 게임플레이 이벤트, 심지어 액터의 주변 상황으로 인해 구동되는 게임플레이 기능 및 디자인을 
+만들어 낼 수 있습니다.
+
+**그래프 패널** 의 **내 블루프린트** 탭에는 LightSwitchBoth 클래스에 C++ 로 추가된 PointLightComponent 와 SphereComponent 가 표시됩니다. 그 이유는 `BlueprintReadOnly` 지정자 때문입니다.
+이들 컴포넌트에 대한 노드를 그래프에 추가하는 것은, **내 블루프린트** 탭에서 그 이름에 클릭하여 그래프에 떨구면 됩니다. 그런 다음 이 노드를 표시여부나 라이트 색같은 변수를 변경하는 
+노드에 연결시키면 됩니다. **DesiredBrightness** 변수 역시 **내 블루프린트** 탭에 나타납니다. 변수이지 컴포넌트는 아니기 때문에, `BlueprintReadWrite` 지정자도 사용할 수 있었습니다.
+즉 블루프린트 그래프에서 **DesiredBrightness** 값을 구하는 노드도 설정하는 노드도 만들 수 있다는 뜻입니다. 일반적인 사용법 관련 정보는 [](Engine/Blueprints\Editor/UIComponents\MyBlueprint) 문서를 확인해 주시기 바랍니다.
+
+[REGION:tip]
+LightSwitchBoth 부모 클래스의 컴포넌트와 변수는 기본적으로 표시되지 않을 수 있습니다. **내 블루프린트** 탭 하단의 **Show user-created variables only** (사용자 생성 변수만 표시) 체크박스를 체크하면 
+부모 클래스에서 상속된 변수를 숨깁니다.
+[/REGION]
+
+| 모든 변수 표시 | 사용자 생성 변수만 표시 |
+| ---------------------- | ------------------- |
+| [REGION:raw]![](showInhVar2.PNG)[/REGION] | [REGION:raw]![](showInhVar.PNG)[/REGION] |
+| ![](BP_Only_MyBlueprint.png) | ![](Both_MyBlueprint.png) |
+
+
+**LightSwitchBoth_BP** 클래스 행위를 구성하는 데 사용되는 그래프가 둘 있습니다. 첫 번째는 [](Engine/Blueprints\UserGuide\UserConstructionScript) 그래프로, 특수한 **컨스트럭션 스크립트** 이벤트가 
+들어있습니다. **컨스트럭션 스크립트** 셋업이 없으면, 새로운 **LightSwitchBoth_BP** 액터는 그저 LightSwitchBoth 생성자를 사용할 것입니다. 그러나 레벨에서 액터를 움직일 때나, 
+**Desired Brightness** 값이 변할 때도 **컨스트럭션 스크립트** 가 실행됩니다. **컨스트럭션 스크립트** 를 사용한다는 것은, 블루프린트에 노출시킨 액터 변수를 쉽게 변경할 수 있다는 뜻이고, 
+그러한 변경의 효과를 빠르게 확인할 수 있다는 뜻입니다.
+
+**LightSwitchBoth_BP** 클래스에서 **컨스트럭션 스크립트** 이벤트는 **Set Intensity** 노드에 연결되어, 액터가 레벨에 추가되거나 이동될 때 또는 **Desired Brightness** 가 변할 때 
+**Point Light 1** (PointLightComponent)의 밝기를 **Desired Brightness** 값으로 설정할 수 있도록 합니다.
+
+![](Both_ConstructionScript.png)
+
+**LightSwitch_BPOnly** 클래스에 구성된 나머지 그래프는, [](Engine/Blueprints\UserGuide\EventGraph) 입니다. 이벤트 그래프의 실행은 이벤트로부터 시작됩니다. 여기서는 C++ 함수 `OnOverlap` 이 
+호출될 때마다 **OnOverlap** 이벤트가 실행됩니다. LightSwitchBoth 소스 파일에서, 액터가 SphereComponent 에 드나들 때 **OnOverlap** 이 실행되도록 델리게이트가 구성됩니다:
+
+		Sphere1->OnComponentBeginOverlap.AddDynamic(this, &ALightSwitchBoth::OnOverlapBegin);		// 이 컴포넌트가 무언가에 겹칠 때에 대한 알림 구성
+		Sphere1->OnComponentEndOverlap.AddDynamic(this, &ALightSwitchBoth::OnOverlapEnd);		// 이 컴포넌트가 무언가에 겹칠 때에 대한 알림 구성
+
+**OnOverlap** 이벤트 노드는 **Set Light Color** 노드에 연결됩니다. 이벤트가 실행될 때마다 PointLightComponent 의 라이트 색이 임의 설정되도록 합니다. 이는 
+소스 파일 내 PointLightComponent 의 표시여부를 토글하는 `OnOverlap_Implementation` 함수를 덮어씁니다.
+
+이벤트와 그래프 작업 관련 상세 정보는 [](Engine/Blueprints\UserGuide\Events), [](Engine/Blueprints\UserGuide\EventGraph), [그래프 패널](Engine/Blueprints\Editor\Modes\GraphPanel) 문서를 참고해 주시기 바랍니다.
+
+![](Both_EventGraph_2.png)
+
+LightSwitchBoth 헤더 파일에서 **DesiredBrightness** 변수는 EditAnywhere 로 설정, **블루프린트 에디터** 의 디폴트에 표시되며, **클래스 디폴트** 버튼을 클릭하여 디테일 패널에 클래스 디폴트를 표시하는 것으로 편집할 수 있습니다.
+이는 변수가 클래스의 각 인스턴스별로 변경 가능하여, 각 액터가 별도의 **DesiredBrightness** 를 가질 수 있다는 뜻이기도 합니다. **DesiredBrightness** 는 **BlueprintReadWrite** 이기도 하고 **컨스트럭션 스크립트** 에 사용되기도 하므로, 
+업데이트하면 **컨스트럭션 스크립트** 가 다시 실행되게 됩니다.
+
+![](Both_Defaults.png)
+
+블루프린티드 클래스는 다른 블루프린트 클래스로 확장 가능한데, **클래스 뷰어** 에서 클래스 옆의 드롭다운 버튼을 사용해서 새 블루프린트를 만들거나, 블루프린트에 우클릭한 다음 
+**Create New Blueprint Based on This** (이것을 기반으로 새 블루프린트 생성)을 선택해도 됩니다.
+
+**LightSwitchBoth_BP** 블루프린트 클래스는 [](Engine/Content/Browser) 에 표시되며, 레벨에 드래그 앤 드롭 가능합니다. [](Engine/UI/ClassViewer) 에도 표시됩니다.
+**콘텐츠 브라우저** 또는 **클래스 뷰어** 를 사용해서 레벨에 액터를 배치하는 방법에 대해서는, [](Engine/Actors/Placement) 문서를 참고해 주시기 바랍니다.

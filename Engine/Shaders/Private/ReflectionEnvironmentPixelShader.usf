@@ -1,0 +1,191 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	ReflectionEnvironmentComputeShaders - functionality to apply local cubemaps.
+=============================================================================*/
+  
+#include "Common.ush"
+#include "DeferredShadingCommon.ush"  
+#include "BRDF.ush"
+#include "ReflectionEnvironmentShared.ush"
+#include "SkyLightingShared.ush"
+#include "ShadingModels.ush"
+#include "LightGridCommon.ush"
+
+#define CompositeTileReflectionCaptureIndices CulledLightDataGrid
+#define InstancedCompositeTileReflectionCaptureIndices InstancedCulledLightDataGrid
+#define REFLECTION_COMPOSITE_USE_BLENDED_REFLECTION_CAPTURES 1
+#define REFLECTION_COMPOSITE_SUPPORT_SKYLIGHT_BLEND 1
+#include "ReflectionEnvironmentComposite.ush"
+
+float3 GatherRadiance(float CompositeAlpha, float3 WorldPosition, float3 RayDirection, float Roughness, float2 ScreenUV, float IndirectIrradiance, uint ShadingModelID, uint NumCulledReflectionCaptures, uint CaptureDataStartIndex)
+{
+	// Indirect occlusion from DFAO, which should be applied to reflection captures and skylight specular, but not SSR
+	float IndirectSpecularOcclusion = 1.0f;
+	float3 ExtraIndirectSpecular = 0;
+
+#if SUPPORT_DFAO_INDIRECT_OCCLUSION
+	float IndirectDiffuseOcclusion;
+	GetDistanceFieldAOSpecularOcclusion(ScreenUV, RayDirection, Roughness, ShadingModelID == SHADINGMODELID_TWOSIDED_FOLIAGE, IndirectSpecularOcclusion, IndirectDiffuseOcclusion, ExtraIndirectSpecular);
+	// Apply DFAO to IndirectIrradiance before mixing with indirect specular
+	IndirectIrradiance *= IndirectDiffuseOcclusion;
+#endif
+
+	return CompositeReflectionCapturesAndSkylight(CompositeAlpha, WorldPosition, RayDirection, Roughness, IndirectIrradiance, IndirectSpecularOcclusion, ExtraIndirectSpecular, NumCulledReflectionCaptures, CaptureDataStartIndex);
+}
+
+
+Texture2D ScreenSpaceReflectionsTexture;
+SamplerState ScreenSpaceReflectionsSampler;
+
+void ReflectionEnvironmentTiledDeferredMain(
+	in float4 UVAndScreenPos : TEXCOORD0,
+	in float4 SvPosition : SV_Position,
+	out float4 OutColor : SV_Target0)
+{
+	float2 ScreenUV = UVAndScreenPos.xy;
+	float2 ScreenPosition = UVAndScreenPos.zw;
+	FScreenSpaceData ScreenSpaceData = GetScreenSpaceData(ScreenUV);
+	FGBufferData GBuffer = ScreenSpaceData.GBuffer;
+	float SceneDepth = CalcSceneDepth(ScreenUV);
+	
+	OutColor = 0;
+	
+	float4 Color = float4(0, 0, 0, 1);
+	
+	float4 HomogeneousWorldPosition = mul(float4(ScreenPosition * SceneDepth, SceneDepth, 1), View.ScreenToWorld);
+	float3 WorldPosition = HomogeneousWorldPosition.xyz / HomogeneousWorldPosition.w;
+	float3 CameraToPixel = normalize(WorldPosition - View.WorldCameraOrigin);
+	float3 ReflectionVector = reflect(CameraToPixel, GBuffer.WorldNormal);
+	float IndirectIrradiance = GBuffer.IndirectIrradiance;
+	
+#if ENABLE_SKY_LIGHT && ALLOW_STATIC_LIGHTING
+	BRANCH
+	// Add in diffuse contribution from dynamic skylights so reflection captures will have something to mix with
+	if (SkyLightParameters.y > 0 && SkyLightParameters.z > 0)
+	{
+		float2 ScreenUV = ScreenPosition * View.ScreenPositionScaleBias.xy + View.ScreenPositionScaleBias.wz;
+		IndirectIrradiance += GetDynamicSkyIndirectIrradiance(ScreenUV, GBuffer.WorldNormal);
+	}
+#endif
+
+	BRANCH
+	if( GBuffer.ShadingModelID != SHADINGMODELID_UNLIT && GBuffer.ShadingModelID != SHADINGMODELID_HAIR )
+	{		
+		float3 N = GBuffer.WorldNormal;
+		float3 V = -CameraToPixel;
+		float3 R = 2 * dot( V, N ) * N - V;
+		float NoV = saturate( dot( N, V ) );
+
+		// Point lobe in off-specular peak direction
+		R = GetOffSpecularPeakReflectionDir(N, R, GBuffer.Roughness);
+
+#if 1
+		// Note: this texture may also contain planar reflections
+		float4 SSR = Texture2DSample( ScreenSpaceReflectionsTexture, ScreenSpaceReflectionsSampler, ScreenUV );
+
+		// NVCHANGE_BEGIN: Add VXGI
+#if APPLY_VXGI 
+		// Make the rest of the shader think that VXGI reflections are SSR
+		// Actually combine VXGI with SSR if both are enabled
+		SSR.rgb = ScreenSpaceData.VxgiSpecular.rgb * (1 - SSR.a) + SSR.rgb;
+		SSR.a = 1 - (1 - ScreenSpaceData.VxgiSpecular.a) * (1 - SSR.a);
+#endif
+		// NVCHANGE_END: Add VXGI
+
+		Color.rgb = SSR.rgb;
+		Color.a = 1 - SSR.a;
+#endif
+
+		if( GBuffer.ShadingModelID == SHADINGMODELID_CLEAR_COAT )
+		{
+			const float ClearCoat = GBuffer.CustomData.x;
+			Color = lerp( Color, float4(0,0,0,1), ClearCoat );
+
+#if CLEAR_COAT_BOTTOM_NORMAL
+			const float2 oct1 = ((float2(GBuffer.CustomData.a, GBuffer.CustomData.z) * 2) - (256.0/255.0)) + UnitVectorToOctahedron(GBuffer.WorldNormal);
+			const float3 ClearCoatUnderNormal = OctahedronToUnitVector(oct1);
+
+			const float3 BottomEffectiveNormal = ClearCoatUnderNormal;			
+			R = 2 * dot( V, ClearCoatUnderNormal ) * ClearCoatUnderNormal - V;
+#endif
+		}
+
+		float AO = ScreenSpaceData.AmbientOcclusion;
+		float RoughnessSq = GBuffer.Roughness * GBuffer.Roughness;
+		float SpecularOcclusion = GetSpecularOcclusion(NoV, RoughnessSq, AO);
+		Color.a *= SpecularOcclusion;
+
+#if FEATURE_LEVEL >= FEATURE_LEVEL_SM5
+		float2 LocalPosition = SvPosition.xy - View.ViewRectMin.xy;
+
+		uint GridIndex = ComputeLightGridCellIndex(uint2(LocalPosition.x, LocalPosition.y), SceneDepth);
+		uint NumCulledEntryIndex = (ForwardGlobalLightData.NumGridCells + GridIndex) * NUM_CULLED_LIGHTS_GRID_STRIDE;
+		uint NumCulledReflectionCaptures = NumCulledLightsGrid[NumCulledEntryIndex + 0];
+		uint DataStartIndex = NumCulledLightsGrid[NumCulledEntryIndex + 1];
+#else
+		uint DataStartIndex = 0;
+		uint NumCulledReflectionCaptures = 0;
+#endif
+
+		//bottom for clearcoat or the only reflection.
+		Color.rgb += GatherRadiance(Color.a, WorldPosition, R, GBuffer.Roughness, ScreenUV, IndirectIrradiance, GBuffer.ShadingModelID, NumCulledReflectionCaptures, DataStartIndex);
+
+		BRANCH
+		if( GBuffer.ShadingModelID == SHADINGMODELID_CLEAR_COAT )
+		{
+			const float ClearCoat			= GBuffer.CustomData.x;
+			const float ClearCoatRoughness	= GBuffer.CustomData.y;
+
+			// TODO EnvBRDF should have a mask param
+			float2 AB = PreIntegratedGF.SampleLevel( PreIntegratedGFSampler, float2( NoV, GBuffer.Roughness ), 0 ).rg;
+			Color.rgb *= GBuffer.SpecularColor * AB.x + AB.y * saturate( 50 * GBuffer.SpecularColor.g ) * (1 - ClearCoat);
+		
+			// F_Schlick
+			float F0 = 0.04;
+			float Fc = Pow5( 1 - NoV );
+			float F = Fc + (1 - Fc) * F0;
+			F *= ClearCoat;
+			
+			float LayerAttenuation = (1 - F);		
+			Color.rgb *= LayerAttenuation;
+			Color.a = F;
+		
+			
+			Color.rgb += SSR.rgb * F;
+			Color.a *= 1 - SSR.a;
+			
+			Color.a *= SpecularOcclusion;
+
+			float3 TopLayerR = 2 * dot( V, N ) * N - V;
+			Color.rgb += GatherRadiance(Color.a, WorldPosition, TopLayerR, ClearCoatRoughness, ScreenUV, IndirectIrradiance, GBuffer.ShadingModelID, NumCulledReflectionCaptures, DataStartIndex);
+		}
+		else
+		{
+			Color.rgb *= EnvBRDF( GBuffer.SpecularColor, GBuffer.Roughness, NoV );
+		}
+
+		// Transform NaNs to black, transform negative colors to black.
+		OutColor.rgb = -min(-Color.rgb, 0.0);
+	}
+}
+
+// Used during reflection captures and SM4 to get faked bounce light from specular surfaces
+void SpecularBouncePS(in noperspective float4 UVAndScreenPos : TEXCOORD0, out float4 OutColor : SV_Target0)
+{
+	float2 UV = UVAndScreenPos.xy;
+
+	FScreenSpaceData ScreenSpaceData = GetScreenSpaceData(UV);
+	FGBufferData GBuffer = ScreenSpaceData.GBuffer;
+
+	float3 ScreenVector = normalize( mul( float4(UVAndScreenPos.zw, 1, 0), View.ScreenToWorld ).xyz );
+
+	float3 N = GBuffer.WorldNormal;
+	float3 V = -ScreenVector;
+
+	float NoV = saturate( dot(N, V) );
+
+	GBuffer.SpecularColor = EnvBRDFApprox( GBuffer.SpecularColor, GBuffer.Roughness, NoV );
+	
+	OutColor = float4( GBuffer.SpecularColor * GBuffer.IndirectIrradiance, 0 );
+}

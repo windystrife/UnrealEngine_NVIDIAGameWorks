@@ -1,0 +1,277 @@
+﻿INTSourceChangelist:3571159
+Availability:Public
+Crumbs: %ROOT%
+Title:单视场远场渲染
+Description:了解虚幻引擎 4 中 VR 移动应用程序的高级渲染功能（单视场远场渲染）。
+Type:Overview
+SkillLevel:Advanced
+Version:4.16
+Parent:Platforms/VR
+Order:
+Tags:Rendering
+Tags:Performance and Profiling
+Topic-Image:hybMonRend_topicImage.png
+related:Engine/Performance
+related:Engine/Performance/GPU
+related:Engine/Rendering
+related:Engine/Performance/StatCommands
+related:Platforms/VR/Profiling
+related:Platforms/VR/Profiling/Considerations
+related:Platforms/VR/Profiling/Overview
+Contributor:Oculus
+
+[TOC(start:2 end:3)]
+
+**单视场远场（Monoscopic Far Field）** 渲染（或更准确地称为“混合单视场渲染”）是虚幻引擎 4（UE4）中内置的一个 VR 移动应用程序高级渲染功能。整体而言，单视场远场渲染可改善包含大量远景内容的关卡的性能。单视场远场渲染能改善远景关卡性能的原因是只对双眼渲染一次远景物体。我们已在 Epic 进行测试，以此法渲染远景物体将使 VR 移动应用程序获得极大的性能提升。
+
+[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:videoid]
+	bAyqVgv-MqA
+	[/PARAMLITERAL]
+	[PARAMLITERAL:width]
+	100
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	56.25
+	[/PARAMLITERAL]
+	[PARAMLITERAL:units]
+	%
+	[/PARAMLITERAL]
+	[PARAMLITERAL:type]
+	simple
+	[/PARAMLITERAL]
+[/OBJECT]
+
+虚幻引擎 4.16 版本发布后，GearVR 设备上已启用多视图和单视场远场渲染，因此要确保场景的立体近场渲染部分已优化。
+
+## 启用单视场远场渲染
+
+[REGION:note]
+在 UE4 中启用单视场远场渲染之前，必须将 Mobile HDR 禁用。
+[/REGION]
+
+创建新项目时，单视场远场渲染默认禁用。如需访问单视场远场渲染设置，从虚幻编辑器中打开 **Project Settings** 菜单，然后从侧边栏中选择 **Rendering**。即可在 **Project-Description** 菜单中看到 **VR** 下拉菜单。
+
+[REGION:lightbox]
+	[![](uncheckedUI.png)(w:600)](uncheckedUI.png)
+[/REGION]
+
+[REGION:caption]
+	点击查看全图。
+[/REGION]
+
+选择 **Monoscopic Far Field** 渲染标签旁边的勾选框即可启用单视场远场渲染。
+
+![](checkedUI.png)
+
+启用 **Monoscopic Far Field** 设置后将弹出重启 UE4 的提示。准备妥善后，即可重启 UE4，将 **Monoscopic Far Field** 渲染设置应用到项目。
+
+![](restartWarning.png)  
+
+### 添加单视场摄像机
+
+禁用单视场远景渲染后，项目中拥有两个立体摄像机，双眼各一个。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Disabled](Disabled.png)
+	[/PARAM]
+	[PARAM:after]
+	![Enabled](Enabled.png)
+	[/PARAM]
+[/OBJECT]
+
+启用单视场远景渲染后，UE4 将在现有的立体摄像机之间加入第三个摄像机。新摄像机为单视场摄像机，将启用混合单视场（与立体）渲染流程。
+
+### 立体摄像机视锥对称
+
+根据设备平台的不同，立体摄像机视锥的平面几何体可能有所不同。对 GearVR 设备而言，立体和单视场摄像机视锥为对称；而对 Rift 设备而言，立体和单视场摄像机视锥为不对称。 
+请参考以下图表，查看 GearVR 和 Rift 设备之间的摄像机视锥差异。
+
+[REGION:imagetable]
+| ![FrustaGeometryGear.png](FrustaGeometryGear.png)(w:542) | ![FrustaGeometryRift.png](FrustaGeometryRift.png)(w:542) |
+| --- | --- |
+| GearVR（对称视锥） | Rift（不对称视锥） |
+[/REGION]
+
+如左图所示，GearVR 立体摄像机拥有对称视锥，意味着单视场摄像机和立体摄像机共用相同的投影矩阵。
+而在 Rift 设备上立体摄像机为不对称（向内的角度小于向外的角度），意味着单视场摄像机的视锥是左右视锥的组合，使单视场渲染目标在边缘上大于立体渲染目标。
+
+### 分离平面属性
+
+UE4 构建单视场摄像机时，渲染器将添加一个分离（剔除）平面。 
+
+![](AddingSplitPlane.png)
+
+[REGION:caption]
+绿色的分离面将作为单视场摄像机的近平面。
+[/REGION]
+
+应用到分离平面的以下属性将被添加到用户的项目中：
+
+*	分离平面与项目的 Z 轴平行。
+*	分离平面的默认 **单视场剔除距离（Mono Culling Distance）** 被设为 `750.0` 厘米（7.5 米）。
+*	平面远侧的物体由单视场摄像机渲染。
+*	跨剔除平面的物体由两个摄像机渲染（单视场和立体）。
+
+在下图中，着色（绿色）区域代表分离平面的远侧，这个区域中的物体在单视场摄像机的深度缓冲中进行渲染。在分离平面近侧的物体则在立体摄像机的深度缓冲中进行渲染。
+
+![](MonoRenderArea.png)
+
+下图展示了实际操作中分离平面的对比：
+
+[REGION:imagetable]
+| ![StereoBuffer_banner.png](StereoBuffer_banner.png)(w:542) | ![MonoBuffer_banner.png](MonoBuffer_banner.png)(w:542) |
+| --- | --- |
+| 立体深度缓冲 | 单视场深度缓冲 |
+[/REGION]
+
+## 性能注意事项
+
+迄今为止，您已学习到 UE4 采用了深度缓冲渲染技术来区分立体或单视场摄像机绘制的内容。从高层次来看，UE4 移动前向渲染器被 [修改](#Bookmark1) 为使用深度缓冲，决定立体像素的深度是否小于单视场像素。和基于物体的渲染技术进行对比，使用基于像素的分离（剔除）平面能够带来性能优势。然而物体穿过分离平面时，他们必须进行单视场和立体绘制（即使物体的像素足以进行单视场绘制）。这些额外的绘制调用通常会生成不必要的带宽，增加 GPU 和 CPU 顶点开销。
+
+下图很好地展示了对性能产生的影响：悬崖的边界球与分离平面发生碰撞，从而导致立体近场摄像机渲染悬崖（但悬崖的像素只应被单视场远场摄像机渲染）。
+
+![](StereoNoCull.png)
+
+## 优化性能
+
+如需评估项目的想能，请参考 **Rendering Hardware Interface (RHI)** 生成的数据输出。如需查看 RHI 生成的数据，执行以下步骤：
+
+1.	点击编辑器中的 **Viewport Options** 按钮。
+
+	[REGION:lightbox]
+	[![](RHIStat_Step1.png)(w:600)](RHIStat_Step1.png)
+	[/REGION]
+	
+	[REGION:caption]
+		点击查看全图。
+	[/REGION]
+
+1.	将鼠标悬停在 **Stat** 选项上，打开 Statistics 菜单。
+
+	[REGION:lightbox]
+	[![](RHIStat_Step2.png)(w:600)](RHIStat_Step2.png)
+	[/REGION]
+	
+	[REGION:caption]
+		点击查看全图。
+	[/REGION]
+
+1.	导航至 **Stat > Advanced**。
+
+	[REGION:lightbox]
+	[![](RHIStat_Step3.png)(w:600)](RHIStat_Step3.png)
+	[/REGION]
+	
+	[REGION:caption]
+		点击查看全图。
+	[/REGION]
+
+1.	最后，选择 **RHI** 选项显示项目的 RHI [数据](Engine/Performance/StatCommands)。
+
+	[REGION:lightbox]
+	[![](RHIStat_Step4.png)(w:600)](RHIStat_Step4.png)
+	[/REGION]
+	
+	[REGION:caption]
+		点击查看全图。
+	[/REGION]
+
+#### 最终结果
+
+此时你将看到项目的 RHI [数据](Engine/Performance/StatCommands)。
+
+[REGION:lightbox]
+[![](RHIStat_Profiling.png)(w:600)](RHIStat_Profiling.png)
+[/REGION]
+
+[REGION:caption]
+	点击查看全图。
+[/REGION]
+
+如果确认项目的 RHI 配置文件不可接受，可通过一些策略优化项目的性能：
+
+*	**更新分离平面距离**。在某些场景中用户需要修改分离平面距离，适应较大（或较小）的渲染区域。
+*	**更新单视场渲染模式**。修改单视场渲染模式即可确定特定物体是否需要强制以单视场渲染。
+*	**强制较远的物体以单视场进行渲染**。无可避免的是，在一些情况下需要强制特定物体（如天空盒或背景网格体）以单视场进行渲染。
+
+### 更新分离平面距离
+
+如果需要更新分离平面的距离，在编辑器中打开项目的 **World Settings**，找到 **VR** 菜单，并将 **Mono Culling Distance** 更新到所需要的距离。
+
+![](MonoCullingDistance.png)
+
+### 更新单视场渲染模式
+
+启用单视场渲染后，您可能需要更新项目的单视场渲染模式。以不同模式渲染场景有助于调试项目中的潜在性能问题。在编辑器的命令控制台中输入 `vr.MonoscopicFarFieldMode [0-4]` 即可更新应用程序的单视场渲染模式。
+
+![](UpdateMonoMode_console.png)
+
+`vr.MonoscopicFarFieldMode` 默认设为 `1`。如果需要修改默认值，请参考下表。
+
+|值|模式|
+|-----|---|
+|**0**| 禁用（混合）单视场远场渲染。|
+|**1**| 启用（混合）单视场远场渲染。单视场远场渲染启用后，此模式将默认设置。|
+|**2**| 只启用立体近场渲染。|
+|**3**| 启用立体近场渲染，同时也禁用远场像素深度测试（Far Field Pixel Depth Test）。从根本上来说，此选项将禁用分离（剔除）平面。|
+|**4**| 只启用单视场远场渲染。|
+
+### 强制较远的物体以单视场进行渲染
+
+假设您在使用以下场景。
+
+![](DebugScene.png)
+
+现在您输入 `vr.MonoscopicFarFieldMode 3` 控制台命令，启用立体远场渲染，同时禁用分离平面。
+
+![](StereoNoCull.png)
+
+[REGION:caption]
+虽然您希望悬崖被剔除，但立体摄像机仍会将悬崖模型渲染出来，对性能造成负面影响。
+[/REGION]
+
+如您（在观察场景后）决定强制悬崖网格体在单视场远场模式中进行渲染，使用 **蓝图编辑器** 打开模型，并在 **Details** 面板中的 **Rendering** 菜单下选择 **Render in Mono** 选项。
+
+[REGION:lightbox]
+	[![](ForceRenderMono.png)(w:600)](ForceRenderMono.png)
+[/REGION]
+
+[REGION:caption]
+	点击查看全图。
+[/REGION]
+
+[REGION:tip]
+将 **Render in Mono** 设为 true 后，如已连接头戴显示器（HMD），且项目已启用 **Monoscopic Far Field** 渲染，悬崖组件则只会由单视场近场摄像机进行渲染。
+[/REGION]
+
+## 立体视觉
+
+混合单视场渲染背后的灵感则是立体视觉的视觉过程。根据 [美国眼科学院](https://www.aao.org/eye-health/ask-ophthalmologist-q/stereopsis) 的说法，立体视觉与深度感同义。人查看物体时，每只眼睛查看物体的角度稍有不同，每只眼睛将图像传回大脑，大脑则将两张图像“合成”为一张图像。从每个眼睛传回的不同画面形成双眼视差，大脑则将其用于提取深度信息。 
+
+[REGION:note]
+物体越远，大脑提取物体深度信息的难度越大。
+[/REGION]
+
+(#Bookmark1)
+### 平衡双眼视差
+
+为平衡大脑从远距离物体上提取深度信息的难度，UE4 移动前向渲染器经修改后执行以下操作（按顺序）：
+
+1.	用立体摄像机渲染不透明物体。
+
+	![](Stereo.png)
+
+1.	移动并组合输出，创建单视场遮蔽遮罩，提前填充单视场深度缓存。
+
+1.	用单视场摄像机渲染不透明物体。
+
+	![](MonoOnly.png)
+
+1.	将单视场摄像机的结果合成到立体深度缓冲中。
+
+	![](MonoStereo.png)
+
+1.	渲染所有透明物体，并用立体摄像机执行所有后期处理。
+

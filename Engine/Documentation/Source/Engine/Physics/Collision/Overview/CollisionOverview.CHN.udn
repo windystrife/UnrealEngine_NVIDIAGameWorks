@@ -1,0 +1,134 @@
+﻿INTSourceChangelist:2714891
+Availability:Public
+Title:碰撞总览
+Crumbs: %ROOT%, Engine, Engine/Physics
+Description:虚幻引擎 4 中碰撞和碰撞响应的操作方式总览。
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Physics/Collision:title%](physics_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%\rendering_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Physics/Collision:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Physics/Collision:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Physics/Collision]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[TOC(start:2 end:3)]
+
+**碰撞响应（Collision Responses）** 和 **轨迹响应（Trace Responses）** 为虚幻引擎 4 提供运行时碰撞和光线投射的处理方式。每个可以发生碰撞的物体都拥有 **物体类型（Object Type）** 和一系列响应。正是这些响应定义了该物体与其他物体类型之间的物理交互。碰撞或重叠事件发生时，两个（或所有）相关物体可被设为产生影响或受到影响，两者（或所有）物体之间存在阻挡、重叠、或无视的情况。
+
+**轨迹响应** 的工作方式基本相同，轨迹本身（光线投射）可被定义为轨迹响应类型之一，使 Actors 基于 _它们的_ 轨迹响应阻挡或无视光线投射。
+
+## 交互
+
+以下是碰撞的处理规则：
+
+* 两个（或多个）设为 Block 的 Actors 之间将自然生成 **阻挡（Blocking）**。然而，执行 **命中事件（Event Hit）** 需启用 **Simulation Generates Hit Events**，此功能用于蓝图、可摧毁 Actor、触发器等资源中。
+* 将 Actors 设为 **Overlap** 通常看起来他们将 **无视** 对方。如未启用 **Generate Overlap Events**，两种设置在本质上相同。
+* 对两个（或多个）相互阻挡的模拟物体而言，需将两者设为对其各自的物体类型进行阻挡。
+* 对两个（或多个）模拟物体而言，如一个设为重叠，另一个设为阻挡，两者间将出现重叠，而非阻挡。
+* 在物体 **阻挡** 其他物体时，仍然 **可以** 产生重叠，尤其是在高速运动状态下。
+	* 不推荐为物体同时设置碰撞和重叠事件。但可以进行手动调整。
+* 如一个物体设为无视，另一个设为重叠，将不会产生重叠事件。
+<!--* 所列出的 **Object Responses** 仅为默认项，并未指定物体究竟 _为何种_。在下文中查阅设置自定义 [物体类型和轨迹通道](#customobjectchannelsandtracechannels) 的更多内容。-->
+
+测试关卡并在世界场景中进行环视：
+
+* 默认的 **Play In Editor** 摄像机就是一个 pawn。因此它将被设为“阻挡 pawns”的任意物体阻挡。
+* 在执行处理之前，**Simulate in Editor** 摄像机 **不是** pawn。它可以自由地夹在所有资源中，不会引发任何碰撞或重叠事件。
+
+
+## 常见碰撞互动范例
+
+[REGION:note]
+这些互动假定所有物体的 **Collision Enabled** 设为 **Collision Enabled**，它们将和其他物体产生完整的碰撞。如碰撞被禁用，就相当于所有 **碰撞响应** 被设为 **无视**。
+[/REGION]
+
+对以下部分而言，这是用于解释即将发生情况的设置。
+
+![](COL_setup.png)(w:940 convert:false)
+
+图中球体是一个 **PhysicsBody**，方块为 **WorldDynamic**。变更其碰撞设置可获得各种行为。
+
+### 碰撞
+
+[VAR:spacer]![](%ROOT%/spacer.png)[/VAR]
+
+对两者的碰撞进行设置使其相互阻挡，从而获得碰撞效果。在相互互动的物体上十分实用。
+
+![](COL_collideNoEvent.png)(w:940 convert:false)
+
+| 球体碰撞设置| 墙壁碰撞设置 |
+| --- | ---- |
+| ![](COL_collideNoEvent_Sphere.png)(convert:false) |![](COL_collideNoEvent_Box.png)(convert:false) |
+| 在此例中，球体为一个 **PhysicsBody**，被设为 `阻挡` **WorldDynamic**（墙壁）。| 墙壁是一个 **WorldDynamic**，被设为 `阻挡` **PhysicsBody** Actors（球体）。|
+
+在此例中，球体和墙壁将产生简单碰撞，没有进一步的碰撞通知。
+
+### 碰撞和模拟产生命中事件
+
+基础碰撞很实用，但整体而言只是最基础的物理互动；如果需要 **报告** 碰撞发生进而触发蓝图或节点的部分，则需要进行如下设置：
+
+![](COL_collideEvent.png)(w:940 convert:false)
+
+| 球体碰撞设置| 墙壁碰撞设置 |
+| --- | ---- |
+| ![](COL_collideEvent_Sphere.png)(convert:false)|![](COL_collideNoEvent_Box.png)(convert:false)|
+| 在上图中，球体为一个 **PhysicsBody**，被设为 `阻挡` **WorldDynamic**（墙壁）。然而球体还启用了 **Simulation Generates Hit Events**，因此它和其他物体发生碰撞时将为自身触发事件。| 墙壁是一个 **WorldDynamic**，被设为 `阻挡` **PhysicsBody** Actors（球体）。墙壁未设为 **Simulation Generates Hit Events**，因此它将不会为自身产生事件。|
+
+设为 **Simulation Generates Hit Events** 后，球体发生碰撞时将进行自我告知。球体将在其蓝图中将产生诸如 **ReceiveHit** 或 **OnComponentHit** 的事件。如果墙壁拥有碰撞事件，它将不会生成事件，因为它并未自我告知已发生的碰撞。
+
+深入而言，报告刚体碰撞的物体与其他物体发生接触时便会报告所有的碰撞并发送报告。因此需要在蓝图或代码中对其碰撞的物体进行仔细过滤。
+
+### 重叠和无视
+
+就全部的意图和目的而言，**重叠** 和 **无视** 与禁用 **assuming Generate Overlap Events** 功能后的效果相同。在此例中，球体被设为重叠或无视方块。
+
+![](COL_ignore.png)(w:940 convert:false)
+
+
+
+
+| 球体碰撞设置| 墙壁碰撞设置 |
+| --- | ---- |
+| ![](COL_OverlapNoEvent_Sphere.png)(convert:false) |![](COL_collideNoEvent_Box.png)(convert:false) |
+| 球体在此被设为 `重叠` **WorldDynamic** Actors（如墙壁），但并未启用 **Generate Overlap Events**。就球体本身而言，它并未与任何物体发生碰撞或产生重叠，实际上无视了墙壁。| 墙壁是一个 **WorldDynamic**，被设为 `阻挡` **PhysicsBody** Actors（球体）。如上所述，两个 Actors 需要被设为阻挡对方的物体类型。如为进行此设置，它们将不会产生碰撞。|
+
+或者：
+
+| 球体碰撞设置| 墙壁碰撞设置 |
+| --- | ---- |
+| ![](COL_ignore_sphere.png)(convert:false) |![](COL_collideNoEvent_Box.png)(convert:false) |
+| 球体在此被设为 `无视` **WorldDynamic** Actors（例如墙壁），它将穿过墙壁。| 墙壁是一个 **WorldDynamic**，被设为 `阻挡` **PhysicsBody** Actors（球体）。如上所述，两个 Actors 需要被设为阻挡对方的物体类型。如为进行此设置，它们将不会产生碰撞。|
+
+
+
+### 重叠与重叠事件生成
+
+和每帧均生成的碰撞不同，重叠事件为 **ReceiveBeginOverlap** 和 **ReceiveEndOverlap**，只在特定条件下生成。
+
+![](COL_overlapEvent.png)(w:940 convert:false)
+
+| 球体碰撞设置| 墙壁碰撞设置 |
+| --- | ---- |
+| ![](COL_OverlapEvent_Sphere.png)(convert:false) | ![](COL_collideNoEvent_Box.png)(convert:false) |
+| 球体在此被设为 `重叠` **WorldDynamic** Actors（如墙壁），它将在和其他物体发生重叠时为自身生成一个事件。| 墙壁是一个 **WorldDynamic**，被设为 `阻挡` **PhysicsBody** Actors（球体）。如上所述，两个 Actors 需要被设为阻挡对方的物体类型。如为进行此设置，它们将不会产生碰撞。但此处确有　**重叠**　发生，并为球体触发一个事件。|
+
+ 
+
+
+
+
+
+

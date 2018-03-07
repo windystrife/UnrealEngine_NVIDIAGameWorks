@@ -1,0 +1,144 @@
+﻿INTSourceChangelist:3011129
+Availability:Public
+Title:通过事件驱动 UI 更新
+Crumbs: %ROOT%, Engine, Engine/UMG, Engine/UMG/HowTo
+Description:学习如何通过事件驱动更新，优化 UI 元素。 
+Related:Engine/UMG
+Related:Engine/UMG/UserGuide
+Related:Engine/Blueprints
+Related:Resources\SampleGames\UnrealMatch3
+Version:4.10
+SkillLevel:Advanced
+
+
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/UMG/HowTo/EventBasedUI:title%](EventUI.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/start_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/UMG/HowTo/EventBasedUI:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/UMG/HowTo/EventBasedUI:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/UMG/HowTo/EventBasedUI]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/UMG/HowTo/EventBasedUI:title%](EventUI.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/start_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/UMG/HowTo/EventBasedUI:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/UMG/HowTo/EventBasedUI:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/UMG/HowTo/EventBasedUI]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:note]
+建议您先整体了解 [](Engine/UMG)，然后再阅读此指南。 
+[/REGION]
+
+制作 UI 元素时要养成思考创建内容优化方式的好习惯，这样可提升性能，减少后期所需的优化。例如：根据项目的实际情况，[](Engine/UMG/UserGuide/PropertyBinding) 也许可用于将信息通信到 UI。然而，如果您的 UI 设置较为复杂或需要优化项目，则需要考虑在必要的时候更新 UI，而不是每帧都执行更新。 
+
+在此指南中，我们将了解到信息通信到 HUD 的 3 个实例。这 3 个实例均可完成操作。第三个实例未使用 tick 事件进行更新，转而使用 [事件分配器](Engine/Blueprints/UserGuide/EventDispatcher) 进行手动信息更新，因此开销和性能之间最为平衡。 
+
+
+## 实例 1.函数绑定（Function Binding）
+
+在此例中我们将了解使用 **函数绑定** 的角色的体力/能量更新。 
+
+此处已有基础的体力/能量设置。 
+
+![](CastBinding_SimpleHealth.png)
+	
+显示后，即可为 _GetHealth_ 和 _GetEnergy_ 进度条 **创建绑定**。之后函数绑定将获取玩家角色蓝图以及为体力和能量设定的变量，并对它们进行指定（_GetHealth_ 绑定如下图所示）。 
+
+![](CastBinding_BindingScript.png)
+
+为便于调试，还添加了一个 **Print String** 节点，将 Health 变量的数值输出到屏幕上。 
+
+在游戏中（如下图所示），玩家角色的体力和能量值经过传递并反映在 HUD 中。然而您会发现，即使未对体力值进行更新，蓝色的调试文本说明每帧对体力值的检查仍在进行。 
+
+![](CastBinding_InGame.png)
+
+如这是执行的唯一操作，则不会有太大影响。如果系统更复杂，多个属性皆以此方式设置，每帧检查更新将对性能产生不良影响，需要尽力避免。 
+
+
+
+## 实例 2.属性绑定（Property Binding）
+
+除函数绑定外，还可以使用 **属性绑定**，达到稍好的开销和性能平衡。 
+
+使用与此处相同的体力/能量设置。 
+
+![](CastBinding_SimpleHealth.png)
+
+在 [控件蓝图](Engine/UMG/UserGuide/WidgetBlueprints) 的 **Graph** 标签上，使用 **Event Construct** 获得对玩家角色蓝图的引用。 
+
+![](PropBinding_EventConstruct.png)
+
+在第一个范例中为每帧 [](Engine/Blueprints/UserGuide/CastNodes) 到角色蓝图，访问体力和能量变量。此处我们将再次进行此操作并将其保存为引用，便无需每帧进行操作。较之于第一种方法，这种方法性价比略高。 
+
+之后即可将进度条数值直接绑定到角色蓝图中的变量。 
+
+![](PropBinding_HealthBound.png)
+
+使用此方法后，便不再对每帧进行投射并检查“什么是玩家角色蓝图”，一旦获得之后便“获取体力和能量值”。我们了解什么是玩家角色，然而仍然进行查看并在每帧询问“角色的体力和能量是多少”。 
+
+与之前的方法相似，这种方法通常可正常使用（基于项目规模）。然而项目规模较大需要进行优化，且有多个属性以此方法设置时，则性能可能下降。
+
+
+
+## 实例 3.事件驱动
+
+此例讲述使用事件在发生变化时更新 HUD。 
+
+继续使用此处的体力/能量设置。 
+
+![](CastBinding_SimpleHealth.png)
+
+在角色蓝图中，将一个 **事件分配器** 添加到减少体力的脚本末尾。 
+
+![](DecreaseHealth.png)
+
+为便于进行测试，我们设置 **F** 键按下时体力减少。 
+
+体力减少时将调用此事件分配器。在 HUD 控件蓝图 的 Graph 上，再次使用 Event Construct 获得并保存对玩家角色蓝图的引用。还可在角色蓝图中将自定义事件绑定到事件分配器，在调用事件分配器时调用自定义事件。 
+
+[REGION:lightbox]
+[![](Event_WBGraph.png)](Event_WBGraph.png)
+[/REGION]
+
+[REGION:caption]
+点击图片查看全图。 
+[/REGION]
+
+现在，HUD 控件蓝图中的自定义事件只在玩家的体力发生变化时执行检查并更新显示，不会固定执行检查。可将相同设置应用到角色的能量，HUD 空间蓝图的效果与下图相似。 
+
+[REGION:lightbox]
+[![](FullSetup.png)](FullSetup.png)
+[/REGION]
+
+[REGION:caption]
+点击图片查看全图。 
+[/REGION]
+
+上图中，自定义事件 _UpdateHealth_ 和 _UpdateEnergy_ 与角色蓝图的事件分配器绑定在一起，只在角色的体力/能量值发生变化时调用。通过绑定流程构建 HUD 后，调用这两个自定义事件即可初始化显示。 
+

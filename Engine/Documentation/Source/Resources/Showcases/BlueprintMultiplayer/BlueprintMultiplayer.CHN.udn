@@ -1,0 +1,510 @@
+﻿INTSourceChangelist:2723610
+Availability: Public
+Title: 多人连线的枪战游戏
+Crumbs:%ROOT%, Resources, Resources/Showcases
+Description: 分析多人游戏案例中的蓝图，以及如何构架。
+Related: Engine/Blueprints
+Related: Engine/UMG
+Related: Programming/Online
+Related: Programming/Online/Steam
+Related: Gameplay/Networking/Actors
+Related: Resources/ContentExamples/Networking
+Version: 4.9
+
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![](MultiplayerShootout_Featured-476x246-c51d69c862538ea6fb72a13f7a0034e0.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/online_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Resources\Showcases\BlueprintMultiplayer:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources\Showcases\BlueprintMultiplayer:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources\Showcases\BlueprintMultiplayer]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![](MultiplayerShootout_Featured-476x246-c51d69c862538ea6fb72a13f7a0034e0.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/online_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Resources\Showcases\BlueprintMultiplayer:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources\Showcases\BlueprintMultiplayer:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources\Showcases\BlueprintMultiplayer]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:raw]
+![](MultiplayerExample_Header.png)
+[/REGION]
+
+[TOC(start:2 end:3)]
+
+**Simple Blueprint Multiplayer** 是一个完全由 **蓝图** 和 **UMG 界面** 编写的游戏，可以作为如何使用蓝图的 **Session Nodes** 打造游戏中的多人部分的使用示例。
+这里有一个主菜单，一个服务器列表，以及一个简单的地图，地图中有一个带有记分牌的 HUD 显示。在主菜单中点击 **PLAY** 便能作为主机创建一个 Session，并加载进入游戏地图。
+其他玩家在自己的菜单界面中，点击 **Find games** 来查看所有存在的游戏主机列表，点击列表中的一个已查到的游戏时则会尝试加入它。如果出现任何错误，则会回到主菜单并显示一个错误框。
+
+这个游戏同时也是一个说明蓝图中如何使用 **GameInstance** 来管理游戏状态的范例。GameInstance 是一个管理游戏状态的方便的手段，它能够在地图加载卸载的过程中一直存在，同时它还是用于接收错误事件的对象。
+大部分 Session 相关的调用以及菜单的切换都由 GameInstance 来处理。
+
+[REGION:note]
+目前，这篇文档涵盖了 [](Engine/Blueprints/UserGuide/OnlineNodes) 和它对于用于多人游戏中的创建主机，发现、加入、离开游戏的实现。这篇文档将会在之后更新，来进一步说明射击游戏的其他方面，比如攻击命中其他玩家，死亡和重生，以及得分的计算。
+[/REGION]
+
+## 开始/进行游戏
+
+这个章节汉高了如何开始并进行游戏，提供了游戏的各个组件的单独分析。
+
+[REGION:note]
+如果您对虚幻引擎 4 中如何测试多人游戏还不熟悉的话，应该先看一下 [](Gameplay/HowTo/Networking/TestMultiplayer) 文档。
+[/REGION]
+
+加载游戏：
+
+1.	在 **Game/Maps** 目录打开 **MainMenu** 地图。
+1.	MainMenu 地图打开后，点击 **Play** 按钮右边的向下箭头，将 **Number of players** 设置为 2。
+
+	![](SettingNumberOfPlayers.png)
+
+	[REGION:warning]
+	**Run Dedicated Server** 选项在这个范例中可能会造成服务器列表显示不正确，这部分还需要被修正。
+	[/REGION]
+	
+1.	点击 **Play** 按钮启动游戏。
+1.	当游戏启动后，会显示一下窗口。
+ 
+	![](twoWindows.png)
+
+	_上图是我们在 **New Editor Windows** 的设置下，并把每个窗口设置为 **640x480** 的分辨率，这些可以在 **Advanced Settings...** 选项内设置。_
+
+	[REGION:warning]
+	如果是在网络上测试这个范例，不像上述过程直接使用本地的多人游戏的话，应采用 **Standalone Play Mode** 的方式来加入其他人的游戏，或者自己作为主机创建并让其他人来加入。通过 PIE（Play In Editor，在编辑器中启动游戏）来进行一个实际网络的游戏目前并不稳定，这个问题我们还在处理。
+	[/REGION]
+
+对于主菜单的拆分说明如下。
+
+![](MainMenu.png)(w:480)
+
+| 单项 | 描述 |
+|---|---|
+| **1** | 以当前游戏窗口作为主机开始游戏。 |
+| **2** | 显示当前有效的 **服务器列表**，可用于选择并加入。 |
+| **3** | 退出当前游戏。 |
+| **4** | 在 **LAN** 和 **Internet** 两个连接模式间切换选择。 |
+
+一旦选择作为主机开始游戏，或者加入其他主机的游戏，则会看到下图所示的游戏窗口。
+
+![](InGame1.png)
+
+在屏幕的左上角（黄色高亮框），可以看到一些文字，这是当前角色的名字。在名字右边的框框中，是当前该角色的得分。当有玩家加入时，角色名字和得分的部分都会得到更新，来显示当前游戏中的所有玩家和对应的的得分。
+
+![](TwoInGame.png)
+
+[REGION:note]
+上图用到的玩家名字，是来自于 LAN 的连线。但当使用诸如 **Steam** 的服务时，应该显示玩家在 Steam 的用户名。
+[/REGION]
+
+一旦有主机已经创建后，在第二个玩家的窗口中点击 **Find Games** 按钮来显示 **Server List**。
+
+![](ServerListWindow.png)
+
+经过一小段时间搜索后，当前可用的游戏就会显示在列表中。在这个窗口中，从左到右显示的是，服务器的名字，玩家的数量，以及该游戏主机的 ping 值。
+在屏幕的左下角可以点击 **Refresh** 按钮来刷新列表，或者点击 **Back** 按钮返回主菜单。直接点击列表中的条目就会尝试连接服务器，并且在游戏中生成角色。
+
+连入游戏后，必须要点击 **鼠标左键** 作为准备好开始游戏的信号。
+
+![](1Ready.png)
+
+当点击完成准备后（主机端或客户端），左上角会显示一个文字来显示玩家已经准备好了。
+
+完成准备后，可以用以下这几个控制方式来玩游戏。
+
+| 操作 | 描述 |
+|---|---|
+| **鼠标右键** | 拔枪（持续按住保持举枪动作）。 |
+| **鼠标移动** | 进入 **瞄准模式**，移动鼠标能够瞄准武器。 |
+| **鼠标左键** | 开火。 |
+| **鼠标中键（上下滚动）** | 在非瞄准状态下进行换弹。 |
+| **Q 键** | 打开游戏暂停菜单（能够继续游戏或者离开游戏）。 |
+
+这个游戏的目标是射击其他玩家，命中就能得到 1 分，被命中的人则要重生。每个玩家有六次射击机会，然后就要用鼠标中间（上下滚轮）来换弹（一次一颗）。
+
+
+## 项目设置/配置
+
+这个章节涵盖了 **内容浏览器** 中创建（或修改）的每个素材，并有各自的描述。有几个蓝图和 UMG UI 的素材互相调用（或有依赖关系），因此如果您想要重新做这个项目中类似的事情，最好是从头开始创建并再将它们关联起来。
+
+在 **内容浏览器中**，每种资源素材都能在它们对应的目录中找到。
+
+**游戏/蓝图/控件**
+
+| 名字 | 描述 |
+|---|---|
+| **ErrorDialog** | 这是一个当有错误时用来显示错误的对话框。 |
+| **HUD** | 这个是游戏内的记分牌，显示 **ScoreboardRow** 控件，囊括了玩家的名字和得分。 |
+| **InGameMenu** | 这个是游戏内的菜单，提供离开游戏返回主菜单的功能。 |
+| **LoadingScreen** | 这是个简单的 loading 界面，它会在加入游戏的过程中显示。|
+| **MainMenu** | 游戏启动时的主菜单，玩家能够创建主机，或者加入其他主机的游戏，或者退出游戏。 |
+| **ScoreboardRow** | 这是个添加到 **HUD** 的控件，包括了玩家的名字和得分。 |
+| **ServerList** | 这个菜单包括了一组 **ServerRow** 的控件，用于显示所有的可用游戏主机清单。 |
+| **ServerRow** | 这个控件具有一个可用主机的信息，包括服务器名字，玩家数量，Ping 值。它被传递到 **ServerList** 控件上。 |
+
+**游戏/蓝图**
+
+| 名字 | 描述 |
+|---|---|
+| **MyGameInstance** | （Instance 蓝图） - 处理所有从主菜单到其他界面过程中发生的状态变化，以及错误消息。 |
+| **MyGameMode** | （Game Mode 蓝图） - 记录了所有的默认类（Pawn，HUD，PlayerController 等）。并处理玩家重生的逻辑，以及当玩家加入游戏时的逻辑。 |
+| **MyPlayerController** | （PlayerController 蓝图）设置游戏内界面，并允许玩家打开游戏中的暂停界面。 |
+| **MyPlayerState** | （PlayerState 蓝图）处理每个玩家的分数。 |
+| **ProjectileBP** | （Actor 蓝图）是每个玩家开火后的子弹，并能对对手造成伤害。 |
+| **State** | （枚举）这是游戏可能处于的状态的全集列表。 |
+
+**游戏/Gunslinger**
+
+| Name | Description |
+|---|---|
+| **Gunslinger_BP** | 这个是游戏中可以使用的角色。 |
+| **GunslingerTTP** | 给 Gunslinger_BP 用的 SkeletalMesh。 |
+| **Gunslinger_AnimBP** | 用来驱动 Gunslinger_BP 的动画。 |
+
+**游戏/Character**
+
+| 名字 | 描述 |
+|---|---|
+| **Character_Parent** | (Parent) Gunslinger_BP 用的材质 |
+| **Character_Instance** | (Instanced) Gunslinger_BP 用的材质实例。 |
+
+**游戏/Fonts**
+
+| 名字 | 描述 |
+|---|---|
+| **ScoreFont** | **Scoreboard** 控件用的字体 |
+
+**游戏/Maps** 
+
+| 名字 | 描述 |
+|---|---|
+| **MainMenu** | 项目和编辑器的默认加载地图，包含了启动的显示。 |
+| **Level_01** | 这是游戏地图，给玩家创建主机或者加入游戏。 |
+
+### 配置设置
+
+为了成功的创建主机或者连接到多人游戏中，在 **DefaultEngine.ini** 中有些设置需要做，该文件在 _UnrealProjectDirectory/ProjectName/Config_：
+
+![](ExampleLocation.png)
+
+打开后，需要先找到 **OnlineSubsystem** 以及要用的 **DefaultPlatformService**。
+
+比如，要在 LAN 上连线，要添加 `DefaultPlatformService=Null`：
+
+	[OnlineSubsystem]
+	DefaultPlatformService=Null
+ 
+或者如果要在 **Steam** 上玩，需要使用这样的 `OnlineSubsystemSteam`：
+
+	[/Script/Engine.GameEngine]
+	+NetDriverDefinitions=(DefName="GameNetDriver",DriverClassName="OnlineSubsystemSteam.SteamNetDriver",DriverClassNameFallback="OnlineSubsystemUtils.IpNetDriver")
+
+	[OnlineSubsystem]
+	DefaultPlatformService=Steam
+
+	[OnlineSubsystemSteam]
+	bEnabled=true
+	SteamDevAppId=480
+	bVACEnabled=0
+
+	[/Script/OnlineSubsystemSteam.SteamNetDriver]
+	NetConnectionClassName="OnlineSubsystemSteam.SteamNetConnection"
+
+[REGION:note]
+如果要用 Steam 的话，需要 [额外的 SDK 和 INI 配置](Programming/Online/Steam)，跳转到该链接查看更多信息。
+[/REGION]
+
+
+## 蓝图说明
+
+在接下去的章节中，我们来看一下游戏的各个状态，以及驱动这些状态工作的蓝图。
+
+我们先看看 **Startup** 的序列。
+
+(#bookmarkstartup)
+### 开始
+
+在 **MainMenu** 的地图中，打开 **Level Blueprint**。
+
+![](Startup1.png)
+
+关卡蓝图打开后，可以看到一部分脚本标记了“Game Logic Starts Here”。
+
+![](Startup2.png)
+
+这个备注不错，游戏正是从这部分脚本开始。游戏开始时，获取了 Game Instance，并 **转换** 为 **MyGameInstance**。这么做便能够访问 MyGameInstance 的变量、函数和脚本了，这里接下去调用了一个叫做 **Begin Play Show Main Menu** 的函数（见下图）。
+
+![](Startup3.png)
+
+当 **Begin Play Show Main Menu** 被调用时，首先运行了一个预先创建的宏，叫做 **IsCurrentState**。
+
+[REGION:note]
+(#bookmarkiscurrentstate)
+##### IsCurrentState 宏
+
+![](Startup4.png)
+
+**IsCurrentState** 会检查 **In State**（在宏的节点上定义） 是否和一个叫做 **Current State** 的变量一致。**Current State** 变量是一个由 **State** 创建的枚举类型，记录游戏可能处于的每一个状态。
+[/REGION:note]
+
+既然 **Current State** 和 **In Satet** 一致，便能调用 **ShowMainMenuEvent** 这个自定义事件了。
+
+![](Startup5a.png)(w:840)
+
+![](Startup5.png)(w:840)
+
+**ShowMainMenuEvent** 做的第一件事情是运行 [IsCurrentState Macro](#bookmarkiscurrentstate) 检查当前状态是否是 **Playing**，如果 **True** 的话，则加载 **MainMenu** 的关卡，如果游戏当前在 **Startup** 的状态，则返回 **False **。这里调用了另一个叫做 **TransitionToState** 预创建的宏。
+
+[REGION:note]
+(#bookmarktransitiontostate)
+##### TransitionToState 宏
+
+下图中，在 TransitionToState 中，首先运行了 [IsCurrentState 宏](#bookmarkiscurrentstate) （1）对照 **Current State** 和 **Desired State**，如果两者一致则在屏幕上显示错误并提示原因（2），如果它们不一致，则执行 **Switch on State** 节点（3），这里会获取 **Current State** 并调用一个叫做 **Hide Widget** 的函数（这里将会隐藏当前显示的 UI 控件），或者运行一个叫做 **Destroy Session Caller** 的自定义事件（将会销毁玩家要调用的游戏 Session）。
+
+![](Startup6.png)
+
+当 Switch on State 完成后，Current State 会根据 Desired State 被更新。
+[/REGION]
+
+完成 **TransitionToState** 宏后，我们可以继续 **ShowMainMenuEvent** 自定义事件。
+
+![](Startup7.png)
+
+上图中，**IsValid** 节点（1）执行，它会检查 **Main Menu** 变量是否有效，第一次运行该变量会无效（如果有效的话则跳过图中的（2）和（3））。步骤（2）调用了 **Create Widget** 节点来创建一个叫做 **Main Menu** 的 UMG 控件蓝图，并将结果作为一个变量（3）保存，这样便能在以后的脚本中直接访问而无需重新创建。在（4）中 **Set Input Mode UIOnly** 节点用来限制输入仅被 UI 接收，在（5）中则将 **Main Menu** 添加到窗口并显示出来。
+
+![](Startup8.png)
+
+然后我们来看一下玩家点击 Play 来创建主机会发生什么。
+
+(#bookmarkhostingagame)
+### 创建一个游戏
+
+在 Main Menu 加载后，可以在 **MainMenu** 控件中点击 **Play** 按钮，然后会运行下图中的脚本。
+
+![](Play1.png)
+
+在 **MainMenu** 的控件蓝图中的 **Designer** 分页上，可以为 "Play" 按钮创建一个 **按钮** 事件关联到 **OnClicked** 事件上。
+当这个事件触发时，获取 game instance 并 **转换** 为 **MyGameInstance** 蓝图，这样就能调用它内部的自定义事件 **Host Game Event** 了。
+
+![](Play2.png)
+
+**HostGameEvent** 首先运行了一个 **MyGameInstance** 蓝图内的自定义事件：**ShowLoadingScreen**。
+
+![](Play3.png)
+
+当 **ShowLoadingScreen** 被调用时，先运行了 [TransitionToState 宏](#bookmarktransitiontostate)（并将 **Desired State** 设置为 **Loading Screen**）。
+
+然后继续 **ShowLoadingScreen**  事件，调用了 **IsValid** 的检查，如下图（1）部分。
+
+![](Play4.png)
+
+**IsValid** 检查变量 **Loading Widget** 是否有效，第一次运行是无效的（如果有效则跳过步骤（2）和（3））。步骤（2）创建了 **Loading Screen** 的 UMG 控件蓝图，并将结果保存到变量中（3），一边将来直接访问而无需重新创建。在步骤（4）中，**Loading Widget** 被添加到窗口中，并调用 **Set Input Mode UIOnly** 在加载过程中将输入限制到 UI 上（这是会在游戏中显示）。
+
+![](Play5.png)
+
+当 Loading Screen 显示时，脚本就回到了 **HostGameEvent** 上继续执行 **Create Session** 的节点。
+
+![](Play6.png)
+
+在 **Create Session** 节点上，**Public Connections** 的数量（允许玩家加入该游戏 Session）设置为 **4**。还有一个 **布尔** 变量叫做 **Enable LAN** 直接连到了 **Use LAN** 的输入上。
+**Enable LAN** 变量是在主菜单上的 **Play Mode** 来切换的，我们在这个文档稍后再来讨论。如果 Session 被成功创建的话，则调用 **Open Level** 节点来加载地图并准备用来开始这个 Session 的游戏。
+如果失败的话，则执行 **OnFailure** 的部分，这里会运行一个预先创建的宏，叫做 **DisplayErrorDialog**。
+
+[REGION:note]
+(#bookmarkdisplayerrordialogmacro)
+##### DisplayErrorDialog 宏
+
+调用 DisplayErrorDialog 宏时，先会执行 （1）[TransitionToState 宏](#bookmarktransitiontostate) 切换到 **Error Dialog** 状态中。
+当切换到新状态后，执行自定义事件 **Destroy Session Caller** （2） 来销毁当前玩家的 Session（可以在 Event Graph 中找到）。
+在 Session 销毁后，调用引擎的宏 **IsValid** 来检查 Error Dialog 这个变量（这是一个 Error Dialog 的控件蓝图）是否有效。
+
+![](Play7.png)
+
+在上面的图第一次运行时，**Error Dialog** 是无效的，如果有效的话，下图的（1）和（2）会跳过直接进入（3）。
+
+![](Play8.png)
+
+第一次运行是，（1）将使用 **Create Widget** 创建一个 ErrorDialog 控件蓝图。（2）中将该控件蓝图记录为 Error Dialog 的变量（以便该宏下次被调用时直接使用）。
+在（3）中，执行函数 **Set Message** 将输入的错误信息（下图黄色高亮框）设置到 ErrorDialog 上，并调用 **Add to Viewport** 将 Error Dialog 控件蓝图显示在屏幕上（5），
+以及使用 **Set Input Mode UIOnly** 来限定输入仅被 UI 获取。
+
+![](Play9.png)
+
+[/REGION]
+
+如果没有错误的话，在 **Open Level** 节点中定义的地图则会加载，玩家进入 **游戏**。
+
+### 加入一个游戏
+
+在主惨淡中，点击 **Find Games** 按钮会执行 **MainMenu** 控件蓝图中的相应脚本，见下图：
+
+![](Findgames1.png)
+
+在 **MainMenu** 的控件蓝图中的 **Designer** 分页上，可以为 Find games" 按钮创建一个 **按钮** 事件关联到 **OnClicked** 事件上。
+当这个事件触发时，获取 game instance 并 **转换** 为 **MyGameInstance** 蓝图，这样就能调用它内部的自定义事件 **Show Server List Event** 了。
+
+![](Findgames2.png)
+
+**ShowServerListEvent** 首先运行 [TransitionToState 宏](#bookmarktransitiontostate)（1）将游戏状态设置为 **Server List**。
+然后用 **IsValid**（2）检查 **Server List** 控件蓝图变量，如果有效的话就用 **Add to Viewport**（5）节点添加到屏幕上显示。
+第一次运行时，Server List 需要先被创建一次，通过 **Create Widget**（3）节点，并将结果保存到变量（4）中，然后再显示到屏幕上。
+当显示到屏幕后，再用 **Set Input Mode UIOnly** 节点限制输入设置给 UI。
+
+在 Server List 菜单显示的时候，在上述的步骤（5）时，步骤（6）前，ServerList 控件蓝图内还有一段脚本会被执行，这里会更新当前可用的游戏到 Server List 上。可以在 Server List 控件蓝图中看到，如下图。
+**Event Construct** 节点会在该控件蓝图被构造（创建）时调用，并立刻执行了一段预先设置的 **RefreshListMacro** 宏。
+
+![](Findgames3.png)
+
+[REGION:note]
+(#bookmarkrefreshlistmacro)
+##### RefreshListMacro 宏
+
+RefreshListMacro 宏干了不少事情。下面先解释第一部分。
+
+![](Findgames4.png)
+
+如上，当宏被调用时，首先它先设置了一个名为 **Refresh Button Enabled** 的布尔变量为 **False**（1），这会禁用 **Refresh** 按钮，防止玩家点击。
+然后一个叫做 Status Text 的变量设置为 **Searching...**（2）并将它的 **Visibility** 设置为 **Visible**（3），就能更新控件并显示这些文字。
+
+在（4）的位置，有一个叫做 **Found Session Widgets** 的数组变量，它是一组 ServerRow 的空间用来刷新 Server List。对每个当前存在的元素调用 **Remove Child**（5）节点。
+这将会先删除数组中所有的内容。在（6）的位置，**Found Session Widgets** 变量再次被清理以消除先前保存过的 Session，这样在继续进一步查找前先把所有的东西清理干净。
+
+然后，该宏获取 game instance 并调用 **Cast To MyGameIntance** 节点（下图 1 处）来访问 **Enable LAN** 的值（在查询 session 时会用到）
+
+![](Findgames5.png)
+
+**Find Session** 节点（2）用来查询当前存在的 session（会作为返回值输出）。在这个节点中，还可以设置 **Max Results**（返回查询结果的数量）。
+**Find Sessions** 的返回结果保存在 **Found Sessions** 数组变量中（3）。这里会有一个 **Branch**（4）来检查结果，如果是 0 的话，
+继续 **True** 的输出（如果不是的话则作为 **False** 输出）。如果 **Find Sessions** 的节点执行时出了什么错误，则会触发 **OnFailure** 输出，并修改 **Status Text** 显示为 **Search failed**（5），
+通知用户查找 session 并未完成。
+
+在 **Branch** 后（上图中的 4），如果是 **True**（也就是并未找到任何 session），**Status Text** 会被设置为 **No sessions found**（下图中的 7），
+并且 **Refresh Button Enabled** 变量被设置为 **True**（8），这样玩家便能点击 **Refresh** 按钮以再次查找游戏。
+
+![](Findgames6.png)
+
+如果有 Session 找到，**Status Text Visibility** 被设置为 **Collapsed**（1）便能将该控件隐藏掉。然后用了 **ForEachLoop** 节点（2）来处理找到的每个 **result**，
+并使用 **Create ServerRow** 节点（3）为每个结果创建一个 Server Row 控件。这就是 Server List 里每个独立的行项。
+
+在（4）的位置，**Results** 也被添加到 **Found Session Widgets** 数组里，然后再调用 ServerRow 控件蓝图（用于生成服务器名称，玩家数量和 Ping 值）中的 Set Serach Result 函数。
+在设置完 ServerRow 控件蓝图的内容后， **Add Child** 节点（6） 用来给每个 ServerRow 控件设置内容，并设置 **Scrolling Servers** 显示在 Server List 菜单中。
+
+将每个找到的 Session 都有了 ServerRow 控件创建后，把它们添加到 **Scrolling Servers** 控件上，**ForEachLoop** 完成，并将 **Refresh Button Enabled** 变量设置为 **True**（8）。
+[/REGION]
+
+在运行了 **RefreshListMacro** 搜索 Session 后，任何找到的可用 Session 将会显示在 **Server List** 的菜单中。
+
+![](Findgames7.png)
+
+点击 **Refresh** 按钮将会再次运行 [RefreshListMacro](#bookmarkrefreshlistmacro) 来搜寻 Session。点击 **Back** 按钮将会执行自定义事件 **ShowMainMenuEvent**（这在 [开始](#bookmarkstartup) 章节有说明）。
+
+在服务器列表中点击其中一个服务器将会触发在 **ServerRow** 控件蓝图中的 **OnClicked** 事件（见下图）。
+
+![](Findgames8.png)
+
+**ServerRow** 控件的 **OnClicked** 事件，先获取了 game instance，并使用 **Cast To MyGameInstance** 节点来进一步调用它的 **Join from Server List Event** 事件。
+**ServerResult** 变量（由 [RefreshListMacro](#bookmarkrefreshlistmacro) 的过程中生成）被传入 **MyGameInstance** 的蓝图，并让玩家点击时加入服务器。
+
+在 **MyGameInstance** 的蓝图中的 **JoinFromServerListEvent**（下图）被调用时，先运行自定义事件 **ShowLoadingScreen**，在 [创建一个游戏](#bookmarkhostingagame) 章节作了描述。
+
+![](Findgames9.png)
+
+当 LoadingScreen 显示的时候，Join Session 节点会尝试加入玩家当前点击的由 ServerRow 控件提供的 SearchResult。
+如果成功的话，玩家就能加入该服务器，并在游戏中生成角色。如果有错误的话，就会执行 [DisplayErrorDialog](#bookmarkdisplayerrordialogmacro) 并显示 **Failed To Join Session** 为 **错误信息**。
+
+### 游戏性
+
+在玩家控制角色前，角色和游戏状态都需要被设置好（或者，比如要加入一个游戏时，游戏自身需要得到更新，并被告知有新玩家要加入进来）。
+当点击主菜单的 **Play** 按钮，或者从 Server List 中选择一个服务器加入时，首先要调用 **GameMode** 蓝图中的 **Post Login** 事件，这里将会启动下图所示的设置过程。
+
+![](Gameplay1.png)
+
+当 **Event Post Login** 触发后，先运行了一个引擎的宏，叫做 **Switch Has Authority**（1），这里会检查脚本是否在一个具有网络权威性（Network Authority）（在服务器上）的地方运行还是在一台远程机器（一个客户端）上运行。
+这个过程会在服务端为主机玩家和加入游戏的客户端运行，**Remote** 的输出并不作任何事情，而 **Authority** 的输出会继续执行 Post Login 的脚本。
+
+[REGION:note]
+还有一个关于 **Switch Has Authority** 的示例，请查看 [在蓝图中检测网络主机和远程客户端](Resources/ContentExamples/Networking/1_2) 页面。
+[/REGION]
+
+在（2）处，新玩家的 **PlayerState** 被 **转换为 Cast** **MyPlayerState** 蓝图，这里会设置 **Player Number**（3）用来保证玩家记分牌中的顺序和玩家顺序一致（每个新玩家的加入，都会添加到记分牌中）。
+在设置 Player Number 后，New Player 被 **转换 Cast** 成 **MyPlayerController** 蓝图，用于调用 **ClientPostLogin** 这个自定义事件。
+
+![](Gameplay2.png)
+
+如图，**ClientPostLogin** 事件的明细面板中还有一些属性设置。
+
+![](Gameplay3.png)
+
+在 **Graph** 区块下，**Replicates** 选项设置为 **Run in owning Client** 并且勾选了 **Reliable** 框。通过这两个选项，我们是在服务端运行的这段脚本，但该节点则仅在当前所属权的客户端上执行。
+**Reliable** 的设置保证了这个脚本一定会被客户端执行到，而不会因为严重的网络负载而丢弃（大部分处理一些视觉效果同步复制的远程调用都是 **Unreliable** 来避免过多的消耗网络负载，在这个例子下，我们需要该事件必须执行，因此使用 **Reliable**）。
+
+确认了脚本应该在何处触发后，**Setup Ingame UI** 函数就能进一步调用了。
+
+![](Gameplay4.png)
+
+这个函数以 **Branch**（1）开始，检查当前的目标是否是本地玩家的 PlayerController，如果是的话，则使用 **Create Widget**（2）节点创建 HUD 控件蓝图。
+然后将 HUD 控件保存到一个叫做 **HUD Widget** 的变量（3）中，并 **Add to Viewport**（4）来把它添加到玩家窗口中。在（5）处，再用一个 **Create Widget** 节点创建 **InGame Menu** 控件蓝图，
+并保存到 **InGameMenuWidget** 变量（6）中，这会在玩家点击按钮调用游戏内菜单时显示。
+
+
+[REGION:note]
+到这里，"login" 的过程就完成了。角色的设置在 **Character Animation Blueprint** 中，定义了角色的每个动作，这部分内容这里并不涵盖，如果想了解的话需要去浏览 **Animation Blueprints**，
+文档在 [](Engine/Animation/AnimBlueprints) 这里。
+[/REGION]
+
+在 **Character Animation Blueprint** 设置后，关卡 **Level_01** 就打开了，在这个地图的 **关卡蓝图** 中，
+
+![](level1LevelBlueprint.png)
+
+上图中的 **Event Begin Play** 是这个地图的事件，调用了 **Cast To MyGameInstance** 节点，并调用 **Start Playing State** 函数。这是一个 **MyGameInstance** 蓝图内的函数，用于将 game state 设置为 **Playing**，如下图所示。
+
+![](playingState.png)
+
+在 state 被设置为 **Player** 后，通过调用 **Set Focus To Game Viewport** 的节点（上图中的（3）），鼠标会被锁定在游戏窗口内，并调用 **Set Input Mode Game Only** 节点（上图的（4））使 UI 不再截获用户输入。
+
+### 从游戏中离开
+
+从一个游戏中断开的过程非常简单直接，只需要关闭一些 UMG 控件的显示，并执行第一次加载游戏进入主菜单同样的过程即可。
+
+在游戏中按 **Q** 键后，则能看到游戏内的暂停菜单，点击 **Leave Game** 选项，则执行在 **InGameMenu** 控件蓝图中的以下步骤：
+
+![](disconnectingGraph.png)
+
+在上图中，点击了 Leave 按钮后触发了这个事件（1）接着 通过获取到当前玩家并 **转换 Cast** 成 **MyPlayerController** 的蓝图（2）。在 **MyPlayerController** 蓝图内的函数 **Hide in Game Menu**（3）如图这样被调用。
+
+![](hideingamemenu.png)
+
+这部分脚本拿到 **In Game Menu Widget** 变量（先前创建并保存的变量），并使用 **Remove From Parent** 节点来将它从屏幕上移除。
+然后，调用 **Set Input Mode Game Only** 来防止玩家操作其他 UI，一直到我们再打开 UI 的输入为止。
+
+然后脚本返回到 **InGameMenu** 的控件蓝图上，并使用 **Cast To MyGameInstance** 节点（4）来得到当前 game instance 并调用它内部的函数 **Show Main Menu Event**，
+接下去先执行 [IsCurrentState 宏](#bookmarkiscurrentstate)，它之后的蓝图内容就是 [开始](#bookmarkstartup) 章节中加载游戏的部分。
+
+![](disconnectingGraph.png)
+
+

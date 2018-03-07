@@ -1,0 +1,267 @@
+﻿INTSourceChangelist:3616288
+Availability:Docs
+Crumbs: %ROOT%, Engine, Engine/Animation
+Title:アニメーションの最適化
+Description:最適化の技術を使って Animation ブループリントのパフォーマンスを高めます。
+Type:Overview
+SkillLevel:Advanced
+Version:4.16
+Parent:Engine/Animation
+Order:1
+Tags:Animation
+Tags:Optimization
+Tags:Animation Blueprint
+topic-image:OptimizationTopic.png
+Related:Engine/Performance
+
+[TOC (start:2 end:2)]
+
+[](Engine/Animation/AnimBlueprints) を作成する際に、プロジェクトのアニメーションができる限りスムーズに動くように注意すべきことがいくつかあります。 
+その一部は、デフォルトで有効になっていますが、他のものは Animation ブループリントをセットアップする際に講じる手段を考える必要があります。 
+C++ を使ってできる作業もあり、いつ、どのようにアニメーションを更新するかを制御することもできます。これは、パフォーマンスの向上につながることがあります。 
+
+
+## マルチスレッドのアニメーションの更新
+
+これを使うと、多くのアニメーションの作業をワーカースレッドで実行することができます。デフォルトで有効になっていて、 [Project Settings](https://docs.unrealengine.com/latest/INT/Engine/UI/ProjectSettings/) にあります。 
+
+* **[Project Settings]** の **[General Settings]、> [Anim Blueprints]** に進み、**[Allow Multi Threaded Animation Update] ** が有効になっていることを確認します。
+
+	![](ProjectSettings.png)
+
+この制御はデフォルトで Animation ブループリント グラフの更新をノン ゲームのスレッドで行うかどうかを制御します。 
+これにより、Animation ブループリント コンパイラでの追加のチェックも有効にし、安全でないオペレーションが試みられると警告を出します。
+**Animation ブループリント** 内で、**[Use Multi Threaded Animation Update]** に設定されていることも確認します。  
+
+* Animation ブループリントの **[Class Settings]** で **[Use Multi Threaded Animation Update]** が有効になっていることを確認します。 
+
+	![](AnimBPMultiThreadOption.png)
+
+これは主に複数のスレッドでの厳密なデータ アクセスを制御を行います。このために、多くのアニメーション グラフがアクセスしたデータは、[`UAnimInstance`](https://docs.unrealengine.com/latest/INT/API/Runtime/Engine/Animation/UAnimInstance/index.html) から新しい [`FAnimInstanceProxy`](https://docs.unrealengine.com/latest/INT/API/Runtime/Engine/Animation/FAnimInstanceProxy/index.html) という構造体に移動しました。 
+このプロキシ構造体は、`UAnimInstance` のデータの大部分がある場所です。 
+
+一般的に、`UAnimInstance` は AnimGraph ノード内からアクセスされたり、ミューテートされません (Update/Evaluate 呼び出し)。これらは他のスレッドで実行できるからです。 
+タスクのインフライト中に `FAnimInstanceProxy` へのアクセスを防ぐロッキング ラッパー、([`GetProxyOnAnyThread`](https://docs.unrealengine.com/latest/INT/API/Runtime/Engine/Animation/UAnimInstance/GetProxyOnAnyThread/index.html) および [`GetProxyOnGameThread`](https://docs.unrealengine.com/latest/INT/API/Runtime/Engine/Animation/UAnimInstance/GetProxyOnGameThread/index.html)) があります。
+最悪のケースでは、プロキシから読み出し、またはプロキシに書き込みできるようになるまでタスクは終了を待つという考え方です。 
+
+Anim グラフの観点から、`UAnimInstance` ではなく `FAnimInstanceProxy` だけがアニメーション ノードからアクセスすることができます。 
+[`FAnimInstanceProxy::PreUpdate`](https://docs.unrealengine.com/latest/INT/API/Editor/AnimGraph/FAnimPreviewInstanceProxy/PreUpdate/index.html) または [`FAnimInstaceProxy::PreEvaluateAnimation`](https://docs.unrealengine.com/latest/INT/API/Runtime/Engine/Animation/FAnimInstanceProxy/PreEvaluateAnimation/index.html) で、各ティックに対してプロキシでデータを使って交換されなければなりません。 
+外部オブジェクトがアクセスする必要があるデータは、[`FAnimInstanceProxy::PostUpdate`](https://docs.unrealengine.com/latest/INT/API/Runtime/Engine/Animation/FAnimInstanceProxy/PostUpdate/index.html) でプロキシから交換、コピーするようにします。
+
+[REGION:tip]
+これは、`UAnimInstance` の一般的なユース ケースとは矛盾します。`UAnimInstance` では、タスクがインフライト中に他のクラスからメンバー変数にアクセスすることができます。 
+他のクラスから Anim Instance に直接アクセスしないようにすることをお勧めします。代わりに、Anim Instance は他の場所からデータをプルするようにします。 
+[/REGION]
+
+### カスタムのネイティブ AnimInstance の例 
+
+以下のコードブロックは、新しい `FAnimInstanceProxy` を使って、内部へのアクセスを認め、プロキシとそのインスタンスとの間での共有データのコピーを回避するカスタムのネイティブ AnimInstance クラスの作成方法例を示しています。 
+
+	USTRUCT()
+
+	struct FExampleAnimInstanceProxy : public FAnimInstanceProxy
+
+	{
+
+		GENERATED_BODY()
+
+		FExampleAnimInstanceProxy()
+
+		:FAnimInstanceProxy()
+
+		{}
+
+		FExampleAnimInstanceProxy(UAnimInstance* Instance);
+
+		virtual void Update(float DeltaSeconds) override
+
+		{
+
+			// Update internal variables (内部変数を更新)
+	    MovementAngle += 1.0f * DeltaSeconds;
+
+
+	        HorizontalSpeed = FMath::Max(0.0f, HorizontalSpeed - DeltaSeconds);
+
+		}
+
+	public:
+
+		UPROPERTY(Transient, BlueprintReadWrite, EditAnywhere, Category = "Example")
+
+	    float MovementAngle;
+
+	    UPROPERTY(Transient, BlueprintReadWrite, EditAnywhere, Category = "Example")
+
+	    float HorizontalSpeed;
+
+	};
+
+	UCLASS(Transient, Blueprintable)
+
+	class UExampleAnimInstance : public UAnimInstance
+
+	{
+
+		 GENERATED_UCLASS_BODY()
+
+	private:
+
+	    // The AllowPrivateAccess meta flag will allow this to be exposed to Blueprint, (AllowPrivateAccess メタ フラグは、これをブループリントに公開します。) 
+
+	    // but only to graphs internal to this class. (ただし、このクラス内部のグラフに対してのみ公開します) 
+
+	    UPROPERTY(Transient, BlueprintReadOnly, Category = "Example", meta = (AllowPrivateAccess = "true"))
+
+	    FExampleAnimInstanceProxy Proxy;
+
+	    virtual FAnimInstanceProxy* CreateAnimInstanceProxy() override
+
+		{
+
+		    // override this to just return the proxy on this instance (これをオーバーライドして、このインスタンスにプロキシを戻します)
+
+			return &Proxy;
+
+		}
+
+		virtual void DestroyAnimInstanceProxy(FAnimInstanceProxy* InProxy) override
+
+		{
+
+		}
+
+		friend struct FExampleAnimInstanceProxy;
+
+	};
+
+## Animation Fast Path
+
+**Animation Fast Path** は、**AnimGraph** の更新内で変数のアクセスを最適化する方法を提供します。 
+これにより、エンジンはブループリントのコードを実行するのではなく (これは、Blueprint Virtual Machine への呼び出しを伴います)、内部でパラメータをコピーすることができます。 
+現在、コンパイラは以下の構造体、すなわちメンバ変数、無効の Boolean メンバ変数、ネスティングされた構造体のメンバを最適化することができます。
+
+Animation Fast Path のオプションはデフォルトで **[Project Settings]** で有効になっています。 
+
+* **[Project Settings]** の **[General Settings]**、そして **[Anim Blueprints]** に進み、**[Optimize Anim Blueprint Member Variable Access] ** が有効になっていることを確認します。
+
+	![](FastPathEnabled.png)
+
+Animation Fath Path を使用するには、Animation ブループリントの AnimGraph 内で、ブループリントのロジックが実行されていないことを確認します。 
+以下の画像では、いくつかの float 値を読み出しています。これは、複数の Blend Space アセットとブレンドを操作するために使用されていて、最終的なアニメーション ポーズになります。
+右上隅に稲妻アイコンがある各ノードは、ロジックが何も実行されていないため、Fast Path を利用しています。 
+
+![](FastPathExample_1.png)
+
+このネットワークを変更して、以下の例のように何らかの計算を含める場合、関連ノードは Fast Path を使わなくなります。 
+
+![](FastPathExample_2.png)
+
+上の図では、ブループリントのロジックを実行して、**TEST_Blend2D** ノードに入力する値を生成しており、Fast Path を使わなくなります (稲妻アイコンもなくなります)。
+
+### Fast Path メソッド
+
+Animation ブループリントで Fast Path を使うようにするには、以下のいずれかを行います。 
+
+** メンバー変数に直接アクセスする**
+
+以下では、Fast Path を使って直接ブール変数の値にアクセスして読み出し、ポーズを決定しています。 
+
+![](AccessDirectly.png)
+
+次の例では、Fast Path を使っていません。ロジックを実行して、boolean 変数が true であるかどうかを判定しているからです。 
+
+![](AccessDirectlyBPLogic.png)
+
+** 無効化されたブール メンバー変数にアクセスする**
+
+以下は、無効化されたブール変数の値を読み出すことでFast Path を使用して、ポーズを決定しています。 
+
+![](AccessNegatedBooleans.png)
+
+次の例では、Fast Path を使っていません。ロジックを実行して、boolean 変数が true でないかを判定しているからです。 
+
+![](AccessNegatedBooleansBPLogic.png)
+
+** ネスティングされた構造体のメンバーにアクセスする**
+
+以下では、rotator 変数をブレークして、Pitch 変数と Yaw 変数に直接アクセスして Aim Offset に入力します。 
+
+![](AccessMembersOfStruct.png)
+
+** "Break Struct" ノードを使用するメンバーにアクセスする**
+
+以下では、Break Struct ノードを使用して rotator 変数を XYZ 値にブレークして、 Aim Offset に入力します。 
+
+![](AccessByBreakStruct.png)
+
+[REGION:note]
+**Break Transform** のような一部の **Break Struct** ノードでは、現在 Fast Path を使用しません。単にデータをコピーするのではなく、内部で変換を行うからです。 
+[/REGION]
+
+
+
+### ブループリントの使用に関する警告
+
+
+Animation ブループリントで確実に Fast Path を使うようにするために、**Warn About Blueprint Usage** オプションを有効にすることができます。AnimGraph から Blueprint Virtual Machine への呼び出しがあると、コンパイラが Compiler Results ログに警告を出力します。 
+
+* **[Warn About Blueprint Usage]** を有効にするには、**Animation ブループリント** の **[Optimization]** で、**[Class Settings]** 内のオプションを有効にします。 
+
+	![](WarningOption.png)
+
+	コンパイラが Fast Path を使用していないノードを見つけると、**Compiler Results** ログに表示されます。 
+
+	![](ExampleWarningShown.png)
+
+	上の図では、AnimGraph でブループリントのロジックを実行していて、警告オプションを有効にしているため、Compier Results に警告メッセージが表示されます。警告上でクリックすると、問題となっているノードがわかります。 
+	これは最適化すべき場所を追跡するのに役立ち、問題の原因となっているノードを特定することができます。 
+
+<!--
+## Update Rate Optimization (URO)
+
+WB Note - Omitting this for now as it's slated for improvements in 4.18
+
+-->
+
+
+## 一般的なヒント
+
+以下は、アニメーションの使用についてパフォーマンスを検討する際に、最適化のガイドラインです。
+
+[REGION:note]
+プロジェクトのサイズとスコープに応じてさらに変更が必要になるかもしれませんが、一般的に以下から始めると良いでしょう。 
+[/REGION]
+
+* **Parallel Update の条件が満たされていることを確認します**
+	 * `UAnimInstance::NeedsImmediateUpdate` では、ゲーム スレッドで実行しているアニメーションの更新フェーズを避けるために満たさなければならない全条件を見ることができます。 
+	キャラクターの動きでルート モーションが必要な場合、並列更新はできません。キャラクターの動きはマルチ スレッドではないからです。 
+* **Blueprint Virtual Machine の呼び出しを回避する**
+	* [](Engine/Blueprints/TechnicalGuide/NativizingBlueprints) を C++ コードにします。 
+	* Animation ブループリントの **Event Graph** を空の状態に保ちます。カスタムの `UAnimInstance` と `FAnimInstanceProxy` の派生クラスを使って、`FAnimInstanceProxy::Update` または `FAnimInstanceProxy::Evaluate` の間にプロキシですべての作業を行います。これらは、ワーカースレッドで実行されるからです。 
+	* Animation ブループリントの **Anim Graph** 内で、[Fast Path](#animationfastpath) を使うようにノードを構築します。 
+	* **[Project Settings]** で、**[Optimize Anim Blueprint Member Variable Access]** を必ず有効にしてください。これは、そのクラスのメンバ変数に直接アクセスする Animation ブループリント ノードが、Blueprint VM に対するサンクを避ける最適化したパスを直接使うかどうかを制御します。
+	* 一般的に、AnimGraph の実行部分で最も負荷がかかる、仮想マシンへの呼び出しを回避するのが Animation ブループリントで最大限のパフォーマンスを引き出す鍵となります。 
+* **Use Update Rate Optimizations (URO)**
+	* これは、アニメーションのティックの頻度が過剰にならないようにします。これをどのように適用するかを制御するのはゲーム次第です。しかし、多くのキャラクターに対して適切な距離で、~15Hz および Update Rates より低くし、補間を無効にすることを推奨します。 
+	* 有効にするには、Skeletal Mesh コンポーネントを **[Enable Update Rate Optimizations]** に設定し、`AnimUpdateRateTick()` を参照します。 
+		* オプションで、**[Display Debug Update Rate Optimizations]** を有効にして、適用されている URO のオンスクリーンのデバッグを有効にすることもできます。 
+* **Enable Component Use Fixed Skel Bounds**
+	* Skeletal Mesh コンポーネントで **[Component Use Skel Bounds]** オプションを有効にします。 
+	* これで物理アセットの使用をスキップし、代わりにスケルタルメッシュで定義されている固定の境界を使用します。 
+	* 各フレームについてカリングするバウンディング ボリュームの再計算もスキップし、パフォーマンスを高めます。 
+
+### その他の検討事項
+
+プロジェクトの [プロファイリング](Engine/Performance) をすると、ワーカースレッド実行後に、メインスレッドでスケルタルメッシュに対して `FParallelAnimationCompletionTask` が実行されているのがわかります。 
+これは、並列更新の条件が満たされるとプロファイルで見られるメイン スレッド作業のバルクであり、各セットアップに応じていくつかのものから構成されます。 
+
+* コンポーネントを動かして例えばボーンの物理オブジェクトを更新します。 
+	* 更新を減らすうえで重要なため、実際に必要のない物理の更新は避けてください。 
+* Animation 通知を発行します。
+	* 効率のために、Blueprint VM に対する呼び出しをしないようにするため、これらはブループリントではない必要があります。 
+	* これらはゲーム スレッド上で行う必要があります。アニメートしたオブジェクトのライフタイムに影響を及ぼす可能性があるからです。 
+* URO が有効な場合、アニメーションを補間します。 
+* マテリアル カーブまたはモーフ ターゲットのカーブを使用している場合、カーブをブレンドします。 
+
+

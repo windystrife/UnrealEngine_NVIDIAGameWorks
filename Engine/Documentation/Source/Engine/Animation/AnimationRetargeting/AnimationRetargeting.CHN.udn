@@ -1,0 +1,151 @@
+﻿INTSourceChangelist:2658350
+Availability:Public
+Title:动画重定位（相同骨架）
+Crumbs:%ROOT%, Engine, Engine/Animation
+Description:通过重定位可以在身材比例差异很大的角色之间复用动画。
+version:4.9
+
+[REGION:fullwidth]
+![](RetargetingHeader.png)
+[/REGION]
+
+[TOC(start:2 end:2)]
+
+
+
+**动画重定位（相同骨架）**是一种允许在共用相同骨架资产但比例差异很大的角色之间复用动画的功能。通过重定位，可以防止生成动画的骨架在使用来自不同外形的角色的动画时丢失比例或产生不必要的变形。
+
+[REGION:warning]
+要让不同的骨骼网格利用重定位功能，它们不但必须使用相同的骨架资产以确保骨骼层次结构，还必须在绑定姿势中使用相同的关节旋转。请参见 [](Engine/Animation/Skeleton) 文档了解详细信息。
+[/REGION]
+
+### 用于不同骨架的动画重定位
+
+本页上的内容讲述了 **动画重定位** 背后的概念，并列举了可以对使用相同骨架资产的角色使用动画重定位的例子。有时您可能希望为使用不同骨架资产的角色重定位动画，**动画重定位（不同骨架）**将说明如何实现这一目的。 
+
+请参见 [动画重定位（不同骨架）](Engine\Animation\RetargetingDifferentSkeletons) 了解更多信息。 
+
+
+## 为何使用重定位？
+
+假设有三个您希望共用动画的角色：一个基本角色、一个矮壮角色和一个高瘦角色。
+
+[VAR:Chars]w:300[/VAR]
+
+[REGION:imagetable]
+|![](BaseCharacter.png)(%chars%)|![](ShortStocky.png)(%chars%)|![](TallSkinny.png)(%chars%)|
+|---|---|---|
+|基本角色|矮壮角色|高瘦角色|
+[/REGION]
+
+
+### 重定位前的结果
+
+在应用重定位前，您就可以在任何共用相同骨架的骨骼网格之间使用动画。但是，如果角色身材比例如上图所示有差异，就会得到一些很难看的结果。请注意矮个角色是如何被不必要地拉长的，高个角色又是如何被压短的，这都是系统为了使其符合基本角色的骨骼比例而进行的更改。
+
+
+[REGION:imagetable]
+|![](BaseCharacterRunning.png)(%chars%)|![](ShortStockyRunning.png)(%chars%)|![](TallSkinnyRunning.png)(%chars%)|
+|---|---|---|
+|基本角色|矮壮角色|高瘦角色|
+[/REGION]
+
+### 重定位后的结果
+
+对角色应用重定位以后，系统就不再考虑它们的比例差异，动画会在角色身上正常播放。您也可以转到 **显示（Show）> 非重定位动画（Non-Retargeted Animation）**来查看原骨架（以米黄色显示）和当前骨架（白色）的差异。请注意，在基本角色身上，米黄色的非重定位骨骼与骨架是完美重合的。
+[EXCERPT:AfterTable]
+[REGION:imagetable]
+|![](BaseCharacterRunningRetargetedBones.png)(%chars%)|![](ShortStockyRunningRetargetedBones.png)(%chars%)|![](TallSkinnyRunningRetargetedBones.png)(%chars%)|
+|---|---|---|
+|基本角色|矮壮角色|高瘦角色|
+[/REGION]
+[/EXCERPT:AfterTable]
+
+## 重定位会影响性能吗？
+
+使用重定位动画和非重定位动画没有显著的性能差异。使用动画重定位的好处是增加独特角色的数量，又不必创建全新的一套匹配动画，重新做动画可能会严重占用您的动画存储预算。
+
+
+## 重定位的原理是怎样的？
+
+动画是绑定到 [骨架资产](Engine/Animation/Skeleton) 的。骨架资产其实就是一个骨骼名称和层次结构数据的列表，但它也存储了来自用于定义骨架资产的原始骨骼网格的初始比例。此数据是以骨骼平移数据的形式存储的。特别要注意的是，重定位系统只会重定位骨骼的平移分量。骨骼的旋转始终来自动画数据。
+
+因为使用了原始骨骼网格定义骨架资产的比例，所以使用该骨架资产但有不同比例的其他任何骨骼网格（例如比原始网格短得多的网格）都需要经过重定位才能正确工作。如果不经过这一步，具有不同比例的骨骼网格会尝试使用原始网格的平移数据，导致我们在本文开头看到的各种错误。
+
+为了解决这个问题，Persona 中的骨架列表提供了几个设置，用于更改处理骨骼之间平移重定位的方式。有 3 种不同设置可用于骨骼平移重定位：
+
+![](RetargetingSettings.png)
+
+-	**动画（Animation）** - 骨骼平移来自动画数据，不做改变。
+-	**骨架（Skeleton）** - 骨骼平移来自目标骨架的绑定姿势。
+-	**比例动画（AnimationScaled）** - 骨骼平移来自动画数据，但按骨架的比例调整。这是目标骨架（播放动画的骨架）与源骨架（制作动画的骨架）的骨骼长度之比。
+
+
+## 重定位如何处理最终效果器？
+
+高个角色会跑得更快吗？它们能拿住相同的道具吗？——这些都是使用重定位时可能出现的问题。简而言之，这里没有自动完成的工作，要由用户来决定如何实施。 
+
+关于保持比例，有一种方法是创建单独的一串骨骼，跟随原始动画中的手部运动，称为“手 IK 骨骼”。然后重定位身体和手臂，但不重定位“手 IK 骨骼”，使其在重定位后保持原样。这样您就可以让不同比例的角色操作相同的道具（例如，给步枪装弹）。 
+
+通过单独设置一串骨骼可以在您需要时方便地在 FK 和 IK 之间平滑切换（例如您希望在装填武器弹药时打开“手 IK”，在从口袋里取弹夹时关闭“手 IK”）。 
+
+这个系统非常灵活，可以根据您的需要定制。也许您只希望左手是 IK，而右手使用其 FK 位置和 IK 旋转。有时可以这样处理脚部，有时不需要这样处理。当角色踩踏非常精确的道具时，您会希望打开 IK；当角色只是四处奔跑时，您会希望使用 FK，以免产生罗圈腿的角色（或相反）。 
+
+
+## 设置重定位
+
+<!---Establishing animation retargeting on your --->
+
+
+
+可以在 **Persona** 的 **骨架树（Skeleton Tree）**面板中设置重定位。
+ 
+通常您需要对两足生物使用这些设置：
+
+* 根骨骼、IK 骨骼、武器骨骼和任何一种将使用动画模式的标记。
+* 骨盆将使用“比例动画”（AnimationScaled），以确保其在正确的高度，同时仍能动作。您希望平移和重定位动画的其他任何骨骼也应该使用“比例动画”（AnimationScaled）。
+* 所有其他骨骼都应使用“骨架”（Skeleton）。它们将使用来自目标骨架的静态平移。
+
+这意味着，如果您要使用重定位，快捷的工作流程将是：
+
+![](RecursivelySet.png)
+
+1. **右键单击** 根骨骼并递归地将所有骨骼设置为 **骨架（Skeleton）**。
+1. 找到骨盆或与之相当的骨骼，将其设置为 **比例动画（AnimationScaled）**。
+1. 找到根骨骼，所有 IK 骨骼、所有武器骨骼或其他标记式的骨骼，将它们设置为使用 **动画（Animation）**。
+
+[REGION:tip]
+在视口的 **显示（Show）**菜单中您可以选择 **非重定位动画（NonRetargeted Animation）**和 **骨骼（Bones）**来比较原动画和重定位的动画。
+[/REGION]
+
+
+## 使用重定位源管理器
+
+![](BasePoseManager.png)
+
+因为重定位使用骨架资产，而骨架的原比例是由最初为之创建骨架的骨骼网格定义的，所以按照上面描述的步骤可以顺利地实现单向重定位。但是您常常会有一些专为变体版本构建的特殊动画。例如，假设有一个特殊动画是专为角色的高个版本创建的。
+
+如果您将这个新的“仅限高个”动画导入，仍然需要和以前一样使用从角色的基本版本创建的同一骨架资产。这将使新动画的比例失真。解决方法就是使用 **重定位源管理器**。
+
+**重定位源管理器** 允许您将动画序列与为之设计序列的实际骨骼网格关联。通过这种方法，任何重定位特殊动画的问题都可以解决。
+
+### 使用重定位源管理器
+
+请将 **重定位源管理器** 看作您可以用来指定比例的骨骼网格列表。如果您需要用于重定位的骨骼网格的特殊动画，需要确保该网格在 **重定位源管理器** 中列出。
+
+1. 在 Persona 的菜单栏中选择 **窗口（Window）> 重定位源管理器（Retarget Source Manager）**。
+1. **右键单击** **重定位源管理器（Retarget Source Manager）**面板的列表区域（中央），从快捷菜单选择 **添加...（Add...）**。
+1. 选择为之创建特殊动画的骨骼网格。现在您应该可以看到该骨骼网格在 **重定位源管理器** 中列出。
+1. 在 Persona 的 **资产浏览器** 中，**双击** 您为骨骼网格创建的特殊动画的动画序列资产。
+1. 在动画资产 **细节（Details）**面板中找到 **动画（Animation）**类别，并找到 **重定位源（Retarget Source）**属性。在下拉菜单中，您现在应该可以看到添加到 **重定位源管理器** 的骨骼网格。通过选择此网格，您就指定了要使用该网格的比例驱动此动画。
+
+
+<!----
+
+If you are creating all of your animations for a single Skeletal Mesh and retargeting them to some other variations, then the information presented so far will get you a nice retargeted result.The reason it works is that using just one original Skeletal Mesh as the base is like a one-way connection, from the original to all the variations.But what happens if you need special animations just for the variants?
+
+Consider if we needed a special set of animations for our tall character, such as a different idle animation.An animator could take that Skeletal Mesh, create the necessary animation, then import it using the same Skeleton asset as before, but there is now a problem.Since the original proportions of the Skeleton asset were based off the Base Character's proportions, the animation will be distorted.
+j
+
+
+--->

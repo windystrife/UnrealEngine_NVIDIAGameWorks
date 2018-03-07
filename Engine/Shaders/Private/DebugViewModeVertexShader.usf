@@ -1,0 +1,189 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	DebugViewModeVertexShader.hlsl: Debug shader used for special viewmode that need to preserve the geometry shape.
+=============================================================================*/
+
+#include "Common.ush"
+
+#include "/Engine/Generated/Material.ush"
+#include "/Engine/Generated/VertexFactory.ush"
+
+#include "DebugViewModeCommon.ush"
+// struct FDebugVSToPS
+
+#if USING_TESSELLATION	
+	struct FDebugVSToDS
+	{
+		FVertexFactoryInterpolantsVSToDS FactoryInterpolants;
+		float4 Position : VS_To_DS_Position;
+		OPTIONAL_VertexID_VS_To_DS 
+	};
+	
+	#define FDebugVSOutput FDebugVSToDS
+#else
+	#define FDebugVSOutput FDebugVSToPS
+#endif
+
+#if USING_TESSELLATION	
+	#define FPassSpecificVSToDS FDebugVSToDS
+	#define FPassSpecificVSToPS FDebugVSToPS
+	
+	FDebugVSToDS PassInterpolate(FDebugVSToDS a, float aInterp, FDebugVSToDS b, float bInterp)
+	{
+		FDebugVSToDS Output;
+		
+		Output.FactoryInterpolants = VertexFactoryInterpolate(a.FactoryInterpolants, aInterp, b.FactoryInterpolants, bInterp);
+
+		return Output;
+	}
+
+	FDebugVSToPS PassFinalizeTessellationOutput(FDebugVSToDS Interpolants, float4 WorldPosition, FMaterialTessellationParameters MaterialParameters)
+	{
+		FDebugVSToPS Output;
+		
+		// Finally, transform position to clip-space
+		ISOLATE
+		{
+
+			Output.Position = mul(WorldPosition, ResolvedView.TranslatedWorldToClip);
+		}
+
+		Output.VertexColor = MaterialParameters.VertexColor;
+
+		float3x3 TangentToWorld = MaterialParameters.TangentToWorld;
+		Output.TangentToWorld0 = TangentToWorld[0];
+		Output.TangentToWorld1 = TangentToWorld[1];
+		Output.TangentToWorld2 = TangentToWorld[2];
+
+#if NUM_MATERIAL_TEXCOORDS_VERTEX > 0
+		Output.TexCoord23 = Output.TexCoord01 = MaterialParameters.TexCoords[0].xyxy;
+#else
+		Output.TexCoord23 = Output.TexCoord01 = 0;
+#endif
+#if NUM_MATERIAL_TEXCOORDS_VERTEX > 1
+		Output.TexCoord01.zw = MaterialParameters.TexCoords[1];
+#endif
+#if NUM_MATERIAL_TEXCOORDS_VERTEX > 2
+		Output.TexCoord23.xy = MaterialParameters.TexCoords[2];
+#endif
+#if NUM_MATERIAL_TEXCOORDS_VERTEX > 3
+		Output.TexCoord23.zw = MaterialParameters.TexCoords[3];
+#endif
+		
+		return Output;
+	}
+	
+	#include "Tessellation.ush"
+#endif
+
+#if VERTEXSHADER
+
+void Main(
+	FVertexFactoryInput Input,
+	OPTIONAL_VertexID
+	out FDebugVSOutput Output
+#if USE_GLOBAL_CLIP_PLANE && !USING_TESSELLATION
+	, out float OutGlobalClipPlaneDistance : SV_ClipDistance
+#endif
+#if INSTANCED_STEREO
+	, uint InstanceId : SV_InstanceID
+	#if !MULTI_VIEW
+		, out float OutClipDistance : SV_ClipDistance1
+	#else
+		, out uint ViewportIndex : SV_ViewPortArrayIndex
+	#endif
+#endif
+	)
+{
+#if INSTANCED_STEREO
+	const uint EyeIndex = VertexFactoryGetEyeIndex(InstanceId);
+	ResolvedView = ResolveView(EyeIndex);
+	#if !MULTI_VIEW
+		OutClipDistance = 0.0;
+	#else
+		ViewportIndex = EyeIndex;
+	#endif
+#else
+	ResolvedView = ResolveView();
+#endif
+
+	FVertexFactoryIntermediates VFIntermediates = GetVertexFactoryIntermediates(Input);
+	float4 WorldPos = VertexFactoryGetWorldPosition(Input, VFIntermediates);
+
+	float3x3 TangentToLocal = VertexFactoryGetTangentToLocal(Input, VFIntermediates);
+	FMaterialVertexParameters VertexParameters = GetMaterialVertexParameters(Input, VFIntermediates, WorldPos.xyz, TangentToLocal);
+
+	// Isolate instructions used for world position offset
+	// As these cause the optimizer to generate different position calculating instructions in each pass, resulting in self-z-fighting.
+	// This is only necessary for shaders used in passes that have depth testing enabled.
+	ISOLATE
+	{
+		WorldPos.xyz += GetMaterialWorldPositionOffset(VertexParameters);
+	}
+
+#if USING_TESSELLATION
+	// Transformation is done in Domain shader when tessellating
+	Output.Position = WorldPos;
+	Output.FactoryInterpolants = VertexFactoryGetInterpolantsVSToDS(Input, VFIntermediates, VertexParameters);
+#else
+	ISOLATE
+	{
+		float4 RasterizedWorldPosition = VertexFactoryGetRasterizedWorldPosition(Input, VFIntermediates, WorldPos);
+		Output.Position = mul(RasterizedWorldPosition, ResolvedView.TranslatedWorldToClip);
+	}
+
+	#if INSTANCED_STEREO && !MULTI_VIEW
+	BRANCH 
+	if (bIsInstancedStereo)  
+	{
+		// Clip at the center of the screen
+		OutClipDistance = dot(Output.Position, EyeClipEdge[EyeIndex]);
+
+		// Scale to the width of a single eye viewport
+		Output.Position.x *= 0.5 * ResolvedView.HMDEyePaddingOffset;
+
+		// Shift to the eye viewport
+		Output.Position.x += (EyeOffsetScale[EyeIndex] * Output.Position.w) * (1.0f - 0.5 * ResolvedView.HMDEyePaddingOffset);
+	}
+	#endif
+	
+#if USE_GLOBAL_CLIP_PLANE
+	OutGlobalClipPlaneDistance = dot(ResolvedView.GlobalClippingPlane, float4(WorldPos.xyz - ResolvedView.PreViewTranslation.xyz, 1));
+#endif
+	Output.VertexColor = VertexParameters.VertexColor;
+
+	float3x3 TangentToWorld = VertexParameters.TangentToWorld;
+	Output.TangentToWorld0 = float3(TangentToWorld[0]);
+	Output.TangentToWorld1 = float3(TangentToWorld[1]);
+	Output.TangentToWorld2 = float3(TangentToWorld[2]);
+
+#if NUM_MATERIAL_TEXCOORDS_VERTEX > 0
+		Output.TexCoord23 = Output.TexCoord01 = VertexParameters.TexCoords[0].xyxy;
+#else
+		Output.TexCoord23 = Output.TexCoord01 = 0;
+#endif
+#if NUM_MATERIAL_TEXCOORDS_VERTEX > 1
+		Output.TexCoord01.zw = VertexParameters.TexCoords[1];
+#endif
+#if NUM_MATERIAL_TEXCOORDS_VERTEX > 2
+		Output.TexCoord23.xy = VertexParameters.TexCoords[2];
+#endif
+#if NUM_MATERIAL_TEXCOORDS_VERTEX > 3
+		Output.TexCoord23.zw = VertexParameters.TexCoords[3];
+#endif
+
+#endif // USING_TESSELLATION
+
+	#if INSTANCED_STEREO
+		#if USING_TESSELLATION	
+			Output.FactoryInterpolants.InterpolantsVSToPS.PackedEyeIndex = PackEyeIndex(EyeIndex, bIsInstancedStereo);
+		#else
+			Output.PackedEyeIndex = PackEyeIndex(EyeIndex, bIsInstancedStereo);
+		#endif
+	#endif
+
+	OutputVertexID( Output );
+}
+
+#endif // VERTEXSHADER

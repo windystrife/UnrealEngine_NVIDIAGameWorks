@@ -1,0 +1,64 @@
+/*=============================================================================
+	VolumetricFogLightFunction.usf
+=============================================================================*/
+
+#include "Common.ush"
+#include "/Engine/Generated/Material.ush"
+#include "LightFunctionCommon.ush"
+
+/** Fade distance in x, disabled brightness in y, output for preview shadows mask in z. */
+float3 LightFunctionParameters2;
+float2 LightFunctionTexelSize;
+
+float4x4 ShadowToWorld;
+
+float3 GetWorldPositionForLightFunctionTexturePosition(float2 ScreenPosition)
+{
+	// Pick a depth to evaluate the light function at
+	float SceneDepth = 0.5f;
+	float4 HomogeneousWorldPosition = mul(float4(ScreenPosition, SceneDepth, 1), ShadowToWorld);
+	return HomogeneousWorldPosition.xyz;
+}
+
+void Main(
+	in noperspective float4 UV : TEXCOORD0,
+	in float4 SvPosition : SV_Position,	
+	out float4 OutColor : SV_Target0
+	)
+{
+	/*
+	float2 LightFunctionTextureUV = SvPositionToBufferUV(SvPosition);
+
+	// make SvPosition appear to be rasterized with the depth from the depth buffer
+	SvPosition.z = LookupDeviceZ(ScreenUV);
+
+	float3 LightVector;
+	{
+		float4 Hom = mul(float4(SvPosition.xyz, 1), SvPositionToLight);
+		LightVector = Hom.xyz / Hom.w;
+	}
+	
+	// todo: TranslatedWorld would be better for quality
+	float3 AbsoluteWorldPosition = SvPositionToWorld(SvPosition);
+	*/
+
+	float2 ScreenPosition = (SvPosition * LightFunctionTexelSize - .5f) * float2(2, -2);
+	float3 AbsoluteWorldPosition = GetWorldPositionForLightFunctionTexturePosition(ScreenPosition);
+
+	float4 LightVector = mul(float4(AbsoluteWorldPosition, 1), LightFunctionWorldToLight);
+	LightVector.xyz /= LightVector.w;
+	float3 LightFunction = GetLightFunctionColor(LightVector.xyz, AbsoluteWorldPosition);
+	float GreyScale = dot(LightFunction, .3333f).x;
+
+	// Calculate radial view distance for stable fading
+	float ViewDistance = length(View.WorldCameraOrigin - AbsoluteWorldPosition);
+
+	float DistanceFadeAlpha = saturate((LightFunctionParameters2.x - ViewDistance) / (LightFunctionParameters2.x * .2f));
+	// Fade to disabled based on LightFunctionFadeDistance
+	GreyScale = lerp(LightFunctionParameters2.y, GreyScale, DistanceFadeAlpha);
+
+	// Fade to disabled based on ShadowFadeFraction
+	GreyScale = lerp(LightFunctionParameters2.y, GreyScale, LightFunctionParameters.y);
+
+	OutColor = GreyScale;
+}

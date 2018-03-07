@@ -1,0 +1,1215 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	PostProcessMobile.usf: Combined {bloom, sunshafts, depth of field}
+=============================================================================*/
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+
+// Point on circle.
+float2 Circle(float Start, float Points, float Point) 
+{
+	float Rad = (3.141592 * 2.0 * (1.0 / Points)) * (Point + Start);
+	return float2(sin(Rad), cos(Rad));
+}
+
+float BloomThreshold;
+
+half FocusDistFar()
+{
+	return View.DepthOfFieldFocalDistance + View.DepthOfFieldFocalRegion;
+}
+
+half FocusDistNear()
+{
+	return View.DepthOfFieldFocalDistance;
+}
+
+// Alpha = 0.5 is full size, >0.5 rate at which near and far hit maximum.
+float4 SunColorApertureDiv2;
+
+// Returns 0=max near DOF, 0.5=in focus, 1.0=max far DOF
+half Coc(half Depth) 
+{
+	half FocusDist = clamp(Depth,half(FocusDistNear()),half(FocusDistFar()));
+	half CocValue = ((Depth - FocusDist) / Depth);
+	return saturate(CocValue * SunColorApertureDiv2.a + 0.5);
+}
+
+
+//////////////////////////
+
+
+float ComputeDOFNearFocalMask(float SceneDepth)
+{
+	float NearFocalPlane = View.DepthOfFieldFocalDistance;
+
+	return saturate((NearFocalPlane - SceneDepth) / View.DepthOfFieldNearTransitionRegion);
+}
+
+// todo move to central place
+float ComputeDOFFarFocalMask(float SceneDepth)
+{
+	float FarFocalPlane = View.DepthOfFieldFocalDistance + View.DepthOfFieldFocalRegion;
+
+	return saturate((SceneDepth - FarFocalPlane) / View.DepthOfFieldFarTransitionRegion);
+}
+
+// Returns 0=max near DOF, 0.5=in focus, 1.0=max far DOF
+half Coc2(half Depth)
+{
+	half N = ComputeDOFNearFocalMask(Depth);
+	half F = ComputeDOFFarFocalMask(Depth);
+	if (F > N)
+	{
+		return (F * 0.5) + 0.5;
+	}
+	return (1.0-N) * 0.5;
+}
+
+//////////////////////////////////
+half2 SunConstDepthMaskScaleBias() 
+{
+	half DepthMin = 65504.0 - 16384.0;
+	half DepthMax = 65504.0 - 0.0;
+	// Compute scale and bias.
+	half Scale = 1.0/(DepthMax-DepthMin);
+	return half2(Scale,-DepthMin * Scale);
+}
+
+// Note: alpha is preserved when no encoding is active.
+half4 HDREncode(half4 color)
+{
+	return Encode32BPPHDR(color, half2(0, 0));
+}
+
+half3 HDRDecode(half4 encodedhdr)
+{
+	return Decode32BPPHDR(encodedhdr).rgb;
+}
+
+//
+// Convert depth in alpha into combined circle of confusion and sun intensity.
+// Or pre-tonemap before hardware box-filtered resolve.
+//
+
+void SunMaskVS_ES2(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out float4 OutUVPos : TEXCOORD0,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	DrawRectangle(InPosition, InTexCoord, OutPosition, OutUVPos.xy);
+	OutUVPos.zw = OutPosition.xy;
+}
+
+void SunMaskPS_ES2(
+	float4 InUVPos : TEXCOORD0,
+	out half4 OutColor : SV_Target0
+	)
+{
+	#if (COMPILER_GLSL_ES2 && ES2_USE_FETCH) || (METAL_PROFILE && !MAC)
+		OutColor = FramebufferFetchES2();
+	#else
+		OutColor = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVPos.xy);
+	#endif
+
+	#if ES2_USE_MSAA
+		// On-chip pre-tonemap before MSAA resolve.
+		OutColor.rgb *= rcp(OutColor.r*0.299 + OutColor.g*0.587 + OutColor.b*0.114 + 1.0);
+	#else
+
+		#if ES2_USE_DEPTHTEXTURE
+			half InDepth = CalcSceneDepth(InUVPos.xy);
+		#else
+			half InDepth = OutColor.a;
+		#endif
+	
+		#if ES2_USE_SUN
+			half2 DepthMaskScaleBias = SunConstDepthMaskScaleBias();
+			half FarAmount = saturate(InDepth * DepthMaskScaleBias.x + DepthMaskScaleBias.y);
+			half3 SunAmount = OutColor.rgb * SunColorApertureDiv2.rgb;
+	
+			half2 Pos = InUVPos.zw * 0.5 + 0.5;
+			half EdgeMask = 1.0f - Pos.x * (1.0f - Pos.x) * Pos.y * (1.0f - Pos.y) * 8.0f;
+			EdgeMask = EdgeMask * EdgeMask;
+	
+			FarAmount *= 1.0-EdgeMask;
+	
+			OutColor.a = min(min(SunAmount.r, SunAmount.g), SunAmount.b) * FarAmount;
+		#else
+			OutColor.a = 0.0;
+		#endif
+		#if ES2_USE_DOF
+//			OutColor.a += Coc(InDepth);
+			OutColor.a += Coc2(InDepth);
+		#endif
+#endif
+}
+
+
+
+
+// 
+// Bloom Setup - Mask Bloom and Downsample 1/16 Area
+//
+
+void BloomVS_ES2(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out float2 OutTexCoords[4] : TEXCOORD0,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	float2 TransformedUV;
+	DrawRectangle(InPosition, InTexCoord, OutPosition, TransformedUV);
+
+	OutTexCoords[0] = TransformedUV + PostprocessInput0Size.zw * float2(-1, -1);
+	OutTexCoords[1] = TransformedUV + PostprocessInput0Size.zw * float2( 1, -1);
+	OutTexCoords[2] = TransformedUV + PostprocessInput0Size.zw * float2(-1,  1);
+	OutTexCoords[3] = TransformedUV + PostprocessInput0Size.zw * float2( 1,  1);
+}
+
+void BloomPS_ES2(
+	float2 InUVs[4] : TEXCOORD0,
+	out half4 OutColor : SV_Target0
+	)
+{
+	half4 C0 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[0]);
+	half4 C1 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[1]);
+	half4 C2 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[2]);
+	half4 C3 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[3]);
+
+	C0.rgb = HDRDecode(C0);
+	C1.rgb = HDRDecode(C1);
+	C2.rgb = HDRDecode(C2);
+	C3.rgb = HDRDecode(C3);
+
+	// Output color is average.
+	OutColor.rgb = (C0.rgb * 0.25) + (C1.rgb * 0.25) + (C2.rgb * 0.25) + (C3.rgb * 0.25);
+
+	#if ES2_USE_MSAA
+		// This should really happen before the average, instead doing after average as optimization.
+		OutColor.rgb *= rcp(OutColor.r*(-0.299) + OutColor.g*(-0.587) + OutColor.b*(-0.114) + 1.0);
+	#endif
+
+	// Try to kill negatives and NaNs here
+	OutColor.rgb = max(OutColor.rgb, 0);
+
+	// Trim bloom and sunshafts black level.
+	half TotalLuminance = Luminance(OutColor.rgb);
+	half BloomLuminance = TotalLuminance - BloomThreshold;
+	half Amount = saturate(BloomLuminance * 0.5f);
+	OutColor.rgb *= Amount;
+
+	// In the case of both DOF and SUN,
+	// Split out alpha back into dual components (circle of confusion size and sun amount).
+	// Expand {near to in-focus} {0.0 to 0.5} to {0.0 to 1.0} for near DOF diolation.
+	// Must keep 1.0 the in-focus here (sunshaft pass will use this data).
+
+	#if ES2_USE_DOF
+		// Expand {near to in-focus} {0.0 to 0.5} to {0.0 to 1.0} for near DOF diolation.
+		// Must keep 1.0 the in-focus here (sunshaft pass will use this data).
+		half Coc0 = saturate(C0.a*2.0);
+		half Coc1 = saturate(C1.a*2.0);
+		half Coc2 = saturate(C2.a*2.0);
+		half Coc3 = saturate(C3.a*2.0);
+
+		// Take min of COC (which is maximum near radius).
+		OutColor.a = min(min(Coc0,Coc1),min(Coc2,Coc3));
+
+		// Improve the quality of near diolation.
+		OutColor.a = 1.0 - OutColor.a;
+		OutColor.a *= OutColor.a;
+		OutColor.a = 1.0 - OutColor.a;
+	#else
+		OutColor.a = 0.0;
+	#endif
+
+	#if ES2_USE_SUN
+		half Sun0 = max(0.0, C0.a-1.0);
+		half Sun1 = max(0.0, C1.a-1.0);
+		half Sun2 = max(0.0, C2.a-1.0);
+		half Sun3 = max(0.0, C3.a-1.0);
+
+		// Take average of sun intensity and adjust by bloom threshold.
+		Amount *= 0.25;
+		OutColor.a += (Sun0 * Amount) + (Sun1 * Amount) + (Sun2 * Amount) + (Sun3 * Amount);
+	#endif
+
+	OutColor = HDREncode(OutColor);
+}
+
+
+
+
+// 
+// Bloom Setup Small - Downsample 1/16 Area
+//
+
+void BloomSmallVS_ES2(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out float4 OutTexCoords[8] : TEXCOORD0,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+
+	DrawRectangle(InPosition, InTexCoord, OutPosition, InTexCoord);
+	
+	float Start = 2.0/14.0;
+	float Scale = 0.66 * 4.0 * 2.0;
+
+	OutTexCoords[0].xy = InTexCoord.xy;
+	OutTexCoords[0].zw = InTexCoord.xy + Circle(Start, 14.0, 0.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[1].xy = InTexCoord.xy + Circle(Start, 14.0, 1.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[1].zw = InTexCoord.xy + Circle(Start, 14.0, 2.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[2].xy = InTexCoord.xy + Circle(Start, 14.0, 3.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[2].zw = InTexCoord.xy + Circle(Start, 14.0, 4.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[3].xy = InTexCoord.xy + Circle(Start, 14.0, 5.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[3].zw = InTexCoord.xy + Circle(Start, 14.0, 6.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[4].xy = InTexCoord.xy + Circle(Start, 14.0, 7.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[4].zw = InTexCoord.xy + Circle(Start, 14.0, 8.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[5].xy = InTexCoord.xy + Circle(Start, 14.0, 9.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[5].zw = InTexCoord.xy + Circle(Start, 14.0, 10.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[6].xy = InTexCoord.xy + Circle(Start, 14.0, 11.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[6].zw = InTexCoord.xy + Circle(Start, 14.0, 12.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[7].xy = InTexCoord.xy + Circle(Start, 14.0, 13.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[7].zw = float2(0.0, 0.0);
+}
+
+void BloomSmallPS_ES2(
+	float4 InUVs[8] : TEXCOORD0,
+	out half4 OutColor : SV_Target0
+	)
+{
+	half3 N0 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[0].xy).rgb;
+	half3 N1 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[0].zw).rgb;
+	half3 N2 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[1].xy).rgb;
+	half3 N3 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[1].zw).rgb;
+	half3 N4 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[2].xy).rgb;
+	half3 N5 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[2].zw).rgb;
+	half3 N6 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[3].xy).rgb;
+	half3 N7 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[3].zw).rgb;
+	half3 N8 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[4].xy).rgb;
+	half3 N9 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[4].zw).rgb;
+	half3 N10 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[5].xy).rgb;
+	half3 N11 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[5].zw).rgb;
+	half3 N12 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[6].xy).rgb;
+	half3 N13 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[6].zw).rgb;
+	half3 N14 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[7].xy).rgb;
+
+	half W = 1.0/15.0;
+	OutColor.rgb = 
+		(N0 * W) +
+		(N1 * W) +
+		(N2 * W) +
+		(N3 * W) +
+		(N4 * W) +
+		(N5 * W) +
+		(N6 * W) +
+		(N7 * W) +
+		(N8 * W) +
+		(N9 * W) +
+		(N10 * W) +
+		(N11 * W) +
+		(N12 * W) +
+		(N13 * W) +
+		(N14 * W);
+
+	// Trim bloom black level.
+	half TotalLuminance = Luminance(OutColor.rgb);
+	half BloomLuminance = TotalLuminance - BloomThreshold;
+	half Amount = saturate(BloomLuminance * 0.5f);
+	OutColor.rgb *= Amount;
+	OutColor.a = 0;
+}
+
+
+
+
+
+
+// 
+// Bloom Downsample  
+//
+
+float BloomDownScale;
+
+void BloomDownVS_ES2(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out float4 OutTexCoords[8] : TEXCOORD0,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	DrawRectangle(InPosition, InTexCoord, OutPosition, InTexCoord);
+
+	float Start = 2.0/14.0;
+	float Scale = BloomDownScale;
+
+	OutTexCoords[0].xy = InTexCoord.xy;
+	OutTexCoords[0].zw = InTexCoord.xy + Circle(Start, 14.0, 0.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[1].xy = InTexCoord.xy + Circle(Start, 14.0, 1.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[1].zw = InTexCoord.xy + Circle(Start, 14.0, 2.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[2].xy = InTexCoord.xy + Circle(Start, 14.0, 3.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[2].zw = InTexCoord.xy + Circle(Start, 14.0, 4.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[3].xy = InTexCoord.xy + Circle(Start, 14.0, 5.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[3].zw = InTexCoord.xy + Circle(Start, 14.0, 6.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[4].xy = InTexCoord.xy + Circle(Start, 14.0, 7.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[4].zw = InTexCoord.xy + Circle(Start, 14.0, 8.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[5].xy = InTexCoord.xy + Circle(Start, 14.0, 9.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[5].zw = InTexCoord.xy + Circle(Start, 14.0, 10.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[6].xy = InTexCoord.xy + Circle(Start, 14.0, 11.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[6].zw = InTexCoord.xy + Circle(Start, 14.0, 12.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[7].xy = InTexCoord.xy + Circle(Start, 14.0, 13.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[7].zw = float2(0.0, 0.0);
+}
+
+void BloomDownPS_ES2(
+	float4 InUVs[8] : TEXCOORD0,
+	out half4 OutColor : SV_Target0
+	)
+{
+	half4 N0 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[0].xy).rgba;
+	half4 N1 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[0].zw).rgba;
+	half4 N2 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[1].xy).rgba;
+	half4 N3 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[1].zw).rgba;
+	half4 N4 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[2].xy).rgba;
+	half4 N5 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[2].zw).rgba;
+	half4 N6 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[3].xy).rgba;
+	half4 N7 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[3].zw).rgba;
+	half4 N8 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[4].xy).rgba;
+	half4 N9 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[4].zw).rgba;
+	half4 N10 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[5].xy).rgba;
+	half4 N11 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[5].zw).rgba;
+	half4 N12 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[6].xy).rgba;
+	half4 N13 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[6].zw).rgba;
+	half4 N14 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[7].xy).rgba;
+	half W = 1.0/15.0;
+	OutColor.rgb = 
+		(HDRDecode(N0) * W) +
+		(HDRDecode(N1) * W) +
+		(HDRDecode(N2) * W) +
+		(HDRDecode(N3) * W) +
+		(HDRDecode(N4) * W) +
+		(HDRDecode(N5) * W) +
+		(HDRDecode(N6) * W) +
+		(HDRDecode(N7) * W) +
+		(HDRDecode(N8) * W) +
+		(HDRDecode(N9) * W) +
+		(HDRDecode(N10) * W) +
+		(HDRDecode(N11) * W) +
+		(HDRDecode(N12) * W) +
+		(HDRDecode(N13) * W) +
+		(HDRDecode(N14) * W);
+	OutColor.a = 0;
+
+	OutColor = HDREncode(OutColor);
+}
+
+
+// 
+// Bloom Upsample
+//
+
+float2 BloomUpScales;
+
+void BloomUpVS_ES2(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out float4 OutTexCoords[8] : TEXCOORD0,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	DrawRectangle(InPosition, InTexCoord, OutPosition, InTexCoord);
+
+	float Start;
+	float Scale;
+
+	Start = 2.0/7.0;
+	Scale = BloomUpScales.x;
+
+
+	OutTexCoords[0].xy = InTexCoord.xy + Circle(Start, 7.0, 0.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[0].zw = InTexCoord.xy + Circle(Start, 7.0, 1.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[1].xy = InTexCoord.xy + Circle(Start, 7.0, 2.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[1].zw = InTexCoord.xy + Circle(Start, 7.0, 3.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[2].xy = InTexCoord.xy + Circle(Start, 7.0, 4.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[2].zw = InTexCoord.xy + Circle(Start, 7.0, 5.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[3].xy = InTexCoord.xy + Circle(Start, 7.0, 6.0) * Scale * PostprocessInput0Size.zw;
+
+	OutTexCoords[3].zw = InTexCoord.xy;
+
+	Start = 2.0/7.0;
+	Scale = BloomUpScales.y;
+
+	OutTexCoords[4].xy = InTexCoord.xy + Circle(Start, 7.0, 0.0) * Scale * PostprocessInput1Size.zw;
+	OutTexCoords[4].zw = InTexCoord.xy + Circle(Start, 7.0, 1.0) * Scale * PostprocessInput1Size.zw;
+	OutTexCoords[5].xy = InTexCoord.xy + Circle(Start, 7.0, 2.0) * Scale * PostprocessInput1Size.zw;
+	OutTexCoords[5].zw = InTexCoord.xy + Circle(Start, 7.0, 3.0) * Scale * PostprocessInput1Size.zw;
+	OutTexCoords[6].xy = InTexCoord.xy + Circle(Start, 7.0, 4.0) * Scale * PostprocessInput1Size.zw;
+	OutTexCoords[6].zw = InTexCoord.xy + Circle(Start, 7.0, 5.0) * Scale * PostprocessInput1Size.zw;
+	OutTexCoords[7].xy = InTexCoord.xy + Circle(Start, 7.0, 6.0) * Scale * PostprocessInput1Size.zw;
+	OutTexCoords[7].zw = float2(0.0, 0.0);
+}
+
+float4 BloomTintA;
+float4 BloomTintB;
+
+void BloomUpPS_ES2(
+	float4 InUVs[8] : TEXCOORD0,
+	out half4 OutColor : SV_Target0
+	)
+{
+	half3 A0 = HDRDecode(PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[0].xy).rgba);
+	half3 A1 = HDRDecode(PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[0].zw).rgba);
+	half3 A2 = HDRDecode(PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[1].xy).rgba);
+	half3 A3 = HDRDecode(PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[1].zw).rgba);
+	half3 A4 = HDRDecode(PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[2].xy).rgba);
+	half3 A5 = HDRDecode(PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[2].zw).rgba);
+	half3 A6 = HDRDecode(PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[3].xy).rgba);
+	half3 A7 = HDRDecode(PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[3].zw).rgba);
+
+	half3 B0 = HDRDecode(PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[3].zw).rgba);
+	half3 B1 = HDRDecode(PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[4].xy).rgba);
+	half3 B2 = HDRDecode(PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[4].zw).rgba);
+	half3 B3 = HDRDecode(PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[5].xy).rgba);
+	half3 B4 = HDRDecode(PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[5].zw).rgba);
+	half3 B5 = HDRDecode(PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[6].xy).rgba);
+	half3 B6 = HDRDecode(PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[6].zw).rgba);
+	half3 B7 = HDRDecode(PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[7].xy).rgba);
+
+	// A is the same size source.
+	half3 WA = BloomTintA.rgb;
+	// B is the upsampled source.
+	half3 WB = BloomTintB.rgb;
+
+	OutColor.rgb = 
+		A0 * WA + 
+		A1 * WA + 
+		A2 * WA + 
+		A3 * WA + 
+		A4 * WA + 
+		A5 * WA + 
+		A6 * WA + 
+		A7 * WA +
+		B0 * WB + 
+		B1 * WB + 
+		B2 * WB + 
+		B3 * WB + 
+		B4 * WB + 
+		B5 * WB + 
+		B6 * WB + 
+		B7 * WB;
+	OutColor.a = 0;
+
+	OutColor = HDREncode(OutColor);
+}
+
+
+// 
+// Near Setup - Generate near diolation for DOF.
+//
+
+void DofNearVS_ES2(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out float2 OutTexCoords2 : TEXCOORD0,
+	out float4 OutTexCoords4[4] : TEXCOORD1,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	DrawRectangle(InPosition, InTexCoord, OutPosition, InTexCoord);
+
+	OutTexCoords2 = InTexCoord;
+	OutTexCoords4[0].xy = InTexCoord + PostprocessInput0Size.zw * float2(-0.5,-1.0);
+	OutTexCoords4[0].zw = InTexCoord + PostprocessInput0Size.zw * float2( 1.0,-0.5);
+	OutTexCoords4[1].xy = InTexCoord + PostprocessInput0Size.zw * float2( 0.5, 1.0);
+	OutTexCoords4[1].zw = InTexCoord + PostprocessInput0Size.zw * float2(-1.0, 0.5);
+	OutTexCoords4[2].xy = InTexCoord + PostprocessInput0Size.zw * float2( 0.5,-1.0);
+	OutTexCoords4[2].zw = InTexCoord + PostprocessInput0Size.zw * float2( 1.0, 0.5);
+	OutTexCoords4[3].xy = InTexCoord + PostprocessInput0Size.zw * float2(-0.5, 1.0);
+	OutTexCoords4[3].zw = InTexCoord + PostprocessInput0Size.zw * float2(-1.0,-0.5);
+}
+
+void DofNearPS_ES2(
+	float2 InUVs2 : TEXCOORD0,
+	float4 InUVs[4] : TEXCOORD1,
+	out half4 OutColor : SV_Target0
+	)
+{
+	half N0 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs2).a;
+	half N1 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[0].xy).a;
+	half N2 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[0].zw).a;
+	half N3 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[1].xy).a;
+	half N4 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[1].zw).a;
+	half N5 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[2].xy).a;
+	half N6 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[2].zw).a;
+	half N7 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[3].xy).a;
+	half N8 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[3].zw).a;
+
+	// Remove sunshaft intensity component and reverse.
+	#if ES2_USE_SUN
+		N0 = saturate(1.0 - N0);
+		N1 = saturate(1.0 - N1);
+		N2 = saturate(1.0 - N2);
+		N3 = saturate(1.0 - N3);
+		N4 = saturate(1.0 - N4);
+		N5 = saturate(1.0 - N5);
+		N6 = saturate(1.0 - N6);
+		N7 = saturate(1.0 - N7);
+		N8 = saturate(1.0 - N8);
+	#else
+		// If no sun-shafts then don't need the saturate.
+		N0 = 1.0 - N0;
+		N1 = 1.0 - N1;
+		N2 = 1.0 - N2;
+		N3 = 1.0 - N3;
+		N4 = 1.0 - N4;
+		N5 = 1.0 - N5;
+		N6 = 1.0 - N6;
+		N7 = 1.0 - N7;
+		N8 = 1.0 - N8;
+	#endif
+
+	// The first sample is 1/4 the size as the rest of the samples.
+	half Out = (N0 * 0.25 + N1 + N2 + N3 + N4 + N5 + N6 + N7 + N8) / 8.25;
+	if(Out > 0.0) Out = sqrt(Out);
+	OutColor.r = Out;
+	OutColor.gba = 0;
+}
+
+
+// 
+// DOF Setup - Downsample to 1/4 area
+//
+
+
+
+void DofDownVS_ES2(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out float2 OutTexCoords[5] : TEXCOORD0,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	DrawRectangle(InPosition, InTexCoord, OutPosition, InTexCoord);
+
+	// Near position fixed to use UV based out output position.
+	OutTexCoords[0] = OutPosition.xy * float2(0.5,-0.5) + 0.5;
+	// Other source UVs based on possible non-full texture.
+	OutTexCoords[1] = InTexCoord + PostprocessInput0Size.zw * float2(-0.5, -0.5);
+	OutTexCoords[2] = InTexCoord + PostprocessInput0Size.zw * float2( 0.5, -0.5);
+	OutTexCoords[3] = InTexCoord + PostprocessInput0Size.zw * float2(-0.5,  0.5);
+	OutTexCoords[4] = InTexCoord + PostprocessInput0Size.zw * float2( 0.5,  0.5);
+}
+
+void DofDownPS_ES2(
+	float2 InUVs[5] : TEXCOORD0,
+	out half4 OutColor : SV_Target0
+	)
+{
+	// This shader needs float precision to work.
+
+	// Fetch near diolation and scale to (0 to 16384.0) range.
+	float N = PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[0]).r * 16384.0;
+
+	float4 A = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[1]);
+	float4 B = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[2]);
+	float4 C = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[3]);
+	float4 D = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[4]);
+
+	#if ES2_USE_SUN
+		// The {0.0 to 1.0} range is focus.
+		// The {1.0 to 65504.0} range is light shaft source intensity (always at fully out of focus).
+		// Must clamp back to {0.0 to 1.0} range.
+		A.a = min(1.0, A.a);
+		B.a = min(1.0, B.a);
+		C.a = min(1.0, C.a);
+		D.a = min(1.0, D.a);
+	#endif
+
+	// To support near DOF the {0.0 to 1.0} maps to {-16384.0 to 16384.0}.
+	A.a = A.a * (2.0 * 16384.0) - 16384.0;
+	B.a = B.a * (2.0 * 16384.0) - 16384.0;
+	C.a = C.a * (2.0 * 16384.0) - 16384.0;
+	D.a = D.a * (2.0 * 16384.0) - 16384.0;
+
+	// Make sure there are no zeros.
+	// Alpha ends up as circle of confusion size.
+	// Near diolation factor applied here.
+	// The 1/8 factor is to workaround mobile hardware lack of precision.
+	A.a = max(N, abs(A.a) + 1.0/8.0);
+	B.a = max(N, abs(B.a) + 1.0/8.0);
+	C.a = max(N, abs(C.a) + 1.0/8.0);
+	D.a = max(N, abs(D.a) + 1.0/8.0);
+
+	// Mix weighted by circle of confusion.
+	// This tends to erode the effect of more infocus samples (removes bleeding artifacts).
+	OutColor = ((A * A.a) + (B * B.a) + (C * C.a) + (D * D.a)) * rcp(A.a + B.a + C.a + D.a);
+
+	// Clamp rgb to prevent overflow during scale.
+	OutColor.rgb = min(OutColor.rgb, 65504.0/16384.125);
+
+	OutColor.rgb *= OutColor.a;
+}
+
+
+//
+// DOF Blur
+//
+
+// DOF BOKEH SAMPLING PATTERN
+// --------------------
+// # = bilinear tap
+// * = the single point tap to get the current pixel
+//
+//       1 1    
+//   4 4 1 * 2 2
+//   4 4 3 3 2 2 
+//       3 3
+//
+// This pattern is very important.
+// All bilinear taps are not always exactly in the middle of 4 texels.
+// It is an asymetric pattern (minimize overlap, allow for different radii).
+#define DOF_1 half2(-0.500, 0.50)
+#define DOF_2 half2( 0.75,-0.50)
+#define DOF_3 half2(-0.500,-1.25)
+#define DOF_4 half2(-1.75,-0.50)
+
+
+
+// This will compute a constant half2 from a constant half2.
+// This computes the soft blend factor for intersection test
+// (does circle of confusion intersect pixel center).
+// Large feather here to make transitions smooth with a few samples.
+half2 DofIntersectionScaleBias(half2 Offset) 
+{
+	// Working in distance squared.
+	// Normalize by maximum distance 
+	half RcpMaxDst = rcp(sqrt(dot(DOF_4, DOF_4)));
+	half Dst0 = sqrt(dot(DOF_1, DOF_1));
+	half Dst1 = sqrt(dot(Offset, Offset));
+	Dst0 = max(Dst0, Dst1 - 0.25);
+	Dst0 *= RcpMaxDst;
+	Dst1 *= RcpMaxDst;
+	half Scale = 1.0/(Dst1 - Dst0);
+	half Bias = (-Dst0) * Scale;
+	return half2(Scale, Bias);
+}
+
+half DofIntersect(half CocTap, half2 Offset)
+{
+	half2 ConstScaleBias = DofIntersectionScaleBias(Offset);
+	// Undo the scale factor.
+	ConstScaleBias.x *= 1.0/16384.0;
+	return saturate(CocTap * ConstScaleBias.x + ConstScaleBias.y);
+}
+
+half DofWeight(half Coc) 
+{
+	half Dst0 = sqrt(dot(DOF_3, DOF_3)) / sqrt(dot(DOF_4, DOF_4));
+	half Dst1 = sqrt(dot(DOF_4, DOF_4)) / sqrt(dot(DOF_4, DOF_4));
+	half Scale = 1.0/(Dst1 - Dst0);
+	half Bias = (-Dst0) * Scale;
+	// Undo the 16384.0 scale factor in this constant.
+	Scale *= 1.0/16384.0;
+	// Scale and Bias should be compile time constants.
+	return saturate(Coc * Scale + Bias);
+}
+
+void DofBlurVS_ES2(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out float2 OutTexCoords[5] : TEXCOORD0,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	DrawRectangle(InPosition, InTexCoord, OutPosition, InTexCoord);
+
+    OutTexCoords[0] = InTexCoord.xy;
+    OutTexCoords[1] = InTexCoord.xy + float2(DOF_1) * PostprocessInput0Size.zw;
+    OutTexCoords[2] = InTexCoord.xy + float2(DOF_2) * PostprocessInput0Size.zw;
+    OutTexCoords[3] = InTexCoord.xy + float2(DOF_3) * PostprocessInput0Size.zw;
+    OutTexCoords[4] = InTexCoord.xy + float2(DOF_4) * PostprocessInput0Size.zw;
+}
+
+void DofBlurPS_ES2(
+	float2 InUVs[5] : TEXCOORD0,
+	out half4 OutColor : SV_Target0
+	)
+{
+	// Near diolation size is copied into alpha for the tonemapper pass.
+	OutColor.a = PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[0]).r;
+
+	half4 C1 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[1]);
+	half4 C2 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[2]);
+	half4 C3 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[3]);
+	half4 C4 = PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[4]);
+
+	// Restore color (colors are weighted by CoC to help remove bleeding).
+	C1.rgb *= rcp(C1.a);
+	C2.rgb *= rcp(C2.a);
+	C3.rgb *= rcp(C3.a);
+	C4.rgb *= rcp(C4.a);
+
+	// First bilinear tap always has 1.0 weight, the rest are weighted.
+	half W1 = 1.0, W2, W3, W4;
+	W2 = W3 = W4 = DofWeight(C1.a);
+	
+	// Remove contribution of taps who's circle of confusion does not intersect the pixel.
+	W2 *= DofIntersect(C2.a, DOF_2);
+	W3 *= DofIntersect(C3.a, DOF_3);
+	W4 *= DofIntersect(C4.a, DOF_4);
+
+	OutColor.rgb = ((C1.rgb * W1) + (C2.rgb * W2) + (C3.rgb * W3) + (C4.rgb * W4)) * rcp(W1 + W2 + W3 + W4);
+}
+
+
+//
+// First sun shaft blur and move sun intensity from alpha to single channel output.
+//
+
+half HighlightCompression(half Channel) 
+{
+	return Channel * rcp(1.0 + Channel);
+}
+	
+half HighlightDecompression(half Channel) 
+{
+	return Channel * rcp(1.0 - Channel);
+}
+
+
+// Convert from [-1 to 1] to view rectangle in texture which is somewhere in [0 to 1].
+float2 SunShaftPosToUV(float2 Pos)
+{
+//	return (Pos.xy * ScreenPosToPixel.xy + ScreenPosToPixel.zw + 0.5f) * PostprocessInput0Size.zw;
+	return Pos.xy * float2(0.5,-0.5) + 0.5;
+}
+
+// Center of light shaft.
+float4 LightShaftCenter;
+
+// Position in {-1 to 1} space.
+float2 SunPos() 
+{
+	return LightShaftCenter.xy;
+}
+
+float2 SunShaftRect(float2 InPosition, float amount) 
+{
+	float2 center = SunPos();
+	return SunShaftPosToUV(lerp(center, InPosition, amount));
+}
+
+// Positions for sun shaft steps.
+// The very tight first position makes direct light to eye bloom a little.
+// Otherwise want even spacing.
+#define SUN_P0 (31.0/32.0)
+#define SUN_P1 (27.0/32.0)
+#define SUN_P2 (23.0/32.0)
+#define SUN_P3 (19.0/32.0)
+#define SUN_P4 (15.0/32.0)
+#define SUN_P5 (11.0/32.0)
+#define SUN_P6 (7.0/32.0)
+// SUN_P7 is fixed at zero.
+
+#define SUN_M 1.0
+
+void SunAlphaVS_ES2(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out float2 OutTexCoords[8] : TEXCOORD0,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	DrawRectangle(InPosition, InTexCoord, OutPosition, InTexCoord);
+
+    OutTexCoords[0] = SunShaftRect(OutPosition.xy, 1.0 - SUN_P0 * SUN_M);
+    OutTexCoords[1] = SunShaftRect(OutPosition.xy, 1.0 - SUN_P1 * SUN_M);
+    OutTexCoords[2] = SunShaftRect(OutPosition.xy, 1.0 - SUN_P2 * SUN_M);
+    OutTexCoords[3] = SunShaftRect(OutPosition.xy, 1.0 - SUN_P3 * SUN_M);
+    OutTexCoords[4] = SunShaftRect(OutPosition.xy, 1.0 - SUN_P4 * SUN_M);
+    OutTexCoords[5] = SunShaftRect(OutPosition.xy, 1.0 - SUN_P5 * SUN_M);
+    OutTexCoords[6] = SunShaftRect(OutPosition.xy, 1.0 - SUN_P6 * SUN_M);
+    OutTexCoords[7] = InTexCoord.xy;
+}
+
+#undef SUN_M
+
+// Remove the +1 bias.
+// This sets negatives to zero because 0-1 is used for DOF.
+half SunUnBias(half A)
+{
+	#if ES2_USE_DOF
+		return max(0.0, A - 1.0);
+	#else
+		return A;
+	#endif
+}
+
+void SunAlphaPS_ES2(
+	float2 InUVs[8] : TEXCOORD0,
+	out half4 OutColor : SV_Target0
+	)
+{
+	OutColor.r = 
+		SunUnBias(PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[0]).a) * 0.125 +
+		SunUnBias(PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[1]).a) * 0.125 +
+		SunUnBias(PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[2]).a) * 0.125 +
+		SunUnBias(PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[3]).a) * 0.125 +
+		SunUnBias(PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[4]).a) * 0.125 +
+		SunUnBias(PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[5]).a) * 0.125 +
+		SunUnBias(PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[6]).a) * 0.125 +
+		SunUnBias(PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[7]).a) * 0.125;
+	OutColor.r = HighlightCompression(OutColor.r);
+	OutColor.gba = 0;
+}
+
+
+
+
+//
+// Second sun shaft blur.
+//
+
+#define SUN_M 0.5
+
+void SunBlurVS_ES2(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out float2 OutTexCoords[8] : TEXCOORD0,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	DrawRectangle(InPosition, InTexCoord, OutPosition, InTexCoord);
+
+    OutTexCoords[0] = SunShaftRect(OutPosition.xy, 1.0 - SUN_P0 * SUN_M);
+    OutTexCoords[1] = SunShaftRect(OutPosition.xy, 1.0 - SUN_P1 * SUN_M);
+    OutTexCoords[2] = SunShaftRect(OutPosition.xy, 1.0 - SUN_P2 * SUN_M);
+    OutTexCoords[3] = SunShaftRect(OutPosition.xy, 1.0 - SUN_P3 * SUN_M);
+    OutTexCoords[4] = SunShaftRect(OutPosition.xy, 1.0 - SUN_P4 * SUN_M);
+    OutTexCoords[5] = SunShaftRect(OutPosition.xy, 1.0 - SUN_P5 * SUN_M);
+    OutTexCoords[6] = SunShaftRect(OutPosition.xy, 1.0 - SUN_P6 * SUN_M);
+    OutTexCoords[7] = InTexCoord.xy;
+}
+
+#undef SUN_M
+
+void SunBlurPS_ES2(
+	float2 InUVs[8] : TEXCOORD0,
+	out half4 OutColor : SV_Target0
+	)
+{
+	OutColor.r = 
+		PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[0]).r * 0.125 +
+		PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[1]).r * 0.125 +
+		PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[2]).r * 0.125 +
+		PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[3]).r * 0.125 +
+		PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[4]).r * 0.125 +
+		PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[5]).r * 0.125 +
+		PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[6]).r * 0.125 +
+		PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[7]).r * 0.125;
+	OutColor.gba = 0;
+}
+
+
+//
+// Third sun shaft blur, composite with bloom, vignette.
+//
+
+#define SUN_M 0.25
+
+void SunMergeVS_ES2(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out float4 OutTexCoordVignette : TEXCOORD0,
+	out float4 OutTexCoords[7] : TEXCOORD1,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	DrawRectangle(InPosition, InTexCoord, OutPosition, InTexCoord);
+
+	OutTexCoordVignette.xy = InTexCoord.xy;
+	OutTexCoordVignette.zw =  VignetteSpace(OutPosition.xy);
+
+	float Start;
+	float Scale;
+
+	Start = 2.0/6.0;
+	Scale = 0.66/2.0;
+
+	OutTexCoords[0].xy = InTexCoord.xy + Circle(Start, 6.0, 0.0) * Scale * PostprocessInput2Size.zw;
+	OutTexCoords[1].xy = InTexCoord.xy + Circle(Start, 6.0, 1.0) * Scale * PostprocessInput2Size.zw;
+	OutTexCoords[2].xy = InTexCoord.xy + Circle(Start, 6.0, 2.0) * Scale * PostprocessInput2Size.zw;
+	OutTexCoords[3].xy = InTexCoord.xy + Circle(Start, 6.0, 3.0) * Scale * PostprocessInput2Size.zw;
+	OutTexCoords[4].xy = InTexCoord.xy + Circle(Start, 6.0, 4.0) * Scale * PostprocessInput2Size.zw;
+	OutTexCoords[5].xy = InTexCoord.xy + Circle(Start, 6.0, 5.0) * Scale * PostprocessInput2Size.zw;
+
+    OutTexCoords[0].zw = SunShaftRect(OutPosition.xy, 1.0 - SUN_P0 * SUN_M);
+    OutTexCoords[1].zw = SunShaftRect(OutPosition.xy, 1.0 - SUN_P1 * SUN_M);
+    OutTexCoords[2].zw = SunShaftRect(OutPosition.xy, 1.0 - SUN_P2 * SUN_M);
+    OutTexCoords[3].zw = SunShaftRect(OutPosition.xy, 1.0 - SUN_P3 * SUN_M);
+    OutTexCoords[4].zw = SunShaftRect(OutPosition.xy, 1.0 - SUN_P4 * SUN_M);
+    OutTexCoords[5].zw = SunShaftRect(OutPosition.xy, 1.0 - SUN_P5 * SUN_M);
+    OutTexCoords[6].xy = SunShaftRect(OutPosition.xy, 1.0 - SUN_P6 * SUN_M);
+	OutTexCoords[6].zw = float2(0.0, 0.0);
+
+}
+
+#undef SUN_M
+
+float4 SunColorVignetteIntensity;
+float3 BloomColor;
+
+void SunMergePS_ES2(
+	float4 InUVVignette : TEXCOORD0,
+	float4 InUVs[7] : TEXCOORD1,
+	out half4 OutColor : SV_Target0
+	)
+{
+	#if ES2_USE_BLOOM
+
+		float Scale1 = 1.0/7.0;
+
+		float Scale2 = 1.0/7.0;
+
+		half3 Bloom2 = (
+			HDRDecode(PostprocessInput1.Sample(PostprocessInput1Sampler, InUVVignette.xy).rgba) *Scale1 +
+			HDRDecode(PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[0].xy).rgba) * Scale2 +
+			HDRDecode(PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[1].xy).rgba) * Scale2 +
+			HDRDecode(PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[2].xy).rgba) * Scale2 +
+			HDRDecode(PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[3].xy).rgba) * Scale2 +
+			HDRDecode(PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[4].xy).rgba) * Scale2 +
+			HDRDecode(PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[5].xy).rgba) * Scale2) * rcp(Scale1 * 1.0 + Scale2 * 6.0);
+
+		OutColor.rgb = HDRDecode(PostprocessInput2.Sample(PostprocessInput2Sampler, InUVVignette.xy));
+
+		OutColor.rgb += Bloom2 * BloomColor;
+
+		// Have 5 layers on mobile.
+		OutColor.rgb *= 1.0/5.0;
+
+	#else
+		OutColor.rgb = half3(0.0, 0.0, 0.0);
+	#endif
+
+	#if ES2_USE_SUN
+		half Sun = 
+			PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[0].zw).r * 0.125 +
+			PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[1].zw).r * 0.125 +
+			PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[2].zw).r * 0.125 +
+			PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[3].zw).r * 0.125 +
+			PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[4].zw).r * 0.125 +
+			PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[5].zw).r * 0.125 +
+			PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[6].xy).r * 0.125 +
+			PostprocessInput0.Sample(PostprocessInput0Sampler, InUVVignette.xy).r * 0.125;
+		Sun = HighlightDecompression(Sun);
+		OutColor.rgb += SunColorVignetteIntensity.rgb * Sun;
+	#endif
+
+	half Vignette = ComputeVignetteMask(InUVVignette.zw, SunColorVignetteIntensity.a);
+
+	OutColor.a = Vignette;
+	OutColor.rgb *= OutColor.a;
+
+	OutColor = HDREncode(OutColor);
+}
+
+#undef SUN_P0
+#undef SUN_P1
+#undef SUN_P2
+#undef SUN_P3
+#undef SUN_P4
+#undef SUN_P5
+#undef SUN_P6
+
+
+
+
+//
+// Sun merge pass without sun but for small bloom final pass and vignette only.
+//
+
+void SunMergeSmallVS_ES2(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out float4 OutTexCoordVignette : TEXCOORD0,
+	out float2 OutTexCoords[6] : TEXCOORD1,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	DrawRectangle(InPosition, InTexCoord, OutPosition, InTexCoord);
+	OutTexCoordVignette.xy = InTexCoord.xy;
+	OutTexCoordVignette.zw =  VignetteSpace(OutPosition.xy);
+
+	float Start;
+	float Scale;
+
+	Start = 2.0/6.0;
+	Scale = 0.66/2.0;
+	Scale *= 8.0;
+
+	OutTexCoords[0] = InTexCoord.xy + Circle(Start, 6.0, 0.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[1] = InTexCoord.xy + Circle(Start, 6.0, 1.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[2] = InTexCoord.xy + Circle(Start, 6.0, 2.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[3] = InTexCoord.xy + Circle(Start, 6.0, 3.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[4] = InTexCoord.xy + Circle(Start, 6.0, 4.0) * Scale * PostprocessInput0Size.zw;
+	OutTexCoords[5] = InTexCoord.xy + Circle(Start, 6.0, 5.0) * Scale * PostprocessInput0Size.zw;
+}
+
+float3 BloomColor2;
+
+void SunMergeSmallPS_ES2(
+	float4 InUVVignette : TEXCOORD0,
+	float2 InUVs[6] : TEXCOORD1,
+	out half4 OutColor : SV_Target0
+	)
+{
+	float Scale1 = 1.0/7.0;
+
+	float Scale2 = 1.0/7.0;
+
+	half3 Bloom1 = (
+		PostprocessInput0.Sample(PostprocessInput0Sampler, InUVVignette.xy).rgb * Scale1 + 
+		PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[0].xy).rgb * Scale2 + 
+		PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[1].xy).rgb * Scale2 +
+		PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[2].xy).rgb * Scale2 + 
+		PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[3].xy).rgb * Scale2 + 
+		PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[4].xy).rgb * Scale2 + 
+		PostprocessInput0.Sample(PostprocessInput0Sampler, InUVs[5].xy).rgb * Scale2) * rcp(Scale1 * 1.0 + Scale2 * 6.0);
+
+	OutColor.rgb = (
+		PostprocessInput1.Sample(PostprocessInput1Sampler, InUVVignette.xy).rgb * Scale1 + 
+		PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[0].xy).rgb * Scale2 + 
+		PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[1].xy).rgb * Scale2 +
+		PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[2].xy).rgb * Scale2 + 
+		PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[3].xy).rgb * Scale2 + 
+		PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[4].xy).rgb * Scale2 + 
+		PostprocessInput1.Sample(PostprocessInput1Sampler, InUVs[5].xy).rgb * Scale2) * rcp(Scale1 * 1.0 + Scale2 * 6.0);
+
+	OutColor.rgb *= BloomColor2;
+
+	OutColor.rgb += Bloom1 * BloomColor;
+
+	// Have 5 layers on mobile (actually only 2 in this shader).
+	OutColor.rgb *= 1.0/5.0;
+
+	// Adjusting for area difference in layers vs PC.
+	OutColor.rgb *= 1.0/4.0;
+
+	half Vignette = ComputeVignetteMask(InUVVignette.zw, SunColorVignetteIntensity.a);
+
+	OutColor.a = Vignette;
+	OutColor.rgb *= OutColor.a;
+}
+
+
+
+
+//
+// Average results of bloom/sunshaft/vignette for 2 frames (used for temporal AA).
+//
+
+void SunAvgVS_ES2(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out float2 OutTexCoord : TEXCOORD0,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	DrawRectangle(InPosition, InTexCoord, OutPosition, OutTexCoord);
+}
+
+void SunAvgPS_ES2(
+	float2 InUV : TEXCOORD0,
+	out half4 OutColor : SV_Target0
+	)
+{
+	OutColor = 
+		PostprocessInput0.Sample(PostprocessInput0Sampler, InUV.xy).rgba * 0.5 +
+		PostprocessInput1.Sample(PostprocessInput1Sampler, InUV.xy).rgba * 0.5;
+}
+
+
+
+//
+// Ultra simple temporal antialiasing shader which works without motion vectors.
+//
+
+float AaBlendAmount;
+
+void AaVS_ES2(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out float2 OutUV[6] : TEXCOORD0,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	DrawRectangle(InPosition, InTexCoord, OutPosition, InTexCoord);
+
+	// AA texture coordinates.
+	float AaX = View.TemporalAAParams.x;
+	// Y is flipped here in comparison with the coords in SceneVisibility (GL -y flip).
+	float2 Aa1 = float2(0.5,-0.0);
+	float2 Aa2 = float2(-0.0,0.5);
+	if(abs(AaX) == 0.0) Aa1 = float2(-0.0,0.5);
+	if(abs(AaX) == 0.0) Aa2 = float2(0.5,-0.0);
+	OutUV[0] = InTexCoord.xy + (Aa1 + float2(-0.75, 0.0)) * PostprocessInput0Size.zw;
+	OutUV[1] = InTexCoord.xy + (Aa1 + float2( 0.0,-0.75)) * PostprocessInput0Size.zw;
+	OutUV[2] = InTexCoord.xy + Aa1 * PostprocessInput0Size.zw;
+	OutUV[3] = InTexCoord.xy + (Aa1 + float2( 0.0, 0.75)) * PostprocessInput0Size.zw;
+	OutUV[4] = InTexCoord.xy + (Aa1 + float2( 0.75, 0.0)) * PostprocessInput0Size.zw;
+	OutUV[5] = InTexCoord.xy + Aa2 * PostprocessInput0Size.zw;
+}
+
+void AaPS_ES2(
+	float2 UV[6] : TEXCOORD0,
+	out half4 OutColor : SV_Target0
+	)
+{
+	//   N
+	// w M E            P = previous middle
+	//   S
+	half4 ColorN = PostprocessInput0.Sample(PostprocessInput0Sampler, UV[0].xy);
+	half4 ColorW = PostprocessInput0.Sample(PostprocessInput0Sampler, UV[1].xy);
+	half4 ColorM = PostprocessInput0.Sample(PostprocessInput0Sampler, UV[2].xy);
+	half4 ColorE = PostprocessInput0.Sample(PostprocessInput0Sampler, UV[3].xy);
+	half4 ColorS = PostprocessInput0.Sample(PostprocessInput0Sampler, UV[4].xy);
+	half4 ColorP = PostprocessInput1.Sample(PostprocessInput1Sampler, UV[5].xy);
+
+	half LumaN = ColorN.g;
+	half LumaW = ColorW.g;
+	half LumaM = ColorM.g;
+	half LumaE = ColorE.g;
+	half LumaS = ColorS.g;
+	half LumaP = ColorP.g;
+
+	half LumaMin = min(LumaM, min(min(LumaN, LumaS), min(LumaW, LumaE)));
+	half LumaMax = max(LumaM, max(max(LumaN, LumaS), max(LumaW, LumaE)));
+
+	// Using circle of confusion size in alpha to increase the blend between two frames.
+	// Depth of field would flicker otherwise.
+	half BlendAmount = saturate(min(ColorM.a, ColorP.a) * 4.0); 
+	BlendAmount = max(BlendAmount * 0.5, AaBlendAmount);
+
+	// BlendAmount = 0.5 -> Full ghosting (average of two frames).
+	// BlendAmount = 0.0 -> No ghosting but lots of flicker.
+	LumaMin = min(LumaM, LumaP) * BlendAmount + LumaMin * (1.0 - BlendAmount);
+	LumaMax = max(LumaM, LumaP) * BlendAmount + LumaMax * (1.0 - BlendAmount);
+
+	half LumaT = LumaM * 0.5 + LumaP * 0.5;
+
+	LumaT = max(LumaT, LumaMin);
+	LumaT = min(LumaT, LumaMax);
+
+	half BlendFinal = saturate((LumaT - LumaM) * rcp(LumaP - LumaM));
+
+	OutColor.rgb = lerp(ColorM.rgb, ColorP.rgb, BlendFinal);
+	OutColor.a = 0;
+}
+

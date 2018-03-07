@@ -1,0 +1,110 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+#include "Common.ush"
+#include "SlateShaderCommon.ush"
+
+
+#define BILINEAR_FILTER_METHOD 1
+#define MAX_SAMPLES 127
+
+#if BILINEAR_FILTER_METHOD
+
+// Weigts and offsets are packed into 4 floats (Weight, Offset, Weight, Offset)
+float4 WeightAndOffsets[MAX_SAMPLES/2];
+#else
+
+#define MAX_SAMPLES 127
+// Weigts and offsets are packed into 4 floats (Weight, Offset, Weight, Offset)
+float4 WeightAndOffsets[MAX_SAMPLES];
+
+#endif
+
+/** Blur sample count */
+int SampleCount;
+
+
+Texture2D ElementTexture;
+SamplerState ElementTextureSampler;
+
+float4 BufferSizeAndDirection;
+float4 UVBounds;
+float4 ShaderParams;
+
+float4 GetSample(float Weight, float Offset, float2 UV)
+{
+	const float2 MinUV = UVBounds.xy;
+	const float2 MaxUV = UVBounds.zw;
+	const float2 Direction = BufferSizeAndDirection.zw;
+	const float2 BufferSize = BufferSizeAndDirection.xy;
+	const float2 UVOffset = float2(Offset*BufferSize.x*Direction.x, Offset*BufferSize.y*Direction.y);
+
+	return 
+		Texture2DSample(ElementTexture, ElementTextureSampler, clamp(UV + UVOffset, MinUV, MaxUV)) * Weight
+		+ Texture2DSample(ElementTexture, ElementTextureSampler, clamp(UV - UVOffset, MinUV, MaxUV)) * Weight;
+}
+
+float4 GaussianBlurMain( FScreenVertexOutput Input ) : SV_Target0
+{
+#if 0
+	float4 OutColor = Texture2DSample(ElementTexture, ElementTextureSampler, Input.UV);
+#else
+
+	float4 OutColor = Texture2DSample(ElementTexture, ElementTextureSampler, clamp(Input.UV, UVBounds.xy, UVBounds.zw)) * WeightAndOffsets[0].x;
+	// First offset is in zw
+	{
+		float Weight = WeightAndOffsets[0].z;
+		float Offset = WeightAndOffsets[0].w;
+
+		OutColor += GetSample(Weight, Offset, Input.UV);
+	}
+
+	for (int i = 2; i<SampleCount; i+=2)
+	{
+		int Index = i/2;
+		{
+			float Weight = WeightAndOffsets[Index].x;
+			float Offset = WeightAndOffsets[Index].y;
+
+			OutColor += GetSample(Weight, Offset, Input.UV);
+		}
+
+		{
+			float Weight = WeightAndOffsets[Index].z;
+			float Offset = WeightAndOffsets[Index].w;
+
+			OutColor += GetSample(Weight, Offset, Input.UV);
+		}
+
+	}
+#endif
+
+	return float4(OutColor.rgb, 1);
+}
+
+float4 DownsampleMain(FScreenVertexOutput Input) : SV_Target0
+{
+#if 0
+	return Texture2DSample(ElementTexture, ElementTextureSampler, Input.UV);
+#else
+
+	float2 UV[4];
+
+	float2 MinUV = UVBounds.xy;
+	float2 MaxUV = UVBounds.zw;
+
+	// Shader params X/Y stores the UV offset in each direction
+	UV[0] = clamp(Input.UV + ShaderParams.xy * float2(-1, -1), MinUV, MaxUV);
+	UV[1] = clamp(Input.UV + ShaderParams.xy * float2(1, -1), MinUV, MaxUV);
+	UV[2] = clamp(Input.UV + ShaderParams.xy * float2(-1, 1), MinUV, MaxUV);
+	UV[3] = clamp(Input.UV + ShaderParams.xy * float2(1, 1), MinUV, MaxUV);
+
+	float4 Sample[4];
+
+	UNROLL for(int i = 0; i < 4; ++i)
+	{
+		Sample[i] = Texture2DSample(ElementTexture, ElementTextureSampler, UV[i]);
+	}
+
+	return float4(Sample[0] + Sample[1] + Sample[2] + Sample[3]) * 0.25f;
+#endif
+}

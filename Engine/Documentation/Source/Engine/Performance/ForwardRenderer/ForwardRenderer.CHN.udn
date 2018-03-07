@@ -1,0 +1,146 @@
+﻿INTSourceChangelist:3277377
+Availability:Public
+Title:VR 前向着色渲染器
+Crumbs: %ROOT%, Engine, Engine/Performance
+Description:说明使用前向着色渲染器提升 VR 性能的优势。
+type: overview
+version:4.14
+parent:Engine/Performance
+tags:Performance and Profiling
+tags:Rendering
+tags:VR
+topic-image:ForwardRenderingTopic.png
+social-image:ForwardRenderingSocial.png
+related:Engine/Performance
+related:Engine/Performance/GPU
+related:Engine/Rendering
+
+[REGION:warning]
+此功能当前仍在实验阶段，一些部分可能无法正常工作，在未来更新中也可能被修改。 
+[/REGION]
+
+[REGION:banner]
+![](ForwardRenderingBanner.png)
+[/REGION]
+
+[TOC(start:2 end:2)]
+
+[EXCERPT:intro]
+虚幻引擎 4 默认使用延迟渲染器，因为它的功能最全面，渲染功能更多。 
+然而，延迟渲染器存在一些权衡，可能不适用于所有 VR 项目。 
+**前向渲染** 提供更快的基线和更快的渲染通道，可在 VR 平台拥有更好的性能。 
+前向渲染不仅速度更快，相较于延迟渲染器它还拥有更多抗锯齿选项，带来更为清晰明快的显示效果。 
+[/EXCERPT]
+
+## 启用前向着色
+
+启用前向着色渲染器的步骤：
+
+1. 在 **Edit** 菜单中打开 **Project Settings**。
+
+1. 选择左边的 **Rendering** 标签并找到 **Forward Shading** 类目。
+
+1. 启用 **Forward Shading**。
+
+![](EnableForwardShading.png)
+
+此时将弹出重启编辑器的提示。完成重启后，即可开始使用前向渲染器的选项和功能。 
+
+## 启用多重采样抗锯齿
+
+使用多重采样抗锯齿（MSAA）的步骤：
+
+1. 在 **Edit** 菜单中打开 **Project Settings**。
+
+1. 选择左边的 **Rendering** 标签并找到 **Default Settings** 类目。
+
+1. 将 **Anti-Aliasing Method** 属性设为 **MSAA**。
+
+![](EnableMSAA.png)
+
+前向渲染器支持 MSAA 和临时抗锯齿（TAA）。在多数情况下，TAA 更为实用，因为它可移除几何体锯齿和镜面锯齿。 
+然而在 VR 项目中，头部追踪引起的恒定亚像素运动会造成不必要的模糊。MSAA 方为更佳选择。 
+选择使用 MSAA 的项目将需要编译内容，以减轻反射锯齿。 
+此外，**Normal to Roughness** 功能有助于减少静态网格体自动 LOD 生成和细节法线贴图（可使远距离模型特征变平）引起的镜面锯齿，从而减少小三角面引起锯齿。 
+
+在我们的测试中，使用 MSAA（替代 TAA）提高了约 25% 的 GPU 帧时（实际开销根据内容而定）。 
+
+下例为启用临时抗锯齿（TAA）和启用 4 倍 MSAA 的对比。 
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![With Temporal AA](TemporalAA.png)(w:1020)
+	[/PARAM]
+	[PARAM:after]
+	![With 4X MSAA](MSAA.png)(w:1020)
+	[/PARAM]
+[/OBJECT]
+
+[REGION:note]
+可使用控制台变量 `r.MSAACount` 控制每个像素计算的 MSAA 采样数。 
+指定 `r.MSAACount 1` 将退回使用 TAA，可在抗锯齿方法之间便利地进行切换。 
+[/REGION]
+
+## 性能与功能
+
+从延迟渲染器切换至前向渲染器后，项目性能可能有所提升。 
+
+进行一些渲染时，前向渲染器的速度比延迟渲染器更快。可在每个材质上禁用的功能可以实现最大的性能提升。 
+默认情况如下：只有最近的反射捕捉应用时不带视差矫正，除非材质使用高精度反射、高度雾按每个顶点计算、平面反射只应用到启用的材质上。 
+
+![](ForwardShading.png)
+
+在 Epic 最新的 VR 游戏《Robo Recall》上平衡这些选项。在使用 NVIDIA 970 GTX 显卡的情况下，前向渲染器比延迟渲染器的速度快约 22%。 
+
+![](ExampleImage.png)
+
+前向渲染器的工作原理是将灯光和反射捕捉剔除到一个视锥空间网格。前向通道中的每个像素在对其产生影响的灯光和反射捕捉上迭代，与它们共享材质。 
+静态光照的动态阴影为提前计算，并被打包到屏幕空间阴影遮罩的通道中，利用现有的 4 个重叠静态光照限制。 
+
+从延迟渲染器切换到前向渲染器时，必须使用虚幻引擎的 [](Engine/Performance) 工具测量游戏的性能。 
+需要对 [](Engine/Performance/GPU) 多加关注，了解 GPU 开销的来龙去脉；并使用 [](Engine/Performance/StatCommands) 协助分析。
+
+### 当前支持的功能
+
+此列表中包含前向渲染器当前支持的功能： 
+
+* 完全支持静态光照。包括来自可移动物体的动态阴影（此阴影将和预计算环境阴影混合）
+* 混合多个反射捕捉（带视差矫正）
+* 部分场景的平面反射（合成到反射捕捉中）
+* DBuffer 贴图
+* 预计算的光照和天空光照
+* 无阴影的可移动光照（任意数量）
+* 胶囊体阴影
+* 遮罩材质的透明覆盖
+* 兼容实例化立体
+* 最多 4 个重阴影投射可移动光照
+* 阴影投射光照上的光照函数
+
+## 已知问题和常见问题
+
+**尚不支持** 前向渲染器的以下功能： 
+
+* 屏幕空间技术（SSR、SSAO、接触阴影）
+* 动态阴影半透明度
+* 从静态光照获取环境阴影的半透明度
+* D-Buffer 贴图和动态模糊上的 MSAA
+
+
+
+以下是使用前向渲染器实验版本时的常见问题。 
+
+* **切换到前向渲染器时材质出错，是不是 GBuffer 场景纹理存在问题？** 
+	* 前向渲染器中，纹理采样无法访问 GBuffer（只能在延迟渲染器中访问）。 
+* **前向渲染器允许的纹理样本数量是否比延迟渲染器少？** 
+	* 前向渲染器将所有功能打包到一个着色器中，因此材质可用的纹理采样器更少。 
+	* 通常使用共享采样器即可解决此问题。 
+* **为什么 MSAA 出现问题，无法找到大气层雾的样本？** 
+	* 大气层雾暂时无法处理 MSAA。 
+	* 对高度雾而言，可使用顶点雾生成（Vertex Fogging）解决问题（启用前向着色后将自动启用该项）。 
+	* 这意味着它将在前向基础通道中进行计算，并获得正确的抗锯齿。 
+	* 大气仍在尚未测试的场景深度的延迟通道中计算，因此无法正确进行抗锯齿（有望在之后的版本中得到修复）。 
+
+
+
+	
+

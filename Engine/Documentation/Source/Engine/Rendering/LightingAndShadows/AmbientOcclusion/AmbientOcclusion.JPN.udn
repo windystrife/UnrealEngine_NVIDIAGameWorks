@@ -1,0 +1,89 @@
+﻿INTSourceChangelist:2666775
+Availability:Public
+Title:アンビエント オクルージョン
+Crumbs: %ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description:オクルージョンによるライトの減衰の程度
+Version:4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/AmbientOcclusion:title%](ao.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/tech_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/AmbientOcclusion:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/AmbientOcclusion:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/AmbientOcclusion]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[EXCERPT:AmbientOcclusion_Desc]
+**アンビエント オクルージョン** (SSAO) は、オクルージョンを起因とする光源の減衰の程度を表すエフェクトです。繊細な効果のもたらす上に、奥まった領域や面や岩の隙間を暗くしたり、その他の特性の見た目をより自然でリアルに表現する際に最も有益です。
+[/EXCERPT:AmbientOcclusion_Desc]
+
+[REGION:imagetable]
+| ![Ambient Occlusion - Off](ao_0.png)(w:300) | ![Ambient Occlusion - Visualized](ao_1.png)(w:300) | ![Ambient Occlusion - Final](ao_2.png)(w:300) |
+| :----: | :----: | :----: |
+| アンビエントオクルージョンが適用されていないシーン | アンビエントオクルージョンの適用のみ | アンビエントオクルージョンが適用されたシーン |
+[/REGION]
+
+このエフェクトは SSAO 手法で実現しています。つまり、スクリーン空間の後処理効果で AO の量が計算されています。 
+我々の手法は深度バッファと標準型の GBuffer (遅延シェーディング参照) を使用しています。これは法線マップの詳細が結果に影響を与えることを意味します。UE4 におけるエフェクトは、 AmbientCubemap に適用されます。ここではシャドウマッピングを使用しているため、直接照明に影響は及びません。
+
+「Visualize GBuffer」ビューモード (ビューモード参照) または「Visualize Ambient Occlusiion」フラグを表示して AO 値を直接見ることが出来ます。
+
+AO 値は GBuffer の一部であるため、マテリアルからも出力することが出来ます。SSAO とマテリアルの AO 値が組み合わさり、結果としてより暗いアンビエントオクルージョンとなります。
+
+| プロパティ | 説明 |
+| -------- | ----------- |
+| **Intensity** | アンビエント オクルージョンの量をグローバルに制御します。0.0 の値はアンビエント オクルージョンが適用されていないことを意味します。 1.0 の値は完全なアンビエント オクルージョンの適用を意味します。[INCLUDE:Engine/Rendering/LightingAndShadows/AmbientOcclusion#Intensity] |
+| **Radius** | アンリアル単位で半径を定義します。半径が大きいほどゆっくりと実行 (テクスチャのキャッシュ トラッシュ) し、サンプル数が制限されるためより多くのアーティファクトを表示します。[INCLUDE:#Radius] |
+| **Radius in WorldSpace** | 有効化されると、 **AO Radius** の値はワールド空間にあると仮定されます。さもなければ、ビュー空間にあると仮定されます。 |
+| **Distance** | オブジェクト周りの暗いハローを回避するために必要な微調整用のパラメータです。オブジェクトの濃さが分からないため、SSAO 技術にはzbuffer のみが存在します。[INCLUDE:Engine/Rendering/LightingAndShadows/AmbientOcclusion#Distance]
+| **Power** | 計算された暗色化効果の強度を制御します。 [INCLUDE:Engine/Rendering/LightingAndShadows/AmbientOcclusion#Power] |
+| **Bias** |アンビエント オクルージョンの詳細を微調整します。遠方の高精度なアーティファクトを回避するために何かしらのバイアスが必要です。アンリアル単位の >0 、デフォルト(3.0) 値は平面に適していますが詳細度は縮小します。<!--TODO: images--> |
+
+<!--
+[EXCERPT:Intensity]
+[REGION:imagetable]
+| ![AO Intensity - 0.0](ao_intensity_0.png)(w:390) | ![AO Intensity - 1.0](ao_intensity_1.png)(w:390)
+| :-----------: | :----------------: |
+| 0.0 | 1.0 |
+[/REGION]
+[/EXCERPT:Intensity]
+
+[EXCERPT:Radius]
+[REGION:imagetable]
+| ![AO Radius - 40.0](ao_radius_0.png)(w:255) | ![AO Radius - 80.0](ao_radius_1.png)(w:255) | ![AO Radius - 200.0](ao_radius_2.png)(w:255) |
+| :--------: | :---------: | :---------: |
+| 40.0 | 80.0 | 200.0 |
+[/REGION]
+[/EXCERPT:Radius]
+
+[EXCERPT:Distance]
+[REGION:imagetable]
+| ![AO Distance - 100.0](ao_distance_0.png)(w:390) | ![AO Distance - 1200.0](ao_distance_2.png)(w:390) |
+| :--------: | :--------: |
+| 100.0 | 1200.0 |
+[/REGION]
+[REGION:note]
+	この例の、右側のキャラクターの角まわりのハローにご注目ください。遠く離れた距離を設定すると、角の裏側の表面に対してオクルージョンを計算するといった非現実的な方法となります。
+[/REGION]
+[/EXCERPT:Distance]
+
+[EXCERPT:Power]
+[REGION:imagetable]
+| ![AO Power - 1.0](ao_power_0.png)(w:255) | ![AO Power - 4.0](ao_power_1.png)(w:255) | ![AO Power - 10.0](ao_power_2.png)(w:255) |
+| :--------: | :--------: | :--------: |
+| 1.0 | 4.0 | 10.0 |
+[/REGION]
+[/EXCERPT:Power]
+-->

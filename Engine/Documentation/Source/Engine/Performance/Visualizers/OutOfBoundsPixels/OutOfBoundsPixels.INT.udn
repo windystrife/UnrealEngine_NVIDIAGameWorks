@@ -1,0 +1,109 @@
+Availability:Public
+Title: Out of Bounds Pixels
+Crumbs: %ROOT%, Engine, Engine/Performance/Visualizers
+Description:Visualizing out of bounds pixels in the Unreal Editor viewport.
+version: 4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Performance/Visualizers/OutOfBoundsPixels:title%](OOBP_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Performance/Visualizers/OutOfBoundsPixels:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Performance/Visualizers/OutOfBoundsPixels:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Performance/Visualizers/OutOfBoundsPixels]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Performance/Visualizers/OutOfBoundsPixels:title%](OOBP_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Performance/Visualizers/OutOfBoundsPixels:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Performance/Visualizers/OutOfBoundsPixels:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Performance/Visualizers/OutOfBoundsPixels]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:banner]
+
+[/REGION]
+
+[TOC(start:2)]
+
+
+If you run into a situation where an object is flickering or perhaps it is disappearing even though a portion of it is still on screen, it may be because parts of it are 
+outside of its bounds. Common reasons for this are: use of world position offset or displacement in a shader, Skeletal Mesh without a physics asset, or a component setup to 
+inherit owner bounds.
+
+This causes frustum culling, occlusion culling, shadow casting, indirect lighting cache and various other rendering functions to operate incorrectly.  The most noticeable 
+artifact will be flickering as you rotate the camera, since it will be incorrectly culled as soon as the bounds are off screen.
+
+**Visualize -> Out of Bounds Pixels** will show you any pixel that is outside of its object's bounds.
+
+## Usage
+
+To enable this mode on any viewport, **Left-click** the **Show Button** on the viewport and select **Visualize -> Out of Bounds Pixels**.
+
+![](OOBP_showMenu.png)
+
+## Inherit Owner Bounds
+
+Blueprint components, often times, can be set to inherit the bounds of their parent, which can cause issues if the parent has smaller bounds than the child.
+
+The cube object below is a Blueprint composed of a Box Component (the red box in these images) and a Static Mesh Component. The Static Mesh is set to inherit its 
+bounds from the box. If the box extents are smaller than the Static Mesh, then Out of Bounds Pixels will show those portions in various colors (blue, yellow, 
+and white).
+
+[REGION:lightbox]
+[![](OOBP_smallBounds_boxExtents.png)(w:300)](OOBP_smallBounds_boxExtents.png) [![](OOBP_smallBounds.png)(w:300)](OOBP_smallBounds.png) [![](OOBP_smallBoundsRotated.png)(w:300)](OOBP_smallBoundsRotated.png)
+
+Since the bounding box (the blue box in these images) is always world aligned, rotating the box can bring portions of the mesh back into the bounding box. However, if any out 
+of bounds portion of the mesh remains in the camera view, it will disappear if the bounding box moves completely off camera.
+
+Below is a corrected Blueprint, with the Box Component's extents set correctly.
+
+[![](OOBP_correctBounds_boxExtents.png)(w:300)](OOBP_correctBounds_boxExtents.png) [![](OOBP_correctBounds.png)(w:300)](OOBP_correctBounds.png) [![](OOBP_correctBoundsRotated.png)(w:300)](OOBP_correctBoundsRotated.png)
+[/REGION]
+
+## World Position Offset or Displacement
+
+The other common time this can occur is when a shader is modifying the world position of vertices in real time, pushing them well outside the bounds of the object's original 
+bounding box:
+
+[REGION:lightbox]
+[![](OOBP_worldPostionOffsetIssue_02.png)(h:300)](OOBP_worldPostionOffsetIssue_02.png) [![](OOBP_worldPostionOffsetIssue_01.png)(h:300)](OOBP_worldPostionOffsetIssue_01.png)
+[/REGION]
+
+Because portions of this object will be visible after the bounding box is completely hidden or off camera, it will flicker or disappear at inappropriate times.
+
+In this case, **Bounds Scale** under the expanded field for **Rendering** in a Component's **Details** panel can be used to increase the bounding box of the mesh until it contains all the pixels.  Be careful 
+doing this on shadow casters though, large shadow casters have a large performance cost.  On Skeletal Meshes, the bounds are derived from the physics asset, and individual 
+bones can be marked as contributing to the bounds or not.
+
+![](OOBP_BoundsScale.png)
+
+## Skeletal Meshes
+
+The primary reason a Skeletal Mesh becomes displaced from its bounds is due to the animation causing the mesh to move away from its Actor root. However, a Skeletal Mesh with 
+a Physics Asset will use the Physics Asset for calculating its bounds. To enable this, **Right-click** the Skeletal Mesh in the **Content Browser** and select 
+**Create Physics Asset**. Using the default settings will get you past any errors being caused by the Skeletal Mesh bounds, but you will probably want to edit the results. 
+See the [Physics Asset Tool](Engine/Physics\PhAT) documentation for more information on editing a **Physics Asset**.

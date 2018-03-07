@@ -1,0 +1,121 @@
+﻿INTSourceChangelist:2872149
+Availability:Public
+Title:Collision モジュール
+Crumbs: %ROOT%, Engine, Engine/Rendering/ParticleSystems, Engine/Rendering/ParticleSystems/Reference
+Description:パーティクルによるアクタコリジョンの処理方法を管理するモジュール。
+Version:4.9
+
+[TOC(start:2 end:3)]
+
+## Collision モジュール
+
+これらのモジュールは、パーティクルによるアクタコリジョンの処理方法を管理します。
+
+### コリジョン
+
+[OBJECT:EmbeddedVideo]
+[PARAMLITERAL:width]
+640
+[/PARAMLITERAL]
+[PARAMLITERAL:height]
+360
+[/PARAMLITERAL]
+[PARAMLITERAL:videoid]
+uD7MQf6sZZU
+[/PARAMLITERAL]
+[/OBJECT]
+
+エミッタにパーティクルのコリジョンを処理させるパラメータです。以下のメンバーが含まれます。
+
+| プロパティ | 説明 |
+| ---- | ---- |
+| [REGION:tablesection]Collision[/REGION]||
+| **Damping Factor** | 衝突後にパーティクルを「遅延」させる度合いを表すベクター分布です。パーティクルのスポーン時に EmitterTime に基づいて値を取得し、パーティクルに格納します。|
+| **Damping Factor Rotation** | 衝突後にパーティクルの回転を「遅延」させる度合い表すベクター分布です。パーティクルのスポーン時に EmitterTime に基づいて値を取得し、パーティクルに格納します。|
+| **Max Collisions** | パーティクルで許容される最大衝突数を表す浮動小数点分布です。パーティクルのスポーン時に EmitterTime に基づいて値を取得します。|
+| **Collision Completion Option** | パーティクルが MaxCollision 数に達した時の動作を表す enum 値です。以下の値のどれかになります: [INCLUDE:#CollisionCompletionOption]|
+| **Apply Physics** | 衝突が発生したパーティクルとオブジェクト間に物理の適用を示すBoolean 値です。 [INCLUDE:#ApplyPhysicsNote] |
+| **Particle Mass** | CollisionCompletionOption が _true_ の場合、パーティクルの質量を表す浮動小数点分布です。パーティクルのスポーン時に EmitterTime に基づいて値を取得します。|
+| **Dir Scalar** | 相互貫通または大きなギャップの回避に「役立つ」、パーティクルの範囲のスケーリングに使用する float 値です。|
+| **Pawns Do Not Decrement Count** | _true_ の場合、Pawns と衝突した時も反応を示しますが、MaxCollision 数の計算からは除外されます。これを使用すると、ポーンからパーティクルを跳ね返しても空中でフリーズすることはありません。|
+| **Only Vertical Normals Decrement Count** | _true_ の場合、垂直衝突の法線がない衝突にも反応しますが、MaxCollision 数の計算からは除外されます。これを使用すると壁からパーティクルを跳ね返し、床に静止させることが出来ます。|
+| **Vertical Fudge Factor** | 垂直方向を決定する float 値です。正確な垂直線は Hit.Normal.Z == 1.0f になります。これにより、[1.0-VerticalFudgeFactor..1.0] の範囲にある Z コンポーネントを垂直コリジョンとして数えることが出来ます。|
+| **Delay Amount** | 衝突のパーティクルをチェックする前に遅延させる時間です。値は EmitterTime を使用して取得します。パーティクル フラグの IgnoreCollisions は、更新中はパーティクルの RelativeTime が _Delay Amount_ を超過するように設定されます。|
+| [REGION:tablesection]Performance[/REGION]||
+| **Drop Detail** | _true_ の場合、WorldInfo の _Drop Detail_ プロパティも _true_ であればモジュールは無視されます。|
+| **Collide Only if Visible** | _true_ の場合、コリジョンはパーティクル システムがレンダリングされている場合にのみ起こります。|
+| **Max Collision Distance** | パーティクルのコリジョンが起こる最長距離です。|
+
+
+**Collision** モジュールは、2 つのベクター (UsedDampingFactor とUsedDampingFactorRotation) と整数 (UsedMaxCollisions) をパーティクルのペイロードデータへ加算します。これらの値は、パーティクルごとにコリジョン情報を追跡する際に使用します。
+
+以下の疑似コードは、コリジョン パーティクルの更新プロセスを説明するものです。
+    
+    Determine the location of the particle.This is required due to the fact
+    that the actual location isn't calculated until after the Update call.
+    Determine the appropriate extent to use during the line check.
+    if (SingleLineCheck indicates collision)
+    {
+        if (UsedMaxCollisions-- > 0)  // Still collisions available
+        {
+            Adjust the velocity and rotation based on the collision
+            if (Applying physics)
+            {
+                Add an appropriate impulse to the hit object.
+                (The Mass is grabbed from the distribution relative to the
+                    particle time.)
+            }
+        }
+        else
+        {
+            Out of collisions for this particle
+            Perform the appropriate action to take based on the CollisionCompletionOption
+        }
+    }
+
+
+### iOS モバイル デバイスのパーティクル コリジョン
+
+**iOS** モバイル デバイス用の VFX のパーティクル コリジョン モジュールを使用する際には、**Min Desired Frame Rate** を 30 FPS 以下になるように調節しておかないと、パーティクル コリジョンがワールドのオブジェクトを衝突できない可能性が高くなります。 
+アンリアル エンジン (UE4) のフレーム レートが 30 FPS より低くなると、UE はパーティクル コリジョンを無効にしてフレーム レートを 30 FPS 以上に保とうとするためです。
+デフォルトでは OS プロジェクトは 30 FPS にロックされています。つまり、パーティクル コリジョンは最初は無効になるように設計されているのです。 
+UE4 iOS プロジェクトでこの事象が起こらないようにするには、**[Project Settings (プロジェクト設定)]** > **[General Settings (一般設定)]** > **[Framerate (フレームレート)]** を開きます。
+
+[REGION:lightbox]
+[![](Min_Desired_Frame_Rate.png)](Min_Desired_Frame_Rate.png)
+[/REGION]
+
+[Framerate] セクションを開いたら、**[Min Desired Frame Rate]** を 25 FPS といった **30** FPS 以下に設定します。
+次に、パーティクル エフェクト コリジョン モジュールの **[Performacne (パフォーマンス)]** セクションの **[Drop Detail (詳細を省く)]** オプションのチェックを外します。
+
+![](Drop_Detail_CM_Box.png)
+
+Min Desired Frame Rate を変更し、[Drop Detail (省略を省く)] のチェックを外したら、 
+プロジェクトを iOS モバイル デバイスに再クックまたは再デプロイするとパーティクル コリジョンが機能しているか確認します。 
+
+<!-----------
+
+#### Includes
+
+[EXCERPT:ApplyPhysicsNote]
+[REGION:note]
+	現在は一方向です。_パーティクルからオブジェクト_ パーティクルに物理は適用されていません。パーティクルが衝突するオブジェクトに適用する力積を生成するのみです。
+[/REGION]
+[/EXCERPT:ApplyPhysicsNote]
+
+
+[EXCERPT:CollisionCompletionOption]
+[REGION:simpletable]
+| **オプション** | **説明** |
+| --- | --- |
+|_EPCC_Kill_|MaxCollisions 数に到達すると、パーティクルを Kill (消去) します。(これはデフォルトの挙動です)。|
+|_EPCC_Freeze_|パーティクルを定位置にフリーズさせます。|
+|_EPCC_HaltCollisions_|衝突チェックを停止しますが、続けて更新します。これにより、パーティクルはオブジェクトを「通り抜け」ることになります。
+|_EPCC_FreezeTranslation_|パーティクルの平行移動を停止しますが、その他はすべて更新し続けます。|
+|_EPCC_FreeRotation_|パーティクルの回転を停止しますが、その他はすべて更新し続けます。|
+|_EPCC_FreeMovement_|パーティクルの平行移動/回転を停止しますが、その他はすべて更新し続けます。.|
+[/REGION]
+[/EXCERPT:CollisionCompletionOption]
+
+
+------->

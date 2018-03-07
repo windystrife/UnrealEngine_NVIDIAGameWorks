@@ -1,0 +1,39 @@
+﻿INTSourceChangelist:3169600
+Availability:Docs
+Title:オンライン ビーコン
+Crumbs: %ROOT%, Engine
+Description:オンライン ビーコン システムの概要
+Version:4.13
+parent:Engine
+Related:Gameplay/Networking/Actors/RPCs
+Related:Gameplay/Networking/Actors/Properties
+
+[TOC (start:2 end:3)]
+
+**オンライン ビーコン** は特殊なタイプの **アクタ** です。通常のゲーム接続せずに、( RPCs 経由) でサーバーと接続してインタラクトする負荷の軽い方法を提供します。ビルトインされたクラスの使用も可能であり、プロジェクト専用のインタラクション、ロジック、情報リクエストを実行するカスタムクラスへの拡張を目的としています。
+
+## オンライン Beacon Base クラス
+ビーコン クラスによって実行される一般的なアクションは、サービスの質に関する情報の要求です。クライアントが参加を望むゲームのスロットを確保し、ゲーム内のプレイヤー名を受け取り、進行中のゲームの特典と実施時間を調べるなどです。以下は、オンライン ビーコン システムの基礎となる、エンジンに実装されているクラスです。
+
+### AOnlineBeacon
+`AOnlineBeaconClient` と `AOnlineBeaconHost` の基本クラスです。`AActor`から直接操作します。
+
+### AOnlineBeaconHost
+このクラスは独自の `UNetDriver` を使って、リモート クライアント マシンからのオンライン ビーコン接続をリッスンします。受け取ると、登録されている `AOnlineBeaconHostObject` インスタンス リストを見て、送られてくるクライアントと一致し、それに対して接続するインスタンスを検索します。このクラスは通常、派生の必要はありません。クライアントおよび登録された `AOnlineBeaconHostObject` 間の最初の接続のみを管理します。
+
+### AOnlineBeaconClient
+このクラスの子供はホストへ接続し、実際の RPC を作成します。このうちの 1 つがクライアント マシン上にスポーンされ、サーバーの `AOnlineBeaconHost` で登録されている適切な `AOnlineBeaconHostObject` によって 1 つがサーバー上でスポーンされます。GetBeaconType` 関数 (クラス名) の出力は、デフォルトで、このクラスのインスタンスを適切なホスト オブジェクト クラスの中の登録済みインスタンスと一致させるために使います。通常はサーバーがアクタをスポーンしてからクライアントに対してレプリケートしますが、それと異なることにご注意ください。ただし、クライアントとサーバーのオブジェクトのコピーが接続されると、オブジェクトのレプリケーションが基準として振る舞い、双方とも他方に RPC を作成することが可能ですが、プロパティのレプリケーションに関してはサーバーのオブジェクトのバージョンが正式です。
+基本クラスには `OnConnected` と `OnFailure` 関数が実装されています。これらの関数は、接続時に RPC を実行する、あるいは接続エラーに対応する子クラスによってオーバーライドすることが可能です。オンライン ビーコン システムで重要なクラスです。ビーコンが要求するクライアント側での処理に対応します。2 つ目のインスタンスはオリジナルと同期しており、正常に接続されるとサーバー側でスポーンされます。そのため、このクラスはサーバー側でも、クライアントとサーバー RPC 経由、あるいはサーバーからクライアントへレプリケートされたプロパティ経由で調整および通信を行います。
+
+### AOnlineBeaconHostObject
+オーバーライドされた `AOnlineBeaconClient` クラスとの組み合わせができるように、このクラスもオーバーライドが可能です。`BeaconTypeName` メンバー変数に格納されている値と、クライアントの `GetBeaconType` の戻り値が一致すると組み合わせが完了です。サーバーの `AOnlineBeaconHost` は `AOnlineBeaconHostObject`、あるいは受け取った `AOnlineBeaconClient` の組み合わせ相手の `AOnlineBeaconHost` を見つけると、仮想関数 `SpawnBeaconActor` を使って `AOnlineBeaconClient` のローカル コピーをスポーンするように `AOnlineBeaconHostObject` に指示します。この関数はデフォルトで `ClientBeaconActorClass` メンバー変数を使用して、スポーンして、組み合わせ相手の `AOnlineBeaconClient` クラスに設定すべきアクタのクラスを決定します。また、クライアント オブジェクトのサーバー側のインスタンスがホスト オブジェクトと通信できるように、スポーンされたオブジェクトのサーバー側のコピーに `SetBeaconOwner` を呼び出します。この設定の多くは基本クラスで確立されるので、オーバーライドは必要ありません。
+
+## オンライン ビーコンの例
+あらかじめ作られた様々な Beacon クラス ペアが既にエンジンには存在しますが、Test Beacon は自分でビルドする方法のシンプルなサンプルなのでお勧めです。`ATestBeaconClient` は `AOnlineBeaconClient` から、`ATestBeaconHost` は `AOnlineBeaconHostObject` から派生します。Test Beacon は単純に、クライアントとサーバー間で関数の呼び出しを双方向に繰り返します。クラスは以下のようにして、一緒に機能します。
+1. `ATestBeaconHost` のコンストラクタ、`ClientBeaconActorClass` は `ATestBeaconClient` のクラスに設定され、`BeaconTypeName` は (`GetName` 関数を呼び出して) `ClientBeaconActorClass` の名前に設定されます。これにより、`AOnlineBeaconHost` は確実に 2 つの Test Beacon クラスと正しい組み合わせになります。
+1. クライアントの `ATestBeaconClient` が正常にサーバーと通信すると、サーバーの `AOnlineBeaconHost` インスタンスは登録された `ATestBeaconHost` に自身の `ATestBeaconClient` をスポーンしてクライアント側の `ATestBeaconClient` と関連づくように指示します。これは、クライアントとサーバー RPC が 2 つの `ATestBeaconClient` インスタンス間の受け渡しを可能にするので重要です。
+1. その後で、サーバーの `ATestBeaconHost` が クライアントの RPC の `OnClientConnected` を `ATestBeaconClient` インスタンス上に呼び出します。この関数はクライアント RPC なので、関数を呼び出すコマンドはサーバー上で関数を呼び出すのではなくクライアント マシンへ渡されます。
+1. クライアントの `ATestBeaconClient` インスタンス上で RPC が `ClientPing` を呼び出すためにオーバーライドされた仮想関数 `OnConnected`を実行します。
+1. `ClientPing` がデバッグ ログへテキストを出力し、次にサーバー RPC の `ServerPong` を呼び出します。`ServerPong` はネットワーク接続によってサーバー側へ送られて `ATestBeaconClient` インスタンス上で実行されます。
+1. `ServerPong` がデバッグ テキストを出力し、その後で `ClientPing` を呼び出し、再びネットワーク化された RPC をクライアントへトリガーします。
+1. このプロセスは無限に続きます。これらの RPC は特に何かをしているわけでもないので、同じ RPC で 2 回実行した際の間隔を記録して、サーバーの ping 時間を追跡し続けることができますが、通常はお勧めしません。この ping チェックはコンピューターやネットワークが許可するほどは頻繁に行いません。頻繁に行うと、クライアントまたはサーバーは ping を数回行うと、その後ぱったり停止してしまいます。RPC コールを継続的なループではなくて 1 回のみにするというユースケースもあります。例えば、どのような情報が特定のゲームやプロジェクトに関連する情報の種類によって、「このサーバーのゲームにはどのマップが使用されていますか？」とか「これは Capture The Flag サーバーですか？」と質問します。

@@ -1,0 +1,122 @@
+﻿INTSourceChangelist:3151855
+Availability:Public
+Title:HLSL 크로스 컴파일러
+Crumbs:%ROOT%, Programming, Programming/Rendering, Programming/Rendering/ShaderDevelopment
+Description:HLSL 을 GLSL 로 변환하는 데 사용되는 HLSLCC 툴에 대한 정보입니다.
+Version: 4.9
+tags:Rendering
+
+
+이 라이브러리는 High Level Shading Language (HLSL) 셰이더 소스 코드를 하이 레벨 중개 표현물로 컴파일하고, 디바이스 독립적인 최적화를 수행하여, OpenGL Shading Language (GLSL) 호환 소스 코드를 생성해 줍니다. 이 라이브러리는 Mesa 의 GLSL 컴파일러에 크게 의존합니다. 프론트엔드는 HLSL 파싱 및 HLSL Abstract Syntax Tree (AST) 에서 Mesa IR 생성을 위해 거의 새로 작성했습니다. 이 라이브러리는 Mesa 의 IR 최적화를 적극 활용하여 코드를 단순화시키고, Mesa IR 에서 GLSL 소스 코드를 최종적으로 생성합니다. GLSL 생성은 glsl-옵티마이저의 작업을 기반으로 합니다.
+
+GLSL 코드 생성에 추가로 컴파일러는 글로벌 유니폼을 쉽고 효율적인 세팅이 가능하도록 배열에 패킹해 넣어 주고, 유니폼을 요하는 하이 레벨 코드에 알리기 위한 반영 메커니즘을 제공하고, 하이 레벨 코드가 실행시간에 리소스 바인딩을 이름이 아닌 인덱스로 할 수 있도록 매핑 정보를 제공해 줍니다.
+
+[REGION:note]
+UnrealBuildTool 은 HLSLCC 같은 외부 라이브러리에 대한 변경사항을 감지하지 못합니다.
+HLSLCC 라이브러리를 리빌드한 경우, OpenGLShaders.cpp 에 공백을 추가하여 모듈을 강제로 다시 링크시키도록 해주세요.
+[/REGION]
+
+
+메인 라이브러리 도입부는 HLSLCrossCompile 입니다. 이 함수는 요청된 옵션에 따라 소스 HLSL 에서 GLSL 코드를 생성하는 데 필요한 모든 단계를 수행합니다. 각 단계를 요약하면 다음과 같습니다:
+
+|작업| 설명|
+|--|--|
+|Preprocessing|전처리 - 코드를 C 같은 전처리기를 통과시킵니다. 이 단계는 옵션으로, NoPreprocess 플랙을 사용하여 건너뛸 수 있습니다. 언리얼은 컴파일 전 MCPP 를 사용하여 전처리를 수행하므로 이 단계를 건너뜁니다. |
+|Parsing|파싱 - HLSL 소스는 추상 문법 트리에 파싱됩니다. 이 작업은 _mesa_hlsl_parse 함수에서 이루어집니다. 렉서와 파서는 각각 flex 와 bison 에 의해 생성됩니다. 자세한 정보는 파싱 부분을 참고하세요. |
+|Compilation|컴파일 - AST 는 Mesa 중간 표현물로 컴파일됩니다. 이 프로세스는 _mesa_ast_to_hir 함수에서 일어납니다. 이 단계 도중 컴파일러는 묵시적 변환, 함수 오버로드 해상도, intrinsic(내재자)에 대한 인스트럭션 생성 등과 같은 작업을 수행합니다. GLSL 주요 입구가 생성됩니다. GenerateGlslMain 을 살펴보세요. 이 단계는 입력 및 출력 변수에 대한 글로벌 선언을 IR 에 추가, HLSL 입구에 대한 입력 계산, HLSL 입구 호출, 글로벌 출력 변수에 출력 작성 작업을 합니다.|
+|Optimization| 최적화 - 여러가지 최적화 패스가 IR 에서 실행되는데, 인라이닝, 죽은 코드 제거, 상수 전파, 공통 하위표현식 제거 등입니다. 자세한 내용은 OptimizeIR, 특히 do_optimization_pass 를 참고하세요.|
+|Uniform packing| 유니폼 패킹 - 글로벌 유니폼은 매핑 정보를 유지한 채 배열에 패킹해 넣어, 엔진에서 유니폼 배열의 관련된 부분에 파라미터를 바인딩할 수 있도록 합니다. 자세한 내용은 PackUniforms 부분을 참고하세요. |
+|Final optimization| 최종 최적화 - 유니폼 패킹 이후 최적화 2 라운드는, IR 에서 유니폼 패킹시 생성된 코드를 단순화시키는 것입니다. |
+|Generate GLSL| GLSL 생성 - 마지막으로 최적화된 IR 을 GLSL 소스 코드로 변환합니다. IR 에서 GLSL 로의 변환은 상대적으로 간단합니다. 모든 구조체와 유니폼 버퍼 및 소스 자체의 정의 생성에 추가로, 파일 상단에 코멘트로 매핑 테이블이 작성됩니다. 이 매핑 테이블을 언리얼에서 파싱하여 파라미터 바인딩이 가능합니다. 자세한 내용은 GenerateGlsl, 특히나 ir_gen_glsl_visitor 클래스를 참고하세요. |
+
+## 파싱
+
+HLSL 파서는 렉서와 파서, 두 부분으로 구성되어 있습니다. 렉서는 정규 표현식을 그에 해당하는 토큰에 일치시켜서 HLSL 입력을 토큰화시킵니다. 소스 파일은 hlsl_lexer.ll 이며, flex 에 의해 처리되어 C 코드를 생성합니다. 각 라인은 정규 표현식으로 시작하여 C 코드로 작성된 구문이 뒤따릅니다. 정규 표현식이 일치되면, 그에 해당하는 C 코드가 실행됩니다. 상태는 "yy" 가 앞에 붙은 다수의 글로벌 변수에 저장됩니다.
+
+파서는 언어의 문법을 해석하고 AST 를 만들기 위해 토큰화된 입력에 규칙을 일치시킵니다. 소스 파일은 hlsl_parser.yy 이며, bison 에 의해 처리되어 C 코드를 생성합니다. bison 에 사용되는 문법을 자세히 설명하는 것은 이 문서의 범위 밖 일이지만, HLSL 파서를 살펴보면 기본적인 부분에 대한 개념을 잡을 수 있을 것입니다. 일반적으로, 재귀적 평가된 토큰 시퀀스에 일치하도록 규칙을 정의합니다. 규칙이 일치되면, 상응하는 C 코드를 실행하여 AST 를 만들 수 있습니다. C 코드 블록 내 문법은 다음과 같습니다:
+
+$$ = 이 규칙 파싱의 결과로, 보통 추상 문법 트리 내 노드입니다.
+$1, $2, 등 = 현재 규칙에 의해 일치된 하위 규칙의 결과입니다.
+
+렉서나 파서를 변경할 때는 반드시 flex 나 bison 을 사용해서 C 코드를 재생성해야 합니다. GenerateParsers 뱃치 파일이 이 작업을 대신해 주긴 하지만, 시스템에 flex 나 bison 이 설치된 위치에 따라 디렉토리 구성을 해 줘야 합니다. README 파일에 사용된 버전 관련 정보와 윈도우용 바이너리를 다운받을 수 있는 곳에 대한 정보가 들어있습니다.
+## 컴파일
+
+컴파일 도중, AST 를 탐색하여 IR 인스트럭션을 생성하는 데 사용됩니다. 한 가지 알아둬야 할 중요 개념은, IR 은 매우 낮은 수준의 연산 시퀀스입니다. 그렇기에 묵시적 변환이나 그런 속성을 지닌 어떤 작업도 하지 않으므로, 모든 것을 명시적으로 해 줘야 합니다!
+
+흥미로운 함수 몇 가지는:
+
+apply_type_conversion - 이 함수는 한 유형의 값을 가능한 경우 다른 유형으로 변환합니다. 묵시적 변환이냐 명시적 변환이냐는 파라미터를 통해 제어됩니다.
+
+arithmetic_result_type 등등 - 입력 값에 연산 적용시 결과 유형을 결정하는 함수 세트입니다.
+
+validate_assignment - rvalue 를 특정 유형의 lvalue 에 할당할 수 있을지 여부를 알아냅니다. 필요한 경우 허용된 묵시적 변환이 적용됩니다.
+
+do_assignment - 가능한 경우 validate_assignment 를 사용해서 lvalue 에 rvalue 를 할당합니다.
+
+ast_expression::hir - AST 의 표현식 노드를 IR 인스트럭션 세트로 변환합니다.
+
+process_initializer - 이니셜라이저 표현식을 변수에 적용합니다.
+
+ast_struct_specifier::hir - 선언된 구조체를 나타내는 종합 유형을 만듭니다.
+
+ast_cbuffer_declaration::hir - 상수 버퍼 레이아웃용 구조체를 만들어 유니폼 블록으로 저장합니다.
+
+process_mul - HLSL 내재 mul 처리를 위한 특수 코드입니다.
+
+match_function_by_name - 이름과 입력 파라미터 목록에 따라 함수 시그너처를 찾습니다.
+
+rank_parameter_lists - 두 파라미터 목록을 비교하여 얼마나 밀접하게 일치하는지를 나타내는 순위를 할당합니다. 오버로드 해법 수행을 위해 사용되는 헬퍼 함수로, 순위가 가장 낮은 시그너처가 이기며, 가장 낮은 순위 시그너처와 같은 시그너처가 있는 경우 함수 호출이 모호한 것으로 선언됩니다. 순위가 0 이면 정확히 일치하는 것임을 나타냅니다.
+
+gen_texture_op - 내장 HLSL 텍스처와 샘플러 오브젝트에 대한 메소드 호출을 처리합니다.
+
+_mesa_glsl_initialize_functions - HLSL 내재자에 대한 내장 함수를 생성합니다. (sin, cos 등) 대부분의 함수는 연산 수행을 위해 IR 코드를 생성하지만, (transpose, determinant 등) 일부는 함수 호출을 유예시켜 연산을 드라이버의 GLSL 컴파일러에 넘깁니다.
+## 컴파일러 확장
+
+특정 기능 구현시 몇 가지 팁입니다:
+
+신규 표현식
+
+    ir_expression_operation enum 에 항목을 추가합니다.
+    ir_expression 생성자에서 입력 피연산자 유형에 따라 표현식 유형 결과를 구성하여 새로운 표현식을 처리합니다.
+    가능하면, ir_expression::constant_expression_value 에 핸들러를 추가하여 컴파일 시간에 상수 표현식을 계산할 수 있도록 합니다.
+    ir_validate::visit_leave(ir_expression *ir) 에 핸들러를 추가하여 표현식이 올바른지 인증하도록 합니다.
+    만든 표현식을 GLSL 표현식에 매핑하기 위해 GLSLExpressionTable 에 항목을 추가합니다.
+    가능한 경우, 만든 표현식의 토큰을 인식할 수 있도록 렉서를 변경합니다.
+    가능한 경우, 토큰을 인식하고 적합한 ast_expression 노드를 만들 수 있도록 파서를 변경합니다.
+
+내재자
+
+    _mesa_glsl_initialize_functions 에 내장 함수 정의를 추가합니다.
+    대부분의 경우 내재자가 단일 표현식에 직접 매핑됩니다. 그런 경우 단순히 새로운 ir_expression 을 추가하고 make_intrinsic_genType 을 사용하여 내재 함수를 생성해 주면 됩니다.
+
+유형
+
+    IR 내 자신의 유형을 나타내기 위한 glsl_type 을 추가합니다. 이는 _mesa_glsl_initialize_types 에 추가하거나, glsl_type::builtin_core_types 와 같은 내장 유형 테이블 중 하나에 추가시킬 수 있습니다. 템플릿 유형 예제는 glsl_type::get_sampler_instance 를 확인하세요.
+    렉서가 필요한 토큰을 인식하고, 파서가 토큰을 일치시킬 수 있도록 변경합니다. 예제로는 Texture2DArray 를 확인하세요.
+    파서가 토큰을 인식하고 필요한 유형 지정자를 생성하도록 변경합니다. texture_type_specifier_nonarray 가 좋은 예입니다.
+    사용자 정의 유형을 만드는 데 필요한 처리를 하도록 ast_type_specifier::hir 를 변경합니다. 예제로는 구조체 처리 부분을 참고하세요.
+    적합한 glsl_type 을 반환하도록 ast_type_specifier::glsl_type 을 변경합니다.
+    유형에 메소드가 포함된 경우, 처리가 가능하도록 _mesa_ast_field_selection_to_hir 을 변경합니다. 예제는 gen_texture_op 를 참고하세요.
+
+어트리뷰트, 플래그, 퀄리파이어
+
+    IR 및/또는 AST 노드의 필요한 곳에 어트리뷰트 / 플래그 / 퀄리파이어 를 추가합니다.
+    렉서가 필요한 토큰을 인식할 수 있도록 변경합니다.
+    파서가 필요한 대로 문법 규칙을 추가할 수 있도록 변경합니다. 예를 들어 [loop] 어트리뷰트를 지원하고자 하는 경우, iteration_statement 규칙이 그 앞의 옵션 어트리뷰트를 받도록 변경하면 됩니다. 이런 식입니다: iteration_statement 를 base_iteration_statement 로 변경하고 다음과 같이 추가합니다.
+
+iteration_statement:
+    iteration_attr base_iteration_statement
+    {
+        // result is the iteration statement
+        $$ = $2;
+        // apply attribute
+        $$->attr = $1;
+    }
+    base_iteration_statement
+    {
+        // pass thru if no attribute
+        $$ = $1;
+    }
+
+
+마지막으로 컴파일러에서 어트리뷰트에 대해 알아야 하는 곳을 변경합니다.

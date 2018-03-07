@@ -1,0 +1,159 @@
+﻿INTSourceChangelist:3151855
+Availability:Public
+Title:셰이더 개발
+Crumbs:%ROOT%, Programming, Programming/Rendering
+Description:셰이더를 작성하는 그래픽 프로그래머를 위한 정보입니다.
+Version: 4.9
+tags:Rendering
+
+## 퀵 스타트
+
+**셰이더 작업을 할 때는 반드시 r.ShaderDevelopmentMode 옵션을 1 로 설정하여 켰는지 확인하세요.**  가장 쉬운 방법은 `ConsoleVariables.ini` 를 편집하여 로드할 때마다 자동 설정되게 하는 것입니다. 그러면 오류시 재시작 기능이 켜지고 셰이더 개발 관련 로그와 경고가 표시됩니다.
+
+변경내용을 .usf 파일에 저장한 이후, **Ctrl+Shift+.** 키를 눌러 변경된 셰이더를 리컴파일합니다.
+여러 셰이더에 포함되는 파일(예: common.usf)을 변경하면, 시간이 조금 걸릴 수 있습니다. 머티리얼에 반복처리 작업을 하려면, 머티리얼에 (노드 이동 등) 살짝 변화를 준 다음 머티리얼 에디터에서 '적용'을 눌러 리컴파일을 발동시키면 됩니다.
+
+## 셰이더 및 머티리얼
+
+#### 글로벌 셰이더
+
+글로벌 셰이더는 (풀스크린 쿼드같은) 고정된 지오메트리에 작동되는 셰이더로, 머티리얼과의 인터페이스가 필요치 않습니다. 섀도 필더링이나 포스트 프로세싱같은 것을 예로 들 수 있습니다. 주어진 글로벌 셰이더 유형의 셰이더 딱 하나만 메모리에 존재합니다.
+#### 머티리얼 및 메시 유형
+
+머티리얼은 (블렌드 모드, 양면 등) 머티리얼 렌더링 방식을 조절하는 상태 세트와 (베이스 컬러, 러프니스, 노멀 등) 머티리얼이 다양한 렌더링 패스와 상호작용하는 방식을 제어하는 머티리얼 입력 세트로 정의됩니다.
+#### 버텍스 팩토리
+
+머티리얼은 다양한 메시 유형에 적용할 수 있어야 하는데, 이는 버텍스 팩토리로 가능합니다. **FVertexFactoryType** 는 고유 메시 유형을 나타내며, FVertexFactory 인스턴스는 인스턴스별 데이터를 저장하여 그 고유 메시 유형을 지원합니다. 예를 들어 FGPUSkinVertexFactory 는 스키닝에 필요한 본 매트릭스뿐만 아니라 GPU 스킨 버텍스 팩토리 셰이더 코드가 입력으로 필요한 여러 버텍스 버퍼로의 레퍼런스도 저장합니다. 버텍스 팩토리 셰이더 코드는 묵시적 인터페이스로, 다양한 패스 셰이더에서 메시 유형 차이점을 추상화시키기 위해 사용되는 것입니다. 버텍스 팩토리는 주로 버텍스 셰이더 코드로 이루어지지만, 픽셀 셰이더 코드도 조금 포함됩니다. 버텍스 팩토리 셰이더 코드 중 중요한 컴포넌트 몇 가지는:
+
+|함수| 설명|
+|--|--|
+|FVertexFactoryInput|버텍스 팩토리에 버텍스 셰이더에 대한 입력으로 필요한 것을 정의합니다. 이는 C++ 측 FVertexFactory 내 버텍스 정의에 반드시 일치해야 합니다. 예를 들어 LocalVertexFactory 의 FVertexFactoryInput 에는 float4 Position : POSITION; 이 있는데, 이는 FStaticMeshLODResources::SetupVertexFactory 의 위치 스트림 정의에 해당합니다.|
+|FVertexFactoryIntermediates|여러 버텍스 팩토리 함수에 사용될 캐시된 중간 데이터 저장에 사용됩니다. 흔한 예는 TangentToLocal 매트릭스를 들 수 있는데, 언패킹된 버텍스 입력에서 계산해야만 합니다. |
+|FVertexFactoryInterpolantsVSToPS|버텍스 셰이더에서 픽셀 셰이더로 전달해야하는 버텍스 팩토리 데이터입니다. |
+|VertexFactoryGetWorldPosition|버텍스 셰이더에서 월드 스페이스 버텍스 위치를 구하기 위해 호출됩니다. 스태틱 메시의 경우 그저 LocalToWorld 매트릭스를 사용해서 로컬 스페이스 위치를 버텍스 버퍼에서 월드 스페이스로 변환시켜줄 뿐입니다. GPU 스키닝된 메시의 경우, 먼저 위치를 스키닝한 다음 월드 스페이스로 변환합니다. |
+|VertexFactoryGetInterpolantsVSToPS|FVertexFactoryInput 을 FVertexFactoryInterpolants 로 변환하며, 이는 픽셀 셰이더에 전달하기 전 그래픽 하드웨어에 의해 보간됩니다.|
+|GetMaterialPixelParameters|픽셀 셰이더에서 호출되어 버텍스 팩토리 전용 인터폴란트(FVertexFactoryInterpolants)를 픽셀 셰이더가 사용하는 FMaterialPixelParameters 구조체로 변환합니다. |
+
+#### 머티리얼 셰이더
+
+**FMaterialShaderType** 을 사용하는 셰이더는 머티리얼의 특성 일부에 접근할 필요가 있는 패스 전용 셰이더이므로, 각 머티리얼에 대해 컴파일되어야 하지만, 메시 특성에 접근할 필요는 없습니다. 라이트 함수 패스 셰이더는 FMaterialShaderTypes 예제입니다.
+
+
+**FMeshMaterialShaderType** 을 사용하는 셰이더는 머티리얼의 특성 그리고 메시 유형에 의존하는 패스 전용 셰이더이므로, 반드시 각 머티리얼/버텍스 팩토리 조합별로 컴파일되어야 합니다. 예를 들어 TBasePassVS / TBasePassPS 는 포워드 렌더링 패스의 모든 머티리얼 입력을 계산할 필요가 있습니다.
+
+머티리얼의 필수 셰이더 세트는 FMaterialShaderMap 에 포함되어 있습니다. 이런 모습입니다:
+
+    FMaterialShaderMap 
+        FLightFunctionPixelShader - FMaterialShaderType
+        FLocalVertexFactory - FVertexFactoryType
+            TDepthOnlyPS - FMeshMaterialShaderType
+            TDepthOnlyVS - FMeshMaterialShaderType
+            TBasePassPS - FMeshMaterialShaderType
+            TBasePassVS - FMeshMaterialShaderType
+            Etc
+        FGPUSkinVertexFactory - FVertexFactoryType
+            Etc
+
+버텍스 팩토리는 자신의 ShouldCache 함수에 따라 이 매트릭스에 포함되어 있는데, 머티리얼의 용도에 따라 달라집니다. 예를 들어 bUsedWithSkeletalMesh 가 `true` 이면 GPU 스킨 버텍스 팩토리가 포함됩니다. FMeshMaterialShaderType 은 자신의 ShouldCache 함수에 따라 이 매트릭스에 포함되는데, 머티리얼과 버텍스 팩토리 특성에 따라 달라집니다. 이는 성긴 행렬 접근법으로 셰이더를 캐시하여 많은 수의 셰이더로 꽤나 빠르게 늘어나므로 차지하는 메모리 양과 컴파일 시간이 늘어납니다. 실제로 필요한 셰이더 목록을 저장하는 것에 비할 때의 주요 장점은 목록을 생성할 필요가 없어서, 필요한 셰이더는 콘솔에서 실행시간 전 항상 이미 컴파일되어 있습니다. UE4 에서는 셰이더 압축으로 셰이더 메모리 문제를, 멀티코어 셰이더 컴파일로 컴파일 시간 문제를 경감시킵니다.
+#### 머티리얼 셰이더 만들기
+
+머티리얼 셰이더 유형은 DECLARE_SHADER_TYPE 매크로로 생성됩니다:
+
+~~~
+
+class FLightFunctionPixelShader : public FShader { DECLARE_SHADER_TYPE(FLightFunctionPixelShader,Material);
+
+~~~
+
+이는 머티리얼 셰이더 유형에 필수인 메타데이터와 함수를 선언합니다. 머티리얼 셰이더 유형은 IMPLEMENT_MATERIAL_SHADER_TYPE 으로 인스턴싱됩니다:
+
+~~~
+
+IMPLEMENT_MATERIAL_SHADER_TYPE(,FLightFunctionPixelShader,TEXT("LightFunctionPixelShader")
+
+~~~
+
+이는 머티리얼 셰이더 유형의 글로벌 메타데이터를 생성하는데, 이를 통해 실행시간에 주어진 셰이더 유형을 사용해서 모든 셰이더를 대상으로 반복처리하는 등의 작업이 가능합니다.
+
+전형적인 머티리얼 픽셀 셰이더 유형은 먼저 GetMaterialPixelParameters 버텍스 팩토리 함수를 호출하여 FMaterialPixelParameters 구조체를 만듭니다. GetMaterialPixelParameters 는 버텍스 팩토리 전용 입력을 어느 패스에서도 접근할 수 있는 WorldPosition, TangentNormal 등과 같은 프로퍼티로 변환합니다. 그런 다음 머티리얼 셰이더는 CalcMaterialParameters 를 호출, FMaterialPixelParameters 의 나머지 멤버를 출력하며, 그 후 FMaterialPixelParameters 가 완전 인스턴싱됩니다. 그 후 머티리얼 셰이더는 MaterialTemplate.usf 의 함수(, 예로 머티리얼의 이미시브 입력에는 GetMaterialEmissive)를 통해 머티리얼 입력 중 몇 가지에 접근하고, 약간의 셰이딩을 한 뒤 그 패스에 대한 최종 색을 출력할 것입니다.
+#### 특수 엔진 머티리얼
+
+UMaterial 에는 bUsedAsSpecialEngineMaterial 라는 세팅이 있어서, 머티리얼을 어떤 버텍스 팩토리 유형과도 사용할 수 있습니다. 즉 모든 버텍스 팩토리는 머티리얼과 함께 컴파일되어, 매우 큰 세트가 될 것이라는 뜻입니다. bUsedAsSpecialEngineMaterial 이 유용한 곳은 다음과 같습니다:
+
+ * 라이팅만 같은 뷰모드 렌더링에 사용되는 머티리얼.
+ * 컴파일 오류가 있을 때 예비로 사용되는 머티리얼 (DefaultDecalMaterial, DefaultMaterial 등).
+ * 캐시해야 하는 셰이더 수를 줄이기 위해 다른 머티리얼을 렌더링하는 데 셰이더가 사용된 머티리얼. 예를 들어, 불투명 머티리얼의 뎁스-온리 셰이더는 DefaultMaterial 과 같은 깊이 출력을 낼 것이므로, DefaultMaterial 의 셰이더를 대신 사용하면 불투명 머티리얼은 뎁스-온리 셰이더 캐시를 건너뜁니다.
+
+## 셰이더 컴파일
+
+UE4 는 스트리밍 시스템을 사용하여 비동기식으로 셰이더를 컴파일합니다. 캐시된 셰이더 맵이 없는 머티리얼 로드시 컴파일 요청이 큐에 등록되었다가, 컴파일 결과가 나오면 엔진을 블록하지 않고 적용됩니다. 로드 시간이나 컴파일 기간 측면에서 이상적이나, 실제 플랫폼 셰이더 컴파일과 그것을 요청한 머티리얼 사이에 레이어가 꽤나 적다는 뜻이기도 합니다.
+
+실제 컴파일 작업은 셰이더 컴파일 워커라 불리는 헬퍼 프로세스에서 이루어지는데, 플랫폼 셰이더 컴파일 함수(D3DCompile)는 종종 단일 프로세스 내 멀티 코어 스케일 작업을 막는 매우 중요한 부분이 포함되어 있기 때문입니다.
+
+#### 셰이더 컴파일러 디버깅
+
+컴파일 방식을 조절하여 셰이더 컴파일러 디버깅을 단순화시킬 수 있는 세팅이 몇 가지 있습니다. 이는 _BaseEngine.ini_ 안의 _[DevOptions.Shaders]_ 에서 찾을 수 있습니다.
+
+|세팅| 설명|
+|--|--|
+|bAllowCompilingThroughWorkers|컴파일러 DLL 호출을 위한 SCW 실행을 할지, UE4 가 컴파일러 DLL 을 직접 호출할지 입니다. 끄면 컴파일은 싱글 코어에서 진행됩니다. |
+|bAllowAsynchronousShaderCompiling|컴파일을 UE4 내 다른 스레드에서 이루어지도록 할 것인지 입니다. |
+
+UE4 에서 (CompileD3D11Shaer 와 같은) 셰이더 컴파일러 DLL 을 직접 실행시키려면, 이 옵션 둘 다 _false_ 로 설정해야 합니다. 그러면 컴파일이 오래 걸릴 테니, 다른 모든 셰이더가 캐시되었는지 확인하도록 하세요.
+
+#### 컴파일 오류시 재시도
+
+r.ShaderDevelopmentMode 옵션을 켜면, 셰이더 컴파일 오류시 재시도할 기회를 얻게 됩니다. 이는 글로벌 셰이더에 특히나 중요한데, 컴파일에 성공하지 않으면 치명적 오류가 나기 때문입니다.
+
+디버거 포함 상태에서 디버깅시, 중단점에 걸리고 Visual Studio 아웃풋 창에서 컴파일 오류가 날 것입니다. **그 때 오류 로그를 더블클릭하면 문제가 된 줄로 바로 이동됩니다.**
+
+![](CompilerErrorDebug.png)
+
+또는 예/아니오 대화창이 뜹니다.
+
+![](CompileError.png)
+
+## 셰이더 캐싱 및 쿠킹
+
+셰이더가 컴파일되면, Derived Data Cache(파생 데이터 캐시)에 저장됩니다. 자신의 키에 셰이더 소스 파일을 포함해서 컴파일에 대한 모든 입력의 해시를 저장합니다. 즉 셰이더 소스 파일에 대한 변경이 엔진을 재실행시킬 때나 'recompileshaders changed' 실행시마다 자동으로 감지된다는 뜻입니다.
+
+FShader Serialize 함수 변경시, 하위 호환성 처리할 필요 없이 그냥 그 셰이더에 포함된 셰이더 파일에 공간을 추가하면 됩니다.
+
+애셋 쿠킹시, 머티리얼 셰이더는 머티리얼의 패키지 속에 삽입되며, 글로벌 셰이더는 엔진 스타트업 초기에 로드 가능하도록 별도의 글로벌 셰이더에 저장됩니다.
+
+## 디버깅
+
+셰이더 디버깅 주요 메소드는 셰이더가 중간 데이터를 출력하도록 변경한 다음, 적합한 VisualizeTexture 명령으로 시각화시키는 것입니다. 이는 엔진을 재시작할 필요 없이 즉석 컴파일이 가능하므로 빠른 반복처리가 가능합니다. 예를 들어 WorldPosition 이 올바른지 다음과 같이 검증 가능합니다:
+
+~~~
+
+OutColor = frac(WorldPosition / 1000);
+
+~~~
+
+그런 다음 스케일이 맞는지, 결과가 뷰 의존적이지는 않은지 검증합니다. 하지만 이 메소드는 데이터 구조체를 만드는 복잡한 셰이더에 쓰기에는 규모가 그리 잘 맞지 않습니다.
+
+#### 디버그 정보 덤프
+
+_r.DumpShaderDebugInfo=1_ 를 사용해서 컴파일되는 모든 셰이더에 대한 파일을 디스크에 저장되도록 할 수 있습니다. r.ShaderDevelopmentMode 처럼 이 옵션도 `ConsoleVariables.ini` 에 설정하면 좋습니다. 파일 저장 위치는 _GameName/Saved/ShaderDebugInfo_ 이며, 포함되는 내용은 다음과 같습니다:
+
+ * 소스 파일 및 인클루드
+ * 셰이더 전처리 버전
+ * 사용된 컴파일러에 상응하는 명령줄 옵션을 포함해서 전처리 버전 컴파일을 위한 뱃치 파일
+ [REGION:note]
+이 세팅을 켜면, 하드 디스크가 다수의 작은 파일과 폴더로 가득찰 수 있습니다.**
+ [/REGION]
+## 반복처리 실전 사례
+
+글로벌 셰이더 작업중인 경우, 반복처리에 가장 빠른 방법은 'recompileshaders changed' 또는 **Ctrl+Shift+.** 입니다. 셰이더 컴파일에 오랜 시간이 걸리는 경우, 셰이더의 ModifyCompilationEnvironment 에 CFLAG_StandardOptimization 을 컴파일 플랙으로 지정하는 것을 고려해 보세요.
+
+BasePassPixelShader.usf 와 같은 머티리얼 셰이더 작업중인 경우, 단일 머티리얼에 대해 반복처리하는 것이 훨씬 빠릅니다. 머티리얼 에디터에서 적용 버튼을 클릭할 때마다, 디스크에서 셰이더 파일을 다시 읽어들여 그 머티리얼만 다시 컴파일할 것입니다.
+
+## 크로스 컴파일러
+
+[HLSL 크로스 컴파일러](Programming/Rendering/ShaderDevelopment/HLSLCrossCompiler) 를 사용하면 HSLS 을 OpenGL 플랫폼용 GLSL 로 자동 변환시켜, 셰이더를 한 번만 만들어도 모든 플랫폼에 사용할 수 있도록 합니다. 오프라인 셰이더 컴파일 도중 실행되며, OpenGL 드라이버에는 종종 빠져있는 여러가지 최적화를 코드에 수행하기도 합니다.
+
+## AsyncCompute
+
+[AsyncCompute](Programming/Rendering/ShaderDevelopment/AsyncCompute) 특정 GPU 에만 존재하는 일부 API 에서 사용가능한 하드웨어 기능입니다.
+GPU 상의 하드웨어 유닛을 보다 효율적으로 더욱 잘 활용하기 위해 다양한 GPU 작업을 끼워넣는 것이 가능합니다.

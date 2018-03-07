@@ -1,0 +1,106 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title: 컴포넌트 리플리케이션
+Crumbs:Gameplay, Gameplay/Networking, Gameplay/Networking/Actors
+Description:네트워크 리플리케이션에 대한 컴포넌트 셋업하기 입니다.
+Related: Gameplay/Networking/Actors
+Related: Gameplay/Networking/Actors/Properties
+Related: Gameplay/Networking/Actors/ReplicationPerformance
+version: 4.9
+
+[TOC (start:2 end:3)]
+
+언리얼 엔진 4 는 컴포넌트 리플리케이션을 지원합니다. 사용법이 간단하기는 하지만, 대부분의 컴포넌트가 리플리케이트되지는 않기에 그리 흔한 일은 아닙니다. 대부분의 게임플레이 로직은 액터 클래스에서 이루어지며,
+컴포넌트는 그저 액터를 이루는 작은 조각을 나타냅니다. 액터의 그 게임플레이 로직이 리플리케이트되는 것이고, 그 결과가 가끔은 컴포넌트에 대한 호출/변화로 나타납니다. 그러나 가끔은 
+컴포넌트의 프로퍼티나 이벤트 자체적으로 직접 리플리케이트해야 할 때도 있습니다. 여기서는 그 방법에 대해 설명해 드립니다.
+
+컴포넌트는 그 소유중인 액터의 일부로 리플리케이트됩니다. 액터는 여전히 역할, 우선권, 연관성, 컬링 등에 대한 설명을 합니다. 액터가 리플리케이트되면, 그 컴포넌트도 리플리케이트시킬 수 있습니다. 이 컴포넌트는 
+액터와 같은 방식으로 프로퍼티와 RPC 리플리케이션이 가능합니다. 컴포넌트는 반드시 액터와 같은 방식으로 `::GetLifetimeReplicatedProps (...)` 함수를 구현해야 합니다.
+
+컴포넌트 리플리케이션에 대해 이야기할 때 컴포넌트는 크게 두 가지 범주로 나뉩니다. 스태틱 컴포넌트는 액터 생성시 생성되는 컴포넌트입니다. 즉 소유중인 액터가 클라이언트나 서버에 스폰되면, 
+컴포넌트의 리플리케이션 여부와 상관없이 컴포넌트 역시도 스폰됩니다. 서버가 클라이언트에 이 컴포넌트를 명시적으로 스폰시킬지 알려주지는 않습니다. 이러한 맥락에서 스태틱 컴포넌트는 C++ 생성자에서 Default Subobject 로 생성되는 컴포넌트 또는 블루프린트 에디터의 컴포넌트 모드에서 생성되는 컴포넌트입니다. 스태틱 컴포넌트는 클라이언트에 리플리케이트시킬 필요가 없이 그냥 기본적으로 존재합니다.
+서버와 클라이언트 사이에 프로퍼티나 이벤트를 자동 동기화시킬 필요가 있을 때만 리플리케이트 해주면 됩니다.
+
+다이내믹 컴포넌트는 실행시간에 서버에서 스폰되는 컴포넌트로, 그 생성 및 소멸이 클라이언트에 리플리케이트되는 것을 말합니다. 액터의 작동방식과 매우 비슷합니다. 스태틱 컴포넌트와는 달리 
+다이내믹 컴포넌트는 모든 클라이언트에 존재하기 위해 리플리케이션이 필요합니다. 또는 클라이언트 자체적으로 리플리케이트되지 않는 로컬 컴포넌트를 스폰시킬 수도 있습니다. 여러 경우에 있어 실제로 
+괜찮은 일입니다. 리플리케이션이 등장하는 일은, 서버상에서 발동되는 프로퍼티 또는 이벤트를 클라이언트에 자동으로 동기화시킬 필요가 있을 경우만입니다.
+
+## 사용법
+컴포넌트에서의 프로퍼티 및 RPC 셋업은 액터에서와 마찬가지로 이루어집니다. 클래스에 리플리케이트되는 것이 있게끔 셋업되면, 이 컴포넌트의 실제 인스턴스 역시도 리플리케이트되도록 설정되어야 합니다.
+
+### C++
+컴포넌트를 리플리케이트시키려면 단순히 `AActorComponent::SetIsReplicated(true)` 호출을 해 주면 됩니다. 컴포넌트가 디폴트 서브오브젝트인 경우, 컴포넌트 생성 이후 클래스 생성자에서 처리될 것입니다.
+
+예:
+	ACharacter::ACharacter()
+	{
+		// 기타...
+
+		CharacterMovement = CreateDefaultSubobject<UMovementComp_Character>(TEXT("CharMoveComp"));
+		if (CharacterMovement)
+		{
+			CharacterMovement->UpdatedComponent = CapsuleComponent;
+
+			CharacterMovement->GetNavAgentProperties()->bCanJump = true;
+			CharacterMovement->GetNavAgentProperties()->bCanWalk = true;
+			CharacterMovement->SetJumpAllowed(true);
+			CharacterMovement->SetNetAddressable(); // Make DSO components net addressable
+			CharacterMovement->SetIsReplicated(true); // Enable replication by default
+
+		}
+	}
+
+### 블루프린트
+
+스태틱 블루프린트 컴포넌트를 리플리케이트시키려면, 컴포넌트 디폴트에서 **Replicates** (리플리케이트?) 불리언을 토글시켜주면 됩니다. 다시 말하지만, 이 작업은 컴포넌트에 리플리케이트하고자 하는 
+프로퍼티나 이벤트가 있을 때만 해 주면 됩니다. 스태틱 컴포넌트의 생성은 클라이언트와 서버 양쪽에서 묵시적으로 일어납니다.
+ 
+![](components_checkbox.png)
+
+참고로 모든 컴포넌트가 이렇게 표시되는 것은 아니며, 일정한 형태의 리플리케이션을 지원하는 것에만 표시됩니다.
+
+이 작업은 동적으로 스폰되는 컴포넌트에서도 **SetIsReplicated** 함수를 호출하여 가능합니다:
+
+![](components_function.png)
+ 
+## 타임라인
+
+타임라인은 반드시 그 프로퍼티의 Replicated 옵션을 통해 리플리케이션을 켜 줘야 합니다. 그러면 서버에서 제어되는 재생 위치, 속도, 방향을 클라이언트에 리플리케이트합니다. 이 부분은 필요에 따라 변할 수 
+있는 기본 구현입니다. 대부분의 타임라인은 리플리케이션이 필요치 않습니다. 리플리케이트되는 여느 게임플레이 오브젝트와 마찬가지로, 리플리케이트되는 타임라인은 서버에서만 직접 조작해야 합니다 
+(시작/중지 등). 클라이언트에서는 리플리케이트된 재생 위치만을 볼 뿐, 타임라인 자체에 대한 변경을 시도해서는 안될 것입니다. 리플리케이션이 업데이트를 받을 때마다 클라이언트는 재생 위치를 
+외삽합니다.
+
+## 대역폭 부하
+
+컴포넌트 리플리케이션에 걸리는 부하는 상대적으로 낮습니다. 리플리케이트되는 액터 내 컴포넌트 하나마다 그 프로퍼티와 함께 NetGUID (4바이트) '헤더' 및 약 1 바이트 '푸터'가 붙습니다.
+CPU 측면에서는 액터상의 프로퍼티 리플리케이션 vs 컴포넌트상의 리플리케이션 차이가 거의 없을 것입니다.
+
+## 일반화된 서브오브젝트 리플리케이션
+
+한 단계 더 나아가서, 컴포넌트 뿐만 아니라 모든 액터 서브오브젝트도 리플리케이트 가능합니다.
+
+이에 대한 응용은 매우 제한적이지만, 가끔 매우 유용할 때가 있습니다. 이 작업에 대한 인터페이스는 클래스 레벨에서 정의되어 있습니다:
+
+	/** FActory method for instantiating templatized TobjectReplicator class for subobject replication */
+	virtual class FObjectReplicatorBase * InstantiateReplicatorForSubObject(UClass *SubobjClass);
+
+	/** Method that allows an Actor to replicate subobjects on its Actor channel */
+	virtual bool ReplicateSubobjects(class UActorChannel *Channel, class FOutBunch *Bunch, FReplicationFlags *RepFlags);
+
+	/** Called on the Actor when a new subobject is dynamically created via replication */
+	virtual void OnSubobjectCreatedFromReplication(UObject *NewSubobject);
+
+액터 컴포넌트가 아닌 서브오브젝트를 리플리케이트하고자 하는 클래스는 위의 세 가지 메소드를 구현해야 합니다.
+
+### 용례
+이것이 유용한 이유는 UObject 와 다형성을 액터 채널 레벨에서 활용할 수 있기 때문입니다. 기존에 복합 데이터 구조체에 대한 리플리케이션은 항상 액터 클래스 내에 
+정적으로 정의해야만 했던 구조체에만 한정되어 있었습니다. 서브오브젝트 리플리케이션을 통해 가능한 인벤토리 시스템을 예를 들자면, 각 항목이 베이스 인벤토리 클래스에서 확장된 클래스가 되면서 완벽히 리플리케이션 가능하고, 
+각 항목이 (너무 자원적으로 무겁지 않도록) 액터일 필요도 없는 것입니다.
+
+## 최적화
+리플리케이트시킬 서브오브젝트가 많은 경우, 최근 변경되어 리플리케이트시킬 필요가 있는 서브오브젝트가 있는지, 있다면 어느 것인지 알려주는 것으로 시간을 많이 절약할 수 있습니다. 즉 접근자 함수를 통해 서브오브젝트의 변경 내역을 기록한다는 뜻입니다.
+그 작업을 위한 인터페이스는 UActorChannel 에 있습니다:
+	bool KeyNeedsToReplicate(int32 ObjID, int32 RepKey);
+이 함수는 액터의 `::ReplicateSubobjects` 구현에서 호출해야 합니다. 액터 클래스는 리플리케이션 시스템이 각 클라이언트에 대해 기록을 유지할 임의의 Object ID 와 Replication Key 셋업을 해 주면 됩니다. ReplicateSubobjects 가 True 를 반환하면, 호출자는 해당 Object ID 로 기록중인 서브오브젝트 상의 ReplicateSubobjects 를 호출할 것으로 예상합니다.
+예를 들어 AQAInventory::ReplicateSubobjects 를 살펴봅시다. 한 가지 핵심적으로 기억할 것은, 오브젝트 ID 와 리플리케이션 키는 완전 임의적이라는 것입니다. 오브젝트 ID 는 '사물'을 가리키는 데 사용됩니다. 서브오브젝트 전체 리스트일 수도, 부분 리스트일 수도, 개별 오브젝트일 수도 있습니다. 리플리케이션 키 역시 임의적인 것으로, 오브젝트 ID 가 추적중인 것에 변화가 있을 때마다 증가되는 카운터가 될 수도 있습니다. 여기에 논의된 최적화는 완전히 옵션입니다.
+

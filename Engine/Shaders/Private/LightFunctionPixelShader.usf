@@ -1,0 +1,64 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	LightFunction.usf: Pixel shader for computing a light function.
+=============================================================================*/
+
+#include "Common.ush"
+#include "/Engine/Generated/Material.ush"
+#include "LightFunctionCommon.ush"
+#include "DynamicLightingCommon.ush"
+
+// used like this: mul(float4(SvPosition.xyz, 1), SvPositionToLight);
+float4x4 SvPositionToLight;
+
+/** Fade distance in x, disabled brightness in y, output for preview shadows mask in z. */
+float3 LightFunctionParameters2;
+
+void Main(
+	// in float4 ScreenPosition : TEXCOORD0, // Not used and not output in VS
+	in float4 SvPosition : SV_Position,		// after all interpolators
+	out float4 OutColor : SV_Target0
+	)
+{
+	float2 ScreenUV = SvPositionToBufferUV(SvPosition);
+
+	// make SvPosition appear to be rasterized with the depth from the depth buffer
+	SvPosition.z = LookupDeviceZ(ScreenUV);
+
+	float3 LightVector;
+	{
+		float4 Hom = mul(float4(SvPosition.xyz, 1), SvPositionToLight);
+		LightVector = Hom.xyz / Hom.w;
+	}
+	
+	// todo: TranslatedWorld would be better for quality
+	float3 AbsoluteWorldPosition = SvPositionToWorld(SvPosition);
+
+	// Calculate radial view distance for stable fading
+	float ViewDistance = length(View.WorldCameraOrigin - AbsoluteWorldPosition);
+
+	float GreyScale;
+	{
+		float3 Color = GetLightFunctionColor(LightVector, AbsoluteWorldPosition);
+		GreyScale = dot(Color, .3333f);
+	}
+
+	float DistanceFadeAlpha = saturate((LightFunctionParameters2.x - ViewDistance) / (LightFunctionParameters2.x * .2f));
+	// Fade to disabled based on LightFunctionFadeDistance
+	GreyScale = lerp(LightFunctionParameters2.y, GreyScale, DistanceFadeAlpha);
+
+	// Fade to disabled based on ShadowFadeFraction
+	GreyScale = lerp(LightFunctionParameters2.y, GreyScale, LightFunctionParameters.y);
+
+#if FORWARD_SHADING
+	float LightInfluenceMask = GetLightInfluenceMask(AbsoluteWorldPosition);
+	GreyScale = lerp(1, GreyScale, LightInfluenceMask);
+	OutColor = EncodeLightAttenuation(GreyScale);
+#else
+	float EncodedLightAttenuation = EncodeLightAttenuation(GreyScale);
+
+	// Light function shadows write to the blue channel.
+	OutColor = lerp(float4(1, 1, EncodedLightAttenuation, 1), EncodedLightAttenuation.xxxx, LightFunctionParameters2.z);
+#endif
+}

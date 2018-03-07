@@ -1,0 +1,30 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title: 액터와 그 접속 소유
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking, Gameplay/Networking/Actors
+Description:멀티플레이어에서 서버의 역할에 대한 개요입니다.
+Related: Gameplay/Networking/Actors
+Related: Gameplay/Networking/Actors/RPCs
+Related: Gameplay/Networking/Server
+version: 4.9
+
+액터의 접속을 소유한다는 것에 대해 많이 들어보셨을 것입니다. 궁극적으로 각 접속에는 PlayerController 가 있으며, 해당 접속 전용으로 만들어진 것입니다 (그 과정에 대해서는 클라이언트 접속 흐름 부분에서 자세히 읽어보세요). 그러한 이유로 생성되는 각 PlayerController 는 해당 접속에 소유됩니다. 일반적으로 액터가 접속에 소유되었는지 알아보려면, 액터의 가장 바깥쪽(outer) 오너에 질의를 하여, 그 오너가 PlayerController 인 경우 그 액터 역시도 그 PlayerController 를 소유하는 동일 접속에 소유된 것입니다.
+
+이에 대한 한 가지 예제는, Pawn 액터가 PlayerController 에 빙의(possess)될 때입니다. 그 오너는 빙의된 PlayerController 가 될 것입니다. 이 동안 액터는 PlayerController 의 접속에 소유됩니다. Pawn 은 PlayerController 에 의해 소유/빙의된 기간동안 이 접속에 소유됩니다. 그리고 PlayerController 가 더이상 Pawn 에 빙의하지 않게 되면, Pawn 은 더이상 접속에 소유되지 않습니다.
+
+또 한가지 예제는 Pawn 에 소유된 인벤토리 아이템입니다. 이 인벤토리 아이템은 Pawn 을 소유한 (것이 있다면) 동일 접속에 소유됩니다.
+
+컴포넌트는 소유 접속 결정에 있어 약간 특별합니다. 이 경우, 먼저 소유 액터를 찾을 때까지 컴포넌트 바깥쪽 체인을 둘러보면서 컴포넌트 오너를 정한 다음, 이 액터의 소유 접속을 결정하는 것으로 위와 같이 계속합니다.
+
+접속 소유권은 몇 가지 이유로 중요합니다:
+* RPC 는 어느 클라이언트에서 클라이언트실행 RPC 를 실행할지 결정해야 합니다.
+* 액터 리플리케이션 및 접속 연관성 때문입니다.
+* 오너가 연관된 경우의 액터 프로퍼티 리플리케이션 조건 때문입니다.
+
+RPC 에 중요한 이유는, 액터에 RPC 함수를 호출할 때, RPC 가 멀티캐스트로 마킹되지 않은 한 그 RPC 를 어느 클라이언트에서 실행할지 알아야 하기 때문입니다. RPC 를 전송할 접속은 소유 접속을 찾는 것으로 결정합니다.
+
+액터 리플리케이션 도중, 그리고 각 액터에 대해 어느 접속이 업데이트를 받을지 결정하는 데도 중요하게 쓰입니다. bOnlyRelevantToOwner 가 True 설정된 액터의 경우, 액터를 소유하는 접속만 해당 액터에 대한 프로퍼티 업데이트를 받습니다. 기본적으로 모든 PlayerController 에는 이 플래그가 설정되어 있으며, 그때문에 각 클라이언트는 소유한 PlayerController 에 대한 업데이트만 받는 것입니다. 그렇게 하는 이유는 여러가지인데, 플레이어 치팅 방지와 효율성 때문이 가장 큽니다.
+
+오너를 사용한 [조건에 따른 프로퍼티 리플리케이션](Gameplay/Networking/Actors/Properties/Conditions) 도중에도 중요하게 쓰입니다. 예를 들어 `COND_OnlyOwner` 가 사용되면, 해당 액터의 오너만 이 프로퍼티 업데이트를 받습니다.
+
+마지막으로 (Role 이 `ROLE_AutonomousProxy` 인) 자율 프록시인 액터에도 중요합니다. 이러한 액터는, 이 액터를 소유하지 않는 접속에 프로퍼티를 리플리케이트시킬 때는 그 롤이 `ROLE_SimulatedProxy` 로 다운그레이드되기 때문입니다.

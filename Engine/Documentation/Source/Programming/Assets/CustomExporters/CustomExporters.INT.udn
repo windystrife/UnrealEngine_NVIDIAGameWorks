@@ -1,0 +1,96 @@
+Availability:Docs
+Title:Custom Exporters Technical Guide
+Crumbs: %ROOT%, Engine, Engine/UI, Programming
+Description:Programmer's guide to writing exporters for custom asset types.
+
+[REGION:todo]
+	This page is converted from Unreal Engine 3 documentation and currently being reviewed. Information may be outdated.
+[/REGION]
+
+[TOC(start:2)]
+
+UExporter classes are used in the editor to export assets, for use either by the editor's copy/paste/duplicate functionality, or to export assets to file.  Exporters classes declare the type of object supported by the exporter and a list of supported export formats.  Exporters support either to text or binary.
+
+The sister class of UExporter is UFactory, which is used to import and paste assets, as well as to create new assets.  See [WritingCustomImporters](Programming/Assets/CustomImporters) for more information on how to write an importer.
+
+
+
+## Adding A New UExporter Class
+
+UExporter-derived types can be defined in your game editor project. Consult classes found in Editor/UnrealEd/Classes/Exporters for examples of UExporter-derived types that ship with UnrealEngine4.
+
+
+## UExporter Members of Note
+
+What follows is a list of UFactory members typically set by a UExporter-derived type in its constructor.
+
+
+### SupportedClass
+Indicates the type of object exported by this exporter
+
+
+### FormatExtension
+A list of files extensions for the file type(s) supported by this exporter.  Used, for example, in the file dialog presented to the user when assets are exported from the editor to file.
+
+
+### FormatDescription
+A list of descriptions for the type(s) supported by this exporter.  Presented to the user in the editor UI when exporting assets to file.
+
+
+### PreferredFormatIndex
+An index into the FormatExtension array of the preferred export type.  Used to automatically select output formats when bulk exporting.
+
+
+### bText
+If _true_, indicates the exporter can export assets to text via ExportText.  If _false_, indicates the exporter can only export to binary via ExportBinary.
+
+
+
+## Example Binary Exporter
+
+Below is an example implementation of a simple exporter used to export sound objects (USoundNodeWave) to .wav.
+
+	/** Constructor */
+	USoundExporterWAV::USoundExporterWAV(const FObjectInitializer& ObjectInitializer)
+		: Super(ObjectInitializer)
+	{
+		// Structure to hold one-time initialization
+		struct FConstructorStatics
+		{
+			ConstructorHelpers::FClassFinder<UObject> Class0;
+			FConstructorStatics()
+				: Class0(TEXT("class'SoundNodeWave'"))
+			{
+			}
+		};
+		static FConstructorStatics ConstructorStatics;
+
+		// Property initialization
+		SupportedClass = USoundNodeWave::StaticClass();
+		bText = false;
+		FormatDescription.Add(TEXT("Sound"));
+		FormatExtension.Add(TEXT("WAV"));
+	}
+
+	/** Exports sound data to the specified archive in .wav form. */
+	bool USoundExporterWAV::ExportBinary( UObject* Object,
+											const TCHAR* Type,
+											FArchive& Ar,
+											FFeedbackContext* Warn,
+											int32 FileIndex,
+											uint32 PortFlags )
+	{
+		USoundNodeWave* Sound = CastChecked<USoundNodeWave>( Object );
+
+		// Export the sound data, which is already stored/
+		// internally in .wav format.
+		void* RawWaveData = Sound->RawData.Lock( LOCK_READ_ONLY );
+		Ar.Serialize( RawWaveData, Sound->RawData.GetBulkDataSize() );
+		Sound->RawData.Unlock();
+		return true;
+	}
+ 
+
+
+
+

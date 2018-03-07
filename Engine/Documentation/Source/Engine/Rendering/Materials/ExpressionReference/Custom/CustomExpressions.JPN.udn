@@ -1,0 +1,83 @@
+﻿INTSourceChangelist:2690125
+Availability:Public
+Title:Custom 表現式
+Crumbs: %ROOT%, Engine, Engine/Rendering/Materials, Engine/Rendering/Materials/ExpressionReference
+Description:カスタム仕様の、プレーンなシェーダー コードの使用を可能にする表現式
+Skilllevel: Advanced
+Version:4.9
+
+## Custom
+
+Custom は、任意量の入力を実行するカスタム HLSL シェーダーコードを書いて、実行結果を出力します。
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]プロパティ[/REGION] ||
+| **Code** | 表現式が実行するシェーダー コードを含みます。( 後述の [警告](#警告) をご覧ください) |
+| **Output Type** | 表現式によって出力される値のタイプを指定します。 |
+| **Description** | マテリアル エディタの表現式のタイトルバーの表示されるテキストを指定します。 |
+| **Inputs** | 表現式が使用する入力配列です。 |
+|[INCLUDE:Engine/Rendering/Materials/ExpressionReference/Custom#CustomInputItem] | [INCLUDE:Engine/Rendering/Materials/ExpressionReference/Custom#CustomInputDesc]|
+
+<!--
+[EXCERPT:CustomInputItem]
+[REGION:prop_sublist]
+**入力名**
+[/REGION]
+[/EXCERPT:CustomInputItem]
+
+[EXCERPT:CustomInputDesc]
+[REGION:prop_sublist]
+入力名を指定します。マテリアル エディタの表現式上に表示される名前となる他に、入力値を参照する HLSL コード内でも使用されます。
+[/REGION]
+[/EXCERPT:CustomInputDesc]
+-->
+
+入力配列には好きなだけ入力を追加し、名前を付けてください。その後、 Code プロパティにコードを書きます。例のように return 文で関数全体を入力しても良いですし、**Input.bgr** などの簡単な表現式を使っても良いです。OutputType で出力データ タイプも指定しなければなりません。
+
+![](T_Custom_Node.png)
+
+上図で使った以下のコードを使って、自分でカスタム ノードを作成できます。
+
+	float3 blur = Texture2DSample(Tex, TexSampler, UV);
+
+	for (int i = 0; i < r; i++)
+	{
+
+	  blur += Texture2DSample(Tex, TexSampler, UV + float2(i * dist, 0));
+	  blur += Texture2DSample(Tex, TexSampler, UV - float2(i * dist, 0));
+
+	}
+
+	for (int j = 0; j < r; j++)
+	{ 
+
+	  blur += Texture2DSample(Tex, TexSampler, UV + float2(0, j * dist));
+	  blur += Texture2DSample(Tex, TexSampler, UV - float2(0, j * dist));
+
+	}
+
+	blur /= 2*(2*r)+1;
+	return blur;
+
+(#警告)
+[REGION:warning]
+**カスタム ノードは定数畳み込みを防止します。また、ノードでビルドされた同等バージョンと比べて、かなり多くのインストラクションを使用する場合があります。** 定数畳み込みは UE4 内部で使用する最適化で、必要に応じてシェーダー インストラクション数を畳み込み処理します。例えば、[Time->Sin->Mul by parameter->Add to something] といった一連の表現式は、UE4 では一つのインストラクションに折り畳まれます。表現式 (Time、パラメータ) の全ての入力値が全体のドローコールに対して定数であり、ピクセルによって変更しないためこれが可能となります。UE4 はカスタムノードにあるものは全て折りたたむことが出来ないため、既存ノードで作成した同等レベルのシェーダーよりも効率が悪くなります。結果として、カスタムのノードの使用は、既存ノードでは不可能な機能性へアクセスがある場合のみが最適です。
+[/REGION]
+
+
+[REGION:warning]
+**カスタムノードで書かれているシェーダーコードは、「そのままの状態」でターゲットプラットフォームに対してコンパイルされます。** つまり、シェーダーが PC でコンパイルされている場合、有効な HLSL コードとみなされます。PS3 でコンパイルされている場合、有効な Cg とみなされます。
+[/REGION]
+
+
+<!--
+## CustomTexture
+
+CustomTexture は、[Custom](#Custom) 表現式内の HLSL コードにあるテクスチャを参照します。通常は tex2D や類似関数を使用して、テクスチャを HLSL コード内でサンプリングします。
+
+通常の TextureSample はカスタムノードへの入力として使用出来ますが、その場合サンプルはカスタムノード外部で計算され、結果は float4 値として渡されます。ループ内で同テクスチャを数回サンプル化したい場合、もしくは ex2Dbias 、 tex2Dlod 、 tex2Dproj 等 (HLSL 文書でこれらの使用目的を参照してください) のサンプリング指示を使用したい場合、この方法は柔軟性に欠けます。
+
+![customtex.jpg](customtex.jpg)
+
+-->

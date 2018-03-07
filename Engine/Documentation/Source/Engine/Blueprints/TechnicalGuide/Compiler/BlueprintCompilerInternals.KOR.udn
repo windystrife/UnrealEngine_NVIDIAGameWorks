@@ -1,0 +1,132 @@
+﻿INTSourceChangelist:3244370
+Availability:Public
+Title:블루프린트 컴파일러 개요
+Crumbs: %ROOT%, Programming, Engine/Blueprints/TechnicalGuide
+Description:블루프린트를 컴파일 프로세스 안내입니다.
+version: 4.9
+tags:Blueprints
+
+[TOC(start:2 end:2)]
+
+보통의 C++ 클래스처럼 블루프린트는 컴파일을 해야 게임에서 사용할 수 있습니다. **블루프린트 에디터** 의 
+**컴파일** 버튼을 누르면, _블루프린트_ 애셋의 프로퍼티와 그래프를 클래스로 변환하는 프로세스가 
+진행됩니다.
+
+## 용어
+
+$ FKismetCompilerContext : 컴파일 작업을 하는 클래스입니다. 컴파일을 할 때마다 새로운 인스턴스가 스폰됩니다. 컴파일중인 클래스, 블루프린트 등에 대한 참조를 저장합니다.
+
+$ FKismetFunctionContext : 관련된 그래프, 프로퍼티, 생성된 UFunction 으로의 참조 등 하나의 함수를 컴파일하기 위한 정보를 담습니다.
+
+$ FNodeHandlingFunctor : 컴파일러 내 하나의 노드 클래스 (싱글톤) 처리를 담당하는 헬퍼 클래스입니다. 핀 연결 등록, 컴파일된 구문 생성을 위한 함수가 들어 있습니다.
+
+$ FKismetCompiledStatement : 컴파일러 내 작업 단위입니다. 컴파일러는 노드를 컴파일된 구문 세트로 변환하며, 이것이 나중에 백엔드에서 바이트코드 연산으로 변환됩니다.
+	
+	**예:**  변수 할당, Goto, Call
+
+$ FKismetTerm : 그래프에 있는 (literal, const, 변수 참조 등의) 터미널입니다. 각 데이터 핀 연결은 이들 중 하나에 연결됩니다! `NodeHandlingFunctor` 에는 급조된(scratch) 변수, 중간(intermediate) 결과 등에 대한 자신만의 텀을 만들 수도 있습니다.
+
+
+## 컴파일 프로세스
+
+블루프린트의 기본적인 컴파일 프로세스 개요는 아래와 같습니다:
+
+[REGION:caption]
+(항목을 클릭하여 확인)
+[/REGION]
+[REGION:flowlist]
+* [REGION:listitem][클래스 소거](#클래스소거)[/REGION]
+* [REGION:listitem][클래스 프로퍼티 생성](#클래스프로퍼티생성)[/REGION]
+* [REGION:listitem][함수 목록 생성](#함수목록생성)[/REGION]
+* [REGION:listitem][클래스 바인딩과 링크](#클래스바인딩과링크)[/REGION]
+* [REGION:listitem special][함수 컴파일*](#함수컴파일)[/REGION]
+* [REGION:listitem][클래스 컴파일 완료](#클래스컴파일완료)[/REGION]
+* [REGION:listitem special][백엔드, 생성된 코드 방출*](#백엔드,생성된코드방출)[/REGION]
+* [REGION:listitem][클래스 디폴트 오브젝트 프로퍼티 복사](#클래스디폴트오브젝트프로퍼티복사)[/REGION]
+* [REGION:listitem][다시 인스턴싱](#다시인스턴싱)[/REGION]
+[/REGION]
+[REGION:caption clear]
+*Full Compile Only
+[/REGION]
+
+### 클래스 소거
+
+클래스는 일정한 자리에 컴파일됩니다. 무슨 뜻이냐면, 같은 **UBlueprintGeneratedClass** 를 소거하고 반복해서 재사용, 
+클래스에 대한 포인터를 고칠 필요가 없다는 뜻입니다. **CleanAndSanitizeClass()** 는 프로퍼티와 함수를 클래스에서 꺼내어 
+휘발성 패키지의 쓰레기 클래스로 이동시킨 다음, 클래스에 있는 데이터를 소거합니다.
+
+### 클래스 프로퍼티 생성
+
+컴파일러는 블루프린트의 **NewVariables** 배열은 물론 일부 다른 (컨스트럭션 스크립트같은) 곳을 대상으로 반복처리를 하여 
+클래스에 필요한 UProperty 전부를 찾은 다음 CreateClassVariablesFromBlueprint() 함수의 UClass 영역에 
+UProperty 를 생성합니다.
+
+### 함수 목록 생성
+
+컴파일러는 이벤트 그래프 처리, 보통 함수 그래프 처리, 각 맥락에 대해 **PrecompileFunction()** 을 호출하는 등 함수 _미리 컴파일_ 
+등을 통해 클래스에 대한 함수 목록을 생성합니다.
+
+#### 이벤트 그래프 처리
+
+이벤트 그래프의 처리는 **CreateAndProcessUberGraph()** 함수에 의해 이뤄집니다. 여기서는 모든 이벤트 그래프를 
+하나의 커다란 그래프로 복사하여 노드를 확장할 기회를 얻습니다. 그런 다음 그래프의 각 Event 노드에 대해 
+함수 토막(stub)을 생성, 각 이벤트 그래프에 대해 **FKismetFunctionContext** 가 생성됩니다.
+
+#### 함수 그래프 처리
+
+보통 함수 그래프의 처리는 **ProcessOneFunctionGraph()** 함수를 통해 이루어지며, 여기서는 각 그래프를 
+임시 그래프로 복제하여 노드 확장의 기회를 얻습니다. 각 함수 그래프에 대해 
+**FKismetFunctionContext** 도 생성됩니다.
+
+#### 함수 미리 컴파일
+
+함수를 미리 컴파일하는 작업은 각 맥락의 **PrecompileFunction()** 로 처리됩니다. 이 함수에서 행하는 동작은 
+다음과 같습니다:
+
+* 실행 스케쥴을 잡고 데이터 의존성을 계산합니다.
+* 스케쥴이 잡히지 않거나 데이터 의존성이 없는 노드를 쳐냅니다.
+* 남아있는 각 노드에서 노드 핸들러의 **RegisterNets()** 를 실행합니다.
+* 그러면 함수 내 값에 대해 **FKismetTerms** 를 생성합니다.
+* **UFunction** 와 연관된 프로퍼티를 생성합니다.
+
+
+### 클래스 바인딩과 링크
+
+컴파일러가 클래스에 대한 UProperty 와 UFunction 전부를 알게 되었으니 클래스 바인딩과 링크가 가능합니다.
+여기에는 프로퍼티 체인, 프로퍼티 크기, 함수 맵 등을 채우는 작업이 관여됩니다. 이 시점에서 본질적으로 
+(최종 플랙과 메타데이터는 빠진) _클래스 헤더_ 와 아울러 클래스 디폴트 오브젝트(CDO)가 생긴 것입니다.
+
+### 함수 컴파일
+
+다음 단계는 나머지 노드에 대한 **FKismetCompiledStatment** 오브젝트 생성 작업으로 구성되는데, 이는 
+노드 핸들러의 **Compile()** 함수에서 **AppendStatementForNode()** 를 사용하는 것으로 이뤄집니다.
+이 함수는 로컬에서 사용되기만 한다면 컴파일 함수에서 **FKismetTerm** 오브젝트를 생성할 수 있습니다.
+
+### 클래스 컴파일 완료
+
+클래스 컴파일을 마치기 위해 컴파일러는, 컴파일 과정에서 모든 것이 제대로 진행되었는지 확인하기 위한 최종 점검을 하기 전,
+클래스 플랙을 마무리하고 부모 클래스에서의 플랙과 메타데이터를 전파시킵니다.
+
+### 백엔드, 생성된 코드 방출
+
+백엔드는 각각의 함수 맥락에서의 구문 모음을 코드로 변환합니다. 사용되는 백엔드는 
+둘입니다:
+
+* **FKismetCompilerVMBackend** - FKCS 를 UnrealScript VM 바이트코드로 변환, 이후 함수의 스크립트 배열로 시리얼라이즈 시킵니다.
+* **FKismetCppBackend** - 순수 디버깅 용도의 _C++-같은_ 코드를 방출시킵니다.
+
+### 클래스 디폴트 오브젝트 프로퍼티 복사
+
+컴파일러는 특수 함수 **CopyPropertiesForUnrelatedObjects()** 를 사용하여 예전 클래스의 
+클래스 디폴트 오브젝트(CDO) 값을 새 CDO 로 복사합니다. 프로퍼티는 태깅된 시리얼라이제이션을 통해 
+복사되므로, 이름이 일관되기만 하다면 제대로 전송될 것입니다. CDO 의 컴포넌트는 이 단계에서 다시 
+인스턴싱되고 적절히 수정됩니다. GeneratedClass CDO 는 authoritative 입니다.
+
+### 다시 인스턴싱
+
+클래스 크기가 변경되었거나 프로퍼티가 추가 또는 제거되었을 수가 있기에, 컴파일러는 방금 컴파일된 클래스를 가지고 
+모든 오브젝트를 다시 인스턴싱할 필요가 있습니다. 이 프로세스에서는 **TObjectIterator** 를 사용하여 클래스의 모든 
+인스턴스를 찾고, 새 것을 스폰시킨 다음, **CopyPropertiesForUnrelatedObjects()** 함수를 사용하여 예전 인스턴스에서 새 인스턴스로 
+복사합니다.
+
+자세한 내용은 **FBlueprintCompileReinstancer** 클래스를 참고하시기 바랍니다.

@@ -1,0 +1,229 @@
+﻿INTSourceChangelist:2480553
+Availability: Public
+Title:战略游戏
+Crumbs:%ROOT%, Resources
+Description:涵盖塔防游戏的文件。
+Related: Gameplay/AI
+Related: Programming/Slate
+Related: Engine/Blueprints/UserGuide/Types/LevelBlueprint
+Related: Engine/Blueprints/Editor
+Related: Programming/Slate
+Related: Gameplay/Framework/UIAndHUD
+Related: Gameplay/Input
+Related: Engine/Rendering/ParticleSystems
+
+
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Resources/SampleGames/StrategyGame:title%](StrategyGameTopic.png)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/StrategyGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/StrategyGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/StrategyGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Resources/SampleGames/StrategyGame:title%](StrategyGameTopic.png)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/StrategyGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/StrategyGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/StrategyGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+[REGION:fullwidth]
+![](StragetyGame.png)
+[/REGION]
+
+
+[TOC(start:2 end:2)]
+
+
+## 概述
+
+塔防实例是即时战略游戏/塔防游戏的一个示例。 
+
+特性的完整列表如下：
+
+* 简单AI逻辑
+* 自动生成的Pawns
+* 自上而下的相机
+* 建造建筑
+* 主菜单
+* 组合了画布描画和Slate控件的游戏中的HUD
+* 游戏中的菜单
+
+在塔防游戏中，玩家必须通过建造劲弩、自动弩以及喷火炮塔来防卫其酿酒厂，同时还会有我方的士兵Pawn来协助防卫。  如果为保卫的酿酒厂购买了升级，这些士兵就会拥有大锤和盾牌。  炮塔，士兵以及升级都需要花费金币，可以从金币节点中收集，也可以击败敌人来获得。 如果玩家能从5波敌人的进攻中幸存，包括最终BOSS的攻击，而没有失去全部三条生命，那么他们会赢得胜利！
+
+## AI逻辑和自动生成的Pawns
+
+![](minion_attack.png)
+
+塔防中的AI逻辑是简单的有限自动机（FSM）。  两种可能的状态为向敌人基地移动以及攻击敌人，两种状态均为继承于`StrategyAIAction`的单独类。 状态位于优先数组内，最为重要的操作排在最前面。  这个数组被进行迭代，并且会选择最为适合执行的操作，如果需要执行具有更高优先级的操作，则可以终止当前操作。
+
+敌方Pawn和我方Pawn都根据AI逻辑运行，向对方基地移动，并且如果遇到对方则开始攻击对方的Pawn。  玩家无法控制我方Pawn的移动或行为，但是他们可以购买新的单位以供生成。  
+
+同时使用了 _蓝图_ 来添加逻辑到士兵的生成。  友军和敌军都可以装备盾牌；如果您为酿酒厂购买了兵工厂升级，则友军可以获得盾牌，如果在 _关卡蓝图_ 中调用 **SpawnHeavyFunction** 或 **SpawnEndBossFunction** ，则敌军的Pawn将会获得盾牌。 如果Pawn拥有盾牌，则来自于自动弩的射弹将会被销毁并且不会造成伤害。 这个逻辑使用 _蓝图接口_ 来实现。  名称为 **Minion** （士兵）的 _蓝图_ 也包含了网络，可以在其被火焰炮塔蓄力击中时令敌军Pawns行动缓慢。  
+
+## 建造建筑
+
+在塔防游戏中，有两种建筑类 - `StrategyBuilding` 和 `StrategyBuilding_Brewery` 。  塔防中所有的炮塔类型，以及空白建筑格，都使用父类为`StrategyBuilding`的 _蓝图_ 。  玩家可以点击任意空白建筑格来显示关联菜单并选择建造新建筑。  在建造建筑时，空白建筑格会被销毁，同时生成新建筑。  
+
+同时还有一个升级建筑的机制。 `StrategyBuilding_Brewery`类被用于此例中，因此升级被建造在酿酒厂基地附近的关联空格中。
+
+再次重申，塔防中的代码会创建基础建筑类。 塔防游戏中建筑的所有逻辑和设计都由关卡设计师在 _蓝图_ 中制作。
+
+### 酿酒厂
+
+**Brewery** （酿酒厂） _蓝图_ 具有父类`StrategyBuilding_Brewery`，并且还包含了 **AIDirector** 组件。  在TowerDefenseMap（塔防地图）中放置了两个酿造厂，一个是敌人生成的地方，还有一个是我方的酿造厂，您可以在此处构建兵工厂和铁匠铺升级，并且可以生成我方的Pawns。  在 **Brewery** _蓝图_ 中没有图表逻辑，只有建造属性的 **默认** 设置以及包含 **AIDirector** ， **触发器盒体** ，以及 _静态网格物体_ 的 **组件** 列表。 
+
+#### 升级
+
+![](upgraded_brewery.png)
+
+我方酿酒厂的有两格升级槽。  它们来自于继承`StrategyBuilding`类的 _蓝图类_ 。  如果在 **酿酒厂** 菜单中选择一项升级，则一个槽会由该升级所取代。 您只能购买一项铁匠铺升级和一项兵工厂升级。 
+
+在购买铁匠铺升级后，建造开始，在 **Wall_Smithy** _蓝图_ 中触发 **OnBuildStarted** 事件。  这个 _蓝图_ 还会在建造完成时告知系统升级已经完成。  此时，任何我方Pawn都会获得来自`StrategyAttachment`类中继承的 _蓝图_ 的盾牌。  在兵工厂升级报告其构建完成之后，指派"shield-attaching"操作的网络出现于 TowerDefenseMap _关卡蓝图_ 的 **PlayerBaseUpgrades** 折叠图表中。 `StrategyAttachment`类包含一个`SkeletalMeshComponent`（骨架网格物体组件）；附加的网格物体和附加点在 **Attachment_Armorer** _蓝图_ 的 **默认值** 中进行设置。
+
+兵工厂 _蓝图_ 包含了使用 **OnBuildStarted** 和 **OnBuildFinished** 事件设置的相同逻辑。  在建造兵工厂后，生成的任何我方Pawn都会拥有大锤，也是继承自`StrategyAttachment`类。  在铁匠铺升级报告其建造完成之后，指派"hammer-attaching"操作的网络也出现于 TowerDefenseMap _关卡蓝图_ 的 **PlayerBaseUpgrades** 折叠图表中。
+
+### 炮塔
+
+#### 空白栏
+
+![](building_empty_slot.png)
+
+空白栏也是具有`StrategyBuilding`父类的 _蓝图_ ，**Wall_EmptySlot** 。 在 _蓝图_ 图表中没有逻辑。 这是一个对建造属性和静态网格物体以及作为 **组件** 设置的触发器盒体的 **默认值** 进行设置的 _蓝图类_ 。
+
+所有可能的炮塔升级都在 **建造** 分类的 **升级** 部分的 **Wall_EmptySlot** _蓝图_ 的 **默认值** 部分进行设置。  
+
+
+#### 劲弩
+
+![](building_arbalest_shooting.png)
+
+**Wall_arbalest** _蓝图_ 包含了弩的逻辑，弩是一种基本的炮塔类型。 弩使用中等强度的射弹射击最近距离的敌人，在其默认模式中自动射箭。 玩家也可以手动发射弩，他可以点击弩然后按照他们希望发射的方向来拖曳。  鼠标拖曳的距离越长，发射的弩的强度越大。  
+
+
+弩的射弹被存储在继承于具有`StrategyProjectile`的 _蓝图_ **TestProjectile** 的另一 _蓝图_  **Projectile_arbalest** 中。  **Wall_arbalest** _蓝图_ 具有一定数量的子网络，都包含在 **事件图表** 内。  在 **构建脚本** 中没有 _蓝图_ 逻辑。   
+
+
+
+#### 自动发射的弩
+
+![](building_auto-arbalest_shooting.png)
+
+**Wall_arbalest_auto** _蓝图_ 包含了自动发射的弩的逻辑。  自动发射的弩从墙壁处直接发射射弹，对射弹穿过的每个单位造成少量的损伤。  自动发射的弩只有在射击到墙壁或敌人的盾牌时才会被销毁。  您可以通过点击并拖曳来让自动发射的弩瞄准所需方向；当您按下鼠标按钮时，自动发射的弩将会持续向瞄准的方向射击，但在您松开鼠标按钮后返回其默认发射位置。 
+
+和劲弩一样，这个炮塔发射的射弹弓箭包含于单独的 _蓝图_ 中。  名称为 **Projectile_arbalest_auto** 的自动发射的弓箭只有在撞击具有盾牌的敌人Pawn或墙壁时才会被销毁，而且这个操作是通过 _蓝图接口_ ， **Interface_Auto_Arbalest** 和 **Interface_Auto_Projectile** 的辅助来执行的。 
+
+#### 喷火器
+
+![](building_fire_shooting_normal.png)
+
+喷火器并不像其他炮台类型那样发射射弹。  它在喷火区域中对所有敌人喷火。  玩家可以点击并按住鼠标不放来积攒喷火器的能量；根据按下的时间不同，释放鼠标后产生的能量可以达到最高三倍的伤害，并减缓受损伤的敌军Pawn的速度。  如果玩家积聚喷火器的能量，随后会需要很短的冷却时间，然后继续开始常规的火焰攻击。  
+
+## 相机
+
+塔防的相机具有固定的视角，并能根据鼠标滚轮的滑动来缩放视角。  相机的运算在`StrategyPlayerController`类的`CalcCamera`函数中进行，而您可以在`DefaultGame.ini`中计算诸如相机最小和最大偏移，相机角度以及相机速度的常量。
+
+我们使用观察者Pawn来创建不具有可见Pawn的玩家。  
+
+## 游戏中的HUD
+
+游戏中的HUD是通过混合使用画布描画和Slate控件来创建的。  
+
+![](StrategyGameHUDcallouts.png)
+
+在右上角，游戏计时器为游戏计算热身的倒计时时间，使用的是类`SStrategySlateHUDWidget`中的函数`GetGameTime`。 在游戏开始后，倒计时从屏幕上消失，并显示剩余的生命数(1) 。  "剩余生命数"显示的属性在`AStrategyHUD`类的`DrawLives`函数中进行设置；生命值的初始数值在 **TowerDefenseMap** _关卡蓝图_ 中的 **PlayerBaseUpgrades** 子图表中进行设置。  
+
+当前的金币资源显示在屏幕的顶部中心位置(2)。  游戏计时器和资源显示都使用`SStrategySlateHUDWidget`中的基础控件进行定义。  同一个类被用于创建所有顶层的控件，但并不默认显示所有控件。
+
+迷你地图位于HUD的左下角(3)。  它是从不可见的Slate控件叠加中构建的，它处理输入和实际地图图像，而此图像使用画布来描画。  `SStrategyMiniMapWidget`负责在按钮被按下时或在迷你地图区域按住按钮不放时移动相机。
+
+当点击建筑空格时，会显示`SStrategyActionGrid`菜单。  只存在此控件的一个实例;其位置由激活的建筑空格来决定。  计算菜单的屏幕位置是以`DrawHUD`方式来完成的，它会投射选定的Actor位置到二维坐标。  此菜单的动作按钮的外观和事件映射在`ShowActionMenu`或`ShowCustomAction`方式的`AStrategyBuilding`类中进行定义。 `按钮`控件在`SStrategyButtonWidget`类中进行定义，任意绑定到动作按钮的额外信息都存储在`FActionButton`信息结构中。
+
+Pawns和建筑的生命条都使用`DrawActorsHealth`方式在画布上进行描画。  每个队伍都有不同的生命条贴图。
+
+[REGION:fullwidth]
+![](health_bar_textures.png)
+[/REGION]
+
+在HUD的右下角位置处，有一个`PauseButton`（暂停按钮）(4)，它可以切换暂停游戏和游戏中菜单的可视性。
+
+在用完游戏时间后，或者在基地之一被摧毁后，游戏将会暂停，同时在屏幕中心位置会出现动画处理的"胜利"或"失败"文本。  动画会随着时间而变更字体大小。 文本使用简单的`STextBlock`控件来创建，具有可视度、字体和文本的代理。
+
+
+## 菜单
+
+### 主菜单
+
+![](StrategyGameMainMenu1.png)(w:700)
+
+
+主菜单位于 **StrategyMenu** 贴图内，它会载入主菜单的特定HUD。  菜单是基于Slate的，`SStrategyMenuWidget`负责主菜单的动画、布局甚至处理。  `SStrategyMenuItem`类继承于在游戏中HUD中使用的`SStrategyButtonWidget`，并且描述了单个菜单项目。  每个菜单项目，以及附着于项目的事件，都在`StrategyMenuHUD`中进行定义。  
+
+如需返回到上一菜单，菜单共享指针的数组都被存储在`MenuHistory`变量中。 这个变量如同堆栈，存储之前查看过的菜单，这样在返回时很方便，同时能移除存储菜单父类的需求，这样菜单可以在多个场合中重新使用。‏
+
+<!-- ![](StrategyGameMainMenu2.png)(w:700) -->
+
+菜单动画使用在`SStrategyMenuWidget::SetupAnimations`中定义的插值曲线。 每条曲线都定义了起始时间、持续时间和插值方式，而且可以正反向播放。 如需在特定时间播放动画属性，则使用`GetLerp()`，它会返回在0.0f和1.0f之间的值。‏‎‏
+
+### 游戏中菜单
+
+[REGION:fullwidth]
+![](StrategyGamePauseMenu.png)
+[/REGION]
+
+当游戏中的菜单为激活状态时，会显示半透明的全屏Slate重叠，并且游戏被暂停。 `PauseMenuButtons` 在`SStrategySlateHUDWidget`中进行定义。 游戏中的暂停菜单有两个按钮： 一个是退出游戏，第二个返回主菜单。  如需退出游戏中菜单，玩家应再次按下右下方的暂停按钮。
+
+## 关卡蓝图
+
+_关卡蓝图_ 具有生成每波攻击的模块化结构，以及初始化和胜利/失败条件。
+
+### 敌人生成
+
+使用三个 _蓝图宏_ 来构建每波进攻： spawn fast（生成快速敌军），spawn normal（生成正常敌军），以及spawn heavy（生成重型敌军）。  每次生成都使用所需的单位参数和附件，并随后等待`StrategyAIDirector`中的`SpawnMinions`函数的触发。 宏会等待敌军酿酒厂的`StrategyAIDirector`返回已经生成一波攻击的报告，然后允许在退出子网络的情况下执行。
+
+每个生成的宏取入两个执行输入，一个用于开始宏，一个用于在 **OnWaveSpawned** 事件触发后打开 **大门** ，并对生成的Pawns数量赋予整数输入。  来自类`StrategyAIDirector`的函数被调用，同时对每种类型的Pawn进攻波指定输入。  三个函数为`SetDefaultWeapon`, `SetDefaultArmor`以及 `SetBuffModifier`。  `SetDefaultWeapon`和`SetDefaultArmor`取入 _蓝图_ 作为输入并指派这些 _蓝图_ 为生成时的新默认武器或默认装甲。  举例来说，所有由 **SpawnFastMacro** 生成的敌军Pawn将 **Attachment_Smithy** 大锤 _蓝图_ 作为默认武器，所有由 **SpawnHeavyMacro** 生成的敌军Pawn将 **Attachment_Armorer** 盾牌 _蓝图_  作为其默认装甲。 
+
+最后由生成的 _蓝图_ 函数调用的`StrategyAIDirector`函数是`SetBuffModifier`，它具有包括Pawn的攻击能力、生命值加成、速度和大小的多个数据输入。  这些输入都在 _蓝图_ 中进行显示，所以对于关卡设计师创建要生成的敌军Pawn的新类是很简单的。  最后，每个生成的 _蓝图_ 函数都会设置敌军酿酒厂的`StrategyAIDirector`的`WaveSize`属性。   
+
+一共有五波敌人的攻击，每波都组合了不同的敌军Pawn，有快速、普通以及重型敌军。  在每波攻击的起始处， **Show Wave Title** （显示每波的标题）节点都会显示波数。  然后，调用首波敌人的生成。  在生成后有两种类型的延迟： 一个是由 **延迟** 节点设置的计时器延迟，一个是由 **WaitForWaveMacro** 设置的基于Pawn的延迟。 **WaitForWaveMacro** 宏继续检查有多少敌军Pawns仍存活，并且除非延迟时间过期或所有敌军Pawn均被摧毁，否则不会退出宏的执行。 在一波攻击的所有生成都完成，并且该波的所有敌军Pawn都被消灭后（或者过了两分钟），会使用 _远程事件_  节点来对下一波调用 _自定义事件_ 。
+
+
+### 输赢条件
+
+在游戏中，您的基地有三条命。  如果有一个敌军Pawn到达了我方的酿酒厂，则扣除一条命，所有命都扣除后，游戏失败。  如果敌军的首领到达了我方的酿酒厂，则游戏失败。 要赢得游戏，您必须在损失所有三条命前击败所有的五波敌军。 该网络同时设置了输赢条件，它们位于 **TowerDefenseMap** 的 _关卡蓝图_ 中，并会调用在类`StrategyGameMode`中设置的函数，而它来源于`AGameMode`类。  `StrategyGameMode`类同时包含诸如`InitGame`的函数，它会初始化游戏，并且在Actor的预初始化组件`SetGamePaused`和`SetGameDifficulty`被调用前进行调用。
+
+在第五波生成的最终首领被消灭后，使用 _远程事件_ 节点来调用 **胜利** _自定义事件_ 。  这个 _自定义事件_ 位于 **胜利条件** 评论框内，然后触发子网络 **WaitForWin** 的执行，而其会检查是否有其它仍存在的敌军Pawn。  如果该值为 _true_ ，则在 **WinningTeam** 输入被设置为"玩家"的情况下调用`Finish Game`函数。  
+
+在 **失败条件** 评论框中有两个节点，它们会调用 **胜利队伍** 输入设置为"Enemy"的`Finish Game`函数，这会导致玩家的游戏失败。  第一个节点会在全部三条命都损失后触发，三条生命会在敌军Pawn到达我方酿酒厂时被扣除。  每次敌军Pawn到达我方酿酒厂时都会触发 **MultiGate** 节点。  **MultiGate** 节点的第一个和第二个输出执行引脚都与更新我方酿酒厂的NumberOfLives（残余生命值量）值的节点相连接，从而每次将值降低1。 最后的输出执行引脚设置我方酿酒厂的生命值量为0，并随后触发 **WinningTeam** 值为"Enemy"的`Finish Game`函数。   在敌方首领生成后， **BossSpawned** _自定义事件_ 关闭 **Gate** 节点，这会造成"3条命版本"的 **MultiGate** ，并打开另一个 **GateNode** ，从而使得第二个`Finish Game`函数的 **WinningTeam** 设置为"Enemy" 。 这样会创建开放的网络，这样如果最终的敌方首领到达我方酿酒厂， **FinishGame** 函数会被激活并且玩家将失败。  
+ 
+
+  
+
+## 资源节点 - 金币
+
+金币节点为具有父类`StrategyResourceNode`的 _蓝图_ 。  这个类包含公共函数`GetAvailableResources`和`GetInitialResources`、受保护的函数`OnDepleted`、在资源用尽时的报告函数`BlueprintImplementableEvent`、以及设置节点中资源数量的受保护属性`NumResources`。  
+
+金币节点的 _蓝图_ 包含子网络，从而让节点按照计时器来出现和消失。  _蓝图_ 中的 **构建脚本** 在蓝图被放置在关卡时设置节点为自动隐藏。 当金币节点出现时， **AppearFX** 粒子特效和声音一起播放。 如果由于节点被成功收集而触发了 **OnDepleted**  事件，则在节点中出现的金币数量被添加到玩家的总金币池中。  播放 **CollectFX** 粒子特效和 **CoinSound** ，随后节点被再次隐藏。  如果玩家未能及时通过点击金币来收藏节点，则播放 **FadeFX** 粒子特效和相应的声音。  

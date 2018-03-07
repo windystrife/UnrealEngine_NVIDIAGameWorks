@@ -1,0 +1,228 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	MeshDecals.usf: Vertex/Hull/Domain/Pixel shader for computing a mesh decal.
+=============================================================================*/
+
+#include "DecalCommon.ush"
+#include "/Engine/Generated/Material.ush"
+#include "/Engine/Generated/VertexFactory.ush"
+
+// Additional guard to remove all struct usage if empty to avoid platform conflicts.
+// This define can be removed if additional data is added to the interpolants struct
+#define NEED_MESH_DECAL_INTERPOLATORS	USE_WORLD_POSITION_EXCLUDING_SHADER_OFFSETS
+
+struct FMeshDecalInterpolants
+{
+#if USE_WORLD_POSITION_EXCLUDING_SHADER_OFFSETS
+	float3 PixelPositionExcludingWPO : TEXCOORD8; // Arbitrary free slot
+#endif
+};
+
+struct FMeshDecalVSToPS
+{
+	FVertexFactoryInterpolantsVSToPS FactoryInterpolants;
+#if NEED_MESH_DECAL_INTERPOLATORS
+	FMeshDecalInterpolants MeshDecalInterpolants;
+#endif
+	float4	Position		: SV_POSITION;
+};
+
+#if USING_TESSELLATION	
+	struct FMeshDecalVSToDS
+	{
+		FVertexFactoryInterpolantsVSToDS FactoryInterpolants;
+	#if NEED_MESH_DECAL_INTERPOLATORS
+		FMeshDecalInterpolants MeshDecalInterpolants;
+	#endif
+		float4 Position : VS_To_DS_Position;
+		OPTIONAL_VertexID_VS_To_DS
+	};
+	
+	#define VS_OUTPUT_TYPE FMeshDecalVSToDS
+#else
+	#define VS_OUTPUT_TYPE FMeshDecalVSToPS
+#endif
+
+#if USING_TESSELLATION	
+	#define FPassSpecificVSToDS FMeshDecalVSToDS
+	#define FPassSpecificVSToPS FMeshDecalVSToPS
+	#define INTERPOLATE_MEMBER(member) O.member = a.member * aInterp + b.member * bInterp
+
+	FMeshDecalVSToDS PassInterpolate(FMeshDecalVSToDS a, float aInterp, FMeshDecalVSToDS b, float bInterp)
+	{
+		FMeshDecalVSToDS O;
+		
+		O.FactoryInterpolants = VertexFactoryInterpolate(a.FactoryInterpolants, aInterp, b.FactoryInterpolants, bInterp);
+
+	#if USE_WORLD_POSITION_EXCLUDING_SHADER_OFFSETS
+		INTERPOLATE_MEMBER(MeshDecalInterpolants.PixelPositionExcludingWPO);
+	#endif
+
+		return O;
+	}
+
+	#undef INTERPOLATE_MEMBER
+	
+	FMeshDecalVSToPS PassFinalizeTessellationOutput(FMeshDecalVSToDS Interpolants, float4 WorldPosition, FMaterialTessellationParameters MaterialParameters)
+	{
+		FMeshDecalVSToPS O;
+		
+		O.FactoryInterpolants = VertexFactoryAssignInterpolants(Interpolants.FactoryInterpolants);
+
+	#if USE_WORLD_POSITION_EXCLUDING_SHADER_OFFSETS
+		O.MeshDecalInterpolants.PixelPositionExcludingWPO = Interpolants.MeshDecalInterpolants.PixelPositionExcludingWPO;
+	#endif
+		
+		// Finally, transform position to clip-space
+		O.Position = mul(WorldPosition, View.TranslatedWorldToClip);
+		return O;
+	}
+	
+	#include "Tessellation.ush"
+#endif
+
+#if VERTEXSHADER
+
+/** transform mesh as normal */
+void MainVS(
+	FVertexFactoryInput Input,
+	OPTIONAL_VertexID
+	out VS_OUTPUT_TYPE Output
+#if USE_GLOBAL_CLIP_PLANE && !USING_TESSELLATION
+	, out float OutGlobalClipPlaneDistance : SV_ClipDistance
+#endif
+	)
+{
+	ResolvedView = ResolveView();
+
+	FVertexFactoryIntermediates VFIntermediates = GetVertexFactoryIntermediates(Input);
+	float4 WorldPosition = VertexFactoryGetWorldPosition(Input, VFIntermediates);
+	float3x3 TangentToLocal = VertexFactoryGetTangentToLocal(Input, VFIntermediates);
+
+#if USE_WORLD_POSITION_EXCLUDING_SHADER_OFFSETS
+	Output.MeshDecalInterpolants.PixelPositionExcludingWPO = WorldPosition.xyz;
+#endif
+
+	FMaterialVertexParameters VertexParameters = GetMaterialVertexParameters(Input, VFIntermediates, WorldPosition.xyz, TangentToLocal);
+	// Isolate instructions used for world position offset on xbox 360, 
+	// As these cause the optimizer to generate different position calculating instructions in each pass, resulting in self-z-fighting.
+	// This is only necessary for shaders used in passes that have depth testing enabled.
+	ISOLATE
+	{
+		WorldPosition.xyz += GetMaterialWorldPositionOffset(VertexParameters);
+	}
+	
+#if USING_TESSELLATION
+	Output.Position = WorldPosition;
+	Output.FactoryInterpolants = VertexFactoryGetInterpolantsVSToDS(Input, VFIntermediates, VertexParameters);
+	
+#else // !USING_TESSELLATION
+
+	Output.Position = mul(WorldPosition, View.TranslatedWorldToClip);
+	Output.FactoryInterpolants = VertexFactoryGetInterpolantsVSToPS(Input, VFIntermediates, VertexParameters);
+
+#if USE_GLOBAL_CLIP_PLANE
+	OutGlobalClipPlaneDistance = dot(ResolvedView.GlobalClippingPlane, float4(WorldPosition.xyz - ResolvedView.PreViewTranslation.xyz, 1));
+#endif
+
+#endif // USING_TESSELLATION
+
+// Move all geometry a little bit towards the camera (to not get z fighting with existing zbuffer of the same meshes rendered with slightly different float computations).
+#if !USING_TESSELLATION
+	// todo: tweak or expose (cvar or per mesh/material setting), if needed the artist always can create a WorldPositionOffset adjustment in the shader (e.g. -0.1*CameraDirectionVector )
+	Output.Position.z += 0.0001f * Output.Position.w;
+#endif
+
+	OutputVertexID( Output );
+}
+
+#endif // VERTEXSHADER
+
+
+
+
+// is called in MainPS() from PixelShaderOutputCommon.usf
+void FPixelShaderInOut_MainPS(
+	FVertexFactoryInterpolantsVSToPS FactoryInterpolants,
+#if NEED_MESH_DECAL_INTERPOLATORS
+	FMeshDecalInterpolants MeshDecalInterpolants,
+#endif
+	inout FPixelShaderIn In,
+	inout FPixelShaderOut Out)
+{
+#if INSTANCED_STEREO
+	ResolvedView = ResolveView(GetEyeIndex(FactoryInterpolants.PackedEyeIndex));
+#else
+	ResolvedView = ResolveView();
+#endif
+
+	FMaterialPixelParameters MaterialParameters = GetMaterialPixelParameters(FactoryInterpolants, In.SvPosition);
+
+	FPixelMaterialInputs PixelMaterialInputs;
+#if USE_WORLD_POSITION_EXCLUDING_SHADER_OFFSETS
+	{
+		float4 ScreenPosition = SvPositionToResolvedScreenPosition(In.SvPosition);
+		float3 TranslatedWorldPosition = SvPositionToResolvedTranslatedWorld(In.SvPosition);
+		CalcMaterialParametersEx(MaterialParameters, PixelMaterialInputs, In.SvPosition, ScreenPosition, In.bIsFrontFace, TranslatedWorldPosition, MeshDecalInterpolants.PixelPositionExcludingWPO);
+	}
+#else
+	{
+		float4 ScreenPosition = SvPositionToResolvedScreenPosition(In.SvPosition);
+		float3 TranslatedWorldPosition = SvPositionToResolvedTranslatedWorld(In.SvPosition);
+		CalcMaterialParametersEx(MaterialParameters, PixelMaterialInputs, In.SvPosition, ScreenPosition, In.bIsFrontFace, TranslatedWorldPosition, TranslatedWorldPosition);
+	}
+#endif
+
+	// Store the results in local variables and reuse instead of calling the functions multiple times.
+	half3 BaseColor = GetMaterialBaseColor(PixelMaterialInputs);
+	half  Metallic = GetMaterialMetallic(PixelMaterialInputs);
+	half  Specular = GetMaterialSpecular(PixelMaterialInputs);
+
+	float3 Color = 1;
+
+	#if DECAL_BLEND_MODE == DECALBLENDMODEID_NORMAL
+		// -1..1 range to 0..1
+		Color = MaterialParameters.WorldNormal * 0.5f + 0.5f;
+	#else
+		Color = GetMaterialEmissive(PixelMaterialInputs);
+	
+		#if (ES2_PROFILE || ES3_1_PROFILE) // only for mobile
+			Color+= BaseColor;
+		#endif
+	#endif
+
+	float Opacity = GetMaterialOpacity(PixelMaterialInputs);
+
+	// decal fade
+//	Opacity *= DecalParams.x;
+
+	FGBufferData GBufferData;
+
+	GBufferData.WorldNormal = MaterialParameters.WorldNormal;
+	GBufferData.BaseColor = BaseColor;
+	GBufferData.Metallic = Metallic;
+	GBufferData.Specular = Specular;
+	GBufferData.Roughness = GetMaterialRoughness(PixelMaterialInputs);
+	GBufferData.CustomData = 0;
+	GBufferData.IndirectIrradiance = 0;
+	GBufferData.PrecomputedShadowFactors = 1;
+	GBufferData.GBufferAO = 1;
+	GBufferData.ShadingModelID = SHADINGMODELID_DEFAULT_LIT;
+	GBufferData.SelectiveOutputMask = 0;
+	GBufferData.PerObjectGBufferData = 1;
+
+	DecalCommonOutput(In, Out, Color, Opacity, GBufferData);
+}
+
+
+#define PIXELSHADEROUTPUT_MESHDECALPASS NEED_MESH_DECAL_INTERPOLATORS
+#define PIXELSHADEROUTPUT_INTERPOLANTS 1
+#define PIXELSHADEROUTPUT_MRT0 (DECAL_RENDERTARGET_COUNT > 0)
+#define PIXELSHADEROUTPUT_MRT1 (DECAL_RENDERTARGET_COUNT > 1 && (BIND_RENDERTARGET1 || COMPILER_METAL))
+#define PIXELSHADEROUTPUT_MRT2 (DECAL_RENDERTARGET_COUNT > 2)
+#define PIXELSHADEROUTPUT_MRT3 (DECAL_RENDERTARGET_COUNT > 3)
+#define PIXELSHADEROUTPUT_MRT4 (DECAL_RENDERTARGET_COUNT > 4)
+// all PIXELSHADEROUTPUT_ and "void FPixelShaderInOut_MainPS()" need to be setup before this include
+// this include generates the wrapper code to call MainPS()
+#include "PixelShaderOutputCommon.ush"

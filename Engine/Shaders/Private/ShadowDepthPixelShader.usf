@@ -1,0 +1,157 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	ShadowDepthPixelShader.usf: Pixel shader for writing shadow depth.
+=============================================================================*/
+
+// needs to before Common.usf
+#define SHADOW_DEPTH_SHADER 1
+#define USE_STENCIL_LOD_DITHER	0
+
+#include "Common.ush"
+#include "/Engine/Generated/Material.ush"
+#include "/Engine/Generated/VertexFactory.ush"
+#include "ShadowDepthCommon.ush"
+
+#define SECONDARY_OCCLUSION			1
+
+#define NO_LPV (COMPILER_GLSL || COMPILER_METAL || COMPILER_HLSLCC)
+
+// With this enabled, very large or one-sided objects (e.g. terrain) inject an additional layer of GV cells 
+// to increase AO contribution. The AO calculation works best with closed geometry and small-medium scale objects
+#define LPV_GV_BOOST				1
+
+#if REFLECTIVE_SHADOW_MAP && !NO_LPV
+	#include "LPVWriteVplCommon.ush"
+
+	#if RSM_TRANSMISSION
+		float2 ReflectiveShadowMapTextureResolution;
+		row_major float4x4 ProjectionMatrix;
+	#endif
+#endif
+
+
+float3 GetMaterialBounceColor(FPixelMaterialInputs PixelMaterialInputs)
+{
+	half3 BaseColor = GetMaterialBaseColor(PixelMaterialInputs);
+	return BaseColor;
+}
+
+
+void Main( 
+	FShadowDepthVSToPS Inputs,
+	in float4 SvPosition : SV_Position,		// after all interpolators
+	out float4 OutColor : SV_Target0
+#if REFLECTIVE_SHADOW_MAP
+	,out float4 OutReflectiveShadowMapDiffuse : SV_Target1
+#endif
+#if PERSPECTIVE_CORRECT_DEPTH
+	,out float OutDepth : SV_DEPTH
+#endif
+	)
+{
+	ResolvedView = ResolveView();
+
+#if INTERPOLATE_VF_ATTRIBUTES
+	
+	FMaterialPixelParameters MaterialParameters = GetMaterialPixelParameters(Inputs.FactoryInterpolants, SvPosition);
+	FPixelMaterialInputs PixelMaterialInputs;
+	#if INTERPOLATE_POSITION
+	    {
+			float4 ScreenPosition  = SvPositionToResolvedScreenPosition(SvPosition);  
+			
+			float3 TranslatedWorld = Inputs.PixelPosition.xyz;
+
+			CalcMaterialParametersEx(MaterialParameters, PixelMaterialInputs, SvPosition, ScreenPosition, 1, TranslatedWorld, TranslatedWorld);
+
+		}
+	#else
+		CalcMaterialParameters(MaterialParameters, PixelMaterialInputs, SvPosition, 1);
+	#endif
+
+	// Evaluate the mask for masked materials
+	GetMaterialClippingShadowDepth(MaterialParameters, PixelMaterialInputs);
+#else
+	ClipLODTransition(SvPosition.xy);
+#endif
+
+#if PERSPECTIVE_CORRECT_DEPTH
+	float DepthBias = ShadowParams.x;
+	float InvMaxSubjectDepth = ShadowParams.y;
+
+	Inputs.ShadowDepth *= InvMaxSubjectDepth;
+	Inputs.ShadowDepth += DepthBias;
+
+	OutDepth = saturate(Inputs.ShadowDepth);
+#endif
+
+	OutColor = 0;
+
+#if REFLECTIVE_SHADOW_MAP
+	OutReflectiveShadowMapDiffuse = 0;
+	float3 normal = normalize( MaterialParameters.TangentToWorld[2] ); // Smooth normal
+	float3 flux = GetMaterialBounceColor(PixelMaterialInputs);
+
+#if MATERIAL_INJECT_EMISSIVE_INTO_LPV
+	float3 emissive = GetMaterialEmissive(PixelMaterialInputs);
+
+	// Remove directionality from the light in the VPL.
+	normal = float3 (0.0f, 0.0f, 0.0f);
+#endif
+
+#if MATERIAL_INJECT_EMISSIVE_INTO_LPV || MATERIAL_BLOCK_GI
+	float opacity = GetMaterialOpacity(PixelMaterialInputs);
+#endif
+
+#if (SECONDARY_OCCLUSION || MATERIAL_INJECT_EMISSIVE_INTO_LPV) && !NO_LPV
+	// Optimisation: only add to GV/VPL if the fragment is within the grid
+	float3 grid = WorldToGrid( MaterialParameters.AbsoluteWorldPosition.xyz );
+	float minGrid = min( grid.x, min(grid.y,grid.z ) );
+	float maxGrid = max( grid.x, max(grid.y,grid.z ) );
+
+	[branch]
+	if ( minGrid > -0.5f && maxGrid <= 32.5f ) // Account for 0.5 cell offset
+	{
+#if SECONDARY_OCCLUSION && (MATERIALBLENDING_MASKED || MATERIALBLENDING_SOLID) && !MATERIAL_BLOCK_GI
+		float3 GvInjectPosition = MaterialParameters.AbsoluteWorldPosition - normal * LpvWrite.GeometryVolumeInjectionBias;
+#if LPV_GV_BOOST
+		if ( Primitive.LpvBiasMultiplier < 0.25 ) 
+		{
+			// Add an additional layer of GV cells facing the opposite direction to improve AO contribution
+			// TODO: add per-primitive AO-boost tickbox instead of hijacking LpvBiasMultiplier like this
+			// NOTE: The cost of this additional branch is minimal (on AMD at least)
+			float offset = ( LpvWrite.LpvScale * 3.0f );
+			AddToGvList( GvInjectPosition - normal * offset, flux, -normal );
+		}
+#endif
+		AddToGvList( GvInjectPosition, flux, normal ); 
+
+#endif
+
+#if MATERIAL_INJECT_EMISSIVE_INTO_LPV && !MATERIAL_BLOCK_GI
+		AddToVplList( MaterialParameters.AbsoluteWorldPosition, emissive * LpvWrite.EmissiveInjectionMultiplier, normal, true );
+#endif
+	}
+	else
+	{
+		OutColor = 0;
+		OutReflectiveShadowMapDiffuse = 0;
+		return;
+	}
+#endif
+
+#if MATERIAL_BLOCK_GI
+	OutColor = 1.0f;
+	OutReflectiveShadowMapDiffuse = opacity;
+#elif MATERIALBLENDING_TRANSLUCENT || MATERIALBLENDING_ALPHACOMPOSITE
+	OutColor = 0;
+	OutReflectiveShadowMapDiffuse = 0;
+	clip(-1.0);
+#else
+	// Pass the LPV bias multiplier in the alpha channel of the normal
+	OutColor = float4(normal * .5 + .5, Primitive.LpvBiasMultiplier / 32.0f );
+	OutReflectiveShadowMapDiffuse = float4(flux, 0);
+#endif
+
+#endif
+}

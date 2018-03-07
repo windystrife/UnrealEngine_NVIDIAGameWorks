@@ -1,0 +1,418 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	PostProcessTemporalAA.usf: Temporal AA
+=============================================================================*/
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+#include "Random.ush"
+#include "EyeAdaptationCommon.ush"
+
+#ifndef ENABLE_TEMPORAL_AA
+#define ENABLE_TEMPORAL_AA	1
+#endif
+
+float SampleWeights[9];
+float PlusWeights[5];
+float CurrentFrameWeight;
+
+#if COMPUTESHADER
+// x: bForceResponsiveFrame, y: Unused, zw: ThreadToUVScale
+float4 TemporalAAComputeParams;
+RWTexture2D<float4> OutComputeTex;
+#endif
+
+// On PS4, those are already defined.
+#if !PS4_PROFILE
+
+// TODO move to common
+float min3( float a, float b, float c )
+{
+	return min( a, min( b, c ) );
+}
+
+float max3( float a, float b, float c )
+{
+	return max( a, max( b, c ) );
+}
+
+float4 min3( float4 a, float4 b, float4 c )
+{
+	return float4(
+		min3( a.x, b.x, c.x ),
+		min3( a.y, b.y, c.y ),
+		min3( a.z, b.z, c.z ),
+		min3( a.w, b.w, c.w )
+	);
+}
+
+float4 max3( float4 a, float4 b, float4 c )
+{
+	return float4(
+		max3( a.x, b.x, c.x ),
+		max3( a.y, b.y, c.y ),
+		max3( a.z, b.z, c.z ),
+		max3( a.w, b.w, c.w )
+	);
+}
+
+#endif // !PS4_PROFILE
+
+float3 RGBToYCoCg( float3 RGB )
+{
+	float Y  = dot( RGB, float3(  1, 2,  1 ) );
+	float Co = dot( RGB, float3(  2, 0, -2 ) );
+	float Cg = dot( RGB, float3( -1, 2, -1 ) );
+	
+	float3 YCoCg = float3( Y, Co, Cg );
+	return YCoCg;
+}
+
+float3 YCoCgToRGB( float3 YCoCg )
+{
+	float Y  = YCoCg.x * 0.25;
+	float Co = YCoCg.y * 0.25;
+	float Cg = YCoCg.z * 0.25;
+
+	float R = Y + Co - Cg;
+	float G = Y + Cg;
+	float B = Y - Co - Cg;
+
+	float3 RGB = float3( R, G, B );
+	return RGB;
+}
+
+// Faster but less accurate luma computation. 
+// Luma includes a scaling by 4.
+float Luma4(float3 Color)
+{
+	return (Color.g * 2.0) + (Color.r + Color.b);
+}
+
+// Optimized HDR weighting function.
+float HdrWeight4(float3 Color, float Exposure) 
+{
+	return rcp(Luma4(Color) * Exposure + 4.0);
+}
+
+float HdrWeightY(float Color, float Exposure) 
+{
+	return rcp(Color * Exposure + 4.0);
+}
+
+// Intersect ray with AABB, knowing there is an intersection.
+//   Dir = Ray direction.
+//   Org = Start of the ray.
+//   Box = Box is at {0,0,0} with this size.
+// Returns distance on line segment.
+float IntersectAABB(float3 Dir, float3 Org, float3 Box)
+{
+	#if PS4_PROFILE
+	    // This causes flicker, it should only be used on PS4 until proper fix is in.
+		if(min(min(abs(Dir.x), abs(Dir.y)), abs(Dir.z)) < (1.0/65536.0)) return 1.0;
+	#endif
+	float3 RcpDir = rcp(Dir);
+	float3 TNeg = (  Box  - Org) * RcpDir;
+	float3 TPos = ((-Box) - Org) * RcpDir;
+	return max(max(min(TNeg.x, TPos.x), min(TNeg.y, TPos.y)), min(TNeg.z, TPos.z));
+}
+
+float HistoryClip(float3 History, float3 Filtered, float3 NeighborMin, float3 NeighborMax)
+{
+#if 0
+	float3 Min = min(Filtered, min(NeighborMin, NeighborMax));
+	float3 Max = max(Filtered, max(NeighborMin, NeighborMax));	
+	float3 Avg2 = Max + Min;
+	float3 Dir = Filtered - History;
+	float3 Org = History - Avg2 * 0.5;
+	float3 Scale = Max - Avg2 * 0.5;
+	return saturate(IntersectAABB(Dir, Org, Scale));
+#else
+	float3 BoxMin = NeighborMin;
+	float3 BoxMax = NeighborMax;
+	//float3 BoxMin = min( Filtered, NeighborMin );
+	//float3 BoxMax = max( Filtered, NeighborMax );
+
+	float3 RayOrigin = History;
+	float3 RayDir = Filtered - History;
+	RayDir = abs( RayDir ) < (1.0/65536.0) ? (1.0/65536.0) : RayDir;
+	float3 InvRayDir = rcp( RayDir );
+
+	float3 MinIntersect = (BoxMin - RayOrigin) * InvRayDir;
+	float3 MaxIntersect = (BoxMax - RayOrigin) * InvRayDir;
+	float3 EnterIntersect = min( MinIntersect, MaxIntersect );
+	return max3( EnterIntersect.x, EnterIntersect.y, EnterIntersect.z );
+#endif
+}
+
+float4 WeightedLerp( float4 ColorA, float WeightA, float4 ColorB, float WeightB, float Blend ) 
+{
+	float BlendA = (1.0 - Blend) * WeightA;
+	float BlendB =        Blend  * WeightB;
+	float RcpBlend = rcp(BlendA + BlendB);
+	BlendA *= RcpBlend;
+	BlendB *= RcpBlend;
+	return ColorA * BlendA + ColorB * BlendB;
+}
+
+#define MINIMAL_REPROJECTION_DEBUG 0
+
+// Useful for verifying that the camera motion reprojection is correct, and the history texture contains the right values
+float3 MinimalReprojectionForDebugging(float2 UV, float4 SvPosition)
+{
+	float3 PosN; 
+	PosN.xy = SvPositionToScreenPosition(SvPosition).xy;
+	PosN.z = SceneDepthTexture.SampleLevel(SceneDepthTextureSampler, UV, 0).r;
+
+	float4 ThisClip = float4( PosN.xy, PosN.z, 1 );
+	float4 PrevClip = mul( ThisClip, View.ClipToPrevClip );
+	float2 PrevScreen = PrevClip.xy / PrevClip.w;
+	float2 BackN = PosN.xy - PrevScreen;
+
+	BackN = SvPositionToScreenPosition(SvPosition).xy - BackN;
+	bool OffScreen = max(abs(BackN.x), abs(BackN.y)) >= 1.0;
+	BackN.x = clamp(BackN.x, -1.0 + ViewportSize.z, 1.0 - ViewportSize.z);
+	BackN.y = clamp(BackN.y, -1.0 + ViewportSize.w, 1.0 - ViewportSize.w);
+	BackN = (BackN * ScreenPosToPixel.xy + ScreenPosToPixel.zw + 0.5) * PostprocessInput0Size.zw;
+
+	float3 OldColor = PostprocessInput1.SampleLevel(PostprocessInput1Sampler, BackN.xy, 0).rgb;
+	float3 CurrentFrameSceneColor = PostprocessInput0.SampleLevel(PostprocessInput0Sampler, UV, 0).rgb;
+
+	float FixedLerp = .1f;
+	float3 NewColor = lerp(OldColor, CurrentFrameSceneColor, FixedLerp);
+	return NewColor;
+}
+
+void SSRTemporalAAPS( 
+	noperspective 	float2 UV 						: TEXCOORD0, 
+	noperspective	float3 InExposureScaleVignette 	: TEXCOORD1, 
+	noperspective	float4 Unused2 					: TEXCOORD2,
+	noperspective	float4 Unused3 					: TEXCOORD3,
+	noperspective	float2 Unused4 					: TEXCOORD4,
+					float4 SvPosition 				: SV_POSITION,		// after all interpolators
+	out 			float4 OutColor 				: SV_Target0 
+	)
+{
+#if ENABLE_TEMPORAL_AA
+	float InExposureScale = InExposureScaleVignette.x;
+	#define AA_ALPHA 1
+	#define AA_CROSS 0
+	#define AA_DYNAMIC 1
+	#define AA_LERP 8
+	#define AA_NAN 1
+	#include "PostProcessTemporalCommon.ush"
+#else 
+	// On broken platforms then at least draw something without AA.
+	OutColor = PostprocessInput0.SampleLevel(PostprocessInput0Sampler, UV, 0);
+#endif
+}
+
+float4 DOFTemporalAACommon(in float2 UV, in float InExposureScale)
+{
+	float4 OutColor = 0;
+
+#if ENABLE_TEMPORAL_AA
+	#define AA_FILTERED 0		// TODO Turn back on when Catmull-Rom weights can be disabled
+	#define AA_ALPHA 1
+	#define AA_CROSS 4
+	#define AA_AABB 0
+	#define AA_NAN 1
+	#define AA_BORDER 1
+	#define AA_FORCE_ALPHA_CLAMP 1
+	#define AA_YCOCG 1
+#if COMPUTESHADER
+	#define AA_SINGLE_PASS_RESPONSIVE 1
+#endif
+	#include "PostProcessTemporalCommon.ush"
+
+#else
+	OutColor = PostprocessInput0.SampleLevel(PostprocessInput0Sampler, UV, 0);
+#endif
+
+	return OutColor;
+}
+
+void DOFTemporalAAPS( 
+	in noperspective float2 UV : TEXCOORD0, 
+	in noperspective float3 InExposureScaleVignette : TEXCOORD1, 
+	in noperspective float4 Unused1 : TEXCOORD2,
+	in noperspective float4 Unused2 : TEXCOORD3,
+	in noperspective float2 Unused3 : TEXCOORD4,
+	float4 SvPosition : SV_POSITION,		// after all interpolators
+	out float4 OutColor : SV_Target0 )
+{
+	float InExposureScale = InExposureScaleVignette.x;
+	OutColor = DOFTemporalAACommon(UV, InExposureScale);
+}
+
+#if COMPUTESHADER
+[numthreads(THREADGROUP_SIZEX, THREADGROUP_SIZEY, 1)]
+void DOFTemporalAACS(uint2 DispatchThreadId : SV_DispatchThreadID)
+{
+	float2 UV = ((float2)DispatchThreadId + View.ViewRectMin.xy + 0.5f) * TemporalAAComputeParams.zw;
+	float4 OutColor = 0;
+
+	if (IsComputeUVOutOfBounds(UV))
+	{
+		return;
+	}
+
+	float InExposureScale = EyeAdaptationLookup();
+	OutColor = DOFTemporalAACommon(UV, InExposureScale);
+
+	uint2 PixelPos = DispatchThreadId + (uint2)View.ViewRectMin.xy;
+	OutComputeTex[PixelPos] = OutColor;
+}
+#endif
+
+void LightShaftTemporalAAPS( 
+	in noperspective float2 UV : TEXCOORD0, 
+	in noperspective float3 InExposureScaleVignette : TEXCOORD1, 
+	in noperspective float4 Unused1 : TEXCOORD2,
+	in noperspective float4 Unused2 : TEXCOORD3,
+	in noperspective float2 Unused3 : TEXCOORD4,
+	float4 SvPosition : SV_POSITION,		// after all interpolators
+	out float4 OutColor : SV_Target0 )
+{
+#if ENABLE_TEMPORAL_AA
+	float InExposureScale = InExposureScaleVignette.x;
+	#define AA_ALPHA 1
+	#define AA_CROSS 0
+	#define AA_DYNAMIC 0
+	#define AA_LERP 64
+	#define AA_NAN 1
+	#include "PostProcessTemporalCommon.ush"
+#else 
+	OutColor = PostprocessInput0.SampleLevel(PostprocessInput0Sampler, UV, 0);
+#endif
+}
+
+// 0.0f or 1.0f (if the RT format is not PF_FloatRGBA)
+float DitherScale;
+
+float4 MainTemporalAACommon(in float2 UV, in float4 SvPosition, in float InExposureScale)
+{
+	float4 OutColor = 0;
+
+#if ENABLE_TEMPORAL_AA
+	#if MINIMAL_REPROJECTION_DEBUG
+		OutColor = float4(MinimalReprojectionForDebugging(UV, SvPosition), 0);
+	#else
+		#define AA_FILTERED 1
+		#define AA_ALPHA (POST_PROCESS_ALPHA)
+		#define AA_BORDER 1
+		#define AA_CROSS 2
+		#define AA_AABB 0
+		#define AA_ROUND 0
+		#define AA_YCOCG 1
+		#define AA_BICUBIC 1
+		#define AA_TONE 1
+		#define AA_DYNAMIC_ANTIGHOST 1
+	#if COMPUTESHADER
+		#define AA_SINGLE_PASS_RESPONSIVE 1
+	#endif
+		#include "PostProcessTemporalCommon.ush"
+
+	#endif
+#else
+	OutColor = PostprocessInput0.SampleLevel(PostprocessInput0Sampler, UV, 0);
+#endif
+
+	return OutColor;
+}
+
+void MainTemporalAAPS(
+	in noperspective float2 UV : TEXCOORD0,
+	in noperspective float3 InExposureScaleVignette : TEXCOORD1,
+	// Note: these are needed to match up with the vertex shader outputs which is FPostProcessTonemapVS, otherwise a d3d debug error is issued
+	in noperspective float4 Unused1 : TEXCOORD2,
+	in noperspective float4 Unused2 : TEXCOORD3,
+	in noperspective float2 Unused3 : TEXCOORD4,
+	in float4 SvPosition : SV_Position,		// after all interpolators
+	out float4 OutColor : SV_Target0 )
+{
+	float InExposureScale = InExposureScaleVignette.x;
+	OutColor = MainTemporalAACommon(UV, SvPosition, InExposureScale);
+}
+
+#if COMPUTESHADER
+[numthreads(THREADGROUP_SIZEX, THREADGROUP_SIZEY, 1)]
+void MainTemporalAACS(uint2 DispatchThreadId : SV_DispatchThreadID)
+{
+	float2 UV = ((float2)DispatchThreadId + View.ViewRectMin.xy + 0.5f) * TemporalAAComputeParams.zw;
+	float4 SvPosition = float4(UV*2-1,0,1);
+	float4 OutColor = 0;
+
+	if (IsComputeUVOutOfBounds(UV))
+	{
+		return;
+	}
+
+	float InExposureScale = EyeAdaptationLookup();
+	OutColor = MainTemporalAACommon(UV, SvPosition, InExposureScale);
+
+	uint2 PixelPos = DispatchThreadId + (uint2)View.ViewRectMin.xy;
+	OutComputeTex[PixelPos] = OutColor;
+}
+#endif
+
+float4 MainFastTemporalAACommon(in float2 UV, in float InExposureScale)
+{
+	float4 OutColor = 0;
+
+#if ENABLE_TEMPORAL_AA
+	#define AA_FILTERED 1
+	#define AA_ALPHA (POST_PROCESS_ALPHA)
+	#define AA_BORDER 1
+	#define AA_CROSS 2
+	#define AA_AABB 0
+	#define AA_YCOCG 1
+	#define AA_BICUBIC 1
+	#define AA_TONE 1
+#if COMPUTESHADER
+	#define AA_SINGLE_PASS_RESPONSIVE 1
+#endif
+	#include "PostProcessTemporalCommon.ush"
+
+#else
+	OutColor = PostprocessInput0.SampleLevel(PostprocessInput0Sampler, UV, 0);
+#endif
+
+	return OutColor;
+}
+
+void MainFastTemporalAAPS(
+	in noperspective float2 UV: TEXCOORD0,
+	in noperspective float3 InExposureScaleVignette : TEXCOORD1,
+	in noperspective float4 Unused1 : TEXCOORD2,
+	in noperspective float4 Unused2 : TEXCOORD3,
+	in noperspective float2 Unused3 : TEXCOORD4,
+	in float4 SvPosition : SV_Position,		// after all interpolators
+	out float4 OutColor : SV_Target0 )
+{
+	float InExposureScale = InExposureScaleVignette.x;
+	OutColor = MainFastTemporalAACommon(UV, InExposureScale);
+} 
+
+#if COMPUTESHADER
+[numthreads(THREADGROUP_SIZEX, THREADGROUP_SIZEY, 1)]
+void MainFastTemporalAACS(uint2 DispatchThreadId : SV_DispatchThreadID)
+{
+	float2 UV = ((float2)DispatchThreadId + View.ViewRectMin.xy + 0.5f) * TemporalAAComputeParams.zw;
+	float4 OutColor = 0;
+
+	if (IsComputeUVOutOfBounds(UV))
+	{
+		return;
+	}
+
+	float InExposureScale = EyeAdaptationLookup();
+	OutColor = MainFastTemporalAACommon(UV, InExposureScale);
+
+	uint2 PixelPos = DispatchThreadId + (uint2)View.ViewRectMin.xy;
+	OutComputeTex[PixelPos] = OutColor;
+}
+#endif
+
+ 

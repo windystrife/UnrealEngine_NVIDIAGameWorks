@@ -1,0 +1,158 @@
+﻿INTSourceChangelist:3151855
+Availability:Docs
+Title:파티클 모듈 테크니컬 가이드
+Crumbs:%ROOT%, Programming, Programming/Rendering
+Description:새로운 파티클 모듈을 추가하여 파티클 시스템 작동방식을 임의로 수정하는 법에 대한 프로그래머 안내서입니다.
+Version: 4.9
+tags:Rendering
+
+[TOC (start:2 end:3)]
+
+
+
+
+
+UE4의 파티클 시스템은 몇 개의 파티클 이미터로 구성되며, 각 이미터는 파티클이 어떻게 행동하는지 영향을 주는 모듈을 포함합니다. 커스텀 모듈 및 이미터 타입으로 시스템을 확장하는 것은 매우 단순하며 이 문서는 그렇게 하는 방법의 몇 예를 줄 것입니다.
+
+## ParticleModule 베이스 클래스
+
+모든 파티클 모듈은 같은 베이스 클래스 `ParticleModule` 에서 파생됩니다. (UE4/Engine/Source/Runtime/Engine/Classes/Particles/Modules/ParticleModule.h 에 정의되어 있습니다). 
+
+
+### 멤버 변수
+
+`ParticleModule` 클래스에는 다음과 같은 멤버 변수가 들어있습니다:
+
+| 변수 | 개요 |
+| ---- | ---- |
+| `bSpawnModule` | 파티클을 스폰해야 하는 모듈이 이 파이프를 통과해야 (즉 `Spawn()`/`SpawnEditor()` 함수가 뭔가 해야) 함을 나타내는 불리언입니다. 기본값은 _False_ 입니다. |
+| `bUpdateModule` | 파티클을 업데이트해야 하는 모듈이 이 파이프를 통과해야 (즉 `Update()`/`UpdateEditor()` 함수가 뭔가 해야) 함을 나타내는 불리언입니다. 기본값은 _False_ 입니다.|
+| `bCurvesAsColor` | 모듈의 분포 (커브) 프로퍼티에 컬러 데이터가 들어 있는지를 나타내는 불리언입니다. _True_ 면 커브 에디터에 그려지는 커브는 `ModuleEditorColor` 에 할당된 것이 아닌 현재 색으로 표시됩니다. 기본값은 _False_ 입니다. |
+| `b3DDrawMode` | 모듈이 자신의 3D 시각화 헬퍼를 렌더링해야 할지를 나타내는 불리언입니다. 기본값은 _False_ 입니다. |
+| `bSupported3DDrawMode` | 모듈이 3D 시각화 헬퍼를 지원(, 즉 `Render3DPreview()` 함수가 어떤 작업을 )함을 나타내는 불리언입니다. 기본값은 _False_ 입니다. |
+| `bEnabled` | 모듈이 켜졌는지 아닌지를 나타내는 불리언입니다. 기본값은 _True_ 입니다. |
+| `bEditable` | 디자이너가 켠 모듈인지를 나타내는 불리언입니다. LOD 레벨에서 하위 LOD 레벨이 수정되었는지 결정하는 데 사용됩니다. 기본값은 _True_ 입니다. |
+| `ModuleEditorColor` | 모듈에 관련된 색입니다. 커브 에디터에 그려지는 모듈의 커브는 이 색으로 표시됩니다. [REGION:note]`bCurvesAsColor` 가 켜져 있으면 커브가 실제 나타내는 색으로 그려집니다.[/REGION] |
+
+`ModuleType` Enum 역시 이 클래스에 정의되며, 어떤 유형의 이미터가 이 모듈을 사용할 수 있는지를 나타냅니다. 사용할 수 있는 유형에 대한 설명은 다음 표와 같습니다:
+
+| 유형 (EPMT) | 설명 |
+| ------------ | ----------- |
+| _General_ | 모든 이미터 유형에서 사용할 수 있는 범용 모듈입니다. |
+| _TypeData_ | TypeData 모듈로, 인스턴싱되는 이미터 클래스를 나타냅니다. |
+| _Beam_ | Beam (빔) 이미터에서만 사용되는 모듈입니다. |
+| _Trail_ | Trail (자취) 이미터에서만 사용되는 모듈입니다. |
+
+
+### 멤버 함수
+
+`ParticleModule` 클래스에는 자신의 모듈을 작성할 때 유의미한 지점인 가상 멤버 함수 여럿이 들어 있으며, (다른 멤버 함수도 여럿 있지만, 커스텀 모듈에는 무관하므로 다루지 않습니다.) 다음과 같습니다:
+
+| 함수 | 개요 |
+| ---- | ---- |
+| `void Spawn(FParticleEmitterInstance* Owner, int32 Offset, float SpawnTime)` | 이미터에서 새롭게 스폰된 파티클에서 호출됩니다. 각 파티클이 생성되면서 모듈이 그 초기값을 설정/수정할 수 있는 곳입니다. |
+| `void Update(FParticleEmitterInstance* Owner, int32 Offset, float DeltaTime)` | 이미터에 의해 업데이트중인 파티클에서 호출됩니다. 업데이트중인 파티클의 색이나 속도를 변경한다든가 하는 작업을 모듈이 할 수 있는 곳입니다. |
+| `uint32 RequiredBytes(FParticleEmitterInstance* Owner = NULL)` | 파티클 페이로드(비용) 블록에서 모듈이 요하는 바이트 수를 반환합니다. 이를 통해 모듈이 파티클별로 요하는 일정한 데이터를 저장할 수 있습니다. |
+| `uint32 RequiredBytesPerInstance(FParticleEmitterInstance* Owner = NULL)` | 이미터의 _인스턴스별_ 데이터 블록에서 모듈이 요하는 바이트 수를 반환합니다. 이를 통해 모듈이 이미터 인스턴스별로 요하는 일정한 데이터를 저장할 수 있습니다. |
+| `virtual void CompileModule( struct FParticleEmitterBuildInfo& EmitterInfo )` | GPU 파티클 이미터와 함께 사용될 수 있는 모듈에 대해서는 반드시 `CompileModule()` 을 구현해야 합니다. 모듈의 이펙트를 시뮬레이션에 적용하기 위해서는 모듈이 emitter info 구조체를 수정해야 합니다.
+
+## 커스텀 모듈 만들기
+
+커스텀 모듈을 만드는 것은 단지 위에 언급한 함수를 덮어써서 원하는 효과를 구현하면 되는 일입니다. 여기서는 그 예로, 분포로 생성되는 인수로 스케일이 조절되는 속도에다 기본 색을 곱해서 파티클의 색을 설정하는 모듈을 구현해 보도록 하겠습니다.
+
+모듈의 베이스 클래스에서는 캐스케이드 우클릭 모듈 메뉴 아래 가게 될 _heading_ 이 정의됩니다. 그래서 우리 예제에서는 모듈이 **Color** 서브메뉴에 오도록 `ParticleModuleColorBase` 클래스에서 파생하겠습니다.
+
+### 모듈 선언
+
+	UCLASS(editinlinenew,collapsecategories,hidecategories=Object)
+	public class UParticleModuleColorByVelocity : public UParticleModuleColorBase
+	{
+		/**
+
+		 *   컬러에 설정하기 전, 각각에 해당하는 속도 요소에 
+		 *   적용할 스케일 값입니다. 이 값은 다음을 사용해서 구합니다:
+		 *   Particle.RelativeTime.
+		 *
+		 *   예를 들어 ScaleVelocity 가 (0.25,0.5,1.0) 이고, 속도가 
+		 *   (2.0,2.0,0.0) 라면, 파티클 컬러는 (0.5,1.0,0.0) 로 설정됩니다;
+		 */
+
+		var(Color)   rawdistributionvector   ScaleVelocity;
+
+		cpptext
+		{
+		   virtual void   Spawn(FParticleEmitterInstance* Owner, int32 Offset, float SpawnTime);
+		   virtual void   Update(FParticleEmitterInstance* Owner, int32 Offset, float DeltaTime);
+		}
+	}
+
+참고할 점:
+
+1. 이 모듈은 파티클 스폰과 업데이트 단계 모두에서 작동되도록 (`bSpawnModule`, `bUpdateModule` 둘 다 _True_ 로 설정)되어 있습니다.
+1. 우리 모듈에서는 파티클별 또는 인스턴스별 데이터를 요하지 않으니, `RequiredBytes*()` 함수를 덮어쓰지 않습니다.
+
+[REGION:warning]
+이 예제에서는 이미터 모듈 스택에 **ColorByVelocity** 모듈 앞에 **InitialColor** 모듈이 와야 합니다.
+파티클 컬러가 조작중임을 표시하기 위해서는 파티클 이미터가 **VertexColor** 표현식을 활용하는 머티리얼을 사용해야 하기도 합니다.
+[/REGION]
+
+#### 모듈 구현
+
+생성자는 `ScaleVelocity` (속도 스케일)에 할당할 `DistributionVectorConstant` (벡터 상수 분포)를 생성하여 엔진더러 파티클 스폰도 업데이트도 처리해야 한다고 일러줍니다.
+
+	UParticleModuleColorByVelocity::UParticleModuleColorByVelocity(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+	{
+		bSpawnModule = true;
+		bUpdateModule = true;
+						
+		UDistributionVectorConstant* DistributionScaleVelocity = ConstructorHelpers::CreateDefaultSubobject<UDistributionVectorConstant>(this, TEXT("DistributionScaleVelocity"));
+		DistributionScaleVelocity->Constant = FVector(1.0f, 1.0f, 1.0f);
+		ScaleVelocity.Distribution = DistributionScaleVelocity;
+	}
+
+`Spawn()` 함수에서 코드는 파티클에 있는 초기 이펙트를 구성하게 됩니다. 모든 모듈에 `Spawn()` 호출이 필요한 것은 아니지만, 얘는 필요합니다.
+
+	void UParticleModuleColorByVelocity::Spawn(FParticleEmitterInstance* Owner, int32 Offset, float SpawnTime)
+	{
+	   SPAWN_INIT;
+	   {
+		  FVector ColorScale    = ScaleVelocity.GetValue(Particle.RelativeTime, Owner->Component);
+		  Particle.Color        = FLinearColor(
+												Particle.BaseColor.R * Particle.Velocity.X * ColorScale.X,
+												Particle.BaseColor.G * Particle.Velocity.Y * ColorScale.Y,
+												Particle.BaseColor.B * Particle.Velocity.Z * ColorScale.Z);
+	   }
+	}
+
+`Spawn()` 함수는 `Particle.RelativeTime` 를 사용하여 분포에서 `ScaleVelocity` 값을 구합니다. 속도에다 이 값을 곱해 스케일이 적용된 속도 값을 구합니다. 그런 다음 `BaseColor` 에 스케일 속도 계산 결과값을 곱해서 `Particle.Color` 에 설정합니다.
+
+`SPAWN_INIT` 은 스폰중인 파티클로의 레퍼런스는 물론, 파티클 페이로드(비용)를 추적해 들어갈 때의 오프셋 등과 같이 파티클 데이터 접근시 흔히 사용되는 값도 구성해 주는 매크로입니다. 전체 내용은 `//depot/UE4/Engine/Source/Runtime/Engine/Public/ParticleHelper.h` 를 참고해 주시기 바랍니다.
+
+[REGION:note]
+	이 모듈은 `Particle.Color` 를 직접 설정한다는 점에서 파괴형(destructive) 모듈입니다. 이 모듈 앞에 와서 `Particle.Color` 만 변경하는 것은 상관이 없을 것이나, **InitialColor** 모듈처럼 `BaseColor` 역시도 변경하는 것이라면 영향을 끼칠 것입니다.
+[/REGION]
+
+특히 이 모듈의 `Update()` 함수는 `Spawn()` 과 다소 동일하다 하겠습니다. 차이점이라면 각각의 활성 파티클이 한 번의 루프에 업데이트된다는 점입니다.
+
+	void UParticleModuleColorByVelocity::Update(FParticleEmitterInstance* Owner, int32 Offset, float DeltaTime)
+	{
+	   BEGIN_UPDATE_LOOP;
+	   {
+		  FVector ColorScale    = ScaleVelocity.GetValue(Particle.RelativeTime, Owner->Component);
+		  Particle.Color        = FLinearColor(
+												 Particle.BaseColor.R * Particle.Velocity.X * ColorScale.X,
+												 Particle.BaseColor.G * Particle.Velocity.Y * ColorScale.Y,
+												 Particle.BaseColor.B * Particle.Velocity.Z * ColorScale.Z);
+	   }
+	   END_UPDATE_LOOP;
+	}
+
+`BEGIN_UPDATE_LOOP`/`END_UPDATE_LOOP` 는 모든 활성 파티클을 대상으로 루프 코드 블록을 구성한 다음 각 파티클에서 그 사이에 포함된 코드를 실행시키는 매크로입니다. 전체 내용은 `UnParticleHelper.h` 를 참고해 주세요.
+
+다음은 작동중인 **ColorByVelocity** 모듈 스크린 샷입니다. 파티클의 **InitialVelocity** (초기 속도)가 **[(0,0,0),(200,200,0)]** 범위에서 임의로 설정됩니다. 각 파티클의 **InitialColor** (초기 색)은 하양으로 설정됩니다. **ColorByVelocity** 의 **VelocityScale** 은 **(0.005, 0.005, 0)** 상수로 설정됩니다. 그 결과 각 파티클의 컬러는 다음과 같이 설정됩니다:   
+    
+	Velocity * VelocityScale
+
+![ColorByVelocity.JPG](ColorByVelocity.JPG)
+

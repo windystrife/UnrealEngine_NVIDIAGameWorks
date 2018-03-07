@@ -1,0 +1,122 @@
+﻿INTSourceChangelist:3244370
+Availability:Public
+Title:ブループリントのプログラミングのガイドライン
+Crumbs: %ROOT%, Programming, Engine/Blueprints/TechnicalGuide
+Description:ブループリント フレンドリーな API を最適に記述するためのヒントとコツ
+Related:Engine/Blueprints/TechnicalGuide/ExtendingBlueprints 
+version:4.9
+tags:Blueprints
+
+[TOC (start:2 end:2)]
+
+C++ コードまたはブループリントのどちらを使用するかを判断する場合、以下の 2 点を検討します。
+-	スピード
+-	式の複雑さ
+
+これ以外には、ゲームの複雑度やチーム構成が決め手となります。開発チームにプログラマーよりもアーティストの方が多く存在する場合は、 
+C++ コードよりもブループリントを多く使うことになるでしょう。逆にチームにプログラマーが多ければ、おそらく C++ コードを好むでしょう。弊社は、その中間でプロジェクトを進めることを推奨します。エピックでは、次のようなワークフローを多く使用しています。 
+コンテンツ クリエーターが非常に複雑なブループリントを作成して、プログラマーがこの多くを新しい Blueprint ノードにコーディングして C++ コードへ圧縮し、 
+その機能の大部分を新しい C++ 関数へ移行します。ブループリントを広範囲に渡って使用し、以下のような場合に C++ コードを使用するのがグッドプラクティスになるでしょう。 
+ブループリントが複雑になるにつれて、C++ なら機能を簡潔な表現式に表せる場合 (そうしなければプログラマー以外の人々にとって複雑すぎる場合)、またはスピードの点から C++ コードへ移行すべき場合です。
+
+
+### スピード
+実行速度に関しては、ブループリントは C++ プログラムよりも実際に実際に遅くなります。パフォーマンスが悪くなるという意味ではありません。 
+演算の数や頻度が多い場合は、ブループリントではなく C++ の使用が好ましい場合もあります。ただし、この 2 つの方法を組み合わせて、チームとプロジェクトのパフォーマンスを最高にすることも可能です。
+ブループリントで多数の機能を設定した場合は、いくつかの機能を C++ へ移行して実行速度を上げ、残りの機能は柔軟性を維持するためにブループリントで保持します。  
+ブループリントのある操作に時間がかかりすぎているとプロファイリングに表示された場合は、残りの機能はブループリントに残しつつ、この問題のある機能を C++ コードのセクションへ移行させることを検討してください。   
+
+ブループリントのビジュアル スクリプティングで実行すると長時間かかるシステムの例に、無数のアクタをコントロールするクラウド システムがあります。 
+この場合は、パフォーマンスのために、C++ で意思決定、パス設定、またその他の Crowd 機能を処理します。そして調整を行うパラメータとコントロールを行う機能をブループリントに公開することも可能です。
+
+### 複雑度
+表現式の複雑度に関しては、ブループリントよりも C++ コードを使った方が簡単な場合もあります。ブループリントはほとんどのことを簡単に処理できますが、 
+中にはノードでの表現が難しい処理もあります。膨大なデータセット操作、文字列操作、膨大なデータセットの複雑な演算などは非常に複雑な処理であるため、ビジュアル システムで行うのは容易ではありません。 
+こうしたものは、C++ コードの記述の方が見やすく状況を把握しやすいため、ブループリントの使用よりも管理がしやすくなります。複雑な数式表現も、クラウド (群衆) システムをブループリントではなく 
+C++ コードで実装した方がよいもうひとつの理由です。 
+
+
+
+## サンプル
+
+C++ コードによる処理、またはブループリントによる処理が最善である様々な機能があるため、ゲーム制作過程における C++ プログラマーとブループリント作成者の
+共同作業例を紹介します。 
+
+* プログラマーは一部のカスタム イベントを定義する Character クラスを C++ コードで実装して、この Character クラスをブループリントで拡張して、実際にメッシュとデフォルト設定を割り当てます。 
+ShooterGame サンプルプロジェクトでこの実装例のようなプレイヤー キャラクターと敵のボットをチェックしてみてください。
+
+* C++ コードで基底クラスを実装するアビリティ システムを実装して、デザイナーは実際に何かを行うブループリントを作成します。StrategyGame サンプルは、C++ コードでベースの砲塔を定義していますが、
+フレームスロワー (火災放射器)、キャノン、アロー タワー (arrow turrets) のビヘイビアはすべてブループリントで定義します。
+
+* "Collect" 関数または "Respawn" 関数がブループリントに実装可能なイベントであるピックアップは、デザイナーが様々なパーティクル エミッタやサウンド エフェクトをスポーンするためにオーバーライドすることができます。ShooterGame と 
+StrategyGame の両方にこの方法で実装したピックアップの例があります。
+
+
+## ブループリント API の作成 :ヒントとコツ
+
+ブループリントに公開した API を作成するにあたり、プログラマーが検討すべきいくつかのポイントを以下に示します。
+
+* オプションのパラメータはブループリントでうまく処理します。
+
+		/**
+		 * 文字列をログにプリントし、オプションで画面に表示します。
+		 * ログへのプリント (Print To Log) が true の場合、Output Log ウィンドウで可視になります。そうでなければ、単に 'Verbose' として記録されるため、通常は表示されません。
+		 *
+		 * @param	InString		The string to log out
+		 * @param	bPrintToScreen	Whether or not to print the output to the screen
+		 * @param	bPrintToLog		Whether or not to print the output to the log
+		 * @param	bPrintToConsole	Whether or not to print the output to the console
+		 * @param	TextColor		Whether or not to print the output to the console
+		 */
+		UFUNCTION(BlueprintCallable, meta=(WorldContext="WorldContextObject", CallableWithoutWorldContext, Keywords = "log print", AdvancedDisplay = "2"), Category="Utilities|String")
+		static void PrintString(UObject* WorldContextObject, const FString& InString = FString(TEXT("Hello")), bool bPrintToScreen = true, bool bPrintToLog = true, FLinearColor TextColor = FLinearColor(0.0,0.66,1.0));
+
+* 構造体を返す関数よりも多くのリターン パラメータがある関数を優先します。ノードで複数の出力ピンを作成する方法を示したスニペットがこちらです。
+
+		UFUNCTION(BlueprintCallable, Category = "Example Nodes")
+		static void MultipleOutputs(int32& OutputInteger, FVector& OutputVector);
+
+* 既存関数に新規パラメータを追加することはできますが、パラメータを削除したり変更する場合は、オリジナル関数を非推奨とし新規関数を追加しなくてはいけません。新規関数に関する情報がブループリントに表示されるように、必ず非推奨にしたメタデータを使用してください。
+
+		UFUNCTION(BlueprintCallable, Category="Collision", meta=(DeprecatedFunction, DeprecationMessage = "Use new CapsuleOverlapActors", WorldContext="WorldContextObject", AutoCreateRefTerm="ActorsToIgnore"))
+		static ENGINE_API bool CapsuleOverlapActors_DEPRECATED(UObject* WorldContextObject, const FVector CapsulePos, float Radius, float HalfHeight, EOverlapFilterOption Filter, UClass* ActorClassFilter, const TArray<AActor*>& ActorsToIgnore, TArray<class AActor*>& OutActors);
+
+* 関数で列挙型変数を受け取らなくてはいけない場合は、簡単にノードを使用できる 'expand enum as execs' メタデータの利用を検討してください。 
+
+		UFUNCTION(BlueprintCallable, Category = "DataTable", meta = (ExpandEnumAsExecs="OutResult", DataTablePin="CurveTable"))
+		static void EvaluateCurveTableRow(UCurveTable* CurveTable, FName RowName, float InXY, TEnumAsByte<EEvaluateCurveTableResult::Type>& OutResult, float& OutXY);
+
+* 完了までに長時間かかるオペレーション (例えば move here) は Latent (潜行) 関数でなければいけません。
+
+		/** 
+		 * 遅延が生じる潜在アクションを実行。
+		 * 
+		 * @param WorldContext	World context.
+		 * @param Duration 		length of delay.
+		 * @param LatentInfo 	The latent action.
+		 */
+		UFUNCTION(BlueprintCallable, Category="Utilities|FlowControl", meta=(Latent, WorldContext="WorldContextObject", LatentInfo="LatentInfo", Duration="0.2"))
+		static void	Delay(UObject* WorldContextObject, float Duration, struct FLatentActionInfo LatentInfo );
+
+* できるかぎり関数を共有ライブラリに格納することを検討してください。複数クラスで関数を簡単に使用できるようになり、'target' ピンを回避します。
+
+		class DOCUMENTATIONCODE_API UTestBlueprintFunctionLibrary : public UBlueprintFunctionLibrary
+
+* できるかぎりノードを pure とマークするようにしてください。配線が必要なノードの実行ピンがいらなくなります。
+
+		/* Returns a uniformly distributed random number between 0 and Max - 1 */
+		UFUNCTION(BlueprintPure, Category="Math|Random")
+		static int32 RandomInteger(int32 Max);
+
+* 関数を `const` として作成しても、実行ピンがない Blueprint ノードを作成します。 
+		/**
+		 * Get the actor-to-world transform.
+		 * @return The transform that transforms from actor space to world space.
+		 */
+		UFUNCTION(BlueprintCallable, meta=(DisplayName = "GetActorTransform"), Category="Utilities|Transformation")
+		FTransform GetTransform() const;
+
+
+
+
+

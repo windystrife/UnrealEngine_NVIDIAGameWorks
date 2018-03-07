@@ -1,0 +1,289 @@
+﻿INTSourceChangelist:0
+Availability: Docs
+Crumbs: %ROOT%
+Title: Slate Clipping System
+Description: An overview of the Clipping System for Slate in Unreal Engine 4.
+Type: Overview
+SkillLevel:Advanced
+Version:4.17
+Parent:Programming/Slate
+Order:1
+Tags:Programming
+Tags:Slate
+Tags:UMG UI Designer
+
+[VAR:spacer]![](%ROOT%/spacer.png)(w:150 convert:false)[/VAR]
+[VAR:spacer2]![](%ROOT%/spacer.png)(w:40 convert:false)[/VAR]
+
+
+
+[TOC(start:2 end:3)]
+
+[REGION:warning]
+With the release of Unreal Engine 4.17, the new Slate Clipping System will break backwards compatability for versions 4.16 and earlier that update. See the [Conversion Guide](#conversionguide) section of this 
+page to update your project. 
+[/REGION]
+
+The Unreal Engine 4 (UE4) uses Slate's clipping system to restrict graphics or text to a region of your screen. This is done by creating a clipping rectangle (or clipping rect) bounding box around the 
+objects and panels that are created. This system is used throughout the UE4 Editor and the UMG UI Designer tools. Slate enables users to move panels and resize them as needed in the Editor
+and the clipping system enables the text and graphics to be contained to their clipping rect. With UMG this enables better render transforms that clip appropriately for your UI. 
+
+## What's New
+
+With the release of Unreal Engine 4.17, the clipping system has been overhauled to be much more flexible than it was in previous versions. This allows for more rendering effects to be 
+added later for tool systems like [UMG](Engine/UMG/UserGuide) for UI in your games. The clipping system used prior was limited and based entirely around axis-aligned boxes for clipping,
+whcih lead to noticeable difficulties with render transforms, generally around edges, like the example below.
+
+[REGION:imagetable]
+| --- | --- | --- | --- | --- | --- |
+| ![](OldClippingIssue1.png)(w:350) | | | | | ![](OldClippingIssue2.png)(w:350) |
+[/REGION]
+
+The comparison list below will give you a general overview of what has changed:
+
+[REGION:simpletable]
+| Clipping 1.0 | Clipping 2.0 |
+| ------------ | ------------ |
+| [INCLUDE:#clipping1] | [INCLUDE:#clipping2] |  
+[/REGION]
+
+Because the new system allows for clipping to occur in the render space of the widgets instead of axis-aligned, this means that the system no longer need to be concerned with clipping issues (left),
+and instead clips the outmost widget. Now any transform that is applied to the inner widgets will be correctly clipped at the edges (right).
+
+[REGION:imagetable]
+| ![](ClippingOld.png)(w:350) | | | | | ![](ClippingNew.png)(w:350) |
+| --- | --- | --- | --- | --- | --- |
+| 4.16 and earlier clipping and transforms. ||||| 4.17 and later, clipping applied at edges |
+|  ||||| along with transforms to the children. |
+[/REGION]
+
+
+For the most part, you shouldn't need to worry about changing the clipping state of a widget. If you were to consider game UI as an example, you wouldn't really need to adjust the widget in UMG and 
+mostly would change this for something like a scroll panel, or in cases, like the Editor, where you can't control the length of the text and need to clip it for resizing the windows or parts of the panel.
+
+![](ClippingExamples.png)(w:500)
+
+Here are a few examples of something you might see and how you can use clipping with them:
+
+* Left - No clipping is enabled on the button or the text.
+* Center - Clipping is enabled on the text
+* Right - Clipping is enabled on the button.
+
+Take note of the difference it makes for who is responisble for clipping. Since the system clips to bounds, things like padding do not factor in here, so if the button is set to clip (right), the 
+contents will run all the way to the edge before they clip, whereas if the text is responsible for clipping (center), then the text clips based on things like the button content padding that 
+reduces the space the text has to fit into.
+
+In addition to the simple axis-aligned examples of clipping, the system also supports arbitrary clipping quads that are stacked on top of each other. 
+
+![](TransformClipping.png)(w:400)
+[REGION:caption]  [/REGION]
+
+While this example is extreme, being able to combine multiple arbitrary clipping zones together is a prerequisite to being able to introduce 3D transforms and projections, since any widget being
+clipped with a projection would need to perform clipping in projected space. 
+
+<!--- 
+
+[EXCERPT:clipping1]
+* Axis-aligned clipping - Only functions in layout space
+* Every Widget gets clipped
+* All clipping is done in the pixel shader (requires 6 floats per vertex)
+* Allowed batching across clipping rects, since the rects are part of the batch data
+* Render Transforms are "special" in that they allow rendering outside the clipping rect provided by the parent, with side effects when the layout rect is clipped
+[/EXCERPT:clipping1]
+
+
+[EXCERPT:clipping2]
+* A clipping that is an arbitrary quad
+	* Axis-aligned clipping zone using Scissor Rects to clip - which avoides unnecessary pixel shader operations
+	* Complex clipping zones use the stencil buffer to compose an arbitrary stack of clipping zones into the stencil buffer that is then used to clip draw calls
+* Very few widgets clip now (by default), consisting mostly of scroll panels and editable text fields
+	* Render Transforms are no longer "special", so any transform can allow you to render outside of another widget, provided it doesn't clip.
+* Slate can no longer batch across clipping zones. This free's up 6 floats in the Slate vertex format, and no longer need to clip in the pixel shader
+[/EXCERPT:clipping2]
+
+---->
+
+
+## Conversion Guide
+
+The changes to the Slate clipping system in 4.17 will break compatibility for any previous versions, so you'll want to use the sections below to update your project to avoid any conversion issues and to
+learn about the new methods you can use to debug widgets in your project.
+
+
+### Enabling Clipping of Widgets
+
+For all your UMG Widgets, you can adjust the **Clipping** property located in the **Details** panel of the selected Widget.
+
+![](UMGClippingProperty.png)(w:600)
+
+You can read more about [Clipping with UMG UI Designer](Engine/UMG/UserGuide/Clipping) here.
+
+To enable clipping in your code, you'll set the clipping property for `EWidgetClipping` to one of the following states:
+
+* Inherit
+* ClipToBounds
+* ClipToBoundsWithoutIntersecting
+* ClipToBoundsAlways
+* OnDemand
+
+Here's a code example: 
+
+	SNew( SBorder )
+	.Clipping(EWidgetClipping::ClipToBounds)
+	[
+		...
+	]
+
+
+### Deprecated APIs
+
+The following APIs have been deprecated. For 4.16 and earlier versions where you may have needed these, consider if you would even need to use these now. Since not every widget clips, you may no longer need any
+code that was possibly "tricking" the clipping system to allow you to move the clipping zone.
+
+* `FSlateDrawElement::Make___(...)` - We no longer pass a clipping rect into every draw call, so you only need to remove the function call, and you'll automatically be using the new version.
+* `SScissorRectBox` - This is no longer necessry since every axis-aligned clipping rect is now a scissor rect. Make sure to delete these and make replace the job it was doing by making its most direct child widget have clipping enabled.
+
+
+### Custom Clipping
+
+If you needed to clip internally in your widget, as an example, the `SProgressBar` needs to clip the progress bar draawing at arbitrary locations based on its progress. In order to add your own 
+clipping, you would do the following in `OnPaint`:
+
+	OutDrawElements.PushClip(FSlateClippingZone(AllottedGeometry));
+
+	//TODO Do your drawing here, or child widget paint calls.
+
+	OutDrawElements.PopClip();
+
+The `FSlateClippingZone` is the arbitrary clipping area in window space that can be intialized using several methods that should allow for a straightforward conversion of your existing code.
+
+If you also need your custom clipping to affect Hit Testing, you will need to push your clipping zone onto the Hit Test Grid by setting up the following:
+
+	OutDrawElements.PushClip(FSlateClippingZone(AllottedGeometry));
+	Args.GetGrid().PushClip(FSlateClippingZone(GetCachedGeometry()));
+
+	//TODO Do your drawing here, or child widget paint calls.
+
+	OutDrawElements.PopClip();
+	Args.GetGrid().PopClip();
+
+[REGION:note]
+The clipping rect for the Hit Test Grid is using cached geometry, instead of the AllotedGeometry. In `OnPaint`, `AllotedGeometry` is in window space, while the Hit Test Grid is in desktop space, so you have
+to use geometry that you'd get in Tick.
+[/REGION]
+
+### Wrapped Clipping States
+
+In some instances, a widget that has a clipping state isn't going to be responsible for clipping. For example, the `SScrollBox` lets you publically change the clipping state like any other widget, however, 
+when the `SScrollBox` was constructed it set **bClippingProxy = true**. This makes it so that when Slate goes to render that widget, it will ignore the clipping state of that particular widget.
+
+Internally, the `SScrollBox` informs another nested widget that it needs to clip, or perform whatever clipping state it was told to do. Additionally, when users change the clipping state, the 
+`SScrollBox` overrides `virtual void SWidget::OnClippingChanged()` function so that it knows when to mirror the new clipping state to the nested private widgets. 
+
+### Culling Changes
+
+Now that clipping is performed in render space, the engine still performs culling using a simple bounding box, although, it is based on the bounding box of the render transformed clipping zone.
+Additionally, clipping and culling might become more nuanced over time, so if you have a custom panel and were doing `MyClippingRect.IntersectionWith` in order to cull widgets that can't possibly
+be drawn, you should now use the following:
+
+	SWidget::IsChildWidgetCulled
+
+The following is an example of this:
+
+	for (int32 ChildIndex = 0; ChildIndex < ArrangedChildren.Num(); ++ChildIndex)
+	{
+		FArrangedWidget& CurWidget = ArrangedChildren[ChildIndex];
+
+	if (!IsChildWidgetCulled(MyCullingRect, CurWidget))
+	{
+		// Paint this widget.
+	}
+	}
+
+[REGION:warning]
+Any place where you're taking in `MyClippingRect` in your OnPaint call should be renamed to `MyCullingRect`.
+[/REGION]
+
+Even with the changes to the clipping system, Slate's culling approach hasn't changed and with the example below, you'll need to keep in mind that if the parent widget (blue) is culled when outside
+the clipping zone (green), the child widget (yellow) will also be culled even if it has a transform that allows it to render entirely outside of the bounds of the parent, like in this example where
+the child is still in the clipping zone but the parent is outside. This is true even when the clipping property **Clip to Bounds - Without Intersecting** enabled since the flag would only be checked
+by the direct parent widget.
+
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Widgets viewed outside | the clipping zone.](Slate_CullingEd.png)(w:600)
+	[/PARAM]
+	[PARAM:after]
+	![Widgets culled outside | the clipping zone.](Slate_CullingEd2.png)(w:600)
+	[/PARAM]
+[/OBJECT]
+
+
+## Debugging Clipping
+
+The **Widget Reflector** has been updated to indicate the clipping state for selected widgets inside the Editor.
+
+[REGION:fullwidth]
+![](WidgetReflector.png)
+[/REGION]
+[REGION:caption] A text block has been selected using the Widget Reflector that indicates the Clipping state to be set to On Demand. [/REGION]
+
+To open the **Widget Reflector** you can navigate to the file menu > **Window** > **Developer Tools** > **Widget Reflector**.
+
+The following console variables can be used to debug clipping and culling states for any widget in the Editor.
+
+[REGION:simpletable]
+| Console Variable | Description |
+| --- | --- |
+| **Slate.ShowClipping** | When enabled, this shows yellow outlines for all axis-aligned clipping rects (Scissor Rects) and red outlines for all stencil clipping quads. [INCLUDE:#showclipping] |
+| **Slate.DebugCulling** | When enabled, this allows you to better understand how the culling in a panel is working or not working correctly. It disables clipping on the GPU, but everything continues as normal, so it enables you to see all the things rendering outside the bounds of clip zones an dsee if they are being culled when you expect them to be. |
+| **Slate.EnableDrawEvents** | When enabled, draw evennts will be enabled so that when you're debugging with RenderDoc or something similar that it's easier to understand the batches or clipping state transitions. This is enabled by default when using a Debug build. |
+||
+[/REGION]
+
+<!---
+
+[EXCERPT:showclipping]
+[REGION:lightbox]
+[![](ShowClipping.png)(w:200)](ShowClipping.png)
+[/REGION]
+[REGION:caption] Click image for full size view. [/REGION]
+[/EXCERPT:showclipping]
+
+[EXCERPT:debugculling]
+[REGION:lightbox]
+[![](Slate_Culling.png)(w:250)](Slate_Culling.png)
+[/REGION]
+[REGION:caption] Click image for full size view. [/REGION]
+[/EXCERPT:debugculling]
+
+[EXCERPT:drawevents]
+[REGION:lightbox]
+[![](Slate_Culling.png)(w:250)](Slate_Culling.png)
+[/REGION]
+[REGION:caption] Click image for full size view. [/REGION]
+[/EXCERPT:drawevents]--->
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,128 @@
+﻿INTSourceChangelist:3429254
+Availability:Public
+Title:Game Mode と Game State
+Crumbs:%ROOT%, Gameplay/Framework
+Description:Game Mode と Game State の概要
+Version:4.14
+type:overview
+parent:Gameplay/Framework
+order:2
+tags:Gameplay Framework
+Related:Gameplay/Framework/Controller/PlayerController
+topic-image:Gameplay/Framework/gamemode_lander.png
+
+[TOC (start:2 end:2)]
+
+プレイ中のゲームに関する情報を処理する主なクラスとして、**Game Mode** と **Game State** があります。
+
+オープンエンド型ゲームでも基本的なゲームのルールがあり、こうしたルールが **Game Mode** を構成します。最も基本的なレベルとしては、以下のルールがあります。
+
+* 現在のプレイヤーとスペクテーター (観戦者) 数に加え、プレイヤーとスペクテーターの最大許容数
+* プレイヤーのゲーム参加方法。スポーン位置と他のスポーン / リスポーンのビヘイビアを選択するためのルールを含みます。
+* 一時停止機能の利用可否と、一時停止の処理方法
+* ゲームをシネマティックス モードで開始するかどうかを含むレベル間の遷移
+
+ゲーム内でルール関連のイベントが発生し、それをトラックし、全プレイヤーで共有する必要がある場合、その情報は **Game State** を通して保存され同期されます。こうした情報には以下が含まれます。
+
+* ゲームをどれくらいの時間実行していたか (ローカルのプレイヤー参加前の実行時間を含む)。
+* 各個人プレイヤーがゲームに参加した場合、そのプレイヤーの現在のステート。
+* 現在の Game Mode の基本クラス。
+* ゲームが開始したかどうか。
+
+## Game Mode
+
+プレイに必要なプレイヤー数や、プレイヤーがゲームに参加する方法などの一部の基本要素は、多くのゲームで共通であり、開発中のゲームに応じてルールを無制限に変化させることができます。こうしたルールがどんなものであれ、Game Mode はそれらを定義し、実装するように設計されています。Game Mode には現在一般的に使用される 2 つの基本クラスがあります。 
+
+アンリアル エンジン 4.14 では、`AGameModeBase` が導入されました。これはすべての Game Mode の基本クラスであり、従来の `AGameMode` を簡素化し、合理化したバージョンです。`AGameMode` は、4.14 より前の Game Mode の基本クラスであり、まだ存在し以前のように機能しますが、現在は、`AGameModeBase` の子になっています。`AGameMode` の方が、マルチプレイヤー シューティング ゲームなどの標準的なゲームで適しています。対戦ステートの概念を実装しているからです。`AGameModeBase` は新しいデフォルト ゲーム モードであり、簡素で効率が高いため、新しいコード プロジェクトに含まれています。
+
+### AGameModeBase
+すべての Game Mode は `AGameModeBase` のサブクラスです。これには、オーバーライド可能なかなりの基本機能が含まれます。共通の関数として以下があります。
+
+| 関数/イベント | 目的 |
+| --- | --- |
+| `InitGame` | `InitGame` event は、他のどのスクリプト (`PreInitializeComponents` を含む) よりも前に呼び出され、`AGameModeBase` によってパラメータを初期化し、そのヘルパー クラスをスポーンするために使用されます。	[REGION:note]これは任意のアクタが Game Mode インスタンスそのものを含む`PreInitializeComponents` を実行する前に呼び出されます。[/REGION:note] |
+| `PreLogin` | サーバーに参加しようとするプレイヤーの受け入れ、または拒否をします。`ErrorMessage` を空ではない文字列に設定したら `Login` 関数は失敗します。`Login` の前に `PreLogin` が呼び出され、Login が呼び出される前にかなりの時間が経過することがあります。特に、参加するプレイヤーがゲーム コンテンツをダウンロードする必要がある場合は時間がかかります。 |
+| `PostLogin` | ログインに成功すると呼び出されます。これは、`PlayerController` でレプリケートされた関数を呼び出すのに安全な最初の場所です。`OnPostLogin` をブループリントで実装し、ロジックを追加することができます。 |
+| `HandleStartingNewPlayer` | `PostLogin` の後、またはシームレスな移動後に呼び出されます。これは、ブループリントでオーバーライドして新規プレイヤーに何が起こるかを変更することができます。デフォルトではプレイヤーのポーンを作成します。 |
+| `RestartPlayer` | これはプレイヤーのポーンのスポーンを開始するために呼び出されます。ポーンがどこでスポーンするかを指示したい場合は、`RestartPlayerAtPlayerStart` 関数と `RestartPlayerAtTransform` 関数もあります。`OnRestartPlayer` をブループリントで実装して、この関数が終了した後にロジックを追加することができます。 |
+| `SpawnDefaultPawnAtTransform` | これは実際には、プレイヤーのポーンをスポーンし、ブループリントでオーバーライドすることができます。 |
+| `Logout` | プレイヤーがゲームを離れるか、破壊される場合に呼び出されます。`OnLogout` を実装してブループリントのロジックを行うことができます。 |
+
+`AGameModeBase` クラスのサブクラスは、ゲームが提供する各マッチの形式、ミッションのタイプ、特殊ゾーンのそれぞれに対して作成することができます。ゲームにはいくつもの Game Mode を設定することができます。従って、 `AGameModeBase` クラスのサブクラスをいくつでも持つことができますが、一度にひとつの Game Mode だけを使用します。Game Mode アクタは、プレイのためにレベルが初期化されるたびに `UGameEngine::LoadMap()` 関数によってインスタンス化されます。 
+
+この Game Mode は、マルチプレイヤー ゲームに参加するリモート クライアントに対してレプリケートされません。サーバー上でのみ存在します。そのため、ローカル クライアントは使用されたストックの Game Mode クラス (またはブループリント) を見ることができますが、実際のインスタンスにアクセスし、その変数をチェックしてゲームの進捗に伴い何が変更されたかを見ることはできません。プレイヤーが現在の Game Mode に関する更新情報が必要な場合、`AGameStateBase` アクタに保存することで簡単に同期させることができます。このアクタのひとつが Game Mode と共に作成されて、すべてのリモート クライアントにレプリケートされます。
+
+### AGameMode
+
+`AGameMode` は `AGameModeBase` のサブクラスであり、マルチプレイヤーの対戦、レガシーのビヘイビアに対応するいくつかの追加の機能があります。すべての新規作成プロジェクトでは、デフォルトで `AGameModeBase` を使用しますが、こうした追加のビヘイビアが必要な場合、`AGameMode` から継承するように切り替えることができます。`AGameMode` から継承する場合、対戦のステートマシンもサポートする `AGameState` からもゲーム ステートを継承します。
+
+`AGameMode` には、Match ステートをトラックするステート マシンまたは一般的なゲームプレイ フローを含みます。現在のステートをクエリするために、 `GetMatchState` や、 `HasMatchStarted`、 `IsMatchInProgress`、`HasMatchEnded` のようなラッパーを使用することができます。以下が考えられる Match ステートです。
+
+* `EnteringMap` は初期ステートです。アクタはまだティックしておらず、ワールドは完全には初期化されていません。ロードが完全に終了すると次のステートへ遷移します。
+* 次のステートである `WaitingToStart` に移ると、 `HandleMatchIsWaitingToStart` が呼び出されます。アクタはティックしますが、プレイヤーはまだスポーンされていません。`ReadyToStartMatch` が _true_ を返した場合、または `StartMatch` が呼びだされた場合、次のステートへ遷移します。
+* `InProgress` はゲームの主要部分が起こるステートです。`InProgress` に遷移すると、`HandleMatchHasStarted` が呼び出され、これが全てのアクタに `BeginPlay` を呼び出します。この時点で通常のゲームプレイが進行中です。`ReadyToEndMatch` が _true_ を返した場合、または `EndMatch` が呼びだされた場合、マッチは次のステートへ遷移します。
+* 最後から 2 つめの次のステートである `WaitingPostMatch` に移ると、 `HandleMatchHasEnded` が呼び出されます。アクタはまだティックしていますが、新規プレイヤーは参加できません。マップ転送が開始すると、次のステートへ遷移します。
+* `LeavingMap` は通常フローの最後のステートでありこのステートに入ると `HandleLeavingMap` を呼び出します。遷移して `EnteringMap`に戻る新規マップに移動する間、マッチはこのステートのままです。
+* `Aborted` は failure (失敗) ステートであり、`AbortMatch` を呼び出して開始されます。修復不能なエラーがある場合に設定されます。
+
+デフォルトで、 Match ステートはほぼ `InProgress` です。これは、`BeginPlay` が呼び出され、アクタがティックを開始するステートだからです。ただし、個々のゲームではこうしたステートのビヘイビアをオーバーライドしてより複雑なルールを持つマルチプレイヤー ゲームをビルドすることができます。他のプレイヤーがマルチプレイヤー シューティング ゲームに参加するのを待っている間、プレイヤーがレベルを自由に飛び回るなどが考えられます。
+
+### Game Mode ブループリント
+
+Game Mode クラスから派生したブループリントを作成して、プロジェクトやレベルのデフォルトの Game Mode として使用することが可能です。
+
+Game Mode から派生したブループリントに以下のデフォルト値を設定することができます。
+* Default [](Gameplay/Framework/Pawn) クラス
+* HUD クラス
+* [](Gameplay/Framework/Controller/PlayerController) クラス
+* Spectator クラス
+* Game State クラス
+* Player State クラス
+
+さらに、Game Mode のブループリントは非常に便利です。コードを変更せずに変数を調整可能です。従ってひとつの Game Mode を複数のレベルに適応するために使用することができます。これには、ハード コーディングされたアセット参照の使用も不要で、エンジニアリングのサポートや微調整の度にコード変更する必要もありません。
+
+### Game Mode を設定する
+
+レベルに GameMode を設定する方法は何通りかあります。優先度の低い方法から説明します。
+
+* `DefaultEngine.ini` ファイルの `/Script/EngineSettings.GameMapsSettings` セクションに `GlobalDefaultGameMode` エントリを設定すると、プロジェクトの全マップに対してデフォルトのゲームモードが設定されます。
+
+		[/Script/EngineSettings.GameMapsSettings]
+		GlobalDefaultGameMode="/Script/MyGame.MyGameGameMode"
+		GlobalDefaultServerGameMode="/Script/MyGame.MyGameGameMode"
+
+* 個別マップのプロジェクト設定をオーバーライドするには、エディタの **[World Settings]** タブで **[GameMode Override]** を設定します。
+
+	![](WorldSettings_GameMode.png)
+
+
+* ゲーム起動時にある特定のオプションを強制的に読み込ませるために URL を実行ファイルへ渡すことができます。ゲームモードの設定は `game` オプションを使用します。詳細は [](Programming/Basics/CommandLineArguments) を参照してください。
+
+		UE4Editor.exe /Game/Maps/MyMap?game=MyGameMode -game
+
+* 最終的に、`DefaultGame.ini` ファイルの `/Script/Engine.WorldSettings/` セクションにマップのプレフィックス (および URL メソッドのエイリアス) が設定されます。これらのプレフィックスは、ある特定のプレフィックスを持つ全てのマップに対してデフォルトのゲームモードを設定します。
+
+		[/Script/EngineSettings.GameMapsSettings]
+		+GameModeMapPrefixes=(Name="DM",GameMode="/Script/UnrealTournament.UTDMGameMode")
+		+GameModeClassAliases=(Name="DM",GameMode="/Script/UnrealTournament.UTDMGameMode")
+
+
+[REGION:note]
+Game Mode の設定例は、 [Game Mode の設定](Gameplay\HowTo\SettingUpAGameMode) を参照してください。
+[/REGION]
+
+## Game State
+
+**GameState** はクライアントがゲーム ステートをモニタできるようにします。概念上は、 Game State は接続している全クライアントに知らせることを意図した情報で、Game Mode に固有のものだが個々のプレイヤーには固有ではない情報を管理します。接続プレイヤーのリスト、Capture the Flag (旗取り) のチーム スコア、オープン ワールド ゲームで完了したミッションなどのゲーム全体のプロパティのトラックを続けます。
+
+Game State は、プレイヤー固有のものをトラックするには適していません。例えば、Capture The Flag マッチでチームに対してあるプレイヤーがどれくらいの点を入れたかは、 **Player State** を使う方がうまく処理できるからです。通常、 GameState はゲームプレイ中に変化し、全員に関係があり、見えるものをトラックします。Game mode はサーバー上だけに存在しますが、Game State はサーバー上に存在し、すべてのクライアントにレプリケートされます。ゲームの進捗に伴い、すべての接続マシンを最新状態に保ちます。
+
+`AGameStateBase` は基本実装であり、そのデフォルト機能には以下のようなものがあります。
+
+| 関数または変数 | 用途 |
+| --- | --- |
+| `GetServerWorldTimeSeconds` | これは `UWorld` 関数 `GetTimeSeconds` のサーバー バージョンであり、クライアントとサーバーの両方で同期されるため、レプリケーションのために使用する信頼できる時間です。 |
+| `PlayerArray` | すべての `APlayerState` オブジェクトの配列です。ゲーム内の全プレイヤーに対して何かを行う場合に便利です。 |
+| `HasBegunPlay` | `BeginPlay` 関数がゲーム内のアクタで呼び出された場合に、true を戻します。 |
+
+`AGameStateBase` は、ゲーム内で何が起こっているかをプレイヤーに知らせる目的で必要な変数や関数を含めるために、一般的に C++ またはブループリントで拡張されます。加えられる修正は一般的に、Game State が作られた対となる Game Mode に基づきます。Game Mode 自体はそのデフォルトの Game State タイプを `AGameStateBase` から派生した C++ クラスまたはブループリントにオーバーライドすることができます。

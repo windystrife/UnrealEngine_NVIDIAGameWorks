@@ -1,0 +1,1 @@
+start %~dp0\..\..\Binaries\DotNET\unrealdoctool.exe %1 -p -s=%~dp0\..\..\Documentation\Source -o=%~dp0\..\..\Documentation\Temp

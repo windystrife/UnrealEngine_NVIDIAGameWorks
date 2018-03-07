@@ -1,0 +1,40 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	PostProcessLensFlares.usf: PostProcessing Lens Flares.
+=============================================================================*/
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+
+// RGB:color, a:unused
+float4 FlareColor; 
+// UV is in 0..1 range but the viewport might not cover the full screen
+float2 TexScale;
+
+// pixel shader, can be optimized by using additive blending
+void CopyPS(noperspective float4 InUV : TEXCOORD0, out float4 OutColor : SV_Target0)
+{
+#ifdef CLEAR_REGION
+	OutColor = float4(0.f, 0.f, 0.f, 0.f);
+#else	
+	OutColor = Texture2DSample(PostprocessInput0, PostprocessInput0Sampler, InUV.xy);
+#endif 
+}
+
+// pixel shader entry point
+void MainPS(in noperspective float4 UVAndScreenPos : TEXCOORD0, out float4 OutColor : SV_Target0)
+{
+	float2 UV = UVAndScreenPos.xy;
+	float2 ScreenPos = UVAndScreenPos.zw;
+
+	// circular shape to mark the screen border (needed but can be implemented with different math)
+	float ScreenborderMask = DiscMask(ScreenPos);
+
+	// extra circular shape aligned to the screen to mask big lens flares
+	ScreenborderMask *= DiscMask(ScreenPos * 0.8f);
+
+	OutColor.rgb = Texture2DSample(PostprocessInput1, PostprocessInput1Sampler, UV).rgb * FlareColor.rgb * ScreenborderMask;
+	OutColor.a = 0;
+}
+

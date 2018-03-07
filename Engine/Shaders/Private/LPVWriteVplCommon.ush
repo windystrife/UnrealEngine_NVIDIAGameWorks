@@ -1,0 +1,99 @@
+//-----------------------------------------------------------------------------
+// File:		LPVWriteVPLCommmon.usf
+//
+// Summary:		Common functionality for LPV vpl list write
+//
+// Created:		2013-03-01
+//
+// Author:		mailto:benwood@microsoft.com
+//
+//				Copyright (C) Microsoft. All rights reserved.
+//-----------------------------------------------------------------------------
+
+//-------------------------------------------------------------------------------------------------
+
+#include "LPVWriteCommon.ush"
+
+//-------------------------------------------------------------------------------------------------
+
+// Bind UAVs to specific indices for materials with the following flags to ensure the UAVs set match
+// up with what the shader is expecting. Only do this for these materials as it causes other compute
+// shaders which include this file to fail to compile.
+#if MATERIAL_INJECT_EMISSIVE_INTO_LPV || MATERIAL_BLOCK_GI
+RWStructuredBuffer<VplListEntry>				RWGvListBuffer : register (u2);		// 0
+RWByteAddressBuffer								RWGvListHeadBuffer : register (u3);	// 1
+
+RWStructuredBuffer<VplListEntry>				RWVplListBuffer : register (u4);		// 2
+RWByteAddressBuffer								RWVplListHeadBuffer : register (u5);	// 3
+#else
+RWStructuredBuffer<VplListEntry>				RWGvListBuffer;		// 0
+RWByteAddressBuffer								RWGvListHeadBuffer;	// 1
+
+RWStructuredBuffer<VplListEntry>				RWVplListBuffer;		// 2
+RWByteAddressBuffer								RWVplListHeadBuffer;	// 3
+#endif
+
+//-------------------------------------------------------------------------------------------------
+// Functions
+//-------------------------------------------------------------------------------------------------
+int AddToVplList( float3 worldPos, float3 flux, float3 direction, const bool emissiveInjection )
+{
+	int gridIndex = GetGridIndex( worldPos ); 
+	[branch]
+	if ( gridIndex >= 0 )
+	{
+		// Allocate a new list entry 
+		uint newHeadIndex = RWVplListBuffer.IncrementCounter();
+		uint oldHeadIndex;
+		// Note: we add one to the list index to make the list 0-terminated and prevent infinite recursion
+		RWVplListHeadBuffer.InterlockedExchange( gridIndex*4, newHeadIndex+1, oldHeadIndex );
+
+		if ( emissiveInjection )
+		{
+			// Weight according to projected texel size 1 / N dot L
+			float nDotL = abs( dot( LpvWrite.GeometryVolumeCaptureLightDirection.xyz, direction ) );
+			nDotL = max( nDotL, 0.25f ); // Clamp to prevent divBy0 and and general weirdness due to undersampling
+			flux *= 1.0f / nDotL;
+		}
+
+		// Fill in the new list node 
+		Vpl vpl;
+		vpl.normal = direction;
+		vpl.flux = flux;
+
+		VplListEntry listNode = PackVpl( vpl );
+		listNode.nextIndex = oldHeadIndex;
+		RWVplListBuffer[ newHeadIndex ] = listNode;
+	}
+	return gridIndex;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+int AddToGvList( float3 worldPos, float3 flux, float3 direction )
+{
+	// Gv is offset by half 
+	float3 offset = ( LpvWrite.LpvScale * 0.5f ).xxx;
+	int gridIndex = GetGridIndex( worldPos + offset ); 
+	[branch]
+	if ( gridIndex >= 0 )
+	{
+		// Allocate a new list entry 
+		uint newHeadIndex = RWGvListBuffer.IncrementCounter();
+		uint oldHeadIndex;
+		// Note: we add one to the list index to make the list 0-terminated and prevent infinite recursion
+		RWGvListHeadBuffer.InterlockedExchange( gridIndex*4, newHeadIndex+1, oldHeadIndex );
+
+		// Fill in the new list node 
+		Vpl vpl;
+		vpl.normal = direction;
+		vpl.flux = flux;
+
+		VplListEntry listNode = PackVpl( vpl );
+		listNode.nextIndex = oldHeadIndex;
+		RWGvListBuffer[ newHeadIndex ] = listNode;
+	}
+	return gridIndex;
+}
+
+//-------------------------------------------------------------------------------------------------

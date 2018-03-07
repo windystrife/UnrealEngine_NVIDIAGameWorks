@@ -1,0 +1,59 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	FilterVertexShader.usf: Filter vertex shader source.
+=============================================================================*/
+
+#include "Common.ush"
+
+float4 SampleOffsets[(NUM_SAMPLES + 1) / 2];
+
+#if (ES2_PROFILE || ES3_1_PROFILE)
+
+void Main(
+	float4 InPosition : ATTRIBUTE0,
+	float2 UV : ATTRIBUTE1,
+	out noperspective float2 OutUV : TEXCOORD0,
+	out noperspective float2 OutOffsetUVs[NUM_SAMPLES] : TEXCOORD1,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	DrawRectangle( InPosition, UV, OutPosition, UV);
+
+	int SampleIndex;
+	for(SampleIndex = 0;SampleIndex < NUM_SAMPLES - 1;SampleIndex += 2)
+	{
+		half4 OffsetUVUV = SampleOffsets[SampleIndex / 2];
+		OutOffsetUVs[ SampleIndex + 0 ] = UV.xy + OffsetUVUV.xy;
+		OutOffsetUVs[ SampleIndex + 1 ] = UV.xy + OffsetUVUV.zw;
+	}
+	if(SampleIndex < NUM_SAMPLES)
+	{
+		half4 OffsetUVUV = SampleOffsets[SampleIndex / 2];
+		OutOffsetUVs[SampleIndex] = UV.xy + OffsetUVUV.xy;
+	}
+
+	OutUV = UV;
+}
+
+#else
+
+void Main(
+	float4 InPosition : ATTRIBUTE0,
+	float2 UV : ATTRIBUTE1,
+	out noperspective float2 OutUV : TEXCOORD0,
+	out noperspective float4 OutOffsetUVs[(NUM_SAMPLES + 1) / 2] : TEXCOORD1,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	DrawRectangle( InPosition, UV, OutPosition, UV);
+
+	for(int OffsetIndex = 0;OffsetIndex < (NUM_SAMPLES + 1) / 2;OffsetIndex++)
+	{
+		OutOffsetUVs[OffsetIndex] = UV.xyxy + SampleOffsets[OffsetIndex];
+	}
+
+	OutUV = UV;
+}
+
+#endif

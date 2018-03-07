@@ -1,0 +1,212 @@
+﻿Availability: Public
+Title:1. 创建并附加组件
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/Components
+Description:创建一系列组件并将它们附加于自定义pawn上。
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[编程指南主页](Programming\Tutorials\)
+	[/PARAM]
+	[PARAM:next]
+		[下一步](Programming\Tutorials\Components\2 "%Programming\Tutorials\Components\2:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+[REGION:tip]如果您刚使用 **虚幻引擎4** ，建议您先读一下[%Programming\QuickStart:title% tutorial](Programming\QuickStart) 。 对这篇教程来说，我们假设您已经了解了如何创建项目，如何添加C++代码到项目中，以及在 **虚幻编辑器** 中如何配置输入 。 如果您对于创建 **Pawn** 类或配置输入不太熟悉，您可以先阅读一下[%Programming\Tutorials\PlayerInput:title% tutorial](Programming\Tutorials\PlayerInput)。[/REGION]
+
+1. 首先我们创建全新的、基础代码项目，附带初学者内容，其名称为"HowTo_Components"。  首先我们把自定义 **Pawn** 添加到这个项目中，它存储了 **Components（组件）** ，在关卡中移动，并与固体碰撞。 在这个教程中，我们把它命名为"CollidingPawn"。
+
+	[![](ChooseParentClass.png)](ChooseParentClass.png)
+
+	[![](NamePawnClass.png)](NamePawnClass.png)
+
+1. 在 **Visual Studio** 中，我们应该打开`CollidingPawn.h`并添加如下代码到类定义的底部位置： 
+
+		UParticleSystemComponent *OurParticleSystem;
+
+	我们将使用这个变量来追溯稍后创建的 **Particle System Component（粒子系统组件）** 。 我们可以创建 **Components（组件）** ，而无需制作变量来对它们进行追溯，但如果我们想要在代码中使用这些 **Components（组件）** ，我们应该把它们这样存储在类成员变量中。
+
+1. 我们现在可以打开 `CollidingPawn.cpp` 并编辑构造函数， **ACollidingPawn::ACollidingPawn** ，通过生成多种有用的 **Components（组件）** 并将它们在层次结构中排列的方式来添加代码。 我们会创建一个 **Sphere Component（球体组件）** 来与物理世界进行互动，使用 **Static Mesh Component（静态网格物体组件）** 来代表碰撞的形状，创建一个可以随意开关的 **Particle System Component（粒子系统组件）** ，以及我们可以用来附加 **Camera Component（相机组件）** 的 **Spring Arm Component（弹簧臂组件）** 来控制游戏中的透视图。
+
+1. 首先是决定把哪个 **Component（组件）** 作为层次结构的根。 在本教程中，我们会使用 **Sphere Component（球体组件）** ，因为这是能与我们的游戏世界进行互动和碰撞的物理表现。 注意一个 **Actor** 可以在其层次结构中有多个启用了物理的 **Component（组件）** ，但在这个教程中，我们只需要一个Actor。
+			// 我们的根组件是一个会对物理行为进行响应的球体
+			USphereComponent* SphereComponent = CreateDefaultSubobject<USphereComponent>(TEXT("RootComponent"));
+			RootComponent = SphereComponent;
+			SphereComponent->InitSphereRadius(40.0f);
+			SphereComponent->SetCollisionProfileName(TEXT("Pawn"));
+	
+1. 接下来，我们会对半径为50的 **Static Mesh（静态网格物体）** 资源创建并附加可见的球体。由于它不能与我们刚创建的半径为40的 **Sphere Component（球体组件）** 很好地排列在一起，我们把它缩放到原有的80%大小。 我们还需要把它向下移动40个单位，从而让它的中心能与 **Sphere Component（球体组件）** 的中心对齐。
+			// 创建并放置网格物体组件，这样我们能看到球体的位置
+			UStaticMeshComponent* SphereVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualRepresentation"));
+			SphereVisual->AttachTo(RootComponent);
+			static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereVisualAsset(TEXT("/Game/StarterContent/Shapes/Shape_Sphere.Shape_Sphere"));
+			if (SphereVisualAsset.Succeeded())
+			{
+				SphereVisual->SetStaticMesh(SphereVisualAsset.Object);
+				SphereVisual->SetRelativeLocation(FVector(0.0f, 0.0f, -40.0f));
+				SphereVisual->SetWorldScale3D(FVector(0.8f));
+			}
+
+	[REGION:note]尽管您可以在代码中看到我们的 **Static Mesh（静态网格物体）** 资源的位置，但是一般硬编码的资源路径不是载入资源的最佳方式。 我们倾向于在类需要使用时，在代码中创建 **Component（组件）** 本身，然后在 **Unreal Editor（虚幻编辑器）** 中选择该资源。 但是，也可以在代码中直接进行此操作，这样对于程序员的调试或编译新功能来说更为快捷。[/REGION]
+
+1. 现在我们可以附加未激活的 **Particle System Component（粒子系统组件）** 到层次结构中。 我们可以用编码的形式来控制这个组件，并在稍后设置一个输入来开启或关闭它。 注意 **Particle System Component（粒子系统组件）** 直接附加到 **Static Mesh Component（静态网格物体组件）** ，而不是附加到根。 同时它也有些偏离网格物体的底部中心位置，这样在游玩中具有更好的可见性。
+			// 创建粒子系统以供我们激活或反激活
+			OurParticleSystem = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("MovementParticles"));
+			OurParticleSystem->AttachTo(SphereVisual);
+			OurParticleSystem->bAutoActivate = false;
+			OurParticleSystem->SetRelativeLocation(FVector(-20.0f, 0.0f, 20.0f));
+			static ConstructorHelpers::FObjectFinder<UParticleSystem> ParticleAsset(TEXT("/Game/StarterContent/Particles/P_Fire.P_Fire"));
+			if (ParticleAsset.Succeeded())
+			{
+				OurParticleSystem->SetTemplate(ParticleAsset.Object);
+			}
+
+1. **Spring Arm Component（弹簧臂组件）** 可以通过让相机以比跟随 **Pawn** 更为缓慢的加速和减速的速度来为我们的相机提供更为平滑的附加点。 它还有一个内置的功能，可以防止相机穿越固体，可用于在诸如玩家回到第三人称游戏的角落时的情境。 这不是一个必备功能，但是可以作为非常快速和方便的、让相机以平滑的感觉地进入游戏的方式。
+			//  使用弹簧臂来让相机获得一种平滑、自然的运动。
+			USpringArmComponent* SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraAttachmentArm"));
+			SpringArm->AttachTo(RootComponent);
+			SpringArm->RelativeRotation = FRotator(-45.f, 0.f, 0.f);
+			SpringArm->TargetArmLength = 400.0f;
+			SpringArm->bEnableCameraLag = true;
+			SpringArm->CameraLagSpeed = 3.0f;
+
+1. 实际的 **Camera Component（相机组件）** 创建起来很容易，而且我们不需要进行任何特殊设置。 **Spring Arm（弹簧臂）** 具有可供我们附加的特殊内置 **socket（插槽）** ，而不用附加到其底部。
+			// 创建相机并附加到弹簧臂
+			UCameraComponent* Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("ActualCamera"));
+			Camera->AttachTo(SpringArm, USpringArmComponent::SocketName);
+
+1. 现在我们创建并附加了组件，我们应该将此 **Pawn** 设置为由默认玩家控制。 我们所需的代码如下：
+			// 控制默认玩家
+			AutoPossessPlayer = EAutoReceiveInput::Player0;
+
+----
+
+现在我们的新建 **Pawn** 附加了好用的 **Components（组件）** 集合，并且可以进行配置以用于用户控制。 我们现在可以返回 **Unreal Editor（虚幻编辑器）** 了。
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    代码
+    [/PARAMLITERAL]
+    [PARAM:heading]
+	    正在开发中的代码
+    [/PARAM]
+    [PARAM:content]
+		**CollidingPawn.h**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "GameFramework/Pawn.h"
+			#include "CollidingPawn.generated.h"
+
+			UCLASS()
+			class HOWTO_COMPONENTS_API ACollidingPawn : public APawn
+			{
+				GENERATED_BODY()
+
+			public:
+				// 设置此pawn属性的默认值
+				ACollidingPawn();
+
+				// 当游戏开始或生成时调用
+				virtual void BeginPlay() override;
+	
+				// 在每一帧调用
+				virtual void Tick( float DeltaSeconds ) override;
+
+				// 调用以绑定功能到输入
+				virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override;
+
+				UParticleSystemComponent* OurParticleSystem;
+			};
+
+		**CollidingPawn.cpp**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_Components.h"
+			#include "CollidingPawn.h"
+
+			// 设置默认值
+			ACollidingPawn::ACollidingPawn()
+			{
+ 				// 将此pawn设置为在每一帧都调用Tick()。  如果您不需要这项功能，您可以关闭它以改善性能。
+				PrimaryActorTick.bCanEverTick = true;
+
+				// 我们的根组件是一个会对物理行为进行响应的球体
+				USphereComponent* SphereComponent = CreateDefaultSubobject<USphereComponent>(TEXT("RootComponent"));
+				RootComponent = SphereComponent;
+				SphereComponent->InitSphereRadius(40.0f);
+				SphereComponent->SetCollisionProfileName(TEXT("Pawn"));
+
+				// 创建并放置网格物体组件，这样我们能看到球体的位置
+				UStaticMeshComponent* SphereVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualRepresentation"));
+				SphereVisual->AttachTo(RootComponent);
+				static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereVisualAsset(TEXT("/Game/StarterContent/Shapes/Shape_Sphere.Shape_Sphere"));
+				if (SphereVisualAsset.Succeeded())
+				{
+					SphereVisual->SetStaticMesh(SphereVisualAsset.Object);
+					SphereVisual->SetRelativeLocation(FVector(0.0f, 0.0f, -40.0f));
+					SphereVisual->SetWorldScale3D(FVector(0.8f));
+				}
+
+				// 创建粒子系统以供我们激活或反激活
+				OurParticleSystem = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("MovementParticles"));
+				OurParticleSystem->AttachTo(SphereVisual);
+				OurParticleSystem->bAutoActivate = false;
+				OurParticleSystem->SetRelativeLocation(FVector(-20.0f, 0.0f, 20.0f));
+				static ConstructorHelpers::FObjectFinder<UParticleSystem> ParticleAsset(TEXT("/Game/StarterContent/Particles/P_Fire.P_Fire"));
+				if (ParticleAsset.Succeeded())
+				{
+					OurParticleSystem->SetTemplate(ParticleAsset.Object);
+				}
+
+				//  使用弹簧臂来让相机获得一种平滑、自然的运动。
+				USpringArmComponent* SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraAttachmentArm"));
+				SpringArm->AttachTo(RootComponent);
+				SpringArm->RelativeRotation = FRotator(-45.f, 0.f, 0.f);
+				SpringArm->TargetArmLength = 400.0f;
+				SpringArm->bEnableCameraLag = true;
+				SpringArm->CameraLagSpeed = 3.0f;
+
+				// 创建相机并附加到弹簧臂
+				UCameraComponent* Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("ActualCamera"));
+				Camera->AttachTo(SpringArm, USpringArmComponent::SocketName);
+
+				// 控制默认玩家
+				AutoPossessPlayer = EAutoReceiveInput::Player0;
+			}
+
+			// 当游戏开始或生成时调用
+			void ACollidingPawn::BeginPlay()
+			{
+				Super::BeginPlay();
+	
+			}
+
+			// 在每一帧调用
+			void ACollidingPawn::Tick( float DeltaTime )
+			{
+				Super::Tick( DeltaTime );
+
+			}
+
+			// 调用以绑定功能到输入
+			void ACollidingPawn::SetupPlayerInputComponent(class UInputComponent* InputComponent)
+			{
+				Super::SetupPlayerInputComponent(InputComponent);
+
+			}
+
+
+    [/PARAM]
+[/OBJECT]
+
+%Steps%

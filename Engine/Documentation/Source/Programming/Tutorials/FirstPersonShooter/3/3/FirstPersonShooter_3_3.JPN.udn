@@ -1,0 +1,133 @@
+﻿INTSourceChangelist:3388665
+Availability:Public
+Title:3.3 - 発射物のコリジョンとライフタイムをセットアップする
+Crumbs: %ROOT%, Programming, Programming/Tutorials/FirstPersonShooter, Programming/Tutorials/FirstPersonShooter/3
+Description:FPS の発射物用にコリジョンとライフタイムををセットアップする方法を学びます。
+SkillLevel:Beginner
+Version:4.15
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[前のステップ](Programming/Tutorials/FirstPersonShooter/3/2)
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[セクション ホーム](Programming/Tutorials/FirstPersonShooter/3)
+	[/PARAM]	
+	[PARAM:next]
+		[次のステップ](Programming/Tutorials/FirstPersonShooter/3/4)
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+現時点で、発射物 (プロジェクタイル) は以下のようになっています。
+
+*	永遠に存続 (ワールド アウトライナーから決して消えません)。
+*	ワールドの他のオブジェクトと衝突しません。
+
+このステップでは、発射物のコリジョンとライフタイムをセットアップします。
+
+## 発射物の存続期間を制限する
+
+1.	**Solution Explorer (ソリューション エクスプローラー)** で、`FPSProjectile` class CPP ファイルを探して、`FPSProjectile.cpp` を開きます。
+
+1.	以下のコードを `FPSProjectile` コンストラクタに追加して、発射物の存続期間を設定します。
+
+		// Die after 3 seconds. (3 秒後に消滅)
+		InitialLifeSpan = 3.0f;
+
+## 発射物のコリジョン設定を編集する
+
+アンリアル エンジンにはいくつかのプリセット コリジョン チャンネルがありますが、ゲームプロジェクトで利用できるカスタマイズ可能なチャンネルもいくつかあります。
+
+1. **[Project Settings (プロジェクト設定)]** を開いて、 **[Collision]** を選択し、コリジョン チャンネルをカスタマイズします。
+
+	![](SettingCollisionChannels.png)
+
+1.	**[New Object Channel...]** を選択し、新規コリジョン チャンネルを作成します。新規コリジョン チャンネルに "Projectile" と名前を付けて、**[Default Response]** を **[Block]** に設定してから、**[Accept]** をクリックします。
+
+	![](NewChannel.png)
+
+1.	**[Preset]** で、**[New...]** を選択し、新しいプロファイルにも "Projectile" と名前を付けます。コリジョンのプリセットを設定するには、以下の画像を参照してください。
+
+	![](NewProfile.png)
+
+	このコリジョン プロファイルは、発射物が `Static Actors`、`Dynamic Actors`、物理をシミュレーションしている `Actors`、`Vehicles`、および `Destructible Actors` によってブロックされることを指定しています。また、 
+	このコリジョン プロファイルは、発射物が `Pawns` にオーバーラップすることを指定しています。
+
+## 新規コリジョン チャンネルの設定を使用する
+
+1.	**Solution Explorer (ソリューション エクスプローラー)** で、`FPSProjectile` class CPP ファイルを探して、`FPSProjectile.cpp` を開きます。
+
+1.	 `FPSProjectile` コンストラクタで、`CollisionComponent` 作成の後に以下の行を追加します。
+
+		CollisionComponent->BodyInstance.SetCollisionProfileName(TEXT("Projectile"));
+
+1.	 `FPSProjectile.cpp` は以下のようになります。
+
+		// Fill out your copyright notice in the Description page of Project Settings. (Project Settings の Description ページに著作権情報を入力してください) 
+		#include "FPSProject.h"
+
+		#include "FPSProjectile.h"
+		// Sets default values (デフォルト値を設定) 
+
+		AFPSProjectile::AFPSProjectile()
+		{
+		 	// Set this actor to call Tick() every frame. (フレーム毎に Tick() を呼び出すようにこのアクタを設定) You can turn this off to improve performance if you don't need it. (必要がなければパフォーマンスを向上させるためにオフにすることができます) 
+			PrimaryActorTick.bCanEverTick = true;
+		// Use a sphere as a simple collision representation (簡易なコリジョン表現に球体を使用)
+
+			CollisionComponent = CreateDefaultSubobject<USphereComponent>(TEXT("SphereComponent"));
+			CollisionComponent->BodyInstance.SetCollisionProfileName(TEXT("Projectile"));
+
+			// Set the sphere's collision radius. (球体のコリジョン半径を設定します)
+			CollisionComponent->InitSphereRadius(15.0f);
+			// Set the root component to be the collision component. (ルート コンポーネントを collision コンポーネントに設定します)
+			RootComponent = CollisionComponent;
+		// Use this component to drive this projectile's movement. (このコンポーネントを使って発射物の動きを操作します)
+
+			ProjectileMovementComponent = CreateDefaultSubobject<UProjectileMovementComponent>(TEXT("ProjectileMovementComponent"));
+			ProjectileMovementComponent->SetUpdatedComponent(CollisionComponent);
+			ProjectileMovementComponent->InitialSpeed = 3000.0f;
+			ProjectileMovementComponent->MaxSpeed = 3000.0f;
+			ProjectileMovementComponent->bRotationFollowsVelocity = true;
+			ProjectileMovementComponent->bShouldBounce = true;
+			ProjectileMovementComponent->Bounciness = 0.3f;
+		// Die after 3 seconds. (3 秒後に消滅)
+
+			InitialLifeSpan = 3.0f;
+		}
+		// Called when the game starts or when spawned (ゲーム開始時またはスポーン時に呼び出される)
+
+		void AFPSProjectile::BeginPlay()
+		{
+			Super::BeginPlay();
+			}
+
+		// Called every frame (フレームごとに呼び出される)
+
+		void AFPSProjectile::Tick( float DeltaTime )
+		{
+			Super::Tick( DeltaTime );
+		}
+
+		// Function that initializes the projectile's velocity in the shoot direction. (発射方向に発射物のべロシティを初期化する関数)
+
+		void AFPSProjectile::FireInDirection(const FVector& ShootDirection)
+		{
+			ProjectileMovementComponent->Velocity = ShootDirection * ProjectileMovementComponent->InitialSpeed;
+		}
+
+1.	`FPSProjectile.cpp` を Visual Studio に保存します。
+
+1.	**[Solution Explorer (ソリューション エクスプローラ)]** で **[FPSProject]** を探します。
+
+1.	**[FPSProject]** 上で右クリックして **[Build]** を選択してプロジェクトをコンパイルします。
+
+	![](BuildFPSProject.png)
+
+%Steps%

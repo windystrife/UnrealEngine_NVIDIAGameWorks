@@ -1,0 +1,134 @@
+Availability: Public
+Title:FText
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture/Reference, Programming/UnrealArchitecture/Reference/Properties, Programming/UnrealArchitecture/StringHandling
+Description:
+Version: 4.9
+Related:Gameplay/Localization
+Related:Gameplay/Localization/Formatting
+
+
+
+[EXCERPT:Overview]
+**FText** represents a display string.  Any text you want to display to the user should be handled with FText. The FText class has built-in support for localization, and can handle text content that is 
+localized and stored in a lookup table, as well as text that is localized at runtime, such as numbers, dates, times, and formatted text.  Even text that does not need to be localized can be handled 
+with FText.  This includes user-entered content such as a player's name, and any text displayed with Slate. FText does not offer any mutation functions, because making changes to display strings is a very unsafe operation.
+[/EXCERPT:Overview]
+
+### Slate and FText
+
+Overall, Slate is moving away from exposing hooks for FStrings in favor of FText.  Since FText handles all of the localization concerns behind its interface, Slate will be able to support 
+features such as Live Language toggling in the future. This would not be possible with FStrings. Using FText also improves the performance of rendering text. When using FText, the string is
+assumed to be immutable, so the memory address of the string can be used as a key for fast cache lookups. This is much less expensive than having to check a string for changes or re-measure it
+for display. Finally, using FText in Slate means that localization support will be naturally integrated with the UI system, so a strong framework for localization best practices 
+will exist. 
+  
+
+## Creating FText
+
+Because of the localization applications of FText, each FText must be set up with a key as well as text. The LOCTEXT and NSLOCTEXT macros can be used to set up FText correctly.
+LOCTEXT takes the key and the text as parameters. All parameters must be string literals. All literals will be passed through the localization system.
+
+[REGION:tip]
+The global LOCTEXT_NAMESPACE macro must be first set to a string literal to specify this localization key's namespace.
+[/REGION]
+
+To create an FText from a string using the LOCTEXT macro:
+  
+	/* Top of File */ 
+	#define LOCTEXT_NAMESPACE "Your Namespace" 
+	... 
+	FText TestHUDText = LOCTEXT( "Your Key", "Your Text" ) 
+	... 
+	#undef LOCTEXT_NAMESPACE 
+	/* Bottom of File */ 
+  
+NSLOCTEXT takes the namespace as a parameter, in addition to the key and the text. All parameters must be string literals. All literals will be passed through the localization system.
+
+	FText TestHUDText = NSLOCTEXT( "Your Namespace", "Your Key", "Your Text" ) 
+
+You can also create a blank FText with either of the following syntaxes:
+  
+* `FText TestHUDText = FText::GetEmpty(); `
+* `FText TestHUDText = FText(); `
+
+
+## Conversions
+
+### String Variables
+
+#### From FText
+
+|From | To | Example |
+|---|------|---------|
+%Programming/UnrealArchitecture/StringHandling:ftexttofstring%
+%Programming/UnrealArchitecture/StringHandling:ftexttofname%
+
+  
+FText strings are immutable so you will not be able to make modifications to the returned string, without cloning it. 
+
+#### To FText
+
+|From | To | Example |
+|---|------|---------|
+%Programming/UnrealArchitecture/StringHandling:fnametoftext%
+%Programming/UnrealArchitecture/StringHandling:fstringtoftext%
+  
+
+### Numeric Variables
+
+No conversions exist from FName strings to numeric variables.
+
+#### To FText
+
+You can convert float and int variables to FText using **FText::AsNumber()**. This function generates an FText that represents the passed number in the current culture.
+
+Example:
+
+	FText::AsNumber( CurrentHealth )
+
+Additional numeric conversions include:
+	
+* `FText::AsPercent()` 
+* `FText::AsCurrency()`
+* `FText::AsDate()`
+* `FText::AsTime()`
+
+  
+## Comparisons
+
+You can compare two FText strings by using **FText::EqualTo()** or **FText::EqualToCaseIgnored()**, receiving either true or false as your result. Using **FText::CompareTo()** or 
+**FText::CompareToCaseIgnored()** to compare strings returns an integer value.   
+  
+FText does not expose operators for these comparison operations currently because their operations are not simple ordinal comparisons like FStrings. We opted to not use the normal operators to hint 
+at the operation's expense. 
+
+
+
+## FText in HUDs
+
+### Canvas
+
+To display FText in a HUD using [Canvas](Gameplay/Framework\UIAndHUD#canvas), you must create a new **FCanvasTextItem**.
+
+	FCanvasTextItem TextItem( FVector2D::ZeroVector, TestHUDText, BigFont, FLinearColor::Black);
+	
+You can change the text of an FCanvasTextItem by setting the Text variable:
+
+	FFormatNamedArguments Arguments;
+	Arguments.Add(TEXT("CurrentHealth"), FText::AsNumber( CurrentHealth ));
+	TextItem.Text = FText::Format(LOCTEXT("ExampleFText", "You currently have {CurrentHealth} health left."), Arguments ) ;
+
+To actually display the FText to the screen, call the **FCanvas::DrawItem()** function:
+	
+	Canvas->DrawItem(TextItem,10.0f,10.0f);
+
+[REGION:note] 
+You must call the DrawItem() function within your HUD class's **DrawHUD()** function, or call it in a function chain that begins with DrawHUD().
+[/REGION]
+
+
+## FText in Blueprints
+
+Blueprints support Text literals. Any input pins for Text values will support being assigned a value in the node and these strings will be gathered up for localization.
+
+

@@ -1,0 +1,395 @@
+﻿INTSourceChangelist:3403466
+Availability:Public
+Title:照片级角色
+Crumbs:%ROOT%, Resources
+Description:照片级角色半身像展示的总览。
+Related:Engine/Rendering/Materials
+Related:Engine/Rendering/Materials/PhysicallyBased
+Related:Engine/Rendering/Materials/LayeredMaterials
+Version:4.15
+topic-image:PhotorealHead.png
+social-image:PhotorealHead.png
+
+
+[TOC(start:2 end:3)]
+
+[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:videoid]
+	K-VyoqRB5_g
+	[/PARAMLITERAL]
+	[PARAMLITERAL:width]
+	100
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	56.25
+	[/PARAMLITERAL]
+	[PARAMLITERAL:units]
+	%
+	[/PARAMLITERAL]
+	[PARAMLITERAL:type]
+	simple
+	[/PARAMLITERAL]
+[/OBJECT]
+
+此展示旨在体现高精度角色着色器技术的使用。这些技术与 Epic 的 MOBA 游戏 Paragon 中角色使用的技术相似。打开项目，按下 Play In Editor 即可查看动画演示。 
+
+如需了解用于制作此角色技术的更多信息，请观看此视频 [Unreal Engine Livestream - Tech & Techniques Behind Creating the Characters for Paragon](https://www.youtube.com/watch?v=toLJh5nnJA8)。
+
+## 皮肤着色
+
+角色的皮肤使用 UE4 的 [次表面配置着色模型](Engine/Rendering/Materials/LightingModels/SubSurfaceProfile/)。 
+
+
+![](Skin.png)(w:700 convert:false)
+
+使用了 [材质函数](Engine/Rendering/Materials/Functions/) 设置皮肤材质的基础。这作为一种可重复使用的制作方法创建 Paragon 的材质。根据此法，美术师可标准化特定类型表面的生成方法。对单个函数进行的基础修改将更新此函数使用之处的所有实例。 
+
+### 皮肤着色器纹理 
+
+用于角色皮肤上的纹理分辨率均为 4K，最初由演员面部扫描生成。之后纹理经 Epic 美术师清理并调整。此纹理设置共利用了五种纹理贴图：弥散、粗糙、反射、散射，以及法线。
+
+| 纹理 | 名称 | 描述 |
+|---------|------|-------------|
+|![](SkinDiffuse.png)(w:200 convert:false)|**Diffuse**|弥散贴图为材质提供基色。在 4K 分辨率下，皮肤下的毛细血管均清晰可见。深色的皱纹则能突出法线贴图提供的纹理。(*UE4_Demo_Head_D*)|
+|![](SkinRough.png)(w:200 convert:false)|**Roughness**|粗糙贴图保存在弥散纹理的透明通道中。这个常用技术可将使用中的纹理量保持到最低。注意粗糙度在毛孔和皱纹中会有所增加。这会导致这些区域缺乏光亮度，突出弥散和法线贴图带来的深度感。此外还需注意头发纹理的粗糙度为 1.0，防止头皮带来杂散反射高光，并为头发带来更强的深度感。(*UE4_Demo_Head_D*)|
+|![](SkinSpec.png)(w:200 convert:false)|**Specular**|反射贴图控制皮肤表面可见的反射高光量。需要注意的是默认反射值为 0.5。此贴图将提升皮肤拉伸更紧之处的反射度，并降低不需要反射之处的反射度（如毛孔中心和皱纹之中）。(*CH2_exp04_merged_spec_f_FC_FINAL*)|
+|![](SkinScatter.png)(w:200 convert:false)|**Scatter**|散射贴图控制散射透过皮肤表面的光照量。暗处区域展示出的散射极少（如脸颊），而明亮区域则能感受到更大量的散射（如鼻子和耳朵）。散射颜色则由 [次表面配置文件资源](Engine/Rendering/Materials/LightingModels/SubSurfaceProfile/) 进行管理 (*UE4_Demo_Head_BackScatter*)|
+|![](SkinNormal.png)(w:200 convert:false)|**Normal**|法线贴图在常规材质设置中功能正常，扰乱像素法线为表面提供触觉纹理。其设置在此例中并无特殊之处。(*UE4_Demo_Head__normals*)|
+
+
+## 头发着色
+
+头发着色由 UE4 的头发着色器模型处理。此着色器是基于物理的着色模型，以 [Eugene d'Eon、Steve Marschner 和 Johannes Hanika] 的研究为基础。[Weta Digital](http://www.wetafx.co.nz/research) 现今正在使用此着色器。着色器通过各向异性反射近似出头发表面的光反射、穿过头发的折射，以及通过多条发缕的散射。 
+
+将材质的 **Shading Model** 属性设为 **Hair** 即可使用 UE4 头发着色器。
+
+
+![](HairSM.png)
+
+### 头发和反射
+
+在真实世界中，头发通常有多个镜面反射高光：一个代表光的颜色，另一个则是头发颜色和光颜色的混合。在此文档中，我们将它们称为主要和次要反射高光。头发着色器可近似出高度真实的相同效果。
+
+![](TwinblastHair_Specs_Diagram.png)(w:700 convert:false)
+[REGION:caption]1.更亮的头发代表主要反射高光。2.更亮的红色头发代表次要反射高光。[/REGION]
+
+UE4 的头发着色器中使用的近似算法以类似真实世界的方式来创建这些效果。光线照到毛囊表面时不会反射开。头发为半透明，部分光线能够*穿过*它，并可能在其中四处反射，然后退出。头发着色器和头发进行交互时通过光线可能行进的三条通道进行近似，如下方的动态 GIF 图表所示：
+
+![](HairDiagram.gif)(w:700 convert:false)
+[REGION:caption]单个毛囊的相交部分显示头发着色器近似与光线交互的方式，体现光线所采用路径的三个主要类型。请参阅下表中此进程每个部分的描述。[/REGION] 
+
+| 数字 | 描述|
+|--------|-------------|
+|0.|毛囊的延展方向（从根到梢）。|
+|1.|仅限反射的通道，光线会在头发表面形成反弹。这能产生主要反射高光。|
+|2.|传播-传播通道，光线通过此通道传入毛囊并从另外一侧退出。这是光线在大量头发中进行散射的方式。|
+|3.|传播-反射-传播通道，光线通过此通道进入毛囊，在表面的边界中反射开，然后退出。这能产生次要反射高光。|
+
+如上方图表所示，一缕发丝并非是完美的圆柱体或管道状。事实上，头发的形状更像是一系列堆叠起来的圆锥体。这意味着从头发表面反射开的光线散射与完美平滑头发所形成的散射有所不同。更进一步而言，每根头发均指向不同的方向，因此反射高光不会被统一，但将基于头发指向的方向进行独立放置。这通常被称作*各向异性*反射，UE4 头发着色器同样支持此特性。
+
+### 头发和透明
+
+头发着色器使用遮罩混合模式替代半透明。然而，遮罩半透明将生成一个二进制结果——表面为完全不透明或完全透明。噪点递色图案不断在表面上移动，需要突出实心的区域更为密集。递色被用作混合遮罩透明的一种方式，但只在 TemporalAA 启用时生效。 
+
+[OBJECT:ComparisonSlider]
+[PARAM:before]
+![Without TemporalAA](Hair_AAOff.png)(w:700 convert:false)
+[/PARAM]
+[PARAM:after]
+![With TemporalAA](Hair_AAOn.png)(w:700 convert:false)
+[/PARAM]
+[/OBJECT]
+
+[REGION:note]结合 TemporalAA 使用动态递色需要数帧来进行混合。头发处于动态时可能出现一些穿帮。这是该技术的正常负面效果。[/REGION]
+
+#### 边缘遮罩
+
+![](EdgeMaskGraph.png)(w:700 convert:false)
+
+虽然并非是着色器本身的一部分，但仍然值得一提的是用于范例角色头发、以及 Epic 游戏*Paragon*中其他角色的材质使用名为“边缘遮罩（Edge Mask）”的技术在头发侧对摄像机时将其淡化。因为头发作为一系列的片进行渲染——参见下方 [头发和几何体](#hairgeometry)，因此从一些特定的摄像机角度可能看到每个片的边缘，破坏头发效果。
+
+为减轻此问题，材质在表面垂直旋转离开摄像机时计算摄像机相对于顶点法线的矢量，它还将淡出至完全透明。然而此方法的另一个方面时执行此操作头发着色器可能显示更多头皮。这是拥有较厚头发角色的头皮上通常绘有头发纹理的原因。如下图所示。
+
+![](HairPaint.png)(w:700 convert:false)
+
+
+[REGION:tip]需要指出的是此效果与 Quality Switch 节点相关联，因此在低性能平台上它可能会容易被关闭，以换取一些着色器性能。如常，推荐在目标平台上进行测试。[/REGION]
+
+
+
+
+
+### 头发创建
+
+使用此展示中的技术创建头发需要理解 Epic 构建此角色头发的方式。
+
+(#hairgeometry)
+#### 头发几何体
+
+使用 UE4 头发着色器的头发几何体通常使用一系列非平面的片表面，这是诸多实时头发解决方案中的一个常见方法。它们能在您选择的 DCC 应用中进行制作。
+
+[REGION:note]头发几何体细节不存在一成不变的规则，但需要注意的是此角色使用大约 800 个发片，总共约 18000 个三角形。还需要注意头发材质在主材质节点的属性中被设为两面。[/REGION]
+
+![](HairSheets.png)(w:700 convert:false)
+
+
+#### 头发纹理
+
+在 UE4 头发着色器的此使用实例中，最终结果由五个主要纹理构成：*Diffuse*、*Alpha*、*Root*、*Depth* 和每缕独立的 *ID* 纹理。在 Epic，这些纹理通常使用 3ds Max 的头发系统生成，将模拟的头发结果投射到一块几何体上。然而，相似结果拥有多个可用选项。 
+
+
+| 纹理 | 名称 | 描述 |
+|---------|------|-------------|
+|![](Diffuse.png)(w:200 convert:false)|**Diffuse**|弥散纹理提供头发中主要的弥散或*基础*颜色、有时最好不对此纹理进行着色，通过参数驱动其颜色，角色头发可能染上多种不同颜色时尤为如此。(*UE4_Demo_Hair_D*)|
+|![](Alpha.png)(w:200 convert:false)|**Alpha**|Alpha 纹理为头发提供不透明区域，隐藏发缕主体外的几何体。(*UE4_Demo_Hair_A*)|
+|![](Root.png)(w:200 convert:false)|**Root**|Root 纹理提供一个遮罩，用于变更从发根至发梢的颜色，可调亮或变暗头发。(*UE4_Demo_Hair_Roots*)|
+|![](Depth.png)(w:200 convert:false)|**Depth**|Depth 纹理由 Pixel Depth 偏移所用，使头发获得深入发卷的特征。它也可用作变更不同深度头发颜色或着色值的基础，如在头发朝头皮方向移动时减少整体反射。(*UE4_Demo_Hair_Depth*)|
+|![](ID.png)(w:200 convert:false)|**Unique ID**| Unique ID 纹理为给定头发几何体提供一个独一的 0 到 1 之间（黑到白）的值。这用于在头发自身之中提供细微的变化。(*UE4_Demo_Hair_ID*)|
+
+
+
+### 头发着色器属性
+
+使用头发着色器时用户可看到主材质节点中有一些新属性可用：**Scatter**、**Tangent** 和 **Backlit**。
+
+![](HairProperties.png)
+
+[REGION:warning]在撰写此文档时（版本 4.13），Backlit 属性只作为着色器早期版本的一部分而存在。与其的连接不会由头发着色器内部使用，因此可无视属性。[/REGION]
+
+#### Scatter
+
+我们将头发着色器视作*近似*而非*模拟*的其中一个主要原因是事实上并未对每缕单独的发丝进行模拟，也未完美模拟精确的光照行为。在真实世界中，光线从头发毛囊反射开并进行传播时，它会经常遭遇*其他*发缕，可能连续多次重复相同进程。此时没有计算系统能够准确生成此类实时模拟的效果。
+
+然而，光线散射通过头发形体的方式仍然决定着头发的在游戏中真实感（是否与真实世界相似）。为进行控制，头发着色器提供了 Scatter 属性，替代主着色器节点上的 Metallic，值限定在 0.0 和 1.0 之间。Scatter 控制通过角色头发整个主体（将其视为单个表面）的光线量。 
+
+关于 Scatter 重要的一点是，它会比浅色头发更亮，比深色头发更暗。这将遵循自然世界的物理规则，因为深色头发将吸收更多光线。在实际操作中，如果尝试创建一个金发角色，只修改弥散纹理或颜色不够，也需要增加 Scatter 数值。
+
+
+[OBJECT:ComparisonSlider]
+[PARAM:before]
+![Scatter value of 0.0](Scatter_0.png)(w:700 convert:false)
+[/PARAM]
+[PARAM:after]
+![Scatter value of 1.0](Scatter_1.png)(w:700 convert:false)
+[/PARAM]
+[/OBJECT]
+[REGION:caption]在此例中发根和发梢颜色被设为偏白的金色，Random Variation 设为 0.0。Scatter 则用于调整被近似通过头发的光线量。这能说明通过修改 Scatter 值能生成多少种色调的头发。[/REGION]
+
+#### Tangent
+
+Tangent 属性替代了头发着色器上的 Normal 属性。切线作为与每缕头发平行运行的矢量进行计算，指回到发根。Tangent 属性的作用是帮助形成适当的各向异性反射。在此解释一番，各向异性反射是光线从带微小槽的表面（如拉丝金属）反弹开时出现的效果。 
+
+![](AnisoVsNonAniso.png)(w:700 convert:false)
+[REGION:caption]左侧球体为各向异性着色，右侧球体则不是。您可发现各向异性发射高光沿表面伸展。[/REGION]
+
+Tangent 属性主要用作为矢量，控制各向异性高光伸展的方向。
+
+![](HairTangent.png)(w:700 convert:false)
+[REGION:caption]此图中的黄线代表沿发缕的切线，指回发根。[/REGION]
+
+[REGION:tip]在范例角色的头发着色器中，此矢量被赋予 Z 轴中 0.3 和 -0.3 之间的一个随机偏移（使用 Unique ID 纹理）。这将生成一个矢量（其在圆弧中拥有一个随机方向），有助于提供各向异性反射高光中的变化（如在一束真实头发中拥有的效果）。[/REGION]
+
+切线可以两种方式进行映射：自动映射或流型图。自动法要求每个头发片的纹理按发根朝向发梢朝下进行朝向。只要头发较短且片不存在弯曲和过度扭曲，这种方法便适用。此法用于范例角色的头发。
+
+##### 相切流型图
+
+另一种方法需要创建流型图。如角色头发较长且弯曲，需拥有比实际几何体更加卷曲的效果，或头发的单个纹理部分朝向不同方向（并非上文所述的上至下）。流型图代表头发在切线空间中或沿表面移动的方向。Photoreal Character Bust 项目中有一个名为 *T_Hair_Flow* 的未使用流型图。下方是流型图和反射结果的对比。 
+
+[OBJECT:ComparisonSlider]
+[PARAM:before]
+![Final Result](SparowFlowMap.png)(w:600 convert:false)
+[/PARAM]
+[PARAM:after]
+![Flow Map Texturing](SparowFlowMap2.png)(w:600 convert:false)
+[/PARAM]
+[/OBJECT]
+[REGION:caption]此处展示了流型图沿 Sparrow 头发表面进行的纹理设置。注意：流型图只用于部分头发片上，并非头发的整个主体上。注意：沿流型图的不同数值将细微地改变沿头发的反射。[/REGION]
+
+
+
+
+#### 使用头发着色器的像素深度偏差
+
+像素深度偏差（PDO）并非头发着色器的特有属性。通俗而言，PDO 使像素拥有凹陷效果（远离摄像机），沿表面形成一种虚拟的景深感。因为头发由简单的几何体片组成（如下文中 [头发和几何体](#hairgeometry) 所述），因此使用 PDO 能为头发整个形体带来一种切实的景深感。它还将打破头发几何体面与头皮相交的交叉点，如下图所示。
+
+[OBJECT:ComparisonSlider]
+[PARAM:before]
+![Without Pixel Depth Offset](PDO_off.png)(w:700 convert:false)
+[/PARAM]
+[PARAM:after]
+![With Pixel Depth Offset](PDO_On.png)(w:700 convert:false)
+[/PARAM]
+[/OBJECT]
+
+
+
+
+## 眼睛着色
+
+![](EyeShading2.png)(w:700 convert:false)
+
+眼睛通常被称作“灵魂的窗户”。观者对人的印象主要来自眼睛，其他方面难以匹及。UE4 中的眼睛着色器提供眼睛表面的真实渲染，对眼睛的每个生理部分进行艺术把控。
+
+[REGION:warning]UE4 中的眼睛着色器技术含量很高，开发过程使着色器代码、材质、几何体形体和几何体的 UV 布局之间存在 **极强的相依性**。如无着色器开发的丰富经验，**不** 建议使用此着色器从零开始构建眼睛。为达目的，我们强烈建议用户在创建真实人眼时提取此范例中的眼睛几何体，并使用眼睛材质 **as-is** 替换相应纹理。 [/REGION]
+
+[REGION:tip]Photoreal Character 项目中有一个名为 **PhotorealEyeGeo** 的静态网格体。这能通过 FBX 从项目导出到您选择的 DCC 应用中，以便在您自建的项目中使用。[/REGION]
+
+### 眼睛生理结构
+
+为完全理解眼睛的特性，最好对眼睛生物学进行一定的了解。此处可见的每个部分均在此眼睛设置中被表示，所有部分均可使用应用至范例角色眼睛的材质实例中的公开参数进行修改。
+
+以下进行快速讲解：
+
+![](EyeDiagram.png)(w:700 convert:false)
+|数字|名称|描述|
+|------|----|-----------|
+|1|巩膜|巩膜也称“眼白”。眼睛的这个区域通常十分湿润，拥有少量的触感纹理。|
+|2|角膜缘|角膜缘是虹膜和巩膜之间深色环状区域。某些眼睛的该部分会比其他眼睛更为突出，从侧面进行观察看时通常会淡化。
+|3|虹膜|虹膜是眼睛中心周围的色彩环状区域。一个人拥有“绿色”眼睛，指的是虹膜主要是绿色。在真实人眼中，虹膜是可延展和收缩的肌肉状纤维组织，使光线进入瞳孔，或减少进入瞳孔的光线。还需要注意的是在真实世界中，虹膜实际上是碟状或圆锥状，不会凸出眼睛的其他部分。|
+|4|瞳孔|瞳孔是眼睛中心的深色点。它是光线传入的洞，使视网膜的视杆细胞和视锥细胞能够接收到光线。
+|5|角膜|角膜是虹膜之上充满液体的透明圆顶物。|
+
+### 眼睛中的折射——过去与现在
+
+眼球充满液体，因此它将对穿过其中的光线产生折射。在真实世界中从多个角度查看眼睛时能发现折射。虹膜和瞳孔将因折射而扭曲，因为是通过角膜进行观察。在游戏和电影中解决此问题的传统方法是创建两个单独的眼睛表面：一个提供巩膜、虹膜和瞳孔；另一个表面在此之上，提供角膜和眼睛的整体湿润度。这能够产生折射，因为下层表面将通过湿润层进行观察。此方法应用在 Epic *男孩和他的风筝*技术 demo 中男孩的眼睛上。下方图表展示了两个表面。
+
+![](KiteBoyEyes.png)(w:700 convert:false)
+
+然而，使用全新的眼睛着色器可通过*单层表面*实现更为真实的效果。通过角膜表面的光线折射现在完全在着色器中进行处理，减少对下方几何体的需求。打开 *MI_EyeRefractive_Bust* 材质实例，调整 **Refraction On/Off** 属性即可对此进行试验。
+
+[OBJECT:ComparisonSlider]
+[PARAM:before]
+![Without Refraction|(Refraction On/Off at 0.0)](NotRefracting.png)(w:700 convert:false)
+[/PARAM]
+[PARAM:after]
+![With Refraction|(Refraction On/Off at 1.0)](Refracting.png)(w:700 convert:false)
+[/PARAM]
+[/OBJECT]
+
+### 眼睛着色器参数
+
+眼睛着色器较为复杂，推荐使用默认，因此我们在此对材质内置的艺术效果参数进行解析。以下是可在 *MI_EyeRefractive_Bust* 材质实例常量中进行调整的眼睛着色器参数。还将在所有可能的位置纳入建议的参数范围。
+
+![](MI_EyeRefractive_Bust.png)
+
+|名称|描述|建议值范围|
+|----|-----------|-------------------|
+|[REGION:tablesection]静态切换参数值[/REGION]|||
+|**UseEyeBulge**|此属性基于眼球几何体是否使用角膜凸起的物理模型调整着色器的反射属性。|n/a|
+|[REGION:tablesection]矢量参数值[/REGION]|||
+|**Sclera inner color**| 这是巩膜与虹膜相交时的颜色。|n/a|
+|**Sclera outer color**| 这是巩膜在眼睛外边缘的颜色。|n/a|
+|**SecondaryEnvBalance**| 此值控制眼睛表面上可见 [次要环境](#eyeshadersecondaryenvironment) 的量。|0.00 - 0.03|
+|**SecondaryEnvRotationAxis**| [次要环境](#eyeshadersecondaryenvironment) 是虚拟反射，因此它必须围绕眼睛手动旋转。此属性控制旋转的轴。| <0.0, 0.0, 1.0> （Z 轴）|
+|[REGION:tablesection]标量参数值[/REGION]|||
+|**Depth Scale**| 此值控制角膜下虹膜反射的深度。|1.0-1.4|
+|**Flatten Normal**| 此值控制眼睛法线贴图发生的扁平，注重于巩膜。|0.9 - 1.1|
+|**IoR**|角膜下液体的折射索引。控制发生的折射量。|1.336|
+|**Iris Concavity Power**| 与 *Iris Concavity Scale* 共用，控制光线通过角膜时在虹膜表面上计算出的光线焦散的形态和量。在通常只在实际照亮的场景中可见，难以在材质实例编辑器中显现。|0.2 - 0.3|
+|**Iris Concavity Scale**| 与 *Iris Concavity Power* 共用，控制光线通过角膜时在虹膜表面上计算出的光线焦散的形态和量。在通常只在实际照亮的场景中可见，难以在材质实例编辑器中显现。|0.07 - 0.15|
+|**Iris UV Radius**| 控制眼球上虹膜的整体大小。|0.14 - 0.15|
+|**Iris Brightness**| 控制虹膜的亮度。| *基于虹膜的颜色* |
+|**Iris Roughness**| 此值决定虹膜之上角膜的亮度。| 0.0 - 0.1 |
+|**Limbus Dark Scale**| 控制角膜缘深色环状区的大小。| 2.0 - 2.15 |
+|**Limbus Pow**| 控制角膜缘区域的整体暗度。过高的数值将使整个角膜缘区域变暗。| 15.0 - 22.0 |
+|**Limbus UV Width Color**| 控制角膜缘的范例采样大小，或用于显示角膜缘所分配的眼睛表面的量。这是一个十分精妙的设置，进行调整是应多加考虑。| 0.025 - 0.040 |
+|**Limbus UV Width Shading**| 控制光线对角膜缘着色影响的程度。十分精妙的设置，调整时需深思熟虑。| 0.040 - 0.050 |
+|**Normal UV Scale**| 控制眼睛表面上法线贴图纹理的大小。| 1.8 - 2.6 |
+|**Pupil Scale**| 控制瞳孔的大小。这是用于扩大眼睛的设置。| 0.5 - 1.0 |
+|**Refraction On/Off**| 在着色器的折射和非折射版本之间进行混合。| 1.0 |
+|**Scale By Center**| 从中心调整整个虹膜/瞳孔区域的大小。| 0.8 - 1.2 |
+|**Sclera Brightness**| 控制巩膜（或眼白）的明亮度。| 0.9 - 1.3 |
+|**Sclera Roughness**| 控制巩膜的材质粗糙度数值| 0.0 - 0.1 |
+|**Secondary Env Rotation**| 此项沿使用 SecondaryEnvRotationAxis 属性所定义的轴旋转 [次要环境立方体贴图](#eyeshadersecondaryenvironment)。| n/a |
+|**Shadow Hardness**| 控制巩膜内外颜色之间混合的锐度。使用 Shadow Radius 驱动巩膜表面的着色，近似出眼睑在眼球表面投射下表面散射阴影的效果。| 0.1 - 0.2 |
+|**Shadow Radius**| 控制巩膜内外颜色之间混的的大小。结合 Shadow Hardness 使用。| 0.5 - 0.85 |
+|**Specularity Iris**| 控制角膜上（虹膜和瞳孔）的反射等级。| 0.25 - 0.8 |
+|**Specularity Sclera**| 控制巩膜上的反射等级。| 0.25 - 0.8 |
+|**Veins**| 控制由 Sclera Color Map 提供的眼睛静脉的可见度。| *基于 Sclera Color Map 和所需的静脉量。*|
+|[REGION:tablesection]纹理参数值[/REGION]|||
+|**Iris Color**| 参见下方的 [眼睛纹理](#eyetextures)。| n/a |
+|**Normal Map**| 参见下方的 [眼睛纹理](#eyetextures)。| n/a |
+|**Sclera Color**| 参见下方的 [眼睛纹理](#eyetextures)。| n/a |
+|**Secondary Env**| 这是用作次要反射环境的立方体贴图。参见下方的 [眼睛着色器次要环境](#eyeshadersecondaryenvironment)。| n/a |
+
+
+(#eyeshadersecondaryenvironment)
+#### 眼睛着色器次要环境
+
+次要环境是眼睛着色器的一部分，为眼睛表面提供虚拟的反射贴图。可使用着色器中的 SecondaryEnv ParamCube 为其提供一个纹理，然后使用其他 SecondaryEnv 属性进行控制。在眼睛的高度特写中十分实用，可观察到特定的反射，如直接环境、另一个角色等。
+
+[OBJECT:ComparisonSlider]
+[PARAM:before]
+![Without Secondary Environment|(SecondaryEnvBalance at 0.0)](SecondaryEnvOFF.png)(w:700 convert:false)
+[/PARAM]
+[PARAM:after]
+![With Secondary Environment|(SecondaryEnvBalance at 0.03)](SecondaryEnvON.png)(w:700 convert:false)
+[/PARAM]
+[/OBJECT]
+
+### 眼睛制作
+
+之前在此章节中我们已经提到眼睛着色器代码、材质设置和眼睛网格体几何体之间有极强的相依性。以下高级总览将说明眼睛设置为何如此特殊，这些内容有助于将几何体替换为用户自建的角色眼睛模型。
+
+自建眼睛时，我们 **强烈** 推荐此范例中的实际眼睛几何体和材质。此处提供的大多数信息均基于已使用范例中资源的假设。 
+
+[REGION:tip]Photoreal Character 项目中有一个名为 **PhotorealEyeGeo** 的静态网格体。这能通过 FBX 从项目导出到您选择的 DCC 应用中，以便在您自建的项目中使用。[/REGION]
+
+#### 形态和 UV 布局
+
+和真实的人眼一样，眼睛网格体模型并非完美的球体。其前方拥有一个特殊的圆顶，代表角膜。因此眼睛的形状类似于鸡蛋。
+
+![](EyeGeometry.png)(w:400 convert:false)
+[REGION:caption]此图展示了 Maya 中眼睛几何体的侧面外观。您会发现前方的凸起角膜。[/REGION]
+
+眼睛的 UV 布局十分重要，因为每个眼睛纹理的比例正是基于它而生成。好消息是，和眼睛着色器完美匹配的 UV 布局相对简单：沿眼睛前方向轴的平面投射。包含背面并非十分重要（因为它们在眼睛后面），在范例角色上也是这样的情况。
+ 
+ UV 布局外观如下：
+
+![](EyeUVs.png)(w:400 convert:false)
+[REGION:caption]注意 UV 布局在 0-1 空间上居中，投射直接进入角膜。 [/REGION]
+
+(#eyetextures)
+### 眼睛纹理
+
+为眼睛创建的诸多纹理将基于以上创建的 UV 布局，虹膜贴图除外。主要可编辑纹理列表中包含：
+
+| 纹理 | 名称 | 描述 |
+|---------|------|-------------|
+|![](ScleraMap.png)(w:200 convert:false) |**Sclera Map**|巩膜贴图控制眼白的颜色，以及眼睛边缘展示的静脉和组织颜色。举例而言，如果需要角色的眼睛布满血丝，这便是需要进行修改的纹理。(*UE4_Demo_Eye_Sclera_Color*)|
+|![](DispMap.png)(w:200 convert:false) |**Mid Plane Displacement Map**|中平面置换贴图用于锁定穿透眼睛中心的平面，并用作虹膜深度偏差的基础。(*EyeMidPlaneDisplacement_Example*)|
+|![](WetNormal.png)(w:200 convert:false) |**Normal Map**|法线贴图的作用与所有着色器中法线贴图的作用相同——提供触觉纹理变化。在范例角色的眼睛设置中，它沿眼睛的湿润表面生成小块。(*T_Eye_Wet_Normal*)|
+|![](Normal.png)(w:200 convert:false) |**Tangent Map**|切线贴图用于控制表面在切线空间中流动的方向。在范例角色的眼睛设置中，它用于突出角膜与巩膜相交方向的变化。(*EYE_NORMALS.EYE_NORMALS*)|
+|![](IrisTexture.png)(w:200 convert:false)|**Iris Map**|虹膜纹理较为独特，它不匹配 UV 布局。相反，纹理将填充整个分辨率。UV 和透明遮罩用于控制整体的虹膜大小，以及瞳孔的大小。如自建虹膜贴图，需要使瞳孔大小接近所提供纹理的比例。(*UE4_Demo_Eye_Iris*)|
+
+[REGION:warning]注意：Tangent Map 输出 **不** 直接插入 Normal Map 输入。它连接到一个 **Tangent Output** 节点（必须单独创建），如主材质 **M_HairSheet_Master2** 所示。 [/REGION]
+![](TangentOutput.png)
+
+
+
+### 眼睛环境遮挡
+
+范例角色眼睛设置的最后一部分是使用一层半透明辅助表面模拟眼睛周围的环境遮挡。在真实世界中，眼睛和其他组织（如眼睑或泪管）接触时将出现十分柔和的阴影。柔和的原因是眼睛自身为半透明，光线将散射通过眼睛。为对此进行真实模拟，我们已放置一个几何体片覆盖眼睛并提供近似的环境遮挡，创建出更加真实的眼睛效果。
+
+应用到这个片的材质名为 *MI_Eye_Occlusion_Bust*，可在范例角色模型的 Element 3 中找到。
+
+[REGION:note]如要为角色眼睛自建内容，则很可能需要自行构建这块几何体。注意：它需要填充睁开眼睑的区域，其 UV 应清楚地填充 3D 建模程序中 0 到 1 的 UV 空间。 [/REGION]
+
+![](AOSheetMaya.png)(w:700 convert:false) 
+[REGION:caption]此图片展示了 Maya 中环境遮挡片几何体，不带面部几何体。此片的边缘将完美填充睁开的眼睑。 [/REGION]
+
+
+[OBJECT:ComparisonSlider]
+[PARAM:before]
+![Without AO Sheet](WithoutAO.png)(w:700 convert:false)
+[/PARAM]
+[PARAM:after]
+![With AO Sheet](WithAO.png)(w:700 convert:false)
+[/PARAM]
+[/OBJECT]
+
+
+
+## 特别鸣谢
+
+特此感谢 [Eugene d'Eon、Steve Marschner 和 Johannes Hanika](http://www.eugenedeon.com/project/importance-sampling-for-physically-based-hair-fiber-models/) 发布他们的作品 [*The importance of sampling for physically-based hair fiber models*](http://dl.acm.org/authorize?6967840)。UE4 头发着色器的部分工作正是基于他们的作品而成。

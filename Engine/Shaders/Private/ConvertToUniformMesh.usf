@@ -1,0 +1,78 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	ConvertToUniformMesh.usf
+=============================================================================*/
+
+#include "Common.ush"
+#include "/Engine/Generated/Material.ush"
+#include "/Engine/Generated/VertexFactory.ush"
+
+struct FConvertToUniformMeshVSToGS
+{
+	FVertexFactoryInterpolantsVSToPS FactoryInterpolants;
+	float3 PixelPosition : TEXCOORD6;
+};
+
+void ConvertToUniformMeshVS(
+	FVertexFactoryInput Input,
+	out FConvertToUniformMeshVSToGS Output
+	)
+{
+	ResolvedView = ResolveView();
+
+	FVertexFactoryIntermediates VFIntermediates = GetVertexFactoryIntermediates(Input);
+	float3 WorldPosition = VertexFactoryGetWorldPosition(Input, VFIntermediates).xyz - ResolvedView.PreViewTranslation.xyz;
+	float3x3 TangentToLocal = VertexFactoryGetTangentToLocal(Input, VFIntermediates);
+
+	FMaterialVertexParameters VertexParameters = GetMaterialVertexParameters(Input, VFIntermediates, WorldPosition, TangentToLocal);
+
+	Output.FactoryInterpolants = VertexFactoryGetInterpolantsVSToPS(Input, VFIntermediates, VertexParameters);
+	Output.PixelPosition = WorldPosition;
+}
+
+// Must match GetUniformMeshStreamOutLayout and TRIANGLE_VERTEX_DATA_STRIDE
+struct FConvertToUniformMeshVertex
+{
+	float4 Position : SV_Position;
+	float3 Tangent0 : Tangent0;
+	float3 Tangent1 : Tangent1;
+	float3 Tangent2 : Tangent2;
+	float2 UV0 : UV0;
+	float2 UV1 : UV1;
+	float4 VertexColor : VertexColor;
+};
+
+[maxvertexcount(3)]
+void ConvertToUniformMeshGS(triangle FConvertToUniformMeshVSToGS Inputs[3], inout TriangleStream<FConvertToUniformMeshVertex> OutStream)
+{ 
+	for (int i = 0; i < 3; i++)
+	{
+		FConvertToUniformMeshVSToGS Input = Inputs[i];
+
+		float4 DummySvPosition;
+		FMaterialPixelParameters MaterialParameters = GetMaterialPixelParameters(Input.FactoryInterpolants, DummySvPosition);
+
+		FConvertToUniformMeshVertex Vertex = (FConvertToUniformMeshVertex)0;
+		Vertex.Position = float4(Input.PixelPosition, 40);
+
+		Vertex.Tangent0 = MaterialParameters.TangentToWorld[0];
+		Vertex.Tangent1 = MaterialParameters.TangentToWorld[1];
+		Vertex.Tangent2 = MaterialParameters.TangentToWorld[2];
+
+		Vertex.UV0 = Vertex.UV1 = 0;
+
+		#if NUM_MATERIAL_TEXCOORDS > 0
+			Vertex.UV0 = MaterialParameters.TexCoords[0];
+		#endif
+
+		#if NUM_MATERIAL_TEXCOORDS > 1
+			Vertex.UV1 = MaterialParameters.TexCoords[1];
+		#endif
+
+		Vertex.VertexColor = MaterialParameters.VertexColor;
+
+		OutStream.Append(Vertex);
+	}
+}
+

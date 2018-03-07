@@ -1,0 +1,104 @@
+﻿INTSourceChangelist:3218894
+Availability:Public
+Title:Lit の透過処理
+Crumbs: %ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description:透過処理されたサーフェスの lit （ライティング有り）とセルフシャドウを含むシャドウを投影する方法の説明
+Version:4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+	![%Engine/Rendering/LightingAndShadows/LitTranslucency:title%](%ROOT%/Engine/Rendering/LightingAndShadows/LitTranslucency/translucent_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+	![](%ROOT%/ue4_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+	%Engine/Rendering/LightingAndShadows/LitTranslucency:title%
+	[/PARAM]
+	[PARAM:description]
+	%Engine/Rendering/LightingAndShadows/LitTranslucency:description%
+	[/PARAM]
+	[PARAM:path]
+	[RELATIVE:Engine/Rendering/LightingAndShadows/LitTranslucency]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[TOC(start:2)]
+
+
+
+透過エフェクトは通常幾つかのカテゴリに分類されます。ボリュメトリック、法線情報を十分に持つことができる密度のボリュメトリック、サーフェス、の 3 つです。それぞれ異なるライティング技術を必要とするため、使用すべき透過ライティングモードを指定するマテリアルが必要です。
+
+Lit 透過処理は、視錐台まわりでカスケード処理された一連のボリュームテクスチャからほとんどのライティングを取り込みます。これにより、ライティングはボリューム内のどの点においても単一のフォワード (レンダリング) パスとなりますが、ボリューム テクスチャが比較的低解像度になる弱点があります。また、ビューアーからカバーできる深度範囲は限定されます。  
+
+ボリュームは cvars で設定されます。設定はスケーラビリティのレベルによって異なります。
+* r.TranslucencyLightingVolumeDim のデフォルトは 64 です。この値が係数 2 で増加すると、ライト ボリュームへの負荷が係数 8 で増加します。
+* r.TranslucencyLightingVolumeInnerDistance のデフォルトは 1500 です。この値を高くするとライティング ボリュームの範囲が増加しますが、有効解像度が下がります。
+* r.TranslucencyLightingVolumeOuterDistance のデフォルトは 5000 です。この値を高くするとライティング ボリュームの範囲が増加しますが、有効解像度が下がります。
+
+全ての可動ライト タイプからの陰付き直接ライティングは、透過のボリュームライトへ注ぎこみます。Light 関数も考慮されます。
+
+[REGION:fullwidth]
+![Lit Translucency](Engine/Rendering/Overview/3LitSnow4.png)
+[/REGION]
+
+透過マテリアルは [間接ライティング キャッシュ](Engine/Rendering/LightingAndShadows/IndirectLightingCache) からディフューズ GI を受け取ります。ライティング サンプルは 1 つだけ、オブジェクトの境界の中心で補間されます。大きなパーティクル システムであっても、サンプルはオブジェクト全体に対して 1 つだけです。境界の中心が変化すると、間接ライティングは時間の経過と共に補間されるのでポップしません。
+
+![](LitTrans_IDLC_spheres.png)
+
+_左側の球体は *間接ライティング キャッシュ* を使った lit 透過処理で、右側の球体は Lightmass から焼き付けたライティングを使い不透明になっています。_
+
+## ボリュメトリック エフェクト
+
+### シャドウの投影およびセルフ シャドウイング
+
+透過処理は、不透明なワールド、その処理自体、また他の lit (ライティング有り) 透過アクタに対してシャドウを投影することが出来ます。これは、Fourier Opacity マップと実装されていて、ぼんやりしたボリュームからのシャドウイングに最適ですが、より不透明な透過処理がされたサーフェスには深刻なリンギング (波模様) アーティファクトが起こります。透過セルフシャドウイングは点とスポットライト向けてボリュームライトを通過するため、大量および高密度なエフェクトでない限り、低解像度となり表面的には見えません。ただし、指向性ライトはピクセルごとにセルフシャドウイングの透過処理をするため、かなりの高品質な結果となります。指向性ライトはまた、サブサーフェス シェーディング モデルを使用して、lit マテリアルに対してサブサーフェス シェーディングを使用します。
+
+透過セルフシャドウイングは、オブジェクトごとにシャドウを使用します。つまり、ユーザーによって指定されたパーティクルシステム固定範囲と、その正確性が必要となります。一番簡単な設定方法は、ユーザー独自のパーティクル移動を作成し、[Cascade] ツールバーの [show bounds] ボタンを **右クリック** します。ダイアログが表示されて、固定範囲の設定が可能となります。非常に大きなセルフシャドウイング パーティクル システムは、シャドウマップがシステム範囲をカバーするために拡大するため、シャドウマップの解像度が低下します。[Show Bounds (範囲を表示)] を有効にして、範囲が妥当かどうかを確認してください。[Show (表示)] -> [Advanced (詳細)] -> [Bounds (範囲)] で確認できます。確認したら、エディタでエミッタを選択すれば、エミッタがバウンディング ボックスと球体を描きます。
+
+[REGION:imagetable]
+![Translucent Particle Self-Shadowing](Engine/Rendering/Overview/self_shadow_1.png)(w:456) | ![Translucent Particle Self-Shadowing](Engine/Rendering/Overview/self_shadow_2.png)(w:456) |
+| ------ | ------ |
+| | |
+[/REGION]
+
+### 静的シャドウイング
+
+透過アイテムは、ライティング ビルド時に生成された特別な静的シャドウ深度マップによって[Stationary Light (固定ライト)] (Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights) から静的シャドウイングを取得できます。
+
+## 透過サーフェス
+
+### 反射キャプチャ
+
+TLM_Surface マテリアルは、レベル内に置かれたリフレクション キャプチャからのリフレクション (スペキュラ GI) に応じて画像を受け取ります。不透明なマテリアルとは違って、リフレクション キャプチャのキューブマップは 1 つだけ適用されます (ブレンドなし)。オブジェクトが別のリフレクション キャプチャの近くに移動すると、それがポップを出します。キューブマップは近くではなく無限遠であるかのようにも適用され、それにより大きなフラットなサーフェスではアーティファクトが発生します。
+
+![](LitTrans_reflSpheres.png)
+
+_左側の球体は透過、右側は不透明です。両方ともメタルとして設定されています。つまり、ライティングは 100% スペキュラから出ているという意味です。_
+
+## 制限事項
+
+* Lit 透過処理されたサーフェスには、直接スペキュラがありません。
+* Lit 透過処理されたサーフェスは、透過ボリューム ライティング テクスチャによる直接ライティングをすべて受けるので、それによりほとんどのサーフェス マテリアル (ガラス、水) が必要とするよりも解像度が低くなります。
+
+### Per-Pixel Translucent Lighting (ピクセル単位の透過ライティング)
+
+ディファード レンダラでは、新しいフォワード シェーディング機能を半透明のサーフェスに使って、複数ライトからのスペキュラ ハイライト、および視差補正された反射キャプチャからのイメージ ベースの反射を受けることができます。
+
+[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:width]
+	640
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	360
+	[/PARAMLITERAL]
+	[PARAMLITERAL:videoid]
+	r6u908IE4aA
+	[/PARAMLITERAL]
+[/OBJECT]
+
+Per-Pixel Translucent Lighting を有効にするには、Lighting Mode を **[Surface ForwardShading]** に設定し、**[Screen Space Reflections]** が有効になっていることを確認してください。
+
+![](PerPixel_TransLighting_Settings.png)

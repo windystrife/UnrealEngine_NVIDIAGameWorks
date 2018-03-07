@@ -1,0 +1,102 @@
+Availability:Public
+Title: Events
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture, Programming/UnrealArchitecture/Delegates
+Description:Delegates that can be bound to multiple functions and execute them all at once.
+Version: 4.9
+
+Events are very similar to [multi-cast delegates](Programming/UnrealArchitecture/Delegates\Multicast). However, while any class can bind events, only the class that declares the event may invoke the event's 
+`Broadcast`, `IsBound`, and `Clear` functions.  This means event objects can be exposed in a public interface without worrying about giving external classes access to these sensitive functions. 
+Event use cases include including callbacks in purely abstract classes, and restricting external classes from invoking the `Broadcast`, `IsBound`, and `Clear` functions.
+
+## Declaring Events
+
+Events are declared in almost the same manner as you [declare multi-cast delegates](Programming/UnrealArchitecture/Delegates/Multicast#DeclaringMulti-castDelegates) except they use the macro variations specific to events.
+
+| Declaration Macro | Description |
+| --- | --- |
+| `DECLARE_EVENT( OwningType, EventName )` | Creates an event. |
+| `DECLARE_EVENT_OneParam( OwningType, EventName, Param1Type )` | Creates an event with one parameter. |
+| `DECLARE_EVENT_TwoParams( OwningType, EventName, Param1Type, Param2Type )` | Creates an event with two parameters. |
+| `DECLARE_EVENT_<Num>Params( OwningType, EventName, Param1Type, Param2Type, ... )` | Creates an event with N parameters. |
+
+[REGION:tip]	
+The first parameter of the `DECLARE_EVENT` macro is the class which will "own" this event, and thus be able to call the `Broadcast()` function.
+[/REGION]
+
+## Binding Events
+
+Binding of events is performed in the same manner as [binding multi-cast delegates](Programming/UnrealArchitecture/Delegates/Multicast#BindingMulti-CastDelegates).
+
+## Event Execution
+
+Events allow you to attach multiple function delegates, then execute them all at once by calling the event's `Broadcast()` function.  Event signatures are not allowed to use a return value. For events, 
+`Broadcast()` can only be called by the class which defines them.
+
+It is always safe to call `Broadcast()` on an event, even if nothing is bound.  The only time you need to be careful is if you are using an event to initialize output variables, which is generally very bad to do.
+
+The execution order of bound functions when calling `Broadcast()` is not defined.  It may not be in the order the functions were added.
+
+| Function | Description |
+| --- | --- |
+| `Broadcast()` | Broadcasts this event to all bound objects, except to those that may have expired. |
+
+
+
+## Implementation Examples
+
+### Simple Event
+
+	public:
+	/** Broadcasts whenever the layer changes */
+	DECLARE_EVENT( FLayerViewModel, FChangedEvent )
+	FChangedEvent& OnChanged() { return ChangedEvent; }
+
+
+	private:
+	/** Broadcasts whenever the layer changes */
+	FChangedEvent ChangedEvent;
+
+[REGION:tip]
+Accessors for events should follow an OnXXX pattern instead of the usual GetXXX pattern.
+[/REGION]
+
+### Inherited Abstract Event
+
+**Base Class Implementation:**
+	
+	/** Register/Unregister a callback for when assets are added to the registry */
+	DECLARE_EVENT_OneParam( IAssetRegistry, FAssetAddedEvent, const FAssetData&);
+	virtual FAseetAddedEvent& OnAssetAdded() = 0;
+
+**Derived Class Implementation:**
+
+	DECLARE_DERIVED_EVENT( FAssetRegistry, IAssetRegistry::FAssetAddedEvent, FAssetAddedEvent);
+	virtual FassetAddedEvent& OnAssetAdded() override { return AssetAddedEvent; }
+
+[REGION:tip]
+When declaring a derived event in the derived class, you do not repeat the function signature in the `DECLARE_DERIVED_EVENT` macro. Also, the last parameter of the `DECLARE_DERIVED_EVENT` macro is 
+the new name for the event, and is generally the same as the base type.
+[/REGION]
+
+### Inherited Event
+
+A derived class does not inherit access to a base class's sensitive event members. Instead, base classes with the intent 
+to allow derived classes to broadcast their events will need to expose a protected Broadcast function for the event.
+
+**Base Class:**
+	
+	public:
+	/** Broadcasts whenever the layer changes */
+	DECLARE_EVENT( FLayerViewModel, FChangedEvent )
+	FChangedEvent& OnChanged() { return ChangedEvent; }
+
+	protected:
+	void BroadcastChanged()
+	{
+		ChangedEvent.Broadcast();
+	}
+
+	private:
+	/** Broadcasts whenever the layer changes */
+	FChangedEvent ChangedEvent;
+

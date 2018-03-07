@@ -1,0 +1,244 @@
+﻿INTSourceChangelist:2956400
+Availability:Public
+Title:パフォーマンスおよびプロファイリングの概要
+Crumbs: %ROOT%, Engine
+Description:パフォーマンス問題の特定および修正方法
+Navigation:topic
+version:4.9
+parent:Engine/Performance
+order:1
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Performance/Overview:title%](performance_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/start_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Performance/Overview:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Performance/Overview:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Performance/Overview]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Performance/Overview:title%](performance_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/start_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Performance/Overview:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Performance/Overview:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Performance/Overview]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+
+[TOC (start:2 end:3)]
+
+このガイドでは、主にレンダリングについて説明します。レンダリングでは最も高いパフォーマンスが必要とされるためです。オブジェクトの追加、解像度の向上、ライトの追加、マテリアルの向上などのすべてが
+パフォーマンスに大きな影響を及ぼします。幸いなことに、多くの場合、レンダリングでパフォーマンスを簡単に取り戻せます。レンダリング機能の多くはコンソール変数で調整できます。 
+
+エディタの出力ログを使用したり、インゲームのコンソールを使用して以下を行うことができます。
+* コンソールの変数を設定する (**cvarname value**) 
+* 現在の状態を取得する (**cvarname**) 
+* 変数 **cvarname ?** のヘルプを取得する 
+
+必要に応じて、記法 **cvarname=value** で ConsoleVariables.ini に設定を入れることも可能です。**DumpConsoleVars** あるいはオート コンプリート システムを使えば、正しいコンソール変数が見つかります。 
+ほとんどのレンダリング変数は **r.** で始まります。
+
+* パフォーマンスを向上させるためのコンソール変数と他のエンジンのオプションを切り替える情報については、[](Engine/Performance\Options) 参照ページをご覧ください。
+
+## 一般的なヒント
+
+理想としては、注意を払うターゲットのできる限り近くでプロファイリングするとよいでしょう。例えば、良いプロファイリングの例としては、ターゲット ハードウェアでスタンドアロン形式でビルドしたライトマップでゲームを 
+テストするということがあります。 
+
+上手なプロファイリングのコツは、結果にノイズを加えてしまうものから離して再現可能なケースを設定することです。エディタですら若干のノイズ (オープンな **コンテンツ ブラウザ** はレンダリング負荷を追加します) を加えてしまうので、 
+ゲームで直接プロファイルを行うのが賢明です。場合によっては、コード変更が役立つこともあります (例、乱数ジェネレータを無効にする)。**Pause** コマンドまたは **Slomo 0.001** は安定化させるために 
+非常に役立つ場合があります。
+
+プロファイルを何度か測定して精度を把握してください。**stat unit** や **stat fps** などの統計情報コマンドは、目安となる数値を与えてくれるでしょう。正確なプロファイリングは、fps (フレームレート) ではなく、 
+ミリ秒単位で行います。簡単にこの 2 つの数字を変換できますが、fps で測定すると相対的な改善はほとんど意味がありません。各機能について言及する場合、フレームを測定しているわけではないため、 
+ミリ秒のみを扱います。
+
+30 fps (~33.3ms) または 60 fps (~16.6ms) でリミットがある場合、VSync を有効にした方が良いでしょう。それ以上の正確なタイミングのためには、VSync なしでプロファイルを行った方が良いでしょう。
+
+とてもシンプルなシーンであれば、非常に高いフレームレートを期待しないでください。多くのデザイン選択は、複雑なシーン (例、ディファード レンダリング) で良い結果をもたらしますが、基本負荷は高くなります。フレームレート リミッターが 
+機能する場合もあります。必要であれば、調整可能です (例、**t.MaxFPS**、**r.VSync**)。
+
+* パフォーマンスのためにコンテンツとレベルをセットアップするコツやガイドラインについては、[](Engine/Performance\Guidelines) ページをご覧ください。
+* stat コマンドについては、[](Engine/Performance\StatCommands) ページをご覧ください。
+
+## 制約の特定
+
+最近のハードウェアには並列動作するユニットが数多くあります (例、GPU: メモリ、トライアングル / 頂点 / ピクセル プロセシングなど、CPU: 複数の CPU 、メモリなど)。これらのユニットはお互い順序待ちをしなければならない場合が多くなっています。
+最初に制約を特定する必要があります。それを最適化することでパフォーマンスを向上できる可能性は高くなります。最適化対象を間違えると時間の無駄になりますし、別のケースに新しいバグやパフォーマンス リグレッションを 
+取り込んでしまう可能性があります。対象領域の改善が終了したら、多くの場合、再度プロファイリングするのが良いでしょう。こうすることで、以前は隠れていた新たなパフォーマンスのボトルネックが見つかるかもしれないからです。
+
+フレームレートが、CPU または GPU の負荷の制約を受けるかをチェックします。いつものように作業負荷を変更して (例、解像度を変更)、その効果を見てみます。ここでは、 **stat unit** 機能でエンジンの
+ビルドを見ると簡単です。
+
+[REGION:imagetable]
+| ![](stat_unit.png)(w:160) |
+| :----: | 
+| CONSOLE: stat unit |
+[/REGION]
+
+実際のフレーム時間は以下の 3 つによって制約されます。すなわち、**ゲーム** (CPU ゲームスレッド)、**ドロー** (CPU レンダリング スレッド) または **GPU** (GPU) の 3 つです。 
+ここでは、**GPU** (3 つの中で最大) が制約要因であることがわかります。**フレーム** 時間を短縮するためには、ここにかかる GPU 作業負荷を最適化しなければなりません。
+
+* [](Engine/Performance\CPU)
+* [](Engine/Performance\GPU)
+
+## 表示フラグ
+
+エンジンの表示フラグを使用して多くのレンダリング機能を切り替えることができます。エディタの 2D UI には全ての表示フラグがリスト化されているので便利です。チェックボックスをクリックすれば、メニューを閉じずに複数のチェックボックスを切り替えることができます。
+
+インゲームで、show (表示) コマンドを使用することができます。show を使って、すべての表示フラグと状態のリストを取得します。**_show showflagname_** を使って機能を切り替えます。これは、ゲーム ビューポートでのみ有効なことにご注意ください。そのため、エディタ内のビューポートでは
+エディタの UI を使用する必要があります。コンソール変数 (**_showflag.Bloom_** など) を使用してインゲームまたはエディタ内で表示フラグ値をオーバーライドできますが、UI も無効にします。
+
+[REGION:note]
+機能がレンダリングを行っていなくてもパフォーマンスを消費することにご注意ください。例えば、 show particles はパーティクルを隠しますが、
+後でそれらをもう一度有効にするためにシミュレーション時間が必要になります。コンソール変数 **_fx.freezeparticlesimulation_** は更新部分も無効にできます (エディタ UI も存在します)。
+もうひとつの変数、show tesselation は、triangle amplification を無効にしますが、なおもテッセレーションのシェーダを使用します。
+[/REGION:note]
+
+ハイレベル機能のプロファイリングの開始点として良いものは、 show StaticMeshes や show tesselation などです。
+
+すべての表示フラグは、コンソール変数としても公開されています。例えば、コンソールの show Bloom、**_showflag.Bloom 0_**、 またはコンフィギュレーション ファイルの showflag.Bloom = 0 です。
+コンソール変数はさらに入力が必要になりますが、エディタ UI 表示フラグのオーバーライドもしますし、他のコンソール変数のようにコンフィギュレーション ファイルに入れることもできます。
+
+便利なものは、ほとんどがプロファイリング用です。
+
+| 表示フラグ | 説明 |
+| -------- | ----------- |
+| **ScreenSpaceReflections** | スクリーン空間の反射を切り替えます。パフォーマンスにかなりの負荷がかかることがあり、一定のラフネスまでのピクセルのみに影響を与えることができます (r.SSR.MaxRoughness で調整、またはポストプロセスの設定で調整)。
+| **AmbientOcclusion** | スクリーン空間環境オクルージョン (シーンによっては、ライトマスで AO（アンビエント オクルージョン）をベイクする静的オブジェクトに対して成果はごくわずかです)。
+| **AntiAliasing** | アンチエイリアシング (TemporalAA と FXAA) を切り替え、 TemporalAA を使って FXAA に切り替えます (速め、遅めの品質)。
+| **Bloom** | レンズフレアとブルーム機能を基にした画像に影響します。
+| **DeferredLighting** | すべてのディファード ライティング パスを切り替えます
+| **DirectionalLights** **PointLights** **SpotLights** | 各照明タイプを切り替えます (各照明タイプがどのようなエフェクトをもたらすか、パフォーマンスの影響を確認するために役立ちます)。
+| **DynamicShadows** | 全ての動的シャドウを切り替えます (シャドウマップ レンダリングとシャドウ フィルタリング / プロジェクション)
+| **GlobalIllumination** | ベイクされた、動的な間接ライティングを切り替えます (LPV)
+| **LightFunctions** | ライト関数のレンダリングを切り替えます
+| **PostProcessing** | すべてのポストプロセス中のパスを切り替えます。
+| **ReflectionEnvironment** | 反射環境のパスを切り替えます
+| **Refraction** | 屈折のパスを切り替えます
+| **Rendering** | レンダリングをまとめて切り替えます
+| **Decals** | デカール レンダリングを切り替えます
+| **Landscape** **Brushes** **StaticMeshes** **SkeletalMeshes** **Landscape** | ジオメトリがレンダリングされたものを切り替えます。
+| **Translucency** | 透過のレンダリングを切り替えます。
+| **Tessellation** | テッセレーションを切り替えます (テッセレーション シェーダーを実行したままで、より多くのトライアングルをスポーンします)。
+| **IndirectLightingCache** | 無効なライトマップを持つ動的オブジェクトまたは静的オブジェクトが、Indirect Lighting Cache (間接光キャッシュ) を使用するかを切り替えます。
+| **Bounds** | エディタで選択されているオブジェクトの境界ボリュームを表示します。
+| **Visualize SSR** | スクリーン空間の反射の影響を受けるすべてのピクセルをレンダリングすると、明るいオレンジ (遅い) になります。以下を参照。
+
+[REGION:imagetable]
+| ![](SSR.png)(w:794) |
+| :----: | 
+| CONSOLE: r.SSR.MaxRoughness 0.9 = 最高品質 (左) と r.SSR.MaxRoughness 0.1 = より高速 (右) |
+| Unlit (ライティングなし)  (上), VisualizeSSR 表示 (下) |
+[/REGION]
+
+
+###ビュー モード
+
+ビュー モードは表示フラグの単なる組み合わせです。エディタの UI は表示フラグとは別のものであり、ViewMode コンソール コマンドを使用してエディタの UI と表示フラグとを切り替えることができます。
+パフォーマンスで非常に役立つものは、**Wireframe**、**LightComplexity**、**ShaderComplexity**、および **Lit** です。
+
+
+![](ViewModes.png)(w:794)
+
+_様々なビューモード (表示順):Lit (ライティングあり)、LightCompexity (暗い方が良い)、ワイヤーフレーム、 Shader Complexity (緑色は良好)_
+
+
+## 広範囲のハードウェアの扱い方
+
+アンリアル エンジンには、多くのグラフィックス機能に組み込まれた [拡張性](Engine/Performance/Scalability) があります。様々なアプリケーションには様々なニーズがあるため、そうしたシステムをカスタマイズすることをお勧めします。
+
+[REGION:note]
+統合型グラフィックス チップでは多くの場合、メモリ サブシステムが遅くなりますが、ALU (Arithmetic Logic Unit:演算論理ユニット) とテクスチャ ユニットも少なくなります。様々なハードウェアでテストするか、実際のパフォーマンスの特性を特定することが重要です。
+SynthBenchmark ツールは、テストする価値があるハードウェアのグループを特定するのに役立ちます。約 100 の数字は、最近の GPU では普通ですが、ある部分で目立った変化がある場合は、
+この GPU は特別な特性を持っており、特別な配慮が必要であるかもしれません。
+[/REGION]
+
+コンソールで SynthBenchmark と入力することでこのツールを使用できます。
+
+
+    FSynthBenchmark (V0.92):
+    ===============
+    Main Processor:
+            ...0.025383 s/Run 'RayIntersect'
+            ...0.027685 s/Run 'Fractal'
+ 
+    CompiledTarget_x_Bits:64
+    UE_BUILD_SHIPPING:0
+    UE_BUILD_TEST:0
+    UE_BUILD_DEBUG:0
+    TotalPhysicalGBRam:32
+    NumberOfCores (physical):16
+    NumberOfCores (logical):32
+    CPU Perf Index 0:100.9
+    CPU Perf Index 1:103.3
+  
+    Graphics:
+    Adapter Name:'NVIDIA GeForce GTX 670'
+    (On Optimus the name might be wrong, memory should be ok)
+    Vendor Id:0x10de
+    GPU Memory:1991/0/2049 MB
+          ...4.450 GigaPix/s, Confidence=100% 'ALUHeavyNoise'
+          ...7.549 GigaPix/s, Confidence=100% 'TexHeavy'
+          ...3.702 GigaPix/s, Confidence=100% 'DepTexHeavy'
+          ...23.595 GigaPix/s, Confidence=89% 'FillOnly'
+          ...1.070 GigaPix/s, Confidence=100% 'Bandwidth'
+ 
+    GPU Perf Index 0:96.7
+    GPU Perf Index 1:101.4
+    GPU Perf Index 2:96.2
+    GPU Perf Index 3:92.7
+    GPU Perf Index 4:99.8
+    CPUIndex:100.9
+    GPUIndex:96.7
+
+
+## 一定期間のチャートを生成する
+
+長期間にわたって stat unit を得ることが非常に役立つ場合があります (例、多くのケースをテストするためのインゲームのカットシーンやカメラ パスのセットアップ)。
+
+以下のチャートは、アンドロイド デバイスでカットシーンから生成されたものです (Streaming)。カットシーンの前後でコンソール コマンド、StartFPSChart と StopFPSChart が入力されました。
+結果として得られる、csv ファイル ([ProjectFolder]\Saved\Cooked\Android_ES31\SubwayPatrol\Saved\Profiling\FPSChartStats にあります)  が Microsoft Excel で開きました。
+この例では、初めから 4 つのヘッダラインを取り除き、全てを選択し、Scatter With Straight Lines プロットを挿入しました。
+
+[REGION:imagetable]
+| ![](fpschart.png)(w:837) |
+| :----: | 
+| CONSOLE:StartFPSChart, StopFPSChart |
+[/REGION]
+
+
+## パフォーマンスおよびプロファイリングの詳しい情報
+* [](Engine/Performance/SystemSettings)
+* [](Engine/Performance/Profiler)
+* [](Engine/Performance/Scalability)
+* [VFX の最適化、最適化の中心的な概念] (Engine/Rendering/ParticleSystems/Optimization/Concepts)
+
+
+
+
+

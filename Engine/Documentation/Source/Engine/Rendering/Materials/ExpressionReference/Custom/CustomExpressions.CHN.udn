@@ -1,0 +1,84 @@
+﻿INTSourceChangelist:2690125
+Availability:Public
+Title:定制表达式
+Crumbs:%ROOT%, Engine, Engine/Rendering/Materials, Engine/Rendering/Materials/ExpressionReference
+Description:允许使用定制普通着色器代码的表达式。
+Skilllevel:Advanced
+Version:4.9
+
+(#Custom)
+## Custom（定制）
+
+**Custom（定制）**表达式允许您编写定制 HLSL 着色器代码，这些代码可对任意数量的输入执行操作，并输出操作结果。
+
+| 项目 | 说明 |
+| -------- | ----------- |
+| [REGION:tablesection]属性[/REGION] ||
+| **代码（Code）** | 包含表达式将执行的着色器代码。（请参阅下文中的 [警告](#Warnings)）|
+| **输出类型（Output Type）** | 指定表达式所输出的值的类型。|
+| **说明（Description）** | 指定要在材质编辑器中的表达式栏中显示的文本。|
+| **输入（Inputs）** | 表达式所使用的输入数组。|
+|[INCLUDE:Engine/Rendering/Materials/ExpressionReference/Custom#CustomInputItem] | [INCLUDE:Engine/Rendering/Materials/ExpressionReference/Custom#CustomInputDesc]|
+
+<!--
+[EXCERPT:CustomInputItem]
+[REGION:prop_sublist]
+**输入名称（Input Name）**
+[/REGION]
+[/EXCERPT:CustomInputItem]
+
+[EXCERPT:CustomInputDesc]
+[REGION:prop_sublist]
+指定输入的名称。这是材质编辑器中显示在此表达式上的名称，并且是 HLSL 代码中用来引用输入值的名称。
+[/REGION]
+[/EXCERPT:CustomInputDesc]
+-->
+
+请向“输入”（Inputs）数组添加任意数目的输入，并对其进行命名。然后，您可以在“代码”（Code）属性中编写代码。您可输入包含 return 语句的完整函数体（如示例所示），也可输入简单表达式，例如 **Input.bgr**。另外，您还必须在 OutputType（输出类型）中指定输出数据类型。
+
+![](T_Custom_Node.png)
+
+这里是以上示例中使用的代码，您可以使用此代码自行尝试 Custom（定制）节点。
+
+	float3 blur = Texture2DSample(Tex, TexSampler, UV);
+
+	for (int i = 0; i < r; i++)
+	{
+
+	  blur += Texture2DSample(Tex, TexSampler, UV + float2(i * dist, 0));
+	  blur += Texture2DSample(Tex, TexSampler, UV - float2(i * dist, 0));
+
+	}
+
+	for (int j = 0; j < r; j++)
+	{ 
+
+	  blur += Texture2DSample(Tex, TexSampler, UV + float2(0, j * dist));
+	  blur += Texture2DSample(Tex, TexSampler, UV - float2(0, j * dist));
+
+	}
+
+	blur /= 2*(2*r)+1;
+	return blur;
+
+(#Warnings)
+[REGION:warning]
+**使用 Custom（定制）节点会阻止常量折叠，并且，与使用内置节点实现的等效版本相比，可能会大幅增加所使用的指令！**常量折叠是 UE4 在内部利用的一项优化功能，旨在必要时减少着色器指令数。例如，“Time（时间）> Sin（正弦）> 乘以（Mul）参数 > 加入（Add）某内容”表达式链可以并且将会由 UE4 折叠为单一指令，即最终的相加。可以做到这一点的原因是，该表达式的所有输入（Time（时间）和参数）在整个绘制调用中保持不变，而不是随像素而变化。UE4 无法折叠 Custom（定制）节点中的任何内容，与使用现有节点实现的等效版本相比，这可能会生成效率欠佳的着色器。因此，最好是仅当 Custom（定制）节点允许您访问无法通过现有节点访问的功能时，才使用 Custom（定制）节点。
+[/REGION]
+
+
+[REGION:warning]
+**在 Custom（定制）节点中编写的着色器代码将“按原样”针对目标平台进行编译。**这意味着，如果是针对 PC 来编译着色器，那么将假定它是有效的 HLSL。如果是针对 PS3 进行编译，那么将假定它是有效的 Cg。
+[/REGION]
+
+
+<!--
+## CustomTexture（定制纹理）
+
+CustomTexture（定制纹理）表达式允许您在 [Custom（定制）](#Custom) 表达式内的 HLSL 代码中引用纹理，通常这是为了在 HLSL 内使用 tex2D 或类似函数进行纹理取样。
+
+您可以使用常规的 TextureSample（纹理取样）作为 Custom（定制）节点的输入，但在这种情况下，将在 Custom（定制）节点外部计算样本，并以 float4 值形式传入结果。如果您希望使用循环对同一个纹理进行多次取样，或者要使用 tex2Dbias、tex2Dlod 和 tex2Dproj 等其他取样指令（请参阅 HLSL 文档以了解这些指令的用途），这就不够灵活了。
+
+![customtex.jpg](customtex.jpg)
+
+-->

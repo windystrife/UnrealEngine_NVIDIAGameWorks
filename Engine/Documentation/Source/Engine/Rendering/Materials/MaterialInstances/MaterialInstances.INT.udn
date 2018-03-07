@@ -1,0 +1,166 @@
+Availability: Public
+Title:Instanced Materials
+Crumbs: %ROOT%, Engine, Engine/Rendering/Materials
+Description:Hierarchical material relationships that allow modification of properties to alter behavior and appearance of child materials without shader recompilation.
+Version: 4.9
+parent:Engine/Rendering/Materials
+order:6
+topic-image:Engine/Rendering/Materials/InstanceTopic.png
+type:overview
+tags:Materials
+
+
+![](MICEditor.png)
+
+[TOC(start:2)]
+
+
+
+
+In Unreal Engine 4, Material instancing is used to change the appearance of a Material without incurring an expensive recompilation of the Material. Whereas a typical Material cannot be edited or changed without recompiling (something that _must_ happen prior to gameplay), an instanced Material can be made to change without such recompilation. Certain types of instanced Materials can even change during gameplay in response to in-game events (such as a tree whose Material blackens and chars while it burns). This allows tremendous visual flexibility in your artistic elements.
+
+
+## Instances and Parameters
+
+Even though the purpose of a Material Instance is to add an inexpensive way to edit the look of a Material, it is important to keep in mind that you are not able to edit every single feature of a material by default. Before a Material Instance is truly editable, you must first select which properties of the original (or _master_) Material that you want to _be_ editable within the instance, and designate them as **parameters**. This is called _parameterizing_ your Material.
+
+A parameter is seen as a data node within the Material Editor. Technically, it is a named value that serves as a conduit to send data values into a Material Instance. These parameters are _exposed_ within either the Material Instance Editor or within script (Blueprints or code), and can then be edited. Say, for example, that you want to create a Material whose color can be changed on the fly. Instead of simply assigning a value to the color, such as red, you would instead assign a _Vector Parameter_ to the Material's _Base Color_ property. You would provide a name for that parameter. When you create an instance of this Material, you will find your named Vector Parameter listed in the instance's properties, and through that you may set the color to anything you wish, all without having to recompile.
+
+Here you can see the parameters set up within a Material.
+
+![](Material_Parameters.png)
+
+And here we see the resulting exposed parameters within a Material Instance.
+
+![](Instance_Parameters.png)
+
+## Constant and Dynamic Instances
+
+There are 2 types of Material Instances available in Unreal Engine 4:
+
+* **Material Instance Constant** - Only calculated prior to runtime.
+* **Material Instance Dynamic** - Can be calculated (and edited) at runtime.
+
+
+
+### Material Instance Constant
+
+A **Material Instance Constant** is an instanced Material that calculates only once, prior to runtime. This means that it cannot change during gameplay. However, although they remain _constant_ throughout your game, they still have the performance advantage of not requiring compilation. For instance, if you have a game with a variety of cars, all with individual paint jobs, but whose colors will _not_ be changing during gameplay, the best practice approach would be to create a master Material that represented the base aspects of a generic car paint, and then create Material Instance Constants to represent the variations for different types of car, such as different colors, varying levels of metallicity, glossiness, etc.
+
+Material Instance Constants are created within the [Content Browser](Engine/Content/Browser) and are edited via the [Material Instance Editor](Engine/Rendering/Materials/MaterialInstances/Editor).
+
+
+
+
+### Material Instance Dynamic
+
+A **Material Instance Dynamic** (MID) is an instanced Material that can be calculated during gameplay (at runtime). This means that as you play, you can use script (either compiled code or Blueprint visual script) to change the parameters of your Material, thereby altering your Material throughout the game. The possible applications for this are endless, from showing different levels of damage to changing a paint job to blending in different skin textures in response to facial expressions.
+
+MIDs are created within script, either from a parameterized Material or a Material Instance Constant. In Blueprint, one would take a given Material that had parameterized properties, and feed it through a _Create Dynamic Material Instance_ node. The result of that node is then applied to the object in question via a _Set Material_ node, resulting in a new Material that can be changed during gameplay.
+
+[REGION:fullwidth]
+![](ConstructionScriptForMID.png)
+[/REGION]
+
+
+
+## Technical Application
+
+
+To allow applying un-instanced Materials to primitives, the abstract base class _MaterialInterface_ is used.  This class is an interface to both the expressions and parameter values of an applied Material.  The Material class is a subclass of MaterialInterface which defines the expressions and default parameter values.  These types both inherit their expressions and parameter values from their parent, optionally overriding or animating some of the parameter values.
+
+[REGION:tip]
+Incidentally, this means that if you want a Blueprint variable to be able to accept _either_ a Material or a Material Instance Constant, you will need to make sure it is a variable of type _MaterialInterface_!
+[/REGION]
+
+
+## Instancing a Material in the Editor
+
+[EXCERPT:MakingAnInstance]
+There are two main methods that can be used to create an instance of a material in the editor. 
+
+Click the **Add New** button in the [Content Browser](Engine/Content/Browser) and choose **Material Instance**.
+
+![](NewMIC.png)
+
+Assign a name to the new Material Instance.
+
+![](NameMIC.png)
+
+**Double-click** your new Material Instance. This opens the [Material Instance Editor](Engine/Rendering/Materials/MaterialInstances/Editor). Use the **Content Browser** to select and assign the Material to be instanced to the **Parent** property for the new Material Instance.
+
+![](MatInstEditorOpen.png)
+
+If you already know the Material for which you want to create an instance, you may also **right-click** on that Material in the **Content Browser** and choose **Create Material Instance** .
+
+![](CreateMaterialInstance.png)
+[/EXCERPT:MakingAnInstance]
+
+
+## Parameter Groups
+
+Parameter expressions have a **Group** property that allows them to be organized when viewed in the Material Instance Editor. Related parameters can be added to the same group making it easy to quickly find and modify all parameters controlling a specific effect or aspect of the parent material. Parameters not belonging to a group default to, and will be displayed in, the _None_ group.
+
+![](ParameterGroups.png)(w:600)
+
+
+
+## Creating Parameterized Materials
+
+To add a parameter to a material, use one of the parameter expression types in the Material Editor. There are several parameter types that can be used including ScalarParameter, VectorParameter, various texture parameters, and static parameters.
+
+Give the parameter a unique name, assign it to a [group](#ParameterGroups), and give it a default value.
+
+![](Material_Parameters.png)
+
+
+
+## Scalar Parameters
+
+A **ScalarParameter** is a parameter that contains a single floating-point value. These can be used to drive effects based on single values such as specular power, the alpha of a linear interpolation, opacity, etc.
+
+See the [](Engine/Rendering/Materials/ExpressionReference) for a complete listing and descriptions of all expressions.
+
+
+
+## Vector Parameters
+
+A **VectorParameter** is a parameter that contains a 4-channel vector value, or 4 floating-point values. These are generally used to provide configurable colors, but could also be used to represent positional data or drive any effect that requires multiple values.
+
+See the [](Engine/Rendering/Materials/ExpressionReference) for a complete listing and descriptions of all expressions.
+
+
+
+## Texture Parameters
+
+There are several texture parameters available. Each one is specific to the type of texture that it accepts or the manner in which it is being used. Due to the shader code that is generated being different depending on the texture type, a separate expression is required for each specific texture-type.
+
+
+* TextureSampleParameter2D accepts a basic Texture2D.
+* TextureSampleParameterCube accepts a TextureCube or cubemap.
+* TextureSampleParameterFlipbook accepts a FlipbookTexture.
+* TextureSampleParameterMeshSubUV accepts a Texture2D that is used for sub-uv effects with a mesh emitter.
+* TextureSampleParameterMeshSubUV accepts a Texture2D that is used for sub-uv blending effects with a mesh emitter.
+* TextureSampleParameterMovie accepts a MovieTexture (bink movie).
+* TextureSampleParameterNormal a Texture2D that is used as a normal map.
+* TextureSampleParameterSubUV accepts a Texture2D that is used for sub-uv effects with a sprite emitter.
+
+
+See the [](Engine/Rendering/Materials/ExpressionReference) for a complete listing and descriptions of all expressions.
+
+
+
+## Static Parameters
+
+**Static** parameters are applied at compile-time, so they produce more optimal code as entire branches of the material that are masked out by a static parameter will be compiled out and not executed at runtime.  Because they are applied at compile-time, they can only be changed from within the [MaterialInstanceEditor](Engine/Rendering/Materials/MaterialInstances/Editor) and not from script.
+[Region:note]
+*Warning: A new material will be compiled out for every combination of static parameters in the base material that are used by instances!
+
+This can lead to an excessive amount of shaders being compiled.  Try to minimize the number of static parameters in the material and the number of permutations of those static parameters that are actually used.  
+[/Region]
+
+
+See [Static Switch Parameter](Engine/Rendering/Materials/ExpressionReference/Parameters#StaticSwitchParameter) and [Static Component Mask Parameter](Engine/Rendering/Materials/ExpressionReference/Parameters#StaticComponentMaskParameter) for information on the specific static parameter types.
+
+See the [](Engine/Rendering/Materials/ExpressionReference) for a complete listing and descriptions of all expressions.
+

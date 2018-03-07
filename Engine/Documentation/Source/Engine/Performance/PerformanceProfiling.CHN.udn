@@ -1,0 +1,246 @@
+﻿INTSourceChangelist:2735872
+Availability:Public
+Title: 性能及分析
+Crumbs: %ROOT%, Engine
+Description: 如何查找性能问题，及找到后如何解决它们。
+Navigation:topic
+version: 4.9
+parent:Engine
+order:13
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Performance:title%](performance_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/start_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Performance:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Performance:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Performance]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Performance:title%](performance_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/start_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Performance:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Performance:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Performance]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:banner]
+![Performance Profiling](ppe_landing_banner.png)
+[/REGION]
+
+[TOC (start:2 end:3)]
+
+[EXCERPT:Intro]
+在做游戏的过程中，**性能** 是个无所不在的话题。为了创建梦幻般的画面，我们需要至少游戏帧数至少达到每秒 15 帧。根据不同的平台和游戏类型，这个帧数可能是 30 或者 60，甚至在某些情况下要求更高。
+
+虚幻引擎提供了很多功能，它们也有不同的性能特性。为了达到性能的要求会需要对游戏素材和代码进行优化。因此需要能够知道性能花费在何处。这一点可以通过使用引擎的性能分析工具。
+每个性能问题都可能是不同的，需要对当前的硬件、软件都有一定的了解。这里我们整理了一些细节应该能在这方面有所帮助。
+[/EXCERPT:Intro]
+
+这篇指南主要涵盖的是渲染的话题，因为通常渲染是性能花费最多的地方。更多的物件，更高的分辨率，更多的灯光，漂亮的材质，所有这些都会在性能上有所影响。
+还好是在渲染上，这里要重新获取性能也相对容易，很多渲染的特性都可以直接在控制台中调整。
+
+编辑器的输出日志，或者游戏的控制台中内，可以：
+* 设置控制台变量（**cvarname value**）
+* 获取当前的状态（**cvarname**）
+* 查看某个变量的帮助（**cvarname ?**）
+
+如果需要的话，可以将设置保存到 ConsoleVariables.ini 文件中，语法是：**cvarname=value**。要使用正确的控制台变量，可以使用 **DumpConsoleVars**，或者利用系统的自动补完功能。大部分渲染变量都是以 **r.** 开头。
+
+* 需要了解更多控制台变量以及引擎优化的开关选项的话，请查看 [](Engine/Performance\Options) 页面。
+
+
+## 通用提示
+
+理想情况下，应该尽可能的贴近想要关心的目标来做性能分析。举个例子来说，一个好的分析案例是，在目标平台上，对带有已完成 Lightmap 构建的独立游戏版本进行测试。
+
+要做到好的分析，最好是能够设置可重现的过程，这样能隔离开那些可能对结果产生干扰的因素。即便是编辑器也会增加干扰（比如，一次打开 **内容浏览器** 的窗口就会增加渲染的开销）因此最好是直接分析游戏程序。
+在有些情况下，通过修改一些代码也将会非常有帮助（比如，禁止随机数的生成）。另外，在希望游戏状态更稳定的情形下，**Pause** 命令和 **Slomo 0.001** 命令也是非常有用的。
+
+多测试几次可以来获得分析工具的精确度。Stat 命令，比如 **stat unit** 和 **stat fps** 能够提供一些数据结果。分析的精确度应该做到毫秒级别（ms），而不是用每秒帧数（fps）来衡量。
+毫秒的度量方式能够很容易的来做比较，而帧数的结果要很横向比较就很困难。在面向一个具体的单独功能讨论时，我们应该只讨论它的毫秒数量的性能，而非测量帧数。
+
+如果发现帧数限制在了 30 fps（约 33.3ms）或者 60 fps（约 16.6ms）时，很可能启用了垂直同步（VSync）。为了更准确的测量性能花费的时间，最好是在分析时去掉垂直同步。
+
+对于一个简单的场景也不要期望有极高的帧数。为了优化复杂场景的性能，很多设计上的抉择（比如延迟渲染）会具有一个较高的最低开销。因此可能会遇到一个整体环境的最高帧数的限制。
+需要的话，这个限制可以被手动设置（比如 **t.MaxFPS**，**r.VSync**）（译者注：无论怎么设置，都不可能突破软硬件环境的下的最高值）
+
+* 关于游戏内容和场景的性能设置上的提示和教程，请参考 [](Engine/Performance\Guidelines) 页面。
+* 关于 stat 命令的信息，请参考 [](Engine/Performance\StatCommands) 页面。
+
+## 定位到性能局限的原因
+
+现代的硬件有很多单元在并行工作（比如，GPU 上有内存单元，三角面/顶点序列/像素处理等，而 CPU 上是多个 CPU 并行，内存单元等）。通常各个单元都会互相等待其他单元的工作。
+首先要做的是找到哪个部分导致了性能的局限。针对这部分的优化都能够带来性能表现的改善。如果对错误的地方进行优化，则是一个浪费时间的事情，并且有可能会引入新的 BUG，甚至在其他地方引起问题。
+一旦对当前局限的部分做了优化后，通常应该重新再做一次分析，一般来说都会找到又一个性能瓶颈处，而这新的瓶颈是由于刚刚的优化改善而暴露出来的，通常在改善前都处于不容易发现的状态。
+
+首先，要先检查帧数是被 CPU 所限还是 GPU 所限。任何时候都可以改变程序的负载（比如调整分辨率）来看一下会有什么结果。这里可以通过 **stat unit** 功能来检查引擎。
+
+[REGION:imagetable]
+| ![](stat_unit.png)(w:160) |
+| :----: | 
+| 命令：stat unit |
+[/REGION]
+
+游戏的实际单帧时间由这三者之一限制：**Game**（CPU 游戏线程），**Draw**（CPU 渲染线程）或者 **GPU**（GPU）。
+图中我们可以看到 **GPU** 是限制主因（三者最大的一个）。为了取得更少的 **单帧** 时间，在这个情形下必须先优化 GPU 的负载。
+
+* [](Engine/Performance\CPU)
+* [](Engine/Performance\GPU)
+
+## Show Flags
+
+引擎的 Show Flag 可以用来对诸多渲染特性进行开关。编辑器在一个 2D 的界面中已经列出了所有的 Show Flag。可以打开该菜单后对一个或者多个勾选框进行点击选择。
+
+在游戏中，可以使用 show 命令。通过 show 可以获得所有 Show Flag 的列表以及它们各自的状态。使用 **_show showflagname_** 可以开关某个具体的特性。请注意这个方式只在游戏窗口中起效，如果是编辑器窗口，
+应该使用编辑器的菜单。还可以通过命令行变量（比如 **_showflag.Bloom_**）来覆盖游戏或者编辑器中的 show flag 数值，这也会使得界面功能失效。
+
+[REGION:note]
+有些渲染特性即便是在不渲染的时候，也仍然会消耗性能。比如 show particles 能隐藏粒子，但计算模拟时间仍然会运行以便于之后重新打开时功能正确。
+命令行变量 **_fx.freezeparticlesimulation_** 则能够彻底禁止模拟更新的计算（编辑器界面也同时存在）。
+再举个例子：show tessellation 会禁用三角形放大，但依然会使用 tessellation shader。
+[/REGION:note]
+
+一个不错的分析的起点是从较高层的功能着手，比如 show StaticMeshes，或者 show tessellation。
+
+所有的 Show Flag 都暴露给了命令行变量。比如命令行中 show Bloom，可以通过 **_showflag.Bloom 0_** 或者在配置文件相应位置添加 showflag.Bloom = 0。
+命令行变量需要打几个字，但它们能够覆盖编辑器界面上的控制，并且可以写在配置文件中。
+
+分析的时候比较有用的 Show Flag 如下：
+
+| Show Flag | 描述 |
+| -------- | ----------- |
+| **ScreenSpaceReflections** | 切换屏幕空间的反射效果，可能会非常影响性能，对那些达到一定粗造度的像素有效（由 r.SSR.MaxRoughness 调节，或者在后处理的设置中设定）。
+| **AmbientOcclusion** | 屏幕空间环境遮罩（对有些场景获益非常有限，比如那些在 Lightmass 中已经对静态物体做了环境遮罩烘培的状况）。
+| **AntiAliasing** | 切换各种抗锯齿（TemporalAA 和 FXAA），用 TemporalAA 切换到 FXAA（更快，但效果较差）。
+| **Bloom** | 影响那些受到 lens flares 和 bloom 功能的画面。
+| **DeferredLighting** | 切换所有延迟光照通道。
+| **DirectionalLights** **PointLights** **SpotLights** | 切换不同的光照类型（这在检查哪种光照类型影响性能时较有用）。
+| **DynamicShadows** | 切换所有的动态阴影（阴影贴图的渲染，以及阴影的过滤和投影）。
+| **GlobalIllumination** | 切换预烘培和动态间接光照（LPV）。
+| **LightFunctions** | 切换光照函数渲染。
+| **PostProcessing** | 切换所有后处理效果。
+| **ReflectionEnvironment** | 切换环境反射效果。
+| **Refraction** | 切换折射效果。
+| **Rendering** | 切换整体渲染。
+| **Decals** | 切换贴花渲染。
+| **Landscape** **Brushes** **StaticMeshes** **SkeletalMeshes** **Landscape** | 轮询切换几种不同的几何体的渲染
+| **Translucency** | 切换透明度渲染。
+| **Tessellation** | 切换曲面细分（仍将运行曲面细分 shader，但生成更多三角面）。
+| **IndirectLightingCache** | 切换是否动态物体或者静态物体具有使用间接光照 Cache 时无效的光照贴图。
+| **Bounds** | 显示编辑器中当前选中物体的边界框。
+| **Visualize SSR** | 将所有收到屏幕空间反射的像素显示为亮橙色（较慢），请看下图。
+
+[REGION:imagetable]
+| ![](SSR.png)(w:794) |
+| :----: | 
+| 命令行：r.SSR.MaxRoughness 0.9 = 最佳质量（左），r.SSR.MaxRoughness 0.1 = 运行较快（右） |
+| Unlit（上），show VisualizeSSR（下） |
+[/REGION]
+
+
+### 视图模式
+
+视图模式就是一系列的 Show Flag 的预设组合。编辑器界面中，和 Show Flag 单独分开，也可以直接使用 ViewMode 的命令行来切换。
+对于性能比较有用的是：**Wireframe**，**LightComplexity**，**ShaderComplexity** 和 **Lit**。（分别是线框模式，光照复杂度模式，Shader 复杂度模式 和 正常的光照模式）
+
+![](ViewModes.png)(w:794)
+
+_几个不同的视图模式（按阅读顺序）：光照模式，光照复杂度（越暗越好），线框模式，Shader 复杂度（绿色代表性能优良）_
+
+
+## 如何处理大范围的不同硬件
+
+虚幻引擎在诸多图形功能中都预设了 [可扩展性](Engine/Performance/Scalability)。不同的游戏对此有不同的要求，因此建议使用订制系统。
+
+[REGION:note]
+集成的图形芯片通常内存速度都较慢，并且 ALU 和贴图单元的数量也较少。在大范围的硬件上测试获得实际的性能特性是有意义的。SynthBenchmark 工具可以用来鉴别什么样的硬件值得测试。
+对于现代 GPU 来说 100 左右的数值是合理的，但如果看到某些部分不成比例的变化，那就需要知道这个 GPU 可能有独特的特性，需要多加留意。
+[/REGION]
+
+可以在命令行中输入 SynthBenchmark 来使用该工具。
+
+    FSynthBenchmark (V0.92):
+    ===============
+    Main Processor:
+            ... 0.025383 s/Run 'RayIntersect'
+            ... 0.027685 s/Run 'Fractal'
+ 
+    CompiledTarget_x_Bits: 64
+    UE_BUILD_SHIPPING: 0
+    UE_BUILD_TEST: 0
+    UE_BUILD_DEBUG: 0
+    TotalPhysicalGBRam: 32
+    NumberOfCores (physical): 16
+    NumberOfCores (logical): 32
+    CPU Perf Index 0: 100.9
+    CPU Perf Index 1: 103.3
+  
+    Graphics:
+    Adapter Name: 'NVIDIA GeForce GTX 670'
+    (On Optimus the name might be wrong, memory should be ok)
+    Vendor Id: 0x10de
+    GPU Memory: 1991/0/2049 MB
+          ... 4.450 GigaPix/s, Confidence=100% 'ALUHeavyNoise'
+          ... 7.549 GigaPix/s, Confidence=100% 'TexHeavy'
+          ... 3.702 GigaPix/s, Confidence=100% 'DepTexHeavy'
+          ... 23.595 GigaPix/s, Confidence=89% 'FillOnly'
+          ... 1.070 GigaPix/s, Confidence=100% 'Bandwidth'
+ 
+    GPU Perf Index 0: 96.7
+    GPU Perf Index 1: 101.4
+    GPU Perf Index 2: 96.2
+    GPU Perf Index 3: 92.7
+    GPU Perf Index 4: 99.8
+    CPUIndex: 100.9
+    GPUIndex: 96.7
+
+
+## 基于一段时间来生成图表
+
+基于一段时间来获取状态数据并生成图表也是很有用的方法（比如用游戏内的过场，或者设置一段摄像机路径作为测试案例）。
+
+下面的图表就是来自一段安卓设备的过场画面。在这个过场的开始处和结束处，输入了命令行命令 StartFPSChart 和 StopFPSChart。
+然后用微软的 Excel 打开结果文件 .csv （保存在 [ProjectFolder]\Saved\Cooked\Android_ES31\SubwayPatrol\Saved\Profiling\FPSChartStats 处）。
+在这里例子中，我们删掉了头四行，选择全部，并插入了一个线状图的散列表。
+
+[REGION:imagetable]
+| ![](fpschart.png)(w:837) |
+| :----: | 
+| 命令行：StartFPSChart, StopFPSChart |
+[/REGION]
+
+
+## 更多关于性能和分析的话题
+* [](Engine/Performance/SystemSettings)
+* [](Engine/Performance/Profiler)
+* [](Engine/Performance/Scalability)
+* [视觉特效的优化：核心优化概念](Engine/Rendering/ParticleSystems/Optimization/Concepts)
+
+
+
+

@@ -1,0 +1,69 @@
+Availability:Docs
+Title:Primitive Types Technical Guide
+Crumbs:%ROOT%, Programming, Programming/Rendering
+Description:Programmer's guide to creating new types of render primitives.
+tags:Rendering
+
+[REGION:todo]
+	This page is converted from Unreal Engine 3 documentation and currently being reviewed. Information may be outdated.
+[/REGION]
+
+[TOC (start:2 end:3)]
+
+UPrimitiveComponents are Actor components that are rendered and collided against.  This page describes how to create a new UPrimitiveComponent type.
+
+
+
+## Rendering
+
+Primitives are the unit of visibility.  View frustum culling and occlusion culling is performed with the bounding boxes of primitives.  You must implement USceneComponent::CalcBounds to write the primitive's bounding volume to the Bounds member.
+
+Primitives are rendered as mesh elements, lines, sprites, and points.  The primitive enumerates the elements which make up its appearance to the scene manager.
+
+When creating your own PrimitiveComponent derived class, you will also have to implement a corresponding FPrimitiveSceneProxy.  This is the render thread's copy of the primitive component and should include all the data that you would need to render that component.  The proxy is added/removed to the render thread's scene during attachment/detachment.  This is usually when you will want to also initialize any rendering resources needed by the proxy.
+
+
+### Primitive scene proxies
+
+The rendering thread works on the scene state a frame behind the game thread.  Primitive properties that the game thread may change dynamically must be duplicated for the rendering thread; this allows the game thread to update them for the next frame in parallel.  Your PrimitiveComponent must create a primitive scene proxy that mirrors the dynamic members.  The scene manager calls UPrimitiveComponent::CreateSceneProxy when the primitive is registered to give your primitive type a chance to create its scene proxy.
+
+When one of the mirrored members is changed, you must call MarkRenderStateDirty to create a new scene proxy.  The scene proxy will be recreated at the end of the frame.
+
+
+### Drawing elements
+
+The scene manager enumerates a primitive's elements by calling FPrimitiveSceneProxy::DrawDynamicElements.  The primitive calls DrawMesh, DrawLine, DrawPoint, or DrawSprite on the provided FPrimitiveDrawInterface to enumerate its elements for the caller.  DrawDynamicElements may be called multiple times per view per frame; the results are not cached, and the primitive's elements may need to be rendered in multiple passes.  DrawDynamicElements is called in the rendering thread, so any members of your PrimitiveComponent that may be written by the game thread must be mirrored in the FPrimitiveSceneProxy and updated by reattaching the primitive.
+
+There is an optimized path for mesh elements which remain static after the primitive is attached to the scene.  The scene manager calls FPrimitiveSceneProxy::DrawStaticElements when the primitive is attached, which uses an interface similar to FPrimitiveDrawInterface to enumerate the primitive's Static Mesh elements.  The Static Mesh elements are cached, and use an optimized rendering path.  Unlike DrawDynamicElements, DrawStaticElements is called in the game thread.
+
+When rendering a frame of a view, the scene rendering code calls FPrimitiveSceneProxy::GetViewRelevance to determine how the primitive is relevant to the view.  This returns a FPrimitiveViewRelevance struct, which is a collection of flags describing the primitive's relevance to the view.  The most important flags are bStaticRelevance and bDynamicRelevance; these flags determine whether the mesh elements enumerated by DrawStaticElements or DrawDynamicElements will be drawn.  You should set the rest of the flags based on whether the primitive uses translucent, distortion, or SceneColor materials.  GetViewRelevance is called in the rendering thread.
+
+You may use hit proxies to decouple click detection precision from primitives.  A hit proxy is associated with each drawn element to provide additional information about what the user clicked on in the editor.  The default behavior is to use a HActor pointing to the primitive's owner.  If you wish to provide more information about different elements of the primitive, you must implement FPrimitiveSceneProxy::CreateHitProxies to allocate the hit proxies used by your primitive.  The hit proxies may then be passed to FPrimitiveDrawInterface::SetHitProxy and FStaticPrimitiveDrawInterface::SetHitProxy.  CreateHitProxies is called in the game thread.
+
+
+### Accessing PrimitiveComponent from the rendering thread
+
+PrimitiveComponent uses a render command fence to ensure that it will not be garbage collected as long as one of its primitive scene proxies may be allocated and executing code in the rendering thread.
+
+If a member of your PrimitiveComponent is static during game play, you may access that member directly from the primitive scene proxy in the rendering thread.
+
+If a member of your PrimitiveComponent is dynamic during game play, you must either mirror it in your primitive scene proxy, or serialize access to it.  You may serialize access to it using the global FlushRenderingCommands function.  FlushRenderingCommands waits for the rendering thread to become idle.  You can then write to the shared member with the assumption that the rendering thread will not access it until a rendering command is enqueued.
+
+
+### Lighting
+
+The renderer applies dynamic lights in the deferred shading passes.
+
+You may provide static lighting for a mesh element by implementing FLightCacheInterface, and passing your implementation in the LCI member of the mesh element.  The FLightCacheInterface provides an optional light-map, and maps from light GUID to detailed light interaction information.  The light interaction information is contained in FLightInteraction, and may be uncached, irrelevant, light-mapped, vertex shadow-mapped, or texture shadow-mapped.
+
+To compute static lighting, you must implement UPrimitiveComponent::GetStaticLightingInfo.  The static lighting system calls it during precomputation to enumerate the primitive's meshes and mappings.
+
+A static lighting mesh is a set of triangles that occlude or reflect static lighting.
+
+A static lighting mapping is a mapping of a static lighting texture or vertex buffer onto a static lighting mesh.  The static lighting system computes the light-map and shadow-maps for the mapping, and passes them to your implementation of the mapping's Apply function.
+
+ 
+
+
+
+

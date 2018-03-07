@@ -1,0 +1,78 @@
+Availability:Docs
+Title:Thumbnail Rendering Technical Guide
+Crumbs: %ROOT%, Engine, Engine/UI, Programming
+Description:Programmer's guide to rendering thumbnails for asset types in the Content Browser.
+Version: 4.9
+
+[REGION:todo]
+	This page is converted from Unreal Engine 3 documentation and currently being reviewed. Information may be outdated.
+[/REGION]
+
+[TOC(start:2)]
+
+The previous rendering system was part of the object in question. It was defined in Core where there was no access to the rendering interfaces needed to render a thumbnail. This posed a problem for object like Archetypes, which had no way to provide a thumbnail view. Also, this editor only function was being included on consoles, where it was just consuming space. Another problem with the system was that it lacked good reuse for items that rendered their thumbnails using the same approach (namely icons for thumbnails).
+
+To alleviate the code duplication, make the code exist in the editor only, and make the system late bound, we created the ThumbnailManager and the support interfaces ThumbnailRenderer and ThumbnailLabelRenderer. The ThumbnailManager uses an object registration system to match the appropriate rendering component(s) for a given resource type. This is similar to the GenericBrowserTypes with the exception being that all of the relevant  information comes from the `MyGameEditor.ini` file rather than through native classes discovery. ThumbnailRenderers render the object they are  associated with in a thumbnail area. ThumbnailLabelRenderers build and render the text that appears beneath the thumbnail. These are separate  objects in order to maximize flexibility and reuse. Most objects use the same label renderer and separating out the interfaces allows  a unique thumbnail rendering object and a shared label rendering object. It also allows for some interesting options at run time, like overriding the suggested label renderer with a memory counting one.
+
+
+
+## Creating a ThumbnailRenderer
+
+To create your own thumbnail renderer, you subclass the ThumbnailRenderer and implement 3 functions: GetThumbnailSize(), Draw(), and SupportThumbnailRendering(). The last function is only needed if your resource type needs per object checking, i.e. it only renders thumbnails for objects with specific properties set. 
+The archetype thumbnail renderer is an example of this, where it only renders the thumbnail if the object in question has the RF_ArchetypeObject flag set. GetThumbnailSize() is used by consumers of the interface so that they can adjust their positioning of the item in question. Finally, Draw() does just what you think it does.
+
+
+### Existing renderers
+
+The following ThumbnailRenderers may suit your needs without you needing to create a new type. Or they may be good base classes for ones specific to your task. 
+
+IconThumbnailRenderer -- Provides an implementation that will render a specified texture as the "icon" for the thumbnail.
+
+DefaultSizedThumbnailRenderer -- Provides common data for rendering objects that do not have an inherent size (particles, material instances, etc.) 
+
+TextureThumbnailRenderer -- Used as the base class for all objects that support the UTexture interface.
+
+
+### ThumbnailHelpers.h
+
+This header file contains some helper classes for rendering Static Meshes, materials, etc. They can be used by your implementation of the Draw() method or as a basis for creating your own helper classes.
+
+
+
+## Creating a ThumbnailLabelRenderer
+
+Creating a custom label renderer is just as simple. Derive from ThumbnailLabelRenderer and override the BuildLabelList() method. Each string that is added to the array passed in will be rendered as the label. The base class handles the rest of the work.
+
+
+### Existing label renderers
+
+GenericThumbnailLabelRenderer -- Adds the object's name and calls its GetDesc() function to build the label list. Most commonly used one.
+
+MemCountThumbnailLabelRenderer -- Counts the memory used for an object and displays that information below the object's name
+
+
+
+## Registering your renderers with the ThumbnailManager
+
+The ThumbnailManager uses the UObject config system to register the classes that are supported for thumbnail rendering. All class are registered by name to avoid package dependencies and allow licensees to create their own in a MyGameUnrealEd package, rather than having to modify Epic code. The snippet below shows how you would add a custom renderer. The second entry shows you how to use the existing icon renderer rather than providing a custom one. Note: the line breaks are there for readability and should not be in your `DefaultEditor.ini` when you customize it.
+
+
+    
+    [UnrealEd.ThumbnailManager]
+    +RenderableThumbnailTypes=
+       (ClassNeedingThumbnailName="MyGame.CustomResource",
+       RendererClassName="MyGameUnrealEd.CustomResourceThumbnailRenderer")
+    +RenderableThumbnailTypes=
+       (ClassNeedingThumbnailName="MyGame.CustomResourceEx",
+       RendererClassName="UnrealEd.IconThumbnailRenderer")
+    
+
+
+
+ClassNeedingThumbnailName is the name of the class that needs a thumbnail renderer. RendererClassName specifies the object to use when rendering the thumbnail. At startup, the ThumbnailManager creates all of the instances of the objects based upon these entries. It caches all of the associations in a map for faster lookups. The map is invalidated anytime GC occurs to prevent and stale UClass pointers from being accessed.
+
+ 
+
+
+
+

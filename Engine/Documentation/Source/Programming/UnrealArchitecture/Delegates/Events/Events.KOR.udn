@@ -1,0 +1,103 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title: 이벤트
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture, Programming/UnrealArchitecture/Delegates
+Description:여러 함수에 바인딩하여 모두 한 번에 실행시킬 수 있는 델리게이트입니다.
+Version: 4.9
+
+이벤트(Event)는 [멀티캐스트 델리게이트](Programming/UnrealArchitecture/Delegates\Multicast) 와 매우 유사합니다. 그러나 어느 클래스도 이벤트 바인딩이 가능하지만, 이벤트를 선언한 클래스만이 이벤트의 
+`Broadcast`, `IsBound`, `Clear` 함수를 호출할 수 있습니다. 즉 이와 같이 민감한 함수에 대한 접근권을 외부 클래스에 주면 어떡하지 하는 걱정 없이, 이벤트 오브젝트는 퍼블릭 인터페이스에 노출시킬 수 있다는 뜻입니다.
+이벤트가 사용되는 곳은, 순수 추상 클래스의 콜백 포함하기, 외부 클래스의 `Broadcast`, `IsBound`, `Clear` 함수 호출 제한시키기 입니다.
+
+## 이벤트 선언하기
+
+이벤트 선언은 이벤트에 특화된 변종 매크로를 사용한다는 점만 빼면 [멀티캐스트 델리게이트 선언](Programming/UnrealArchitecture/Delegates/Multicast#멀티캐스트델리게이트선언) 시와 마찬가지 방식으로 이루어집니다.
+
+| 선언 매크로 | 설명 |
+| --- | --- |
+| `DECLARE_EVENT( OwningType, EventName )` | 이벤트를 생성합니다. |
+| `DECLARE_EVENT_OneParam( OwningType, EventName, Param1Type )` | 파라미터가 하나인 이벤트를 생성합니다. |
+| `DECLARE_EVENT_TwoParams( OwningType, EventName, Param1Type, Param2Type )` | 파라미터가 둘인 이벤트를 생성합니다. |
+| `DECLARE_EVENT_<Num>Params( OwningType, EventName, Param1Type, Param2Type, ... )` | 파라미터가 N 개인 이벤트를 생성합니다. |
+
+[REGION:tip]	
+`DECLARE_EVENT` 매크로의 첫 파라미터는 이 이벤트를 "소유"(own)하게 될 클래스, 즉 `Broadcast()` 함수를 호출할 수 있는 클래스입니다.
+[/REGION]
+
+## 이벤트 바인딩하기
+
+이벤트 바인딩은 [멀티캐스트 델리게이트 바인딩](Programming/UnrealArchitecture/Delegates/Multicast#멀티캐스트델리게이트바인딩) 과 같은 방식으로 이루어집니다.
+
+## 이벤트 실행
+
+이벤트를 통해 다수의 함수 델리게이트를 붙인 다음, 그 이벤트의 `Broadcast()` 함수를 호출하여 모두 한 번에 실행시킬 수 있습니다. 이벤트 시그너처에는 반환값을 사용할 수 없도록 되어있습니다. 이벤트의 경우,
+`Broadcast()` 는 이벤트를 정의하는 클래스에 의해서만 호출 가능합니다.
+
+이벤트에서의 `Broadcast()` 호출은, 바인딩된 것이 없다 하더라도 언제든 안전합니다. 조심해야할 필요가 있는 유일한 경우는 출력 변수 초기화를 위해 이벤트를 사용하는 경우로, 이는 일반적으로는 매우 안좋은 작업입니다.
+
+`Broadcast()` 호출시 바인딩된 함수의 실행 순서는 정의되지 않습니다. 함수가 추가된 순서는 아닐 수 있습니다.
+
+| 함수 | 설명 |
+| --- | --- |
+| `Broadcast()` | 이 이벤트를 만료되었을 수 있는 모든 바인딩 오브젝트에 브로드캐스트(전파)합니다. |
+
+
+
+## 구현 예제
+
+### 간단 이벤트
+
+	public:
+	/** 레이어 변경이 있을 때마다 브로드캐스트 */
+	DECLARE_EVENT( FLayerViewModel, FChangedEvent )
+	FChangedEvent& OnChanged() { return ChangedEvent; }
+
+
+	private:
+	/** 레이어 변경이 있을 때마다 브로드캐스트 */
+	FChangedEvent ChangedEvent;
+
+[REGION:tip]
+이벤트에 대한 접근자는 GetXXX 패턴보다는 OnXXX 패턴을 따라야 합니다.
+[/REGION]
+
+### 상속된 추상 이벤트
+
+**베이스 클래스 구현:**
+	
+	/** 애셋이 레지스트리에 추가될 때에 대한 콜백 등록/해제  */
+	DECLARE_EVENT_OneParam( IAssetRegistry, FAssetAddedEvent, const FAssetData&);
+	virtual FAseetAddedEvent& OnAssetAdded() = 0;
+
+**파생 클래스 구현:**
+
+	DECLARE_DERIVED_EVENT( FAssetRegistry, IAssetRegistry::FAssetAddedEvent, FAssetAddedEvent);
+	virtual FassetAddedEvent& OnAssetAdded() override { return AssetAddedEvent; }
+
+[REGION:tip]
+파생된 클래스에서 파생된 이벤트를 선언할 때는, `DECLARE_DERIVED_EVENT` 매크로의 함수 시그너처를 반복하지 않습니다. 또한, `DECLARE_DERIVED_EVENT` 매크로의 마지막 파라미터는 이벤트의 새 이름으로, 
+보통은 베이스 유형과 같습니다.
+[/REGION]
+
+### 상속된 이벤트
+
+파생된 클래스는 베이스 클래스의 민감한 이벤트 멤버에 대한 접근권까지 상속하지 않습니다. 그 대신, 파생된 클래스에서도 
+자신의 이벤트 브로드캐스트를 허용하려는 베이스 클래스는, 이벤트에 대한 protected Broadcast 함수를 노출시켜 줘야 합니다.
+
+**베이스 클래스:**
+	
+	public:
+	/** 레이어 변경이 있을 때마다 브로드캐스트 */
+	DECLARE_EVENT( FLayerViewModel, FChangedEvent )
+	FChangedEvent& OnChanged() { return ChangedEvent; }
+
+	protected:
+	void BroadcastChanged()
+	{
+		ChangedEvent.Broadcast();
+	}
+
+	private:
+	/** 레이어 변경이 있을 때마다 브로드캐스트 */
+	FChangedEvent ChangedEvent;
+

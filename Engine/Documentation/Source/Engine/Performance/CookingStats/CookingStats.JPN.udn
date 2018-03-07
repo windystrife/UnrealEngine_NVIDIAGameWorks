@@ -1,0 +1,139 @@
+﻿INTSourceChangelist:3011459
+Availability:Public
+Title:クックの統計情報
+Crumbs: %ROOT%, Engine
+Description:パフォーマンス問題の特定および修正方法
+
+プロジェクトのクック中、アンリアル エンジン 4 は多数の詳細ログを作成します。そのうちの 1 つが **Stats.csv** ファイルです。このページでは、クック パフォーマンスによる問題を見抜くためのファイルの読み取り方法を詳しく説明します。
+
+## ログの読み取り
+
+プロジェクトをクックすると、統計情報が必ず作成されます。統計情報は以下の場所に保存されます。
+
+	<projectdirectory>\Saved\Stats\<datetime>Stats.csv
+
+**Stats.csv** ファイルは、値がカンマで区切られた数多くの行を含んでいます。最初の値はユニークなキーで、その行の説明になります。関連する値を持つタグを '=' で区切ってこの後に続けます。例：
+
+	DDCTransactionId2154470643B07308C1979DA468F3EA48_0,StartTime=2015.07.14-17.09.19
+
+キーが最初のパラメータになるので、この例の最初のパラメータは以下になります。
+
+	DDCTransactionId2154470643B07308C1979DA468F3EA48_0
+
+そして最初のタグは以下です。
+
+	StartTime=2015.07.14-17.09.19
+
+最初のタグは、タグ名と値のペアに分けることができます。
+
+	TagName:StartTime
+	Value:2015.07.14-17.09.19
+
+これらのキーとタグは、クックのパイプラインにおける問題の解決に役立ちます。
+
+
+## クック パフォーマンス問題のデバッグ
+
+処理時間がかかってしまう原因は、
+**Derived Data Cache** が無効になると、プラットフォームのテクスチャをリビルドする必要がある場合がほとんどです。
+
+クックの反復がそれでも遅い場合は、大量のデータがクックされていることを示しています。クックの必要がある場合には、反復型のクック (実験的) もしくはテスティング / 開発目的のクックの使用を検討してみてください。
+
+
+
+## Derived Data Cache (DDC) Stats
+
+DDC 統計情報は DDCTransactionId で始まるので、stats.CSV ファイルの中ですぐ分かります。
+
+また、キャッシュ内のコンテンツを DDC がどのように検索したかを反映するために、階層形式になっています。
+
+DDC 統計情報の 3 つのエントリをレビューします (分かりやすいようにタグ行は編集してあります)
+
+	DDCTransactionId2154470643B07308C1979DA468F3EA48_86
+	 GetCachedData
+	 CacheKey=MATSM_984afa3849534faa8491540b994bd32e_SF_PS4_15493__BC5N_DEV_SL_NoDBufF7646F9__526E4F887A3482CE276E9E40861788C0F9774343
+	 StartTime=2015.07.14-17.09.30
+	DDCTransactionId2154470643B07308C1979DA468F3EA48_87
+	 CachedDataProbablyExists
+	 Parent=DDCTransactionId2154470643B07308C1979DA468F3EA48_86
+	 StartTime=2015.07.14-17.09.30
+	DDCTransactionId2154470643B07308C1979DA468F3EA48_88 
+	 GetCachedData
+	 Parent=DDCTransactionId2154470643B07308C1979DA468F3EA48_86
+	 StartTime=2015.07.14-17.09.30
+
+次の 2 つのトランザクションは "Parent" タグによって
+最初のトランザクションへリンクします。
+親タグは最初のトランザクションを
+DDC リクエストのソースに指定します。
+最初のトランザクションは、
+トランザクションのエントリ ポイントであるタグ "GetCachedData" も指定します。CacheKey も指定されていることが
+わかります。
+トランザクションにはすべて開始時間と継続時間があります。継続時間はミリ秒で、
+すべて包括時間です。
+親のトランザクションに対する排他時間は、
+子のトランザクション継続時間を差し引くと決まります。
+
+## Save Package Stats
+
+Save Package はクック処理の大部分です。Save Package Stats はそれぞれ "SavePackageTransactionId" で始まります。
+
+	SavePackageTransactionId830D62FB4EE90050FDB33BBDAA57A9A7_124
+	 Filename=D:/Builds/UE4/QAGame/Saved/Cooked/PS4/Engine/Plugins/Runtime/LeapMotionController/Content/LM_SampleDistortion.uasset
+	 FlushAsyncLoading=0.019673ms  FlushStreamingFunc=0.007272ms
+	 BlockTillAllRequestsFinished=0.006843ms
+	 ResetLoadersForSaveUnMarkAllObjects=0.158671ms
+	 TagPackageExports=0.222396ms  BeginCacheForCookedPlatformData=0.086393ms
+	 SerializeImports=0.120610ms  GatherLocalizableTextData=0.005558ms
+	 MarkNames=0.007700ms  SerializeSummary=0.016678ms
+	 SerializeNames=0.027802ms  SerializeGatherableTextData=0.004277ms
+	 BuildExportMap=0.017535ms  SortExportsNonSeekfree=0.008553ms
+	 SortExportsSeekfreeConstructor=0.019245ms
+	 SortExportsSeekfreeInner=0.327609ms  SortExportsSeekfree=0.005133ms
+	 BuildDependencyMap=0.010692ms  SerializeImportMap=0.005562ms
+	 SerializeExportMap=0.004705ms  SerializeDependencyMap=0.004277ms
+	 SerializeStringAssetReferenceMap=0.004277ms
+	 SaveThumbNailsAssetRegistryDataWorldLevelInfo=0.022668ms
+	 SerializeExports=0.109062ms  SerializeBulkData=0.015821ms
+	 AsyncWrite=4.576687ms  UnaccountedTime=0.307079ms
+	 RunGuid=RunID7F4E40464DE38EF1DECAF5A385FBDB1E
+
+Save package のタグは保存されたセクションごとに別れます。
+Save package のデバッグ問題には
+save package の別のセクションの特定の知識も必要となります。
+
+## Cooking Package Stats
+
+Cooking Package Stats によって、
+クッカが (クッカ側から) どのようにパッケージを処理しているかが分かります。パッケージごとのおおよその処理時間が
+わかります。
+
+Cooking package stats キーは、標準のパッケージ名です。
+
+	../../../Engine/Content/EditorMaterials/Cascade/CASC_Cross.uasset
+	 AllOfLoadPackage_Duration=0.115048ms  AllOfLoadPackage_HitCount=5
+	 ResolveRedirectors_Duration=0.001281ms  ResolveRedirectors_HitCount=5
+	 CacheForCookedPlatformData_Duration=5.137812ms
+	 CacheForCookedPlatformData_HitCount=1
+	 UnsolicitedMarkup_Duration=0.065863ms  UnsolicitedMarkup_HitCount=1
+	 SavePackageCacheForCookedPlatformData_Duration=0.146270ms
+	 SavePackageCacheForCookedPlatformData_HitCount=2
+	 SaveCookedPackage_Duration=1.683380ms  SaveCookedPackage_HitCount=1
+	 RunGuid=RunID2062A4FA4DBD3833D4A026A94B8970BB
+
+各統計情報にはヒットカウントと継続時間が記録されます。
+例:
+
+* **AllOfLoadPackage** は単一の統計情報ですが、関連するタグが 2 つ付いています。
+	* **AllOfLoadPackage_Duration** は、取り込んだパッケージをすべて実行するためにかかる時間です。
+	* **AllOfLoadPackage_HitCount** は、取り込んだパッケージがヒットした回数です。
+
+クッカはクック処理を最適化しようとするため、
+クッカのさまざまなセクションで、複数回ヒットする場合があります。
+クッカがパッケージを取り込んで、コンテンツが DDC から消えたため、
+再生成しなければいけない場合が最も一般的なケースです (処理は遅い)。
+そのような場合クッカは、コンテンツがそろっていてる他のパッケージを勝手にクックして、
+このパッケージに戻ってこようとします。
+ただし、パッケージが必ずしも 5 回取り込まれるわけではなく、
+パッケージが既にロードされている場合はクッカは早めに引き上げて、
+保存されていない場合はメモリにパッケージを保存します。

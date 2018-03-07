@@ -1,0 +1,196 @@
+Availability:Public
+Title:Stationary lights
+Crumbs: %ROOT%, Engine, Engine/Rendering/LightingAndShadows,Engine/Rendering/LightingAndShadows/LightMobility
+Description:Light type that can change its color and brightness at runtime but cannot move, rotate or change influence size.
+Version: 4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+	![%Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights:title%](%ROOT%/Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights/stationarylights_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+	![](%ROOT%/ue4_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+	%Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights:title%
+	[/PARAM]
+	[PARAM:description]
+	%Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights:description%
+	[/PARAM]
+	[PARAM:path]
+	[RELATIVE:Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+	![%Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights:title%](%ROOT%/Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights/stationarylights_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+	![](%ROOT%/ue4_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+	%Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights:title%
+	[/PARAM]
+	[PARAM:description]
+	%Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights:description%
+	[/PARAM]
+	[PARAM:path]
+	[RELATIVE:Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:banner]
+![](Engine/Rendering/LightingAndShadows/lighting_overview_banner_001.png)(convert:false)
+[/REGION]
+
+[TOC(start:2 end:2)]
+
+
+
+[INCLUDE:Resources/ContentExamples\Lighting\2_2#StationaryLights01]
+
+## Direct Lighting
+
+The direct lighting of stationary lights is rendered dynamically using deferred shading. This allows 
+the brightness and color to be changeable at runtime, along with a light function or IES profile. The 
+light will have high quality analytical specular just like a movable light.  The direct lighting can 
+be shown or hidden in game by modifying the **Visible** property of the light.
+
+[REGION:fullwidth]
+	![](DirectLighting.png)
+[/REGION]
+
+[REGION:caption]
+Direct lighting from a stationary light.
+[/REGION]
+
+## Direct Shadowing
+
+Realtime shadowing of light sources has a major performance cost. A fully dynamic light with shadows 
+will often cost twenty times (20x) as much to render than a dynamic light without shadows. For this reason, 
+stationary lights have the ability to have static shadowing on static objects, but with some limitations.
+
+### Static Shadowing
+
+#### On Opaque
+
+[**Lightmass**](Engine/Rendering/LightingAndShadows/Lightmass) generates _distance field 
+shadow maps_ for stationary lights on static objects during the lighting rebuild. Distance field shadow maps 
+provide very accurate shadow transitions even at low resolutions, and with very little runtime cost. Like 
+lightmaps, distance field shadow maps require uniquely unwrapped UVs on all _StaticMeshes_ using static 
+lighting.
+
+[REGION:fullwidth]
+	![](DistanceFieldShadows.png)
+[/REGION]
+
+[REGION:caption]
+Accurate shadows of a _StaticMeshActor_ onto opaque surfaces using distance field shadows.
+[/REGION]
+
+[REGION:note]
+Lighting must be built to display distance field shadows, otherwise whole scene dynamic shadows 
+will be used for previewing.
+[/REGION]
+
+Only 4 or fewer overlapping stationary lights can have static shadowing, because the lights must be assigned 
+to different channels of a shadowmap texture. This is a graph coloring problem, so there are often fewer 
+than 4 overlapping allowed due to topology. Shadowing cannot affect the overlap test, so **the sunlight 
+typically requires a channel from the entire level it is in, even the underground areas.**  Once the channel 
+limit is reached, additional stationary lights will use whole scene dynamic shadows at a severe performance 
+cost. The **StationaryLightOverlap** view mode can be used to visualize the overlap, which is updated dynamically 
+as you modify the lights. Light icons are changed to a red X when they are not able to allocate a channel.
+
+![](OverlapError.png)(w:640)
+
+[REGION:caption]
+StationaryLightOverlap viewmode showing one too many overlapping lights. Notice the three lights behind the **Spot Light**, the radius of left and the center light can be seen overlapping the **Spot Light's** radius while the right one does not.
+[/REGION]
+
+#### On Translucency
+
+Translucency also receives shadowing very cheaply with Stationary lights - Lightmass precomputes a shadow depth map from static geometry which is applied to translucency at runtime.  This form of shadowing is fairly coarse and only captures shadowing on the scale of meters.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Unshadowed Translucency](1OriginalCropped.png)(w:700)
+	[/PARAM]
+	[PARAM:after]
+	![Translucency recieving static shadowing form a Diretional Light](1ShadowedCropped.png)(w:700)
+	[/PARAM]
+[/OBJECT]
+
+The resolution of the static shadow depth map is controlled by StaticShadowDepthMapTransitionSampleDistanceX and StaticShadowDepthMapTransitionSampleDistanceY in BaseLightmass.ini, with a default setting of 100 meaning one texel every meter.
+
+### Dynamic Shadowing
+
+[EXCERPT:StationaryShadows]
+Dynamic objects (like _StaticMeshComponents_ and _SkeletalMeshComponents_ with Mobility set to Movable) must integrate into the static shadowing of the 
+world from distance field shadowmaps. This is accomplished with _Per Object_ shadows. Each movable object creates 
+two dynamic shadows from a stationary light: a shadow to handle the static world casting onto the object, and a 
+shadow to handle the object casting onto the world. With this setup, the only shadowing cost for stationary 
+lights comes from dynamic objects that it affects. This means the cost can vary from very little to a large 
+amount, depending on how many dynamic objects there are. With enough dynamic objects, it is more efficient 
+to use a Movable light instead.
+
+In the scene below, the spheres are all movable, and they all receive shadows from the static world and 
+cast their own shadows, which merge with the distance field shadows. The _Per Object_ shadow frustums for each 
+Movable component are also shown.
+
+[REGION:fullwidth]
+	![](DynamicObjectShadowFrustums.png)
+[/REGION]
+
+[REGION:note]
+_Per Object_ shadows used by movable components apply a shadowmap to the object's bounds, therefore the bounds must be accurate.  For Skeletal meshes this means they should have a physics asset.  For particle systems, any fixed bounding box must be large enough to contain all particles.
+[/REGION]
+
+[/EXCERPT:StationaryShadows]
+
+#### Directional light dynamic shadowing
+
+[EXCERPT:CascadedShadowMaps]
+**Directional Stationary Lights** are special because they support whole scene shadows through _Cascaded Shadow Maps_ 
+at the same time as static shadowing. This is very useful in levels with a lot of animating foliage; you want 
+to have moving shadows around the player but do not want to pay the cost of having many cascades to cover a large 
+view range. The dynamic shadows are faded into static shadows over distance, such that the transition is often 
+indistinguishable. To set this up, just change the **Dynamic Shadow Distance StationaryLight** of a _DirectionalLightStationary_ to be the range at which you want the fade to happen.
+[/EXCERPT:CascadedShadowMaps]
+
+Movable components will still create PerObject shadows even when using Cascaded Shadow Maps on a directional light.  This behavior is useful with small Dynamic Shadow Distances, but incurs unnecessary cost with larger distances.  To disable PerObject shadows and save performance, disable *Use Inset Shadows For Movable Objects* on the light.
+
+## Indirect Lighting
+
+Stationary lights store their indirect lighting in the lightmap just like a static light. Indirect lighting cannot 
+be modified at runtime by changing brightness and color like direct lighting can. This means that even when a 
+light has **Visible** unchecked, its indirect lighting will be put in the lightmap during the lighting build. 
+**IndirectLightingIntensity** on the light can be used to scale or disable the indirect lighting from a given light at lighting build time.  
+
+However there's a post process volume setting called **IndirectLightingIntensity** which lets you scale the contribution of the lightmap for all lights, which can be changed at runtime from a blueprint. 
+
+
+## Use Area Shadows for Stationary Lights
+In the 4.9, or later, release of Unreal Engine, Stationary Directional Lights have a new shadowing option located in the Lightmass options called **Use Area Shadows for Stationary Lights**. 
+
+![](Area_Shadows_Options.png)
+
+To Enable the Use Area Shadows for Stationary Lights option, first select the **Directional Light** in your scene and make sure that it's **Mobility** is set to **Stationary**.
+Then in the **Lightmass** section of the Directional light,  click on the box next the Use Area Shadows for Stationary Lights option to enable it. 
+When the Use Area Shadows for Stationary Lights option is enabled, the Stationary Light will use area shadows for the precomputed shadow maps.
+Area shadows are shadows that get softer the further they are from shadow casters.
+In the following image you see the difference between the two shadowing methods.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Area Shadows Enabled](AreaShadows.png)(w:900)
+	[/PARAM]
+	[PARAM:after]
+	![Area Shadows Disabled](UniformPenumbraSharp.png)(w:900)
+	[/PARAM]
+[/OBJECT]
+
+_Note that Area Shadows will only work on Stationary Lights and you might have to increase some objects lightmap resolution to get the same shadow quality and sharpness._

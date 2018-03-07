@@ -1,0 +1,176 @@
+﻿INTSourceChangelist:2713325
+Availability:Public
+Title: 设置
+Crumbs:%ROOT%, Gameplay, Gameplay/Localization
+Description:如何以本地化为目的来设置项目。 
+version: 4.9
+
+[TOC (start:2)]
+
+设置一个要本地化的项目涉及以下方面：
+* 为 commandlet 管道编写本地化配置脚本。
+* 配置本地化数据的加载来源。
+* 指定将哪些本地化数据打包后进行分发。 
+
+按照惯例，本地化配置脚本位于 “Config/Localization”，本地化数据则存放在 “Content/Localization”。
+
+[REGION:raw]
+![](SetupFlowchart.png)
+[/REGION:raw]
+
+[REGION:note]
+对于本地化的构建和迭代过程目前需要靠手动完成，但用于管理本地化的仪表板 UI 目前正在开发中，它将大大简化涉及的工作流程。
+[/REGION:note]
+
+
+
+
+## 本地化配置脚本
+本地化工作流程包含[各种命令行工具](Gameplay/Localization/Commandlets)，
+用于收集文本，存储文本，管理翻译内容，并将它们编译成二进制形式供引擎使用。
+一个主要的命令行工具通过一个配置文件（指定了要执行的步骤）运行其他的命令行指令。
+
+通常来讲，项目只需要一个目标文件来涵盖所有要翻译的文本。之后会有一个配置脚本来指定所有步骤和设置，从而迭代
+本地化的自动执行过程——包括收集文本（TEXT）、生成清单（MANIFEST）和存档（ARCHIVE）、导入任何新翻译、导出任何新原文，
+并生成一个编译过的二进制格式本地化资源供应用程序使用。
+
+下面是一个本地化配置脚本示例，这里实施了一个常见的本地化流程。
+
+[REGION:codetitlebar]
+Config/Localization/Game.ini
+[/REGION:codetitlebar]
+	;Common settings to be used for all commandlets as needed.
+	[CommonSettings]
+	SourcePath=./Content/Localization/Game
+	DestinationPath=./Content/Localization/Game
+	ManifestName=Game.manifest
+	ArchiveName=Game.archive
+	ResourceName=Game.locres
+	PortableObjectName=Game.po
+	;English
+	SourceCulture=en
+	;English
+	CulturesToGenerate=en
+	;French - Commented Out
+	;CulturesToGenerate=fr
+	;Italian - Commented Out
+	;CulturesToGenerate=it
+	;German - Commented Out
+	;CulturesToGenerate=de
+	;Spanish - Commented Out
+	;CulturesToGenerate=es
+
+	;Gather text from source code and configuration files.
+	[GatherTextStep0]
+	CommandletClass=GatherTextFromSource
+	IncludePaths=./Source/
+	IncludePaths=./Config/
+	ExcludePaths=*/Config/Localization/*
+	SourceFileSearchFilters=*.h
+	SourceFileSearchFilters=*.cpp
+	SourceFileSearchFilters=*.ini
+
+	;Gather text from assets in content.
+	[GatherTextStep1]
+	CommandletClass=GatherTextFromAssets
+	IncludePaths=./Content/
+	ExcludePaths=*/Content/Localization/*
+	PackageExtensions=*.umap
+	PackageExtensions=*.uasset
+
+	;Create manifest with all gathered source text.
+	[GatherTextStep2]
+	CommandletClass=GenerateGatherManifest
+
+	;Create new archives/update existing archives with new entries from the manifest.
+	[GatherTextStep3]
+	CommandletClass=GenerateGatherArchive
+
+	;Import new translations from PO (portable object) files into existing archives.
+	[GatherTextStep4]
+	CommandletClass=InternationalizationExport
+	bImportLoc=true
+
+	;Export new source from existing archives into PO (portable object) files.
+	[GatherTextStep5]
+	CommandletClass=InternationalizationExport
+	bExportLoc=true
+
+	;Compile source text and translations into binary form for use by the application.
+	[GatherTextStep6]
+	CommandletClass=GenerateTextLocalizationResource
+
+
+### 目录结构示例
+“MyProject” 的项目目录结构示例，并带有两个目标（“Game” 和 “DLC”）。
+* MyProject
+	* Config
+		* Localization
+			* Game.ini
+			* DLC.ini
+
+## 本地化数据
+项目必须被配置为使用其本地化数据。搜索本地化数据所用的路径是在 `Config/DefaultGame.ini` 的 `Internationalization` 部分中指定，对于
+`LocalizationPaths` 键使用了数组表示法。默认情况下，本地化数据将在 `Content/Localization/Game` 中搜索，但这个条目可以被显式移除或替换。
+
+[REGION:codetitlebar]
+Config/DefaultGame.ini Excerpt
+[/REGION:codetitlebar]
+
+	[Internationalization]
+	;This first entry is inherited from BaseGame.ini by default.
+	;+LocalizationPaths=%GAMEDIR%Content/Localization/Game
+	+LocalizationPaths=%GAMEDIR%Content/Localization/DLC
+
+
+### 目录结构示例
+“MyProject” 的项目目录结构示例，并带有两个目标（“Game” 和 “DLC”），同时提供了英语（“en”）和巴西地区葡萄牙语（“pt-BR”）本地化的示例目录结构。
+
+* MyProject
+	* Content
+		* Localization
+			* Game
+				* Game.manifest
+				* en
+					* Game.archive
+					* Game.locres
+				* pt-BR
+					* Game.archive
+					* Game.locres
+			* DLC
+				* DLC.manifest
+				* en
+					* DLC.archive
+					* DLC.locres
+				* pt-BR
+					* DLC.archive
+					* DLC.locres
+
+## 打包设置
+为了对项目进行正确打包，需要为打包指定基于所支持语言（Culture）的本地化数据。在编辑器的 **文件** 菜单中，
+打开 **Package Project** 子菜单，然后选择 **Packaging Settings...** 。在 **Project Settings** 窗口的 **Packaging** 类别中，
+展开高级部分以访问 **Localization to Package** 设置。您可以勾选相应的选框或对其取消勾选来决定哪些 Cultures 应当对其本地化数据进行打包。
+英语已经被默认选中。
+
+
+![](SetupEditor.png)
+
+另外，这些设置可以在 `Config/DefaultGame.ini` 文件中直接修改，而不必使用编辑器界面，
+它们位于 `/Script/UnrealEd.ProjectPackagingSettings` 部分，对于 `CulturesToStage` 键使用了数组表示法。
+
+[REGION:codetitlebar]
+Config/DefaultGame.ini Excerpt
+[/REGION:codetitlebar]
+	[/Script/UnrealEd.ProjectPackagingSettings]
+	+CulturesToStage=en
+	+CulturesToStage=fr
+	+CulturesToStage=it
+	+CulturesToStage=de
+	+CulturesToStage=es
+
+
+## 迭代
+本地化数据的迭代过程时需要运行 GatherText 命令行指令，并提供一个本地化配置脚本。命令行应当采用以下格式： 
+
+	<ProjectFilePath> -Run=GatherText -Config=<PathToConfigFileRelativeToProjectRoot>
+	解释：<项目文件路径> -Run=GatherText -Config=<配置文件相对项目根目录的相对路径>

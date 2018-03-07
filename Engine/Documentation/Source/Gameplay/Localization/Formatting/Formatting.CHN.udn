@@ -1,0 +1,98 @@
+﻿INTSourceChangeList:3124629
+Availability:Public
+Title:设置面向用户文本的格式
+Crumbs:%ROOT%, Gameplay, Gameplay/Localization
+Description:使用 Format 函数向用户显示本地化文本
+Parent:Gameplay/Localization
+Order:3
+version:4.13
+Related:Programming/UnrealArchitecture/StringHandling/FText
+
+FText 用于创建面向用户的文本，这些文本通常已被本地化。这意味着在游戏过程中不断变化的用户界面文本也能遵循多种语言的语法规则。使用 `FText::Format` 及相应的 **Format Text** 蓝图节点能构造出可重复使用的格式规范，简化本地化流程并减少出界错误。两个函数都支持排序参数、命名参数和基于复数形态、性别形态及谚文字母后位的特定参数。
+
+在 C++ 中，您可以预先将 `FText` 格式规范编译到 `FTextFormat` 中，以便重复使用编译的格式规范。这在需要频繁重复使用某个格式规范时十分实用，如原文格式因文化差异发生变化时，它还能自动重新编译。
+
+还可以使用 **Format Text** 节点在 Blueprint 中设置 FText 的格式。**Format** 文本可为文字，或连接到某个引脚。作为文字使用时，它将自动生成格式设置的参数。输入文字“There are {number} days until {day}.”，自动对节点加入一个 **Number** 引脚和一个 **Day** 引脚。这些引脚可以作为文字填写，也可以从变量输入，且输出的 **Text** 将以这些引脚所挂钩的值替代参数。
+
+当 **Format** 引脚连接到某个变量时，**Format** 将无法解密，因其可能随游戏过程发生变化。因此，您可自行添加引脚并以可能的参数对它们进行命名。这样便可以将 **Format Text** 节点设置好，以应对多种可能。当某个参数与 Format 变量中的参数匹配时，它将应用提供的信息。
+
+可在 **Details** 面板中对引脚名进行变更、添加和移除。
+
+[REGION:imagetable]
+|![](FormatNode.png)(h:400) | ![](FormatNodeDetails.png)(h:400)|
+|--- |---- |
+|**Format Text** 节点 | **Details** 面板 | 
+[/REGION]
+
+
+[REGION:tip]
+对于使用源码版本虚幻引擎的用户而言，`TextTest.cpp`可提供范例，说明如何有效地进行针对文化差异的格式设置、对比和排序。
+[/REGION]
+
+### 排序参数
+ 
+ 使用排序参数构建格式参数时，大括号代表格式参数的开头和结尾，数值代表传递的参数。
+ 参数从 {0} 开始，并依次排列（{0}、{1}、{2} 等）。`Format` 函数和 **Format Text** 节点会将变量按其被提供的顺序插入到 
+ 格式参数中。 
+
+ 以下 C++ 和 Blueprint 片段显示已排序的格式参数，显示玩家当前的生命值和生命值上限。
+
+### C++ 示例
+
+	FText::Format( LOCTEXT( "HealthFormatStr",  "{0} / {1}" ), FText::AsNumber( CurrentHealth ), FText::AsNumber( MaxHealth )  ) 
+		
+### Blueprint 示例
+
+![](OrderedArgs.png)
+
+### 命名参数 
+
+以命名参数构建格式参数时，大括号表示格式参数的开头和结尾，大括号之间的文本是传入参数中的参数名称。
+常用参数的示例有 {Name}、{ID}、{Health} 等。
+
+随后的 C++ 和 Blueprint 片段会显示命名的格式参数，显示玩家当前的生命值。
+
+### C++ 示例
+
+	FFormatNamedArguments Arguments;
+	Arguments.Add(TEXT("CurrentHealth"), FText::AsNumber( CurrentHealth ));
+	EditorErrors.Error(FText::Format(LOCTEXT("ExampleFText", "You currently have {CurrentHealth} health left."), Arguments ) );
+
+### Blueprint 示例
+			
+![](CurrentHealth.png)
+
+## 特定参数
+
+为传入复数/性别形态支持所需的数字/性别值，所有 `FText::Format(...)` 系列函数现均将其值作为 FFormatArgumentValue，而非 FText。这可以通过任何数字类型、ETextGender 或 Ftext 进行隐式构造。 
+
+在蓝图中设置这些数值类型的功能已通过 **Format Text** 节点上的万能引脚公开。
+
+根据上面的示例，这些格式规范可以作为参数提供给 `FText::Format` 或 **Format Text**。 
+
+### 复数形态
+
+复数形态能基于提供给文本格式的数字变量来使用不同文本。复数形态可能是基数词，如“有 1 只猫”或“有 4 只猫”，也可以是序数词，如“你得到了第 1 名！”或“你得到了第 2 名！”
+
+复数形态将以“关键字->值”对的形式指定，且支持以下所有关键字（由 [CLDR 数据] 根据所选文化进行定义(http://www.unicode.org/cldr/charts/29/supplemental/language_plural_rules.html)）：0、1、2、few、many、other。值是可选择引用的字符串， 
+它们可能还包含格式标记。
+
+基数词格式示例：`"There {NumCats}|plural(one=is,other=are) {NumCats} {NumCats}|plural(one=cat,other=cats)"`
+
+序数词格式示例：`"You came {Place}{Place}|ordinal(one=st,two=nd,few=rd,other=th)!"`
+
+
+### 性别形态
+
+性别形态可基于为文字格式赋予的 ETextGender 值使用不同文本，如“Le guerrier est fort”或“La guerrière est forte”。
+性别形态为一系列顺序为 [masculine, feminine, neuter] 的值，其中 neuter 为可选。值为可选择引用的字符串，其中可能还包含格式标记。
+
+格式示例：`"{Gender}|gender(Le,La) {Gender}|gender(guerrier,guerrière) est {Gender}|gender(fort,forte)"`
+
+### 谚文字母后位
+
+谚文字母后位可帮助您应对韩语中的语法规则，根据插入值的结尾是辅音还是动词来插入正确的字符，如“사람은”或“사자는”。
+谚文字母后位为一系列顺序为 [consonant, verb] 的值。值是可选择引用的字符串。
+
+格式示例：`"{Arg}|hpp(은,는)"`
+

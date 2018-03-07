@@ -1,0 +1,183 @@
+﻿INTSourceChangelist:1997546
+Availability:Public
+Title:C++和蓝图
+Crumbs: %ROOT%, Programming
+Description:为使用虚幻引擎的游戏开发入门人员提供的入门信息。
+
+## 概述
+
+蓝图可以继承C++类，从而使得程序员可以在代码中创建新的游戏性类，而关卡设计人员可以使用蓝图来继承该类并对其进行修改。
+有很多种修饰符可以改变C++类和蓝图系统间交互方式，其中某些修饰符会在本示例中突出介绍。
+
+## 类设置
+
+在类设置的第一部分中，使用[](Programming\Development\ManagingGameCode\CppClassWizard)创建一个名称为LightSwitchBoth 的类。
+
+LightSwitchBoth类中的大部分代码设置都和 [仅使用C++的LightSwitch示例](Gameplay\ClassCreation\CodeOnly) 类似。尽管您可以让一个蓝图继承LightSwitchCodeOnly类，  
+但蓝图图表并不能访问该类中创建的组件、属性及函数。该示例将使用  `UPROPERTY()`  和 `UFUNCTION()` 修饰符，这两个修饰符使得LightSwitchBoth作为继承它的蓝图的模板。
+
+您会发现首先参考下 [仅使用C++的LightSwitch示例](Gameplay\ClassCreation\CodeOnly)是有用的，这样您可以看下如何设置头文件及源文件
+来创建LightSwitchComponent、SphereComponent、DesiredBrightness属性及OnOverlap函数。
+
+这个头文件是从 [仅使用C++的LightSwitch示例](Gameplay\ClassCreation\CodeOnly) 改编而来，添加了以下功能： 
+
+* PointLightComponent和SphereComponent是BlueprintReadOnly（仅蓝图可读的），并且将显示在 **我的蓝图** 选卡中的  **Switch Components（切换组件）** 类目中。
+* OnOverlap现在是一个BlueprintNativeEvent，将会显示在 **我的蓝图** 选卡中的  **Switch Functions（切换函数）** 类目中。
+* DesiredBrightness是BlueprintReadWrite（蓝图可读写的），将显示在 **我的蓝图** 选卡中的  **Switch Properties（切换属性）** 类目中。
+* DesiredBrightness现在是EditAnywhere（随处可编辑的），而不是VisibleAnywhere(随处可见的)。
+
+[REGION:tip]
+`UCLASS()`  宏有个 `Blueprintable` 修饰符。在这个示例中，该修饰符不是必须的，因为LightSwitchBoth直接继承Actor，而Actor是Blueprintable（可蓝图化的），所以LightSwitchBoth会继承该修饰符。
+[/REGION]
+
+加上 `UPROPERTY()`  和 `UFUNCTION()` 宏中的额外修饰符，LightSwitchBoth类的头文件如下所示：
+
+[REGION:codetitlebar]
+LightSwitchBoth.h
+[/REGION:codetitlebar]
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+	#pragma once
+
+	#include "LightSwitchBoth.generated.h"
+
+	/**
+		* 
+		*/
+	UCLASS()
+	class ALightSwitchBoth : public AActor
+	{
+		GENERATED_UCLASS_BODY()
+
+		/** point light component */
+		UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Switch Components")
+		TSubobjectPtr<UPointLightComponent> PointLight1;
+
+		/** sphere component */
+		UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Switch Components")
+		TSubobjectPtr<USphereComponent> Sphere1;
+
+		/** called when something overlaps the sphere component */
+		UFUNCTION(BlueprintNativeEvent, Category="Switch Functions")
+		void OnOverlap(class AActor* OtherActor, class UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+
+		/** the desired brightness for the light */
+		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Switch Properties")
+		float DesiredBrightness;
+	};
+
+在LightSwitchBoth的源文件中，构造器仍然是一样的。但是，需要对 `OnOverlap` 函数做一点修改。这个函数现在是一个BlueprintNativeEvent。这意味着
+在继承这个类的蓝图中，可以放置一个覆盖 `OnOverlap` 的事件，当正常调用该函数时会执行此事件。如果该事件不存在，那么则是执行那个函数的 
+C++实现。要想使这个设置正常工作，该C++函数需要重命名为 `OnOverlap_Implementation` 。稍后在本示例中将介绍这个蓝图设置。对 `OnOverlap` 函数
+进行了修改后，LightSwitchBoth 的源文件如下所示：
+
+[REGION:codetitlebar]
+LightSwitchBoth.cpp
+[/REGION:codetitlebar]
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+	#include "BasicClasses.h"
+	#include "LightSwitchBoth.h"
+
+	ALightSwitchBoth::ALightSwitchBoth(const FObjectInitializer& ObjectInitializer)
+		: Super(ObjectInitializer)
+	{
+
+		DesiredBrightness = 15.0f;
+
+		PointLight1 = ObjectInitializer.CreateDefaultSubobject<UPointLightComponent>(this, "PointLight1");
+		PointLight1->Brightness = DesiredBrightness;
+		PointLight1->bVisible = true;
+		RootComponent = PointLight1;
+		Components.Add(PointLight1);
+
+		Sphere1 = ObjectInitializer.CreateDefaultSubobject<USphereComponent>(this, TEXT("Sphere1"));
+		Sphere1->InitSphereRadius(250.0f);
+		Sphere1->OnComponentBeginOverlap.AddDynamic(this, &ALightSwitchBoth::OnOverlap);		// set up a notification for when this component overlaps something
+		Sphere1->OnComponentEndOverlap.AddDynamic(this, &ALightSwitchBoth::OnOverlap);		// set up a notification for when this component overlaps something
+		Sphere1->AttachParent = RootComponent;
+		Components.Add(Sphere1);
+	}
+
+	void ALightSwitchBoth::OnOverlap_Implementation(AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+	{
+		if ( OtherActor && (OtherActor != this) && OtherComp )
+		{
+			PointLight1->ToggleVisibility();
+		}
+	}
+
+
+当创建类时，新的 `UCLASS()` 、`UFUNCTION()` 和/或 `UPROPERTY()` 宏意味着该代码必须在Visual Studio 或Xcode中进行编译，然后使用虚幻编辑器重新加载它们。
+关闭虚幻编辑器，在Visual Studio 或Xcode中编译该项目，然后打开编辑器并重新加载该项目，以确保正确地重新加载该游戏模块。同时，需要注意的一点是，
+要确保 **Build Configuration（版本配置）** 和您打开该项目使用的虚幻编辑器可执行文件的版本一致。 请在 
+[](Programming\Development\CompilingProjects)文档中阅读关于编译配置及编译项目的更多信息。
+
+当重新打开虚幻编辑器并重新打开您的项目后，便可以[创建](Engine/Blueprints\UserGuide\Types\ClassBlueprint\Creation)一个新的[类蓝图](Engine/Blueprints\UserGuide\Types\ClassBlueprint)了。
+在本示例中，选择LightSwitchBoth作为该蓝图的父类，蓝图名称为 **LightSwitchBoth_BP** 。
+
+![](BPBoth_ParentClass.png)
+
+在 C++代码中添加的PointLightComponent和SphereComponent 也会显示在 **Blueprint Editor（蓝图编辑器）** 的 [组件模式](Engine/Blueprints\Editor\Modes\Components)中的 **Components（组件）** 选卡内。
+它们的图标是深蓝色，表示它们是从父类LightSwitchBoth类继承而来的原生组件。而刚刚添加到 **LightSwitchBoth_BP**  蓝图中的新组件的图标 
+是浅蓝色的。关于使用 **Components（组件）** 选卡添加及排列组件的更多信息，请参照 [](Engine/Blueprints\UserGuide\Components)选卡文档。
+
+![](Both_ComponentList.png)
+
+**Blueprint Editor（蓝图编辑器）** 的 [图表模式](Engine/Blueprints\Editor\Modes\GraphPanel)是蓝图编辑的核心。在 **Graph Mode（图表）** 模式中，您可以在[](Engine/Blueprints\Editor/UIComponents\MyBlueprint)选卡中添加新[变量](Engine/Blueprints\UserGuide\Variables)、 
+[函数](Engine/Blueprints\UserGuide\Functions)及[宏](Engine/Blueprints\UserGuide\Macros)。您也可以访问该类蓝图中包含的 
+所有 [图表](Engine/Blueprints\UserGuide\Graphs)。在这些图表中，各种[节点](Engine/Blueprints\UserGuide\Nodes)连接到一起，来创建由类属性、游戏事件、甚至Actor的周边环境
+驱动的设计及游戏功能。
+
+在 **Graph Mode（图标模式）** 中， **My Blueprint（我的蓝图）** 选卡显示了在C++中添加到LightSwitchBoth类中的 PointLightComponent 和SphereComponent 。这是因为  `BlueprintReadOnly` 修饰符存在的缘故。
+通过在 **我的蓝图** 选卡中点击并拖拽这些组件的名称到图表中，可以将这些组件的节点添加到图表中。然后，您可以把这些节点连接到改变像可见性
+或光源颜色这样属性的节点上。**DesiredBrightness** 属性也会出现在 **我的蓝图** 选卡中。因为它是一个属性，而不是一个组件，所以可以使用 `BlueprintReadWrite` 
+修饰符。这意味着在蓝图图表中可以创建节点来获取及设置 **DesiredBrightness** 的值。请参照 [](Engine/Blueprints\Editor/UIComponents\MyBlueprint)文档来获得一般的应用信息。
+
+[REGION:tip]
+默认情况下，可能不会显示父类LightSwitchBoth的组件和属性。因为当选中 **我的蓝图** 选卡底部的 **Show user-created variables only(仅显示用户创建的变量)** 复选框时，
+会隐藏从父类继承的属性。
+[/REGION]
+
+| 显示所有变量 | 仅显示用户创建的变量|
+| ---------------------- | ------------------- |
+| ![](Both_MyBlueprint.png) | ![](Both_Hidden_MyBlueprint.png)|
+
+
+
+有两个图表用于设置 **LightSwitchBoth_BP** 类的行为。第一个是[](Engine/Blueprints\UserGuide\UserConstructionScript)图表，它包含了一个专用的 **Construction Script（构建脚本）**   
+事件。如果没有该 **Construction Script** 设置，那么新的 **LightSwitchBoth_BP** Actor  将仅使用LightSwitchBoth的构造函数。然而，当Actor在关卡中移动时，及当 
+**Desired Brightness** 发生改变时，都会执行 **Construction Script** 。使用 **Construction Script** 意味着，可以轻松地改变暴露给蓝图的Actor属性， 
+并且可以快速地看到这些修改的效果。
+
+在 **LightSwitchBoth_BP** 类中， **Construction Script** 事件连接到了 **Set Brightness**  节点上，以便当在关卡中添加或移动Actor时或者 **Desired Brightness** 发生改变时，将 **Point Light 1** (PointLightComponent) 的亮度设置为 
+**Desired Brightness** 的值。
+
+![](Both_ConstructionScript.png)
+
+**LightSwitch_BPOnly** 类中设置的另一个图表是 [](Engine/Blueprints\UserGuide\EventGraph) 。EventGraph的执行是由事件触发的。在这个示例中，
+任何时候当调用C++函数  `OnOverlap`  时，  **OnOverlap** 就会执行。在LightSwitchBoth的源文件中，设置了代理，以便当一个Actor进入或离开SphereComponent时会执行 **OnOverlap** 。
+
+		Sphere1->OnComponentBeginOverlap.AddDynamic(this, &ALightSwitchBoth::OnOverlap);		// set up a notification for when this component overlaps something
+		Sphere1->OnComponentEndOverlap.AddDynamic(this, &ALightSwitchBoth::OnOverlap);		// set up a notification for when this component overlaps something
+
+**OnOverlap** 事件节点连接到了 **Set Light Color** 节点上。任何时候当执行该事件时，它都将会把PointLightComponent的光源颜色设置为一个随机颜色。这覆盖了
+源码文件中用于切换的PointLightComponent可见性的 `OnOverlap_Implementation` 函数。
+
+关于事件及处理图表的更多信息，请参照[](Engine/Blueprints\UserGuide\Events)、 [](Engine/Blueprints\UserGuide\EventGraph)和[事件模式](Engine/Blueprints\Editor\Modes\GraphPanel) 文档。
+
+![](Both_EventGraph.png)
+
+在变量的设置中， **DesiredBrightness** 变量设置为 **EditAnywhere （随处可编辑）** ，所以在 **蓝图编辑器** 的[默认模式](Engine/Blueprints\Editor\Modes\Defaults)中它是可见的，并且可以进行编辑。
+这意味着对于类的每个实例，这个变量是可以变化的，所以每个Actor可以有其自己的 **DesiredBrightness** 。因为 **DesiredBrightness** 也是 **BlueprintReadWrite（蓝图可读写）** 的，且 
+**Construction Script** 中使用了它，所以更新它还会导致再次执行 **Construction Script** 。
+
+![](Both_Defaults.png)
+
+其他Class Blueprints(类蓝图)可以继承由蓝图创建的类，通过以下两种方式实现：使用 **Class Viewer（类别查看器）** 中的类附近的下拉列表按钮来创建一个新蓝图， 
+或者通过右击该蓝图并选择 **Create New Blueprint Based on This（基于此蓝图创建一个新蓝图）** 。
+
+类蓝图 **LightSwitchBoth_BP** 位于 [](Engine/Content/Browser)中，您可以从那里将其拖拽到关卡内。它也存在于 [](Engine/UI/ClassViewer)中。
+关于使用 **内容浏览器** 或 **类别查看器** 在关卡放置Actor的更多信息，请参照[](Engine/Actors/Placement) 文档。

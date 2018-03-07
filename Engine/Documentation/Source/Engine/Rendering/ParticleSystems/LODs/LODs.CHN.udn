@@ -1,0 +1,171 @@
+﻿INTSourceChangelist:2603854
+Availability:Public
+Title:粒子系统细节级别（LOD）
+Crumbs: %ROOT%, Engine, Engine/Rendering/ParticleSystems
+Description:粒子的 GPU 模拟，可允许成百上千的粒子同时存在。
+Version:4.9
+
+[TOC(start:2 end:3)]
+
+细节级别（LOD）是特效师的福音，利用它可以创建出根据玩家距离高效利用屏幕空间的粒子特效。例如篝火粒子系统，可能包含以下几种发射器：
+
+* 火焰内焰
+* 火焰外焰
+* 内焰辉光
+* 火星和灰烬
+* 一层或多层烟雾
+
+
+近距离观察时，系统的外观如下图所示：
+
+![FireEffect_Close.png](FireEffect_Close.png)
+
+
+而当玩家走远时，系统占用屏幕的空间变少，如下图所示：
+
+![FireEffect_Distant.png](FireEffect_Distant.png)
+
+在这种情况下，粒子系统的一些方面将会变得十分小（小于一个像素）而无需进行渲染，如灰烬。然而，这些粒子仍然被计算和处理。LOD 就可以大显身手了。它可使粒子系统基于距离进行简化，（在玩家距离过远而欣赏不到特效时）将系统中的发射器和模块将设置关闭，或完全关闭。
+
+
+该文档讲述粒子系统中细节层级（LODs）的创建以及在游戏中的实际用法。
+
+
+## 级联 LOD 功能键
+
+以下部分讲述级联工具栏中的 LOD 功能键。
+
+**级联 LOD 功能键**
+
+![Cascade_Toolbar.png](Cascade_Toolbar.png)
+
+每个功能键详解如下：
+
+
+| **按钮** | **名称** | **描述** |
+| --- | --- | --- |
+| ![Cascade_Toolbar_RegenLOD_Duplicating.png](Cascade_Toolbar_RegenLOD_Duplicating.png) | **Regenerate Lowest LOD Duplicating Highest Button** | 按下 _Regenerate Lowest LOD Duplicating Highest_ 按钮后，粒子系统将移除所有现有的较低 LOD 层并重新生成一个最低的 LOD。此 LOD 为最高层的副本。 |
+| ![Cascade_Toolbar_RegenLOD.png](Cascade_Toolbar_RegenLOD.png) | **Regen Lowest LOD Button** | 按下 _Regen Lowest LOD_ 按钮后，粒子系统将移除所有现有 LOD 层并重新生成一个最低的 LOD。 |
+| ![Cascade_Toolbar_LowestLOD.png](Cascade_Toolbar_LowestLOD.png) | **Jump to Lowest LOD Button** | 按下 _Jump to Lowest LOD_ 按钮后，系统将被设为最低的可用静态 LOD。 |
+| ![Cascade_Toolbar_LowerLOD.png](Cascade_Toolbar_LowerLOD.png) | **Jump to Lower LOD Button** | 按下 _Jump Lower to LOD_ 按钮后，系统将设为比当前 LOD 设置低一层的可用静态 LOD。 |
+| ![Cascade_Toolbar_AddLOD_Before.png](Cascade_Toolbar_AddLOD_Before.png) | **Add LOD before current Button** | 按下 _Add LOD before current_ 按钮后，系统将在当前加载的 LOD 前插入一个新的静态 LOD。 |
+| ![Cascade_Toolbar_CurrentLOD.png](Cascade_Toolbar_CurrentLOD.png) | **Current LOD** |  Current LOD 信息框显示当前载入的 LOD，以及粒子系统中存在的 LOD 数量。 |
+| ![Cascade_Toolbar_AddLOD_After.png](Cascade_Toolbar_AddLOD_After.png) | **Add LOD after current Button** | 按下 _Add LOD after current_ 按钮后，系统将在当前加载的 LOD 后插入一个新的静态 LOD。 |
+| ![Cascade_Toolbar_HigherLOD.png](Cascade_Toolbar_HigherLOD.png) | **Jump to Higher LOD 按钮** | 按下 _Jump to Higher LOD_ 按钮后，系统将设为比当前 LOD 设置高一层的可用静态 LOD。 |
+| ![Cascade_Toolbar_HighestLOD.png](Cascade_Toolbar_HighestLOD.png) | **Jump to Highest LOD 按钮**  |按下 _Jump to Highest LOD_ 按钮后，系统将被设为最高的可用静态 LOD。|
+| ![Cascade_Toolbar_DeleteLOD.png](Cascade_Toolbar_DeleteLOD.png) | **Delete LOD 按钮** | 按下 _Delete LOD_ 按钮将从粒子系统中删除当前选中的静态 LOD 层。 |
+
+
+
+
+
+## 在粒子系统中创建 LOD 层
+
+以下部分将讲述 LOD 全支持粒子系统创建的常规设计流程。流程的步骤详解如下：
+
+* 创建期望的整体效果。此为最高的 LOD 层。
+* 接下来创建最低的 LOD 层。
+* 添加两者之间的 LOD 层，创建从最高质量到最低质量的平顺过渡。
+
+
+[REGION:note]
+	只能在编辑最高 LOD 层时添加/删除模块。 
+[/REGION:note]
+
+
+
+在此例中我们使用单个 SubUV 发射器。它设置的方式是 SubUV 坐标 0 显示数字 1，坐标 1 显示数字 2，以此类推。应用的纹理外观如下：
+
+![ImageTest_Tile.png](ImageTest_Tile.png)(w:256)
+
+我们来设置最高的 LOD 层。 
+
+**最高 LOD 层**
+
+![HighestLOD.png](HighestLOD.png)
+
+特效师对粒子系统进行 LOD 开发时，选择工具栏中的 **Regenerate Lowest LOD**。这将使系统重新生成最低的 LOD 层。（它将同时删除临时创建的静态 LOD 层。）在当前，它将以较低的生成率复制最高 LOD 层。
+
+选择最低的 LOD 层后，进行数值调整获得需要的外观。需要注意的是所有模块在静态 LOD 层中均默认标为 _un-editable_。模块中显示的大理石花纹背景为此特征。
+
+|在最高 LOD 中查看的模块 | 在最低 LOD 中查看的模块 |
+| --- | --- |
+|![HighestLevelModules.png](HighestLevelModules.png)| ![LowestLevelModules.png](LowestLevelModules.png)|
+
+必须将其启用方可在静态 LOD 层中对模块进行编辑。在模块中 **单击右键** 并从快捷菜单中选择 **Duplicate from Higher**，完成此操作。 
+
+可用选项如下：
+
+| **选项** | **描述** |
+| ---- | ---- |
+| **Duplicate from Higher** | 复制更高一层 LOD 设置，启用模块编辑。|
+| **Share from Higher** | 分享更高一层 LOD 设置，启用模块编辑。这意味着编辑一个 LOD 将以相同方式自动编辑另一个 LOD。|
+| **Duplicate from Highest** | 复制最高 LOD 设置，启用模块编辑。|
+
+
+在此例中，我们已启用 SubImage Index 模块的编辑并将索引设为 3.发射器中的结果显示为黄色的 *4*，如下图所示：
+
+**最低 LOD 层**
+
+![LowestLOD.png](LowestLOD.png)
+
+注意：生成率被自动设为最高 LOD 层的 10%。
+
+下一步，按下 **Add LOD before current** 按钮（假定此时您仍在查看最低 LOD 层），在最高和最低之间添加一个静态 LOD。已启用 SubImage Index 模块并将索引设为 1。发射器中的结果显示为蓝色的 *2*，如下图所示：
+
+**LOD 第一层**
+
+![LOD_33.png](LOD_33.png)
+
+按下 **Add LOD after current** 按钮启用 SubImage index 模块，在第一个静态 LOD 和最低 LOD 之间添加一个静态 LOD。SubImage Index 被设为 2，导致发射器显示一个绿色的 *3*，如下图所示：
+
+**LOD 第二层**
+
+![LOD_66.png](LOD_66.png)
+
+
+## LOD 方法和距离设置
+
+粒子系统的游戏内操作由两个模式中的一个完成。每个粒子系统中名为 LODMethod 的列举提供确定此模式的方法。该模式交替控制 LOD 距离的处理方法。
+
+下图显示范例粒子系统的属性窗口：
+
+**LODDistances 属性窗口**
+
+![LODsettings.png](LODsettings.png)
+
+在此例中，发射器来自摄像机的 [0..1249] 单位时，使用 LOD 0（最高）。LOD 1 来自 [1250..1874]，LOD 2 来自 [1875..2499]，距离大于 2500 个单位时为 LOD 3。
+
+设为自动模式的每个 ParticleSystemComponent 在运行时将执行 LOD 距离确认，LODDistanceCheckTime 用于设置此操作的执行频率（以秒为单位）。在此例中，关卡中的每个粒子系统每四分之一秒执行一次距离确认。
+
+ 
+
+| 属性 | 描述 |
+| -------- | ----------- |
+| [REGION:tablesection]LOD[/REGION] ||
+| **LOD Distance Check Time** | 确定系统执行一次距离检测的时间频率（以秒为单位），以明确使用的 LOD 级别。（仅在 LODMethod 设为 Automatic 时使用）。|
+| **LOD Method** | 此列举说明系统选择适当 LOD 级别时所使用的方法。有两种方法可用：[INCLUDE:#LODMethod] |
+| **LODDistances** | 确定使用 LOD 级别的距离阵列。（仅在 LODMethod 设为 Automatic 时使用）。这些数值将提供选择 LOD 级别的推荐最小距离。例如，3 种 LOD 级别的粒子系统：[INCLUDE:#LODDistance] |
+| **LODSettings** | 一种结构阵列，决定每个 LOD 使用的特定设置。当前使用指定 LOD 时，唯一的设置 _Lit_ 用于控制 ParticleSystem 是否接受光照。|
+
+<!----
+[EXCERPT:LODDistance]
+[REGION:simpletable]
+| LODDistanceIndex | 值| 范围 | 所选 LOD 级别 |
+| --- | --- | --- | --- |
+| 0 | 0.0 | 0.0 - 2499.9 | 0 (最大值) |
+| 1 | 2500.0 | 2500.0 - 4999.9 | 1 |
+| 2 | 5000.0 | 5000.0 - 无限| 2 |
+[/REGION]
+[/EXCERPT:LODDistance]
+[EXCERPT:LODMethod]
+[REGION:simpletable]
+| 方法 | 描述 |
+| --- | --- |
+| Automatic | 基于 LOD 距离和检测时间自动设置 LOD 级别。|
+| DirectSet | 游戏将直接为系统设置使用的 LOD 级别。|
+| ActivateAutomatic | 特效生成时 LOD 即被定义，基于 LOD 中定义的距离参数。|
+[/REGION]
+[/EXCERPT:LODMethod]
+
+---->

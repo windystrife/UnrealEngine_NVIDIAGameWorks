@@ -1,0 +1,214 @@
+Availability: Public
+Title:控制台管理器: 在C++中设置控制台变量
+Crumbs:%ROOT%, Engine, Programming, Programming/Basics
+
+[TOC(start:2)]
+
+
+
+## 概述
+
+虚幻引擎自很久以前就有了控制台命令。一个控制台命令就是用户输入的一个简单的字符串，该字符串被发送到引擎中，引擎以某种方式作出反应(比如，控制台文本反应、改变内部状态)。
+
+新的控制台管理器统一并简化为一个通用形式： 控制台变量。
+
+
+
+## 什么是控制台变量?
+
+控制台变量是某种简单的数据类型(比如，浮点型、整型、字符串型)，这些类型具有引擎范围内的状态，用户可以读取和设置该状态。控制台变量有一个名称，当用户开始尝试把名称输入到控制台中时会进行自动补全处理。
+
+|**用户控制台输入**|**控制台输出**|**描述**|
+| --- | --- | --- |
+|`MyConsoleVar`|`MyConsoleVar = 0`|变量的当前状态输出到控制台中。| 
+|`MyConsoleVar 123`|`MyConsoleVar = 123`|变量的状态被修改了，新的状态会被输出到控制台中。| 
+|`MyConsoleVar ?`|`Possibly multi line help text.`|把控制台变量的帮助文本输出到控制台中。|
+
+
+
+## 创建/注册 控制台变量
+
+当创建引擎时需要尽早注册变量。示例：
+
+      GConsoleManager->RegisterConsoleVariable(TEXT("r.TonemapperType"),
+         -1,
+         TEXT("Allows to override which tonemapper function (during the post processing stage to transform HDR to LDR colors) is used:\n")
+         TEXT("  -1 = use what is specified elsewhere\n")
+         TEXT("   0 = off (no tonemapper)\n")
+         TEXT("   1 = filmic approximation (s-curve, contrast enhances, changes saturation and hue)\n")
+         TEXT("   2 = neutral soft white clamp (experimental)"),
+         ECVF_Cheat);
+
+
+`GConsoleManager` 是全局访问点。在那里您可以注册一个控制台变量或者查找一个现有的控制台变量。第一个参数是控制台变量的名称(unicode)。第二个参数是默认值，根据这个常量类型的不同，将会创建不同的控制台变量类型： int, float or string (!FString).
+
+`RegisterConsoleVariableRef` 也允许您注册一个现有浮点或int型，并让控制台变量直接使用它来存储变量状态。
+
+下一个参数定义了当用户在控制台变量的后面使用"?"时所显示的帮助文档。
+
+另一个可选的参数允许指定标志，比如ECVF_Cheat。在 `IConsoleManager.h` 对这些内容进行了详细解释。
+
+
+
+## 获得控制台变量的状态
+
+通过使用 `RegisterConsoleVariableRef` 所注册的变量可以高效地获得使用 `RegisterConsoleVariableRef` 所创建的控制台变量的状态。
+
+通过使用以下其中任何一个get函数可以更加方便地获得状态，但是速度稍微慢些(虚函数调用，或许会产生缓存丢失)： !GetInt(), !GetFloat(), !GetString()
+要想获得最好的性能，您应该使用和所注册的变量一样的类型。为了获得到变量的指针，您可以存储注册函数的返回参数或者在需要变量之前调用 `FindConsoleVariable` 函数。示例：
+
+
+       static IConsoleVariable* CVar = GConsoleManager->FindConsoleVariable(TEXT("TonemapperType")); 
+    
+       int32 Value = CVar->GetInt();
+    
+
+这里的static确保只在第一次调用该代码时进行名称搜索(作为地图实现)。这是正确的，因为该变量永远都不会移动，仅在引擎关闭时销毁。
+
+
+
+## 当状态改变时的反应
+
+可以使用ECVF_Changed标志来检测状态是通过Set()方法改变的还是由于用户输入改变的(注意，可以在不触发该标志的情况下改变到这些变量的引用)。示例：
+
+       if(CVar->TestFlags(ECVF_Changed))
+       {
+          CVar->ClearFlags(ECVF_Changed);
+          ... 
+       }
+    
+
+
+## 预期的控制台变量行为和风格
+
+
+* 控制台变量应该反映用户输入，不必反应系统的状态(比如， !MotionBlur 0/1 ，某些平台可能不支持它)。不应该通过代码改变变量状态。否则用户或许会想他是否拼写错了，因为变量不具有他所指定的状态或者由于某个其他变量的状态导致他不能修改控制台变量。
+* 总是提供很好的帮助信息，指出变量的用途及设置哪些值是有意义的。
+* 大部分控制台变量都是仅用于开发，所以尽早指定 `ECVF_Cheat` 标志是个好主意。
+* 当描述变量名称时应该尽可能简短，避免否定意思 (比如 这些不好的名字 !EnableMotionBlur 、 !MotionBlurDisable 、 MBlur 、 !HideMotionBlur)。使用大小写区分使得名称变得更加具有可读性和方便性(比如 !MotionBlur)。
+* 对于缩进，您可以假设固定宽度的字体输出 (不成比例)。
+
+
+请阅读 `IConsoleManager.h` 查找关于这些内容的更多信息。
+
+
+##加载控制台变量
+
+一旦引擎启动，就可以从"Engine/Config/ConsoleVariables.ini"文件加载控制台变量的状态。更多细节可以在该文件本身内找到：
+
+    ; This file allows to set console variables on engine startup (In undefined order).
+    ; Currently there is no other file overriding this one.
+    ; This file should be in the source control database (for the comments and to know where to find it)
+    ; but kept empty from variables.
+    ; A developer can change it locally to save time not having to type repetitive
+    ; console variable settings. The variables need to be in the section called [Startup].
+    ; Later on we might have multiple named sections referenced by the section name.
+    ; This would allow platform specific or level specific overrides.
+    ; The name comparison is not case sensitive and if the variable doesn't exists it's silently ignored.
+    ;
+    ; Example file content:
+    ;
+    ; [Startup]
+    ; FogDensity = 0.9
+    ; ImageGrain = 0.5
+    ; FreezeAtPosition = 2819.5520 416.2633 75.1500 65378 -25879 0
+    
+    [Startup]
+    
+
+## 以后的工作
+
+
+* 当前系统非常简单很容易使用。
+* 我们也考虑到了执行控制台命令(统一的界面、使用函数调用或代理、自动补全及帮助)。
+* 为了在所有解决方案中都能获得显示有好的帮助文本输出，我们将检查最长行的长度，并确保我们总是使用固定宽度的字体。
+* 目前仅能通过C++创建控制变量，但是这个情况性可能会改变。
+* 我们应该考虑把变量分组到一起。其他系统具有针对特定用途的首字母或字符串前缀(比如 !s_MusicBufferSize)。
+* 我们打算添加一个用于输出全部控制台命令及其帮助文本的命令(排序,分组)。
+* 我们想添加一个枚举类型和布尔类型，但是这会导致很多问题。暂时，我们建议使用int类型，或者根据需要使用字符串。
+* 帮助文档是非常便利的，但是为了减小可执行文件的大小或者为了使它们对于作弊者来说变得更加难，我们考虑添加一个定义来防止帮助文本进入到可执行文件中。
+* 目前的自动补全功能也会输出某些命令的一行帮助。对于控制台变量来说，该功能是禁止的，因为我们不想指定另一行帮助信息，并且我们不应该缩短多行帮助文档。这个或许会进行修改。
+
+
+
+##取消注册控制台变量
+
+`UnregisterConsoleVariable` 方法允许您删除该控制台变量。至少从用户的角度来说所发生的处理是这样的。实际上，这个变量仍然是保留的(具有取消注册标志)，以防止当指针访问该数据是出现崩溃。如果有一个新的变量注册为和所存储的老变量一样的名称，那么将会复制新变量的帮助提示信息及标志。这样DLL加载及卸载也可以正常工作，甚至不会缺失变量状态。注意，这个方法对于控制台变量引用是无效的。该问题可以通过放弃以下处理来进行修复： 不要存储指针、不要取消注册引用或不要使用引用。
+
+
+
+##和手动控制台变量实现的比较
+
+**示例:**
+
+_一些 .cpp文件和全局变量_
+
+
+       // for documentation see "MotionBlurSoftEdge" console command
+       float GMotionBlurSoftEdge = -1;
+    
+
+_另一些 .cpp文件和Exec() 方法_ 
+
+
+       else if (ParseCommand(&Cmd, TEXT("MotionBlurSoftEdge")))
+       {
+          extern float GMotionBlurSoftEdge;
+          FString Parameter(ParseToken(Cmd, 0));
+          if(Parameter.Len())
+          {
+             GMotionBlurSoftEdge = appAtof(*Parameter);
+          }
+          else
+          {
+             Ar.Logf(TEXT("Allows to override the motion blur soft edge amount.\n"));
+             Ar.Logf(TEXT("<0: use post process settings (default: -1)"));
+             Ar.Logf(TEXT(" 0: override post process settings, feature is off"));
+             Ar.Logf(TEXT(">0: override post process settings by the given value"));
+          }
+          Ar.Logf( TEXT("MotionBlurSoftEdge = %g"), GMotionBlurSoftEdge );
+          return true;
+       } 
+    
+
+
+_在 !BaseInput.ini 中_
+
+
+       ManualAutoCompleteList=(Command="MotionBlurSoftEdge",Desc="")
+    
+
+_某个函数中的应用:_
+
+       extern float GMotionBlurSoftEdge;
+       ... use GMotionBlurSoftEdge ...
+    
+
+**变为:**
+
+_在某些 .cpp文件中, 当引擎启动时_
+
+
+       GConsoleManager->RegisterConsoleVariable(TEXT("MotionBlurSoftEdge"),
+          -1.0f,
+          TEXT("Allows to override the motion blur soft edge amount.\n")
+          TEXT("<0: use post process settings (default: -1)\n")
+          TEXT(" 0: override post process settings, feature is off\n")
+          TEXT(">0: override post process settings by the given value"),
+          ECVF_Cheat);
+    
+
+
+_某个函数中的应用:_
+
+
+       {
+          static IConsoleVariable* CVar = GConsoleManager->FindConsoleVariable(TEXT("MotionBlurSoftEdge")); 
+          float Value = CVar->GetFloat();
+          ... use Value ...
+       }
+    
+
+
+当创建控制台变量时，在读取该变量之前代码甚至可以更加简短。但是，在引擎初始化过程中注册变量是很重要的，所以自动补全可以有效工作。可以输出所有控制台变量及其帮助信息是非常重要的，我们以后打算实现该功能。
+

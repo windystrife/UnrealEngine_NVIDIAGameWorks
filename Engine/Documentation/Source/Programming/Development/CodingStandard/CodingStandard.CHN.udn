@@ -1,0 +1,686 @@
+﻿INTSourceChangelist:1
+Availability:Public
+Title:编码规范
+Crumbs:%ROOT%, Programming, Programming\Development
+Description:Epic Games在虚幻引擎4的代码库中使用的标准和规范。
+Version: 4.11
+
+[TOC(start:2)]
+
+
+在 Epic 内部，我们遵循一些简单的编码标准和规则。书写本文的目的不是为了进行相关讨论或者将其作为一项正在进行中的工作，而是为了反映 Epic 的目前使用的编码规范的状态。
+
+编码规范对于程序员来说非常重要，原因如下：
+
+* 一套软件 80% 的生命周期都是维护。
+* 在软件的整个生命周期中，几乎不可能一直是软件的原始作者来对其进行维护。
+* 编码规范可以改进软件的可读性，从而使得工程师可以快速并透彻地理解新的代码。在项目的整个生命周期中我们肯定会需要雇佣新的工程师及实习生，并且我们可能要将我们制作的一些新的引擎改进应用到接下来的项目中。
+* 如果我们决定将源代码公布到 MOD 开发者社区，那么我们想让它通俗易懂。
+* 其中大部分编码规范实际上是交叉编译器兼容性所要求的。
+
+这里的代码规范是面向 C++ 而言的，然而无论用什么语言来编写代码都应该遵循同样的标准精神。
+
+
+## 类的组织结构
+
+类的组织结构应该以阅读代码的人而不是以编写代码的人为中心。因为大部分阅读代码的人都要使用类的公共接口，所以在类中应该先声明公共接口，然后是类的私有实现。
+
+
+## 版权声明
+
+Epic 发布时提供的任何源码文件 (`.h`, `.cpp`, `.xaml` 等等) 都必须包含版权声明，将其放置在文件的第一行。版权声明的格式必须完全符合以下格式：
+
+	// 版权1998-2016 Epic Games, Inc. 版权所有。
+
+如果没有这行声明或者格式不正确，那么CIS（持续集成系统）将会产生错误并导致集成失败。
+
+## 命名规范
+
+* 名字中每个单词的首字母(比如类型或变量)要大写，单词之间通常不要使用下划线。比如，Health 和 UPrimitiveComponent 是符合规范的，而 lastMouseCoordinates 或 delta_coordinates是不符合规范的。
+* 类型名称有一个额外的大写字母前缀，以便将类型名称和变量名称区分开来。比如，FSkin 是类型名称，而 Skin 是 FSkin 的一个实例。
+    * 模板类以 T 为前缀。
+    * 继承 UObject 的类以 U 为前缀。
+    * 继承 AAtor 的类以 A 为前缀。
+    * 继承 SWidget 的类以 S 为前缀。
+    * 抽象接口类以 I 为前缀。
+    * 枚举类由 E 为前缀
+    * 布尔变量必须以 b 为前缀（比如 “bPendingDestruction”，或 “bHasFadedIn”）
+    * 大部分其他类都以 F 为前缀, 但某些子系统使用其他字母。
+    * Typedef 应该由相应的类型来前缀：F 则说明是 struct 的 typedef，U 则是 UObject 的 typedef，以此类推
+        * 对于一个模板的特定化实例来做的 typedef 则不再是模板，应该用相应的前缀来定义。比如：
+                typedef TArray<FMyType> FArrayOfMyTypes;
+    * C# 中忽略前缀
+    * UnrealHeaderTool 在大部分情况下都要求使用正确的前缀，因此这些规则很重要。
+* 类型和变量名称必须是名词。
+* 方法（或函数，或过程）的名称是动词，动词可以描述该方法的作用，或者对于没有作用的方法可以用返回值来描述方法名称。
+
+
+变量、方法及类的名称应该清晰、明确且具有描述性。名称的作用域越大，取一个符合标准的具有描述性的名称的重要性便越强。避免过度缩写。
+
+所有变量都应该一次仅声明一个，以便可以提供有关这个变量的含义的注释。同时，这也符合 JavaDocs 风格的要求。您可以在变量前面使用多行或单行注释，可以留一个空行来给变量分类。
+
+所有返回布尔值的函数都应该询问返回值是真还是假这个问题，比如 "IsVisible()" 或 "ShouldClearBuffer()" 。
+
+过程（没有返回值的函数）命名时应该使用一个强动词后面加一个对象。如果方法的对象正是该方法所属的对象，那么方法将根据上下情境来获得对象，这是种例外情况。命名时要避免使用 "Handle" 和 "Process" 开头，这些动词表达的意思模糊不清。
+
+如果一个参数是通过引用传入函数且该函数要向此参数写入值，那么我们鼓励您使用 "Out" 作为函数参数名称的前缀，但这不是强制要求。这样便显而易见地表示出传入到该参数中的值会被该函数所代替。
+
+对于能够返回值的函数的名称，应该描述出该返回值的意思；名称应该可以清楚地表达出要返回的是什么值。这对于布尔函数尤为重要。考虑以下两个示例方法：
+
+		bool CheckTea(FTea Tea) {...} // true 代表什么意思？
+		bool IsTeaFresh(FTea Tea) {...} // 名称可以明确表示true代表茶是新鲜的
+
+
+### 示例
+
+		/** 茶重量（单位:千克）*/
+		float TeaWeight;
+
+		/** 茶叶数量 */
+		int32 TeaCount;
+
+		/** true 表示茶叶很香 */
+		bool bDoesTeaStink;
+
+		/** 茶叶的非人类可读 FName */
+		FName TeaName;
+
+		/** 茶叶的人类可读名称 */
+		FString TeaFriendlyName;
+
+		/** 要使用的是茶叶的哪一个类 */
+		UClass* TeaClass;
+
+		/** 倒茶的声音 */
+		USoundCue* TeaSound;
+
+		/** 茶叶的图片 */
+		UTexture* TeaTexture;
+
+
+## 基本C++数据类型的可移植别名
+
+* bool 代表布尔值 (永远不要假设布尔值的大小) 。BOOL 将不会进行编译。
+* TCHAR 代表字符型（永远不要假设TCHAR的大小）。
+* uint8 代表无符号字节（占1个字节）。
+* int8 代表有符号的字节（占1个字节）。
+* uint16 代表无符号"短整型" (占2 个字节)。
+* int16 代表有符号"短整型" (占2 个字节)。
+* uint32 代表无符号整型（占4字节）。
+* int32 代表带符号整型（占4字节）。
+* uint64 代表无符号"四字" (8个字节)。
+* int64 代表有符号"四字"（8个字节）。
+* float 代表单精度浮点型 (占4 个字节)。
+* double 代表双精度浮点型 (占8 个字节)。
+* PTRINT 代表可以存放一个指针的整型 (永远不要假设PTRINT的大小)。
+
+
+请不要在可移植代码中使用 C++ 整型，因为需要根据编译器决定这种数据类型的大小。
+
+
+## 注释
+
+注释是一种信息交流；而这种信息交流 _至关重要_ 。关于注释，需要注意以下几点（节选自 Kernighan & Pike 的 _编程实践_ ）：
+
+
+### 指南
+
+* 编写具备良好可读性的代码:
+
+		// 不好:
+		t = s + l + b;
+		
+		// 好:
+		TotalLeaves = SmallLeaves + LargeLeaves - SmallAndLargeLeaves;
+
+
+* 编写有用的注释:
+
+		// 不好:
+		// iLeaves进行自加运算
+		++Leaves;
+
+		// 好:
+		// 我们知道有另一片茶叶
+		++Leaves;
+
+
+* 不要给可读性不好的代码添加注释 - 重新编写这段代码:
+
+		// 不好:
+		// 茶叶的总量是
+		// 大茶叶和小茶叶的总量之和减去
+		// 既包含大茶叶又包含小茶叶的茶叶量
+		t = s + l + b;
+		
+		// 好:
+		TotalLeaves = SmallLeaves + LargeLeaves - SmallAndLargeLeaves;
+
+
+* 编写的注释不要和代码相冲突：
+
+		// 不好:
+		// 永远不要让iLeaves进行自加运算!
+		++Leaves;
+		
+		// 好:
+		// 我们知道有另一片茶叶
+		++Leaves;
+
+
+### Const 正确性
+
+const 即使对编译器工作的引导，也是说明文档，因此应该尽可能的遵守正确使用 const 的形式。
+
+这里包括当函数不修改传入参数时，应在参数中使用 const 指针或引用，如果一个函数不修改对象则将它标记为 const，以及在对于不修改外部容器的循环使用 const 修饰。
+
+		void SomeMutatingOperation(FThing& OutResult, const TArray<int32>& InArray); // InArray will not be modified by SomeMutatingOperation, but OutResult probably will be
+
+		void FThing::SomeNonMutatingOperation() const
+		{
+			// This code will not modify the FThing it is invoked on
+		}
+
+		TArray<FString> StringArray;
+		for (const FString& : StringArray)
+		{
+			// The body of this loop will not modify StringArray
+		}
+
+Const 也应该对于使用值的方法下被使用。这里就告诉代码的读者该变量并不会在函数体内修改，会帮助理解代码。这么做的事情也请保证函数申明和定义一致，因为这也会影响 JavaDoc 的过程：
+
+		void AddSomeThings(const int32 Count);
+
+		void AddSomeThings(const int32 Count)
+		{
+			const int32 CountPlusOne = Count + 1;
+
+			// Neither Count nor CountPlusOne can be changed during the body of the function
+		}
+
+这里有个值传递参数的例外（查看 "Move semantics"），但这种情况很少见。
+
+		void FBlah::SetMemberArray(TArray<FString> InNewArray)
+		{
+			MemberArray = MoveTemp(InNewArray);
+		}
+
+将 const 关键字放到后面来表示一个指针本身是常量（而不是它指向的内容）。这里表示该指针无法被“重新指向”。
+
+		// Const pointer to non-const object - pointer cannot be resassigned, but T can still be modified
+		T* const Ptr = ...;
+
+		// Illegal
+		T& const Ref = ...;
+
+不要用 const 来修饰返回值类型，这是一个 move semantics 的用法，为了复杂类型并会对内建类型产生编译警告。这条规则仅对范围类型本身起效，并不对返回的指针类型或引用类型的目标起效。
+
+		// Bad - returning a const array
+		const TArray<FString> GetSomeArray();
+
+		// Fine - returning a reference to a const array
+		const TArray<FString>& GetSomeArray();
+
+		// Fine - returning a pointer to a const array
+		const TArray<FString>* GetSomeArray();
+
+		// Bad - returning a const pointer to a const array
+		const TArray<FString>* const GetSomeArray();
+
+### 示例格式
+
+我们使用基于JavaDoc 的系统来自动地从代码中提取注释并构建成文档，所以这就要求遵循一些特定的注释格式规则。
+
+以下示例展示了类、状态、方法和变量的注释格式。请记住注释应该是辅助加强代码的。代码是功能实现，注释表明了代码的目的。请确保在您更改一段代码意图时更新注释。
+
+注意，正如下面Steep和Sweeten方法所呈现的，我们支持两种不同的参数注释风格。Steep所应用的@param风格是传统风格，但对于简单的函数来说，把参数介绍集成到函数的描述性注释中会使其看上去更加清晰，正如Sweeten 中的注释所示。
+
+和UE3编码规范不同，UE4中应该仅包含一次方法注释，即在公开声明方法的地方提供该注释。方法注释应该仅包含和方法的函数调用相关的信息，包括可能和该函数调用相关的方法重载的任何信息。关于那些和函数调用无关的方法及其重载方法的实现细节，应该在方法实现内部进行注释。
+
+
+		/** 可饮用对象的接口。*/
+		class IDrinkable
+		{
+		public:
+
+			/**
+			 * 当玩家饮用该对象时调用。
+			 * @param OutFocusMultiplier - 返回时，将包含乘数以应用于饮用者。
+			 * @param OutThirstQuenchingFraction - 返回时，将包含饮用者的口渴值的分数值归0 (0-1)。
+			 */
+			virtual void Drink(float& OutFocusMultiplier,float& OutThirstQuenchingFraction) = 0;
+		};
+
+		/** 一杯茶 (茶) */
+		class FTea : public IDrinkable
+		{
+		public:
+
+			/**
+			 * 根据浸泡茶的水的体积和水温来计算茶叶的变换口味值。
+			 * @param VolumeOfWater - 以毫升计算的用于酿造的水量
+			 * @param TemperatureOfWater - 以开氏度计算的水温
+			 * @param OutNewPotency - 在浸泡开始后的茶叶效能，从0.97到1.04
+			 * @return    会返回每分钟茶叶口味单位值 (TTU) 中茶叶浓度的改变
+			 */
+			float Steep(
+				float VolumeOfWater,
+				float TemperatureOfWater,
+				float& OutNewPotency
+				);
+
+			/** 对茶叶添加甜味剂，根据产生相同甜度的蔗糖的量来作为数量，以克计算。*/
+			void Sweeten(float EquivalentGramsOfSucrose);
+
+			/**在日本出售的茶叶的价格，以日元为单位。*/
+			float GetPrice() const
+			{
+				return Price;
+			}
+
+			// IDrinkable接口
+			virtual void Drink(float& OutFocusMultiplier,float& OutThirstQuenchingFraction);
+
+		private:
+
+			/** 以日元计算的茶叶的价值。*/
+			float Price;
+
+			/** 茶叶的甜味，根据产生相同甜度的蔗糖的量来作为数量，以克计算。*/
+			float Sweetness;
+		};
+
+		float FTea::Steep(float VolumeOfWater,float TemperatureOfWater,float& OutNewPotency)
+		{
+			...
+		}
+
+		void FTea::Sweeten(float EquivalentGramsOfSucrose)
+		{
+			...
+		}
+
+		void FTea::Drink(float& OutFocusMultiplier,float& OutThirstQuenchingFraction)
+		{
+			...
+		}
+
+
+类注释中都包括哪些内容？
+* 这个类解决的问题的说明。为什么创建这个类？
+
+方法注释的所有组成部分的意思？
+* 首先是函数的作用；这记录了 _函数所解决的问题_ 。正如上面所说的，注释表明 _意图_ ，而代码记录 _实现_ 。
+* 然后是参数注释；每个参数注释应该包含了度量单位、期望值的范围、不符合要求的值、及 状态/错误 代码的意思。
+* 然后是返回值注释，它说明了期望的返回值的信息，注释方法和给输出变量添加注释一样。
+
+
+## C++ 11 和现代语法
+
+虚幻引擎可大量移植到许多C++编译器中，所以我们对于与支持的编译器相兼容功能的使用非常谨慎。有时一些功能相当好用，我们会把它们放在宏中并大量使用它们，但一般我们会等到对所有可能的编译器的支持达到最新标准才开始使用。
+
+我们正在使用特定的对现代编译器进行良好支持的 C++ 11 语言功能，诸如"auto"关键字，range-based-for 以及 lambdas。在一些情况下，我们能够以预处理器条件句的形式对这些功能进行打包（诸如容器中的 rvalue 引用）。但是，对一些特定的语法功能，我们可能需要尽力避免，除非我们确信这个语法在新平台上可以被识别。
+
+除非是下方特别指出的受支持的现代 C++ 编译器功能，否则您应尽量不使用编译器的特定语法功能，除非它们被封装在预处理器宏或条件句中，并且被保守使用。
+
+
+### 原有宏的新关键字
+
+原有的宏 'checkAtCompileTime', 'OVERRIDE', 'FINAL' 和 'NULL' 现在可以替换为 'static_assert', 'override', 'final' 和 'nullptr'。一些宏可能仍保留定义，因为它们的使用仍较为广泛。
+
+其中的一个例外情况是 C++/CX 版本中的 nullptr（例如 Xbox One）实际上是管理的无效引用类型。除了类型和一些模板实例关联外，它与原生 C++ 的 nullptr 最为兼容，因此出于兼容性的考量，您应该使用 TYPE_OF_NULLPTR 宏而不是更为常见的 decltype(nullptr)。
+
+
+### 'auto' 关键字
+
+所有的编译器虚幻引擎4对象都支持'auto'关键字，我们建议您在您代码中的合适位置使用。
+
+正如您使用类型名称那样，您可以且应该使用带auto的常量或* 。使用auto关键字将会强制将推测类型变为您想要使用的类型。
+
+我们建议将auto关键字用于迭代器循环（消除样板） - 或更佳： ranged-based for loops - 以及在您初始化变量到新建实例时（消除多余的类型名称）。一些使用更为持续，但您可以随意使用，并且我们也会不断学习并改进其应用。
+
+技巧：  如果您将鼠标悬停于Visual Studio中的变量上，一般它会告知您推测类型。
+
+
+### Range Based For
+
+可以在所有的引擎和编辑器代码中使用，并且我们建议将其用于更容易了解和维护代码的位置。在迁移使用原有TMap迭代器的代码时，请注意原有的作为迭代器类型方式的 Key() 和 Value() 函数现在成为底层键值 TPair 的简单键值域：
+
+		TMap<FString, int32> MyMap;
+
+		// 原有样式
+		for (auto It = MyMap.CreateIterator(); It; ++It)
+		{
+			UE_LOG(LogCategory, Log, TEXT("Key: %s, Value: %d"), It.Key(), *It.Value());
+		}
+
+		// 新建样式
+		for (auto& Kvp : MyMap)
+		{
+			UE_LOG(LogCategory, Log, TEXT("Key: %s, Value: %d"), Kvp.Key, *Kvp.Value);
+		}
+
+对于单独的迭代器类型，我们也有范围替换：
+
+		// 原有样式
+		for (TFieldIterator<UProperty> PropertyIt(InStruct, EFieldIteratorFlags::IncludeSuper); PropertyIt; ++PropertyIt)
+		{
+			UProperty* Property = *PropertyIt;
+			UE_LOG(LogCategory, Log, TEXT("Property name: %s"), *Property->GetName());
+		}
+
+		// 新建样式
+		for (UProperty* Property : TFieldRange<UProperty>(InStruct, EFieldIteratorFlags::IncludeSuper))
+		{
+			UE_LOG(LogCategory, Log, TEXT("Property name: %s"), *Property->GetName());
+		}
+
+
+### Lambdas 以及匿名函数
+
+现在允许使用 Lambdas，但是对于捕获堆栈变量的状态 lambdas 的使用我们要谨慎 --目前我们仍在学习哪些使用是恰当的。另外，状态 lambdas 无法指派给我们使用很多的函数指针。
+
+Lambdas 的最佳用法是与通用算法中的断言一起使用，举例来说：
+
+		// 搜寻首个名称包含文字 "Hello" 的对象
+		Thing* HelloThing = ArrayOfThings.FindByPredicate([](const Thing& Th){ return Th.GetName().Contains(TEXT("Hello")); });
+
+		// 以名称的反向来对数组排序
+		AnotherArray.Sort([](const Thing& Lhs, const Thing& Rhs){ return Lhs.GetName() > Rhs.GetName(); });
+
+我们期望在未来建立最佳实践之后来更新本文。
+
+
+## 强类型枚举
+
+枚举类受所有编译器的支持，并且我们推荐将其替换原有类型的命名空间枚举，比如常规枚举和UENUMs。比如：
+
+		// 原有枚举
+		UENUM()
+		namespace EThing
+		{
+			enum Type
+			{
+				Thing1,
+				Thing2
+			};
+		}
+
+		// 新建枚举
+		UENUM()
+		enum class EThing : uint8
+		{
+			Thing1,
+			Thing2
+		};
+
+只要它们是基于 uint8，它们也被作为 UPROPERTYs 而受到支持 - 它替换了原有的 TEnumAsByte<> 解决方案:
+
+		// 原有属性
+		UPROPERTY()
+		TEnumAsByte<EThing::Type> MyProperty;
+
+		// 新建属性
+		UPROPERTY()
+		EThing MyProperty;
+
+作为标识使用的枚举类可以通过新建 ENUM_CLASS_FLAGS(EnumType) 宏来自动定义所有的按位操作符:
+
+		enum class EFlags
+		{
+			Flag1 = 0x01,
+			Flag2 = 0x02,
+			Flag3 = 0x04
+		};
+
+		ENUM_CLASS_FLAGS(EFlags)
+
+其中的例外情况是在 'truth' 关联中的标识使用 - 这是对语法的限制，并且可以使用 'double bang' 操作符来变通处理：
+
+		// 原有
+		if (Flags & EFlags::Flag1)
+
+		// 新增
+		if (!!(Flags & EFlags::Flag1))
+
+
+## Move 语句
+
+所有的主容器类型 - TArray, TMap, TSet, FString -都具有 move 构造函数以及 move 赋值运算符。在根据值来传递/返回这些类型时，它们经常会被自动使用，但可以通过使用 MoveTemp 来明确调用，MoveTemp 等同于 虚幻引擎4 的 std::move。
+
+通过值来返回容器或字符串有助于表达而不会使用通常的临时拷贝。值传递以及对 MoveTemp 的使用的规则仍在建立中，但已经可以在代码库的一些最优化区域中找到。
+
+
+## 第三方代码
+
+任何时候当您修改引擎中我们使用的库的代码时，请一定要使用带 //@UE4 的注释标记该变更,并解释您进行该修改的原因。这样可以更加容易地将变更合并到这个库的新版本中，并且使授权用户可以轻松地找到我们已经进行的任何修改。
+
+引擎中包含的任何第三方代码都应该使用格式化的注释进行标记，以便可以轻松地进行查找。比如：
+
+		// @third party code - BEGIN PhysX
+		#include <PhysX.h>
+		// @third party code - END PhysX
+
+		// @third party code - BEGIN MSDN SetThreadName
+		// [http://msdn.microsoft.com/en-us/library/xcb2z8hs.aspx]
+		// Used to set the thread name in the debugger
+		...
+		//@third party code - END MSDN SetThreadName
+
+
+## 代码格式
+
+
+### 大括号 { }
+
+大括号冲突是不符合规则的。Epic长期使用的一种模式是将大括号单独放在新的一行上。请继续遵守这个规则。
+
+
+### If - Else
+
+if-else 语句的每个代码执行块都应该位于大括号内。这是为了防止编辑错误 - 如果没有使用大括号，某人可能会不经意地向 if 代码块中添加另一行代码。而这行代码并不会受到if表达式的控制，这是非常糟糕的。更糟糕的是，当条件化地编译各项时会导致 if/else 语句中断。所以一定要使用大括号。
+
+		if(HaveUnrealLicense)
+		{
+			InsertYourGameHere();
+		}
+		else
+		{
+			CallMarkRein();
+		}
+
+多重 if 语句在缩进时应该让每个 else if 语句的缩进和首个 if 语句对齐，这样对读者来说结构更加清晰。
+
+		if(TannicAcid < 10)
+		{
+			Log("Low Acid");
+		}
+		else if(TannicAcid < 100)
+		{
+			Log("Medium Acid");
+		}
+		else
+		{
+			Log("High Acid");
+		}
+
+
+### Tabs(制表符)
+
+* 通过可执行代码块缩进代码。
+
+* 使用制表符而不是空格来设置每行首部的空白。设置您的制表符大小为 4 个字符。但是，有时候也是需要使用空格，以便无论一个制表符中包含多少个空格都可以保持代码对齐；比如，当对齐没有应用制表符字符后面的代码时。
+
+* 如果您正编写 C# 代码，那么您也要使用制表符字符而不是空格。这样做的原因是程序员经常要在 C# 和 C++ 之间进行切换，所以大部分人都希望使用统一的制表符设置。Visual Studio 默认在 C# 文件使用空格，所以当您在处理虚幻引擎代码时，您需要记住改变这个设置。
+
+
+### Switch 语句
+
+除了空的 case（具有相同代码的多个case）外，swittch case 语句应该明确地标注出某个 case 运行到下一个 case。在每个 case 中或者包含一个 break 语句或者包含一个向下执行的注释。也可以使用其他的代码控制变换命令(return、continue 等)。
+
+通常都有一个default case，它包含一个break语句 - 这样可以防止某人在default语句后再添加新的case。
+
+		switch (condition)
+		{
+			case 1:
+				...
+				// falls through
+			case 2:
+				...
+				break;
+			case 3:
+				...
+				return;
+			case 4:
+			case 5:
+				...
+				break;
+			default:
+				break;
+		}
+
+
+## Namespaces（命名空间）
+
+您可以在适当的地方使用命名空间来组织您的类、函数、变量，只要遵循以下规则即可。
+
+* 虚幻代码目前没有封装在全局命名空间中。所以您需要小心以免在全局作用域内发生冲突，尤其是当引入第三方代码的时候。
+* 不要把 "using" 声明放到全局作用域内,即使是放在 .cpp 文件中也不行(这会导致我们“联合的”编译系统出现问题)。
+* 可以把 "using" 声明放在另一个命名空间或函数体内。
+* 注意如果您把 "using" 声明放到一个命名空间内,那么它将继续存在于同一编译单元中其它地方出现的该命名空间中 。只要您使其保持一致即可。
+* 如果您遵守上面的规则，您可以仅在头文件中安全地使用 "using" 。
+* 注意，进行前置声明的数据类型需要在其各自的命名空间中进行声明，否则将会出现连接错误。
+* 如果您在一个命名空间中声明了很多类/数据类型，那么在其他具有全局作用域的类中使用这些数据类型可能会很难。(比如，函数签名出现在类声明中时需要使用显式命名空间。)
+* 您可以使用 "using" 来把命名空间中的特定变量在您的作用域中进行别名设置(比如 using Foo::FBar), 但我们一般不会在虚幻引擎代码中进行这样的操作。
+* 我们要求 C++ 枚举变量声明要[封装在一个命名空间中]( #C++ 枚举值和命名空间作用域） ，以便枚举值名称不会位于全局作用域中。
+
+
+## C++ 枚举值(命名空间作用域)
+
+* 在虚幻引擎的代码中我们一般会在枚举类型前面加上 "E"字符作为前缀。
+
+* 我们要求所有枚举类型都使用命名空间来 (或空的结构体) 确定作用域。这样做的原因是在C++中枚举值的作用域和枚举类型本身的作用域一样。这样可能导致命名冲突，使得程序员必须创建奇怪的名称或者给枚举值加上前缀使它们的值保持唯一性。相反，我们通常会使用命名空间来规定新的枚举类型的作用范围。命名空间内的实际枚举类型的名称应该总是声明为 "Type" 。
+
+* 通过命名空间确定枚举类型作用于的示例：
+
+		/** 定义命名空间内的枚举来完成C#-样式的枚举范围 */
+		namespace EColorChannel
+		{
+			/** 按照此枚举的实际类型来声明EColorChannel::Type */
+			enum Type
+			{
+				Red,
+				Green,
+				Blue
+			};
+		}
+
+		/** 给定颜色通道，返回该通道的名称。*/
+		FString GetNameForColorChannel(const EColorChannel::Type ColorChannel)
+		{
+			switch(ColorChannel)
+			{
+				case EColorChannel::Red:   return TEXT("Red");
+				case EColorChannel::Green: return TEXT("Green");
+				case EColorChannel::Blue:  return TEXT("Blue");
+				default:                   return TEXT("Unknown");
+			}
+		}
+
+
+* 注意对于局部声明的枚举类型来说，您不能使用命名空间来规定作用范围。在这些情况中，我们选择声明一个没有成员变量的局部结构体，该结构体内仅有一个局部的枚举类型，使用该结构体来规定作用范围。
+
+		/** 使用结构体定义本地作用的枚举*/
+		class FObjectMover
+		{
+        public:
+
+            /** 待移动的方向 */
+            struct EMoveDirection
+            {
+			    enum Type
+			    {
+				    Forward,
+				    Reverse,
+			    };
+            };
+
+            /** 构建具有特定移动方向的FObjectMover */
+            FObjectMover( const EMoveDirection::Type Direction );
+		}
+
+
+## 物理依赖
+
+* 不要在任何地方都给文件名添加前缀；比如，要命名为 Scene.cpp 而不是UnScene.cpp。这样做通过减少用于消除您想要的文件的歧义性所需的字符数，使得在解决方案中使用像Workspace Whiz或Visual Assist的Open File这样的工具时更加方便。
+* 使用 #pragma once 指令来避免所有头文件中包含多个包含文件。注意现在我们所使用的所有编译器都支持 #pragma once。
+	
+		#pragma once
+
+		<file contents>
+
+* 一般，请尝试最小化物理耦合。
+** 如果您可以使用前置声明来代替包含一个头文件，那么请这样做。
+** 包含头文件时要尽可能地包含具体文件；不要包含Core.h文件，而是包含Core中具有您所需定义的特定头文件。
+* 请尝试包含您直接需要的每个头文件，以便使得包含详细具体的头文件变得更加容易。
+** 不要依赖于您包含的另一个头文件中间接地包含的头文件。
+** 不要通过另一个头文件来包含需要的内容；而是自己包含您所需要的任何内容。
+* Modules（模块）有私有和公有源码目录。其他模块中需要的任何定义必须位于公开目录中的头文件内，但是其他内容应该位于私有目录内。注意，在旧版的虚幻模块中，这些目录可能仍然称为Src和Inc，但是这些目录同样是为了分离私有和公有代码，而不是为了从源码文件中分离头文件。
+* 不要担心把您的头文件设置为预编译头文件生成。UnrealBuildTool可以比您更好地完成这个工作。
+
+
+## 一般风格问题
+
+* *最小化依赖距离* 。当代码依赖于具有特定值的变量时，尝试恰好在使用该变量之前设置该变量的值。在可执行代码块的顶部初始化变量且在接下来的上百行代码中都不使用它，会导致其他人很可能会不小心地修改这个值，而没有意识到依赖关系。将变量初始化放在变量应用的上一行使得大家可以清晰地看到变量初始化的方式、及其应用的地方。
+* *在可能的情况下都尽量把方法分割成子方法*。人们更喜欢先看到大局然后再继续研究感兴趣的细节，而不是从大量的细节开始然后根据细节重构出大局。同样，理解一个调用了几个具有良好可读性命名的子方法的方法比理解一个简单地包含了子方法中所有代码的等价方法更加容易。
+* 在函数声明或函数调用的地方，不要在函数名称和包含参数列表的小括号之间添加空格。
+* *解决编译器警告。* 编译器警告信息表示某些内容和其期望内容不符。您可以修复编译器所抱怨的问题。如果您确实无法解决这个问题，那么使用 #pragma 禁止该警告；这是最后一种补救方法。
+* *在文件结尾留下一行空白行。* 所有 .cpp 和 .h 文件应该包括一行空白行,以便可以很好地同gcc编译器协同工作。
+* *绝对不允许将 FLOAT 隐性转换成int32。* 这个操作很慢，且不会在所有编译器上进行编译。相反，通常使用 appTrunc() 函数来转换为int32。这样可以确保交叉编译器兼容性并生成更快速的代码。
+* *使用保护关键字进行封装* 类成员应该声明为私有的，除非它们是该类的公有接口的一部分。
+* 接口类(以 "I" 为前缀)应该是抽象类，不能包含任何成员变量。接口可以包含非纯虚函数、甚至可以包含非虚函数或静态函数，只要将它们作为内联函数实现即可。
+* *在任何可能的地方使用常量。* 尤其是在引用参数和类方法中。关于常量的文档很多，它就像个编译器指令一样。
+* *调试代码一般是有用的且经过改进的, 不要将其迁入源码控制工具。* 如果讲调试代码和其他代码相混合，那么会导致其他代码非常难以理解。
+* *使用中间变量来简化复杂的表达式。* 如果您有一个复杂的表达式，若您将它分为几个子表达式，并在父项表达式中创建一个具有描述了子表达式意思的名称的中间变量，然后将该子表达式赋予该中间变量，这将会使得表达式更加容易理解。比如：
+
+		if ((Blah->BlahP->WindowExists->Etc && Stuff) &&
+			!(bPlayerExists && bGameStarted && bPlayerStillHasPawn &&
+			IsTuesday())))
+		{
+			DoSomething();
+		}
+
+	_应该替换为_
+
+		const bool bIsLegalWindow = Blah->BlahP->WindowExists->Etc && Stuff;
+		const bool bIsPlayerDead = bPlayerExists && bGameStarted && bPlayerStillHasPawn && IsTuesday();
+		if(bIsLegalWindow && !bIsPlayerDead)
+		{
+			DoSomething();
+		}
+
+
+ * *当声明重写方法时请使用virtual和OVERRIDE关键字。* 当在子类中声明一个重写父类虚函数的虚函数时，您 *必须* 使用virtual和OVERRIDE关键字。比如：
+		
+		class A
+		{
+		public:
+			virtual void F() {}
+		};
+		class B : public A
+		{
+		public:
+			virtual void F() override;
+		};
+
+
+ 注意，由于最近才添加 OVERRIDE 关键字，所以有很多现有代码还不符合这条规则，在任何方便的时候应该向该代码中添加 OVERRIDE 关键字。
+
+* *指针和引用应该仅有一个空格，该空格位于指针/引用的右侧。* 这样使得可以快速地在文件中查找某种特定类型的所有指针或引用。
+	请使用这种格式：
+		FShaderType* Type
+		
+	而不是这些格式：
+		
+		FShaderType *Type
+		FShaderType * Type

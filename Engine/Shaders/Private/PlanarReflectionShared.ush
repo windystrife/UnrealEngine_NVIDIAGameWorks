@@ -1,0 +1,109 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+ PlanarReflectionShared.usf
+=============================================================================*/
+
+// Must match C++
+#define NUM_MAX_PLANAR_REFLECTION_VIEWS 2
+
+// World space reflection plane, normalized
+float4 ReflectionPlane;
+
+float3 PlanarReflectionOrigin;
+float4 PlanarReflectionXAxis;
+float4 PlanarReflectionYAxis;
+
+// Used to transform normals into the mirrored space
+float3x4 InverseTransposeMirrorMatrix;
+
+// x = scale for plane distance fading, y = bias for plane distance fading, z = controls normal distortion strength
+float3 PlanarReflectionParameters;
+
+// x = scale for angle fading, y = bias for angle fading
+float2 PlanarReflectionParameters2;
+
+// Projection matrix that was used to capture PlanarReflectionTexture
+float4x4 ProjectionWithExtraFOV[NUM_MAX_PLANAR_REFLECTION_VIEWS];
+
+// Scale and bias to transform NDC into UVs for PlanarReflectionTexture
+float4 PlanarReflectionScreenScaleBias[NUM_MAX_PLANAR_REFLECTION_VIEWS];
+
+// True if we're rendering a stereo planar reflection
+bool bIsStereo;
+
+// WaveWorks Start
+float4 PlanarReflectionWaveWorksParameters;
+// WaveWorks End
+
+Texture2D PlanarReflectionTexture;
+SamplerState PlanarReflectionSampler;
+
+float4 ComputePlanarReflections(float3 WorldPosition, float3 WorldNormal, float Roughness, SamplerState SharedClampSampler)
+{
+	float4 OutPlanarReflection = 0;
+
+	float PlaneDistance = dot(ReflectionPlane, float4(WorldPosition, -1));
+	float DistanceFade = 1 - saturate(abs(PlaneDistance) * PlanarReflectionParameters.x + PlanarReflectionParameters.y);
+
+	float3 PlaneOriginToWorldPosition = WorldPosition - PlanarReflectionOrigin;
+	float XAxisDistance = dot(PlaneOriginToWorldPosition, PlanarReflectionXAxis.xyz);
+	float XAxisFade = saturate((PlanarReflectionXAxis.w - abs(XAxisDistance)) * PlanarReflectionParameters.x);
+	float YAxisDistance = dot(PlaneOriginToWorldPosition, PlanarReflectionYAxis.xyz);
+	float YAxisFade = saturate((PlanarReflectionYAxis.w - abs(YAxisDistance)) * PlanarReflectionParameters.x);
+	DistanceFade *= XAxisFade * YAxisFade;
+
+	BRANCH
+	if (DistanceFade > 0)
+	{
+		// CameraToPixel in the main view is what we used as ReflectionVector when rendering the reflection pass to PlanarReflectionTexture
+		float3 CameraToPixel = normalize(WorldPosition - ResolvedView.WorldCameraOrigin);
+		// Reflect the effective ReflectionVector in mirrored space to get the original camera vector
+		float3 MirroredCameraVector = reflect(CameraToPixel, -ReflectionPlane.xyz);
+		// Transform the GBuffer normal into mirrored space
+		float3 MirroredNormal = mul(WorldNormal, (float3x3)InverseTransposeMirrorMatrix);
+		// Reflect the original camera vector across the GBuffer normal in mirrored space
+		float3 MirroredReflectionVectorOffNormal = reflect(MirroredCameraVector, MirroredNormal);
+		// At this point we have a new reflection vector off of the GBuffer normal, and we need to approximate its intersection with the scene
+		// An accurate intersection would ray trace the planar reflection depth buffer
+		// As an approximation we are just intersecting with a user defined sphere
+		float3 VirtualReflectionSpherePosition = WorldPosition + MirroredReflectionVectorOffNormal * PlanarReflectionParameters.z;
+		// Transform the intersection position into view space
+		float3 ViewVirtualReflectionSpherePosition = mul(float4(VirtualReflectionSpherePosition + ResolvedView.PreViewTranslation.xyz, 1), ResolvedView.TranslatedWorldToView).xyz;
+		// Transform the intersection position into clip space using the same projection matrix used to render PlanarReflectionTexture
+		float4 ClipVirtualReflectionSpherePosition = mul(float4(ViewVirtualReflectionSpherePosition, 1), ProjectionWithExtraFOV[ResolvedView.StereoPassIndex]);
+
+		uint EyeIndex = 0;
+
+#if !MULTI_VIEW
+		if (bIsStereo)
+		{
+			EyeIndex = ResolvedView.StereoPassIndex;
+		}
+#endif
+
+		float2 NDC = clamp(ClipVirtualReflectionSpherePosition.xy / ClipVirtualReflectionSpherePosition.w, -1, 1);
+		float2 ViewportUV = NDC * PlanarReflectionScreenScaleBias[EyeIndex].xy + PlanarReflectionScreenScaleBias[EyeIndex].zw;
+
+		float AngleFade = saturate(dot(ReflectionPlane.xyz, WorldNormal) * PlanarReflectionParameters2.x + PlanarReflectionParameters2.y);
+		float RoughnessFade = 1 - saturate((Roughness - .2f) * 10.0f);
+		float FinalFade = DistanceFade * AngleFade * RoughnessFade;
+
+		float4 PlanarReflectionTextureValue = Texture2DSampleLevel(
+			PlanarReflectionTexture, 
+#if SUPPORTS_INDEPENDENT_SAMPLERS
+			SharedClampSampler, 
+#else
+			PlanarReflectionSampler,
+#endif
+			ViewportUV, 
+			0);
+
+		// Fade out in regions of the planar reflection that weren't written to, so we can composite with other reflection methods
+		FinalFade *= PlanarReflectionTextureValue.a;
+		OutPlanarReflection.rgb = PlanarReflectionTextureValue.rgb * FinalFade;
+		OutPlanarReflection.a = FinalFade;
+	}
+
+	return OutPlanarReflection;
+}

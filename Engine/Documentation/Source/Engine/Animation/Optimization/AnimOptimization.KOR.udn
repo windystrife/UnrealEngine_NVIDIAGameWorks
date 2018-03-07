@@ -1,0 +1,269 @@
+﻿INTSourceChangelist:0
+Availability: Docs
+Crumbs: %ROOT%, Engine, Engine/Animation
+Title: Animation Optimization
+Description: Describes methods to achieve more performant Animation Blueprints through optimization techniques.
+Type: Overview
+SkillLevel: Advanced
+Version: 4.16
+Parent: Engine/Animation
+Order: 1
+Tags: Animation
+Tags: Optimization
+Tags: Animation Blueprint
+topic-image:OptimizationTopic.png
+Related: Engine/Performance
+
+[TOC (start:2 end:2)]
+
+As you construct your [](Engine/Animation/AnimBlueprints), there are some practices you should keep in mind to ensure the animation in your project runs as smoothly as possible. 
+Some of these are enabled by default while others will require that you consider the approach you take in setting up your Animation Blueprints. 
+While other efforts can be performed through C++ that will also grant you some control over how and when animations are updated, which can lead to improved performance. 
+
+
+## Multi Threaded Animation Update
+
+This allows more animation work to run in worker threads and is enabled by default which you can find in your [Project Settings](https://docs.unrealengine.com/latest/INT/Engine/UI/ProjectSettings/): 
+
+* Inside the **Project Settings** under **General Settings > Anim Blueprints**, make sure **Allow Multi Threaded Animation Update** is enabled.
+
+	![](ProjectSettings.png)
+
+This controls whether by default we allow Animation Blueprint Graph updates to be performed on non-game threads. 
+This also enables some extra checks in the Animation Blueprint compiler that will warn when unsafe operations are being attempted.
+Inside your **Animation Blueprints**, you will also want to make sure that it is set to **Use Multi Threaded Animation Update**.  
+
+* Inside your Animation Blueprint under the **Class Settings**, make sure that **Use Multi Threaded Animation Update** is enabled. 
+
+	![](AnimBPMultiThreadOption.png)
+
+The main driver behind this was to control data access more tightly across threads. To this end, much anim-graph-accessed data has been moved from `UAnimInstance` to a new struct called `FAnimInstanceProxy`. 
+This proxy structure is where the bulk of the data on `UAnimInstance` is found. 
+
+In general, the `UAnimInstance` should not be accessed or mutated from within AnimGraph nodes (Update/Evaluate calls) as these can be run on other threads. 
+There are locking wrappers (`GetProxyOnAnyThread` and `GetProxyOnGameThread`) that prevent access to the `FAnimInstanceProxy` while tasks are in-flight.
+The idea is that in the worst case, tasks wait for completion before data is allowed to be read from or written to in the proxy. 
+
+From the Anim Graph point of view, only the `FAnimInstanceProxy` can be accessed from animation nodes, not the `UAnimInstance`. 
+Data must be exchanged with the proxy for each tick (either through buffering, copying or some other strategy) in `FAnimInstanceProxy::PreUpdate` or `FAnimInstaceProxy::PreEvaluateAnimation`. 
+Any data that then needs to be accessed by external objects should then be exchanged/copied from the proxy in `FAnimInstanceProxy::PoseUpdate`.
+
+[REGION:tip]
+This is in conflict with the general use case of `UAnimInstance` where member variables can be accessed from other classes while tasks are in-flight. 
+As a recommendation, try to not directly access the Anim Instance at all from other classes. Instead, the Anim Instance should pull data from elsewhere. 
+[/REGION]
+
+### Example Custom Native AnimInstance 
+
+In the code block below is an example of how one would build a custom native AnimInstance class using the new `FAnimInstanceProxy`, granting access to its innards and avoiding copies of shared data between the proxy and the instance: 
+
+	USTRUCT()
+
+	struct FExampleAnimInstanceProxy : public FAnimInstanceProxy
+
+	{
+
+		GENERATED_BODY()
+
+		FExampleAnimInstanceProxy()
+
+		: FAnimInstanceProxy()
+
+		{}
+
+		FExampleAnimInstanceProxy(UAnimInstance* Instance);
+
+		virtual void Update(float DeltaSeconds) override
+
+		{
+
+			// Update internal variables
+	
+		    MovementAngle += 1.0f * DeltaSeconds;
+
+	        HorizontalSpeed = FMath::Max(0.0f, HorizontalSpeed - DeltaSeconds);
+
+		}
+
+	public:
+
+		UPROPERTY(Transient, BlueprintReadWrite, EditAnywhere, Category = "Example")
+
+	    float MovementAngle;
+
+	    UPROPERTY(Transient, BlueprintReadWrite, EditAnywhere, Category = "Example")
+
+	    float HorizontalSpeed;
+
+	};
+
+	UCLASS(Transient, Blueprintable)
+
+	class UExampleAnimInstance : public UAnimInstance
+
+	{
+
+		 GENERATED_UCLASS_BODY()
+
+	private:
+
+	    // The AllowPrivateAccess meta flag will allow this to be exposed to Blueprint,
+
+	    // but only to graphs internal to this class.
+
+	    UPROPERTY(Transient, BlueprintReadOnly, Category = "Example", meta = (AllowPrivateAccess = "true"))
+
+	    FExampleAnimInstanceProxy Proxy;
+
+	    virtual FAnimInstanceProxy* CreateAnimInstanceProxy() override
+
+		{
+
+		    // override this to just return the proxy on this instance
+
+			return &Proxy;
+
+		}
+
+		virtual void DestroyAnimInstanceProxy(FAnimInstanceProxy* InProxy) override
+
+		{
+
+		}
+
+		friend struct FExampleAnimInstanceProxy;
+
+	};
+
+## Animation Fast Path
+
+**Animation Fast Path** provides a way to optimize variable access inside the **AnimGraph** update. 
+This enables the engine to copy parameters internally rather than executing Blueprint code (which involves making calls into the Blueprint Virtual Machine). 
+The compiler can currently optimize the following constructs: member variables negated boolean member variables and members of a nested structure.
+
+The Animation Fast Path option is enabled by default inside the **Project Settings**: 
+
+* Inside the **Project Settings** under **General Settings** and **Anim Blueprints**, make sure **Optimize Anim Blueprint Member Variable Access** is enabled.
+
+	![](FastPathEnabled.png)
+
+To make use of Animation Fath Path, inside the AnimGraph of your Animation Blueprints, ensure that no Blueprint logic is being executed. 
+In the image below, we are reading several float values which are being used to drive multiple Blend Space assets and a Blend resulting in our Final Animation Pose.
+Each node denoted with the lightning icon in the upper right corner are utilizing Fast Path as no logic is being executed. 
+
+![](FastPathExample_1.png)
+
+If we were to change this network to include any form of calculation such as the example depicted below, the associated node would no longer be using Fast Path. 
+
+![](FastPathExample_2.png)
+
+Above, since we are now executing Blueprint logic to generate the values feeding the **TEST_Blend2D** node, it is no longer using Fast Path (and the lighting icon will be removed).
+
+### Fast Path Methods
+
+In order for your Animation Blueprints to use Fast Path, ensure that they either: 
+
+**Access Member Variables Directly**
+
+Below we are using Fast Path by directly accessing and reading the value of our boolean variable to determine our pose. 
+
+![](AccessDirectly.png)
+
+In the next example, we are not using Fast Path as we are performing logic to determine if the boolean variable is equal to true. 
+
+![](AccessDirectlyBPLogic.png)
+
+**Access Negated Boolean Member Variables**
+
+Below we are using Fast Path by reading the value of the negated boolean to determine our pose. 
+
+![](AccessNegatedBooleans.png)
+
+In the next example, we are not using Fast Path as we are performing logic to determine if the boolean variable is not equal to true. 
+
+![](AccessNegatedBooleansBPLogic.png)
+
+**Access Members of a Nested Struct**
+
+Below we break our rotator variable to directly access our Pitch and Yaw variables to feed our Aim Offset. 
+
+![](AccessMembersOfStruct.png)
+
+**Access Members Using "Break Struct" Nodes**
+
+Below we use a Break Struct node to break our rotator variable into XYZ values to feed our Aim Offset. 
+
+![](AccessByBreakStruct.png)
+
+[REGION:note]
+Some **Break Struct** nodes like **Break Transform** will not currently use Fast Path as they perform conversions internally rather than simply copying data. 
+[/REGION]
+
+
+
+### Warn About Blueprint Usage
+
+
+To ensure that your Animation Blueprints are using Fast Path, you can enable the **Warn About Blueprint Usage** option which will cause the compiler to emit warnings to the Compiler Results log whenever a call into the Blueprint Virtual Machine is made from the AnimGraph. 
+
+* To enable **Warn About Blueprint Usage**, enable the option inside the **Class Settings** of your **Animation Blueprint** under **Optimization**. 
+
+	![](WarningOption.png)
+
+	When the compiler identifies any nodes that are not using Fast Path, they will be displayed in the **Compiler Results** log. 
+
+	![](ExampleWarningShown.png)
+
+	Above, since we are executing Blueprint logic in our AnimGraph and have the warning option enabled, we get a warning message in the compiler results and can click on it to take us to the offending node. 
+	This can help track down optimizations that need to be made and will enable you to identify the node(s) that may be the source of the problem. 
+
+<!--
+## Update Rate Optimization (URO)
+
+WB Note - Omitting this for now as it's slated for improvements in 4.18
+
+-->
+
+
+## General Tips
+
+As you start to consider the performance of your animation usage, here are some guidelines that you may want to follow when performing optimizations.
+
+[REGION:note]
+Based on the size and scope of your project, more invasive changes may be needed however this is generally a good place to start. 
+[/REGION]
+
+* **Make sure that the conditions for Parallel Updates are met**
+	 * In `UAnimInstance::NeedsImmediateUpdate` you can see all the conditions that must be met to avoid the update phase of animation running on the game thread. 
+	If root motion is required for character movement, the parallel update cannot be performed as character movement is not multi threaded. 
+* **Avoid calls into the Blueprint Virtual Machine**
+	* Consider [](Engine/Blueprints/TechnicalGuide/NativizingBlueprints) into C++ code. 
+	* Keep your **Event Graph** in your Animation Blueprints empty. Use a custom `UAnimInstance` and `FAnimInstanceProxy` derived class and do all of your work in the proxy during `FAnimInstanceProxy::Update` or `FAnimInstanceProxy::Evaluate` as these are executed on worker threads. 
+	* Ensure that the nodes within your **Anim Graph** of your Animation Blueprint are structured in a way that they are using [Fast Path](#animationfastpath). 
+	* Ensure that **Optimize Anim Blueprint Member Variable Access** is enabled in the **Project Settings** as this controls whether Animation Blueprint nodes that access member variables of their class directly should use the optimized path that avoids a thunk to the Blueprint VM.
+	* Generally the most costly part of an AnimGraph's execution, avoiding calls to the virtual machine is the key to getting maximum performance out of Animation Blueprints. 
+* **Use Update Rate Optimizations (URO)**
+	* This will prevent your animations from ticking too often. Control over how this is applied is up to your game, but we recommend moving toward ~15Hz and under Update Rates at appropriate distances for many characters, as well as disabling interpolation. 
+	* To enable, set your Skeletal Mesh Component to **Enable Update Rate Optimizations** and refer to `AnimUpdateRateTick()`. 
+		* Optionally, you can also enable **Display Debug Update Rate Optimizations** to enable onscreen debugging of URO being applied. 
+* **Enable Component Use Fixed Skel Bounds**
+	* In your Skeletal Mesh Component, enable the **Component Use Skel Bounds** option. 
+	* This will skip using a physics asset and will instead always use the fixed bounds defined in the Skeletal Mesh. 
+	* This will also skip recalculating bounding volumes for culling for every frame, increasing performance. 
+
+### Other Considerations
+
+When [profiling](Engine/Performance) your project, you may see that `FParallelAnimationCompletionTask` is being run for Skeletal Meshes on the main thread after worker threads are done. 
+This will be the bulk of the main thread work that you will see in your profile once the conditions for parallel updates are satisfied and usually consist of a few things, depending on your setup: 
+
+* Moving your components around, updating physics objects for bones for example. 
+	* Try avoiding updating physics for things that don't actually need it as this will be key to reducing this. 
+* Firing off Animation Notifies.
+	* These should be non-Blueprint, again to avoid calls to the Blueprint VM for efficiency. 
+	* These also need to be performed on the game thread as they can affect the animated object's lifetime. 
+* Interpolation of animation if URO is enabled. 
+	* Future engine versions may allow this to be done on the worker thread in certain circumstances. 
+* Blending of curves if Material or Morph Target curves are in use. 
+	* This could also be moved onto the worker thread, although this will result in minor gains. 
+
+	

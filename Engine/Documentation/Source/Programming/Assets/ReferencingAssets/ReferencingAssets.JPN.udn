@@ -1,0 +1,89 @@
+﻿INTSourceChangelist:2721243
+Title:アセットの参照
+Crumbs:
+Description:
+Availability:Public
+Version:4.9
+
+アンリアル エンジン 4 は、アセットの参照およびメモリへのロードの方法を制御するメカニズムを豊富に備えています。2 種類の参照方法があると考えてください。ハード参照は、オブジェクト A がオブジェクト B を参照し、オブジェクト A がロードされるとオブジェクト B もロードさせます。ソフト参照は、オブジェクト A がオブジェクト B を、パスからオブジェクトへのストリングなどの間接的なメカニズム経由で参照します。まず最初の 2 つのセクションではハード参照について説明し、残りのセクションでソフト参照について説明します。 
+
+## プロパティの直接参照
+
+アセット参照の中で最も一般的なケースです。UPROPERTY マクロによって公開されます。ゲームプレイ クラスは、ブループリント継承によるアーキタイプまたはワールド内に置かれたインスタンスのいずれかに存在する特定のアセットをデザイナーに指定させる UPROPERTY を公開します。例えば、次のコードは StrategyGame のサンプルに含まれる AStrategyBuilding で、タイプのビルドが構築されるとデザイナーは再生するサウンドを選択できるようになります。
+
+	/** construction start sound stinger */
+
+	UPROPERTY(EditDefaultsOnly, Category=Building)
+
+	USoundCue* ConstructionStartStinger;
+
+このプロパティは、オブジェクトのデフォルト プロパティの一部としてのみ設定することができます (EditDefaultsOnly キーワードはこれを制御します)。デザイナーは AStrategyBuilding から拡張する Blueprint クラスを作成します。そして、デザイナーが選んだサウンドをブループリントに保存することが可能になります。デザイナーが作成したブループリントがロードされると、 UPROPERTY の一部としてそれを参照するサウンドも自動的にロードされます。
+
+## Construction Time Reference
+
+2 つ目のハード参照は、プログラマーが所定のプロパティに対してロードする必要のあるアセットが正確に分かっていて、そのプロパティをコンストラクションの一部として設定します。この場合、特殊なクラスの ConstructorHelpers を使って行います。ConstructorHelpers はコンストラクション中にオブジェクトおよびオブジェクトのクラスを検索します。再び、 StrategyGame のサンプルから、レンダリングの一部として使用する HUD が割り当てるアセットのスニペットです。
+
+	/** gray health bar texture */
+
+	UPROPERTY()
+
+	class UTexture2D* BarFillTexture;
+
+	AStrategyHUD::AStrategyHUD(const FObjectInitializer& ObjectInitializer) :
+		Super(ObjectInitializer)
+	{
+		static ConstructorHelpers::FObjectFinder<UTexture2D> BarFillObj(TEXT("/Game/UI/HUD/BarFill"));
+
+		...
+
+		BarFillTexture = BarFillObj.Object;
+
+		...
+
+	}
+
+上記のコンストラクタでは、ConstructorHelpers クラスはメモリ内のアセットを探そうとし、見つからないとそれをロードしようとします。アセットへのフル パスはロードする対象を指定するために使用することに注目してください。アセットが存在しない、あるいはエラーのためにロードが不可能な場合、プロパティは nullptr に設定されます。これが起こると、テクスチャにアクセスしようとするコードがクラッシュします。参照が有効とコードが見なした場合、アセットは正しくロードされたとアサートした方が良いでしょう。
+
+UPROPERTY 宣言により、さきほどのハード参照のサンプルと同じものが表示されます。違う点は初期設定の方法のみで、動作は一緒です。ハード参照スで配慮することは、オブジェクトがロードされインスタンス化される時に、ハード参照が行われたアセットもロードされることです。十分注意しないと、1 度に大量のアセットがロードされるので、メモリ使用量が膨れ上がってしまいます。ロードを保留したい、あるいはランタイム時にどうするかを決定したい場合は、次のセクションがお役に立つでしょう。
+
+## プロパティの間接参照
+
+アセットがロードされるタイミングを制御する一番簡単な方法は TAssetPtr を使うことです。デザイナーにとっては、プロパティの直接参照と同じように使うことができます。ただし、ポインタの直接参照ではなくて、アセットがロードされているかどうかの安全な確認を行うために、プロパティはテンプレート コード付きのストリングとして保存されます。アセットがアクセス可能な状態かを確認するには、 IsPending() メソッドを使います。TAssetPtr を使うには、使用したい時に手動でロードする必要があります。テンプレート化された LoadObject<>() 手法である StaticLoadObject()、または FStreamingManager を使ってオブジェクトをロードすることができます (詳細は [](Programming/Assets/AsyncLoading) をご覧ください)。始めの 2 つの手法ではアセットが同時にロードされ、フレームレートが急増するため、ゲームプレイに影響を及ぼさないと分かっている場合のみ使用すべきです。
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category=Building)
+	TAssetPtr<UStaticMesh> BaseMesh;
+
+	UStaticMesh* GetLazyLoadedMesh()
+	{
+		if (BaseMesh.IsPending())
+		{
+			const FStringAssetReference& AssetRef = BaseMesh.ToStringReference();
+			BaseMesh = Cast< UStaticMesh>(Streamable.SynchronousLoad(AssetRef));
+		}
+		return BaseMesh.Get();
+	}
+
+上記のコードは TAssetPtr of UStaticMesh をつあってランタイム時のメッシュのロードを遅くしています。オブジェクトがロードされたか確認するために、アセットを確認します。ロードされていなければ、 FStreamingManager を使って同時にロードを行います。そうしない場合、 TAssetPtr 内の UStaticMesh ポインタが呼び出し元に返されます。
+
+UClass のロードを保留にしたければ、クラス固有バージョンの TAssetSubclassOf テンプレート タイプを代用している TAssetPtr と同じ方法で行います。特定のアセットを参照する場合と同じ動きをしますが、インスタンスではなくアセットについて UClass へ参照します。
+
+## オブジェクトの検索 / ロード
+
+ここまでのサンプルは、すべて UPROPERTY を基本としていました。それでは、もしランタイム時にストリングをビルドして、オブジェクトへの参照取得のためにそれを使いたい場合はどうしますか？オプションが 2 通りあります。UObject のロードが完了している、あるいは既に作成されている場合のみ使用したいのであれば、 FindObject<>() が正しい選択です。まだロードが完了していないのでオブジェクトをロードしたい場合は、LoadObject<>() を選択しましょう。LoadObject<>() は cover の下の FindObject と同等の役目をするので、まずオブジェクトを見つけてからロードする必要がないことに注目してください。以下は、それぞれの関数の使用例です。
+
+	AFunctionalTest* TestToRun = FindObject<AFunctionalTest>(TestsOuter, *TestName);
+	GridTexture = LoadObject<UTexture2D>(NULL, TEXT("/Engine/EngineMaterials/DefaultWhiteGrid.DefaultWhiteGrid"), NULL, LOAD_None, NULL);
+
+UClass のロード時に使用できる LoadObject が特殊化されます。クラスをロードするにはこの方法が簡単ですし、タイプの自動照合が行われます。以下のコード スニペットをみると、それが分かります。
+
+	DefaultPreviewPawnClass = LoadClass<APawn>(NULL, *PreviewPawnName, NULL, LOAD_None, NULL);
+
+Is the same as
+
+	DefaultPreviewPawnClass = LoadObject<UClass>(NULL, *PreviewPawnName, NULL, LOAD_None, NULL);
+
+	if (!DefaultPreviewPawnClass->IsA(APawn::StaticClass()))
+	{
+		DefaultPreviewPawnClass = nullptr;
+	}
+

@@ -1,0 +1,184 @@
+﻿INTSourceChangelist:2855948
+Availability:Public
+Title:Material Blend モード
+Crumbs: %ROOT%, Engine, Engine/Rendering/Materials, Engine/Rendering/Materials/IntroductionToMaterials,  Engine/Rendering/Materials/MaterialProperties
+Description:Material Blend モードの一覧とマテリアルのレンダリングに与える影響
+Version:4.9
+
+
+[TOC(start:2 end:2)]
+
+
+
+![](BlendModeProperties.png)
+
+[EXCERPT:BlendModes]
+Blend モードは、現在のマテリアルの出力と既に描画されている背景のブレンドを表現します。技術的に言うと、このマテリアルが別のピクセルの前でレンダリングされる時、エンジンがマテリアル (**Source color**) と既にフレームバッファ (**Destination color**) にあるカラーを結合する方法の制御を可能にします。
+
+デモ用に、カメラと 2 つのオブジェクトがある簡単なシーンを設定しました。最初のオブジェクトを用いて、Blend モードを変更するにつれて背景にどのような影響が及んでいるかを見ていきます。
+
+[REGION:fullwidth]
+![](CameraObjectSetup.png)
+[/REGION]
+
+## Opaque
+
+Opaque Blend モードは最も単純です。おそらくユーザーにとって一番使用頻度の高いモードです。通過または貫通しないライトで表面を定義します。プラスチック、メタル、石、より大きなその他の表面タイプに最適です。
+
+
+
+[REGION:imagetable]
+| ![](CameraObjectSetup.png)(w:500) | ![](CamerasView.png)(h:189) |
+| --- | --- |
+| シーンの設定 | カメラのビュー|
+[/REGION]
+
+
+
+## Masked
+
+Masked Blend モードは、バイナリ (オン/オフ) 形式で、選択的に可視性を制御する必要のあるオブジェクトに使用します。例えば、金網のフェンスや格子をシミュレートするマテリアルを考えてみましょう。不可視な領域とソリッド (空ではない) 領域がそれぞれあります。このようなマテリアルに Masked Blend モードの使用が最適です。
+
+
+![](MaskedGridMaterial.png)(w:700)
+
+
+_透明性_ と _レンダリング処理をしない_ ことの違いは、留意しなくてはいけない重要な点です。ガラスのような透明な表面は、反射 (スペキュラリティ) する形でライトと作用します。Masked モードでカリングされたピクセルは _描画しない_ ので、この領域に反射を見ることはできません。反射もしくはスペキュラの外観を維持したい場合、Translucent Blend モードを使用するか、レイヤーマテリアルを作成します。
+
+さらに、これらの機能はマスクされている領域ではレンダリングしないので計算の必要が全くなく、GPU でのパフォーマンスを節約することができます。
+
+
+[REGION:imagetable]
+| ![](MaskedSetup.png)(w:500) | ![](MaskedGridCameraView.png)(h:189) |
+| --- | --- |
+| シーンの設定 | カメラのビュー|
+[/REGION]
+
+
+Masked Blend モードを使用時は、**Opacity Mask Clip Value** プロパティに特別な注意をはらわなくてはいけません。このプロパティは、カットオフ ポイントとして使用されるオパシティマスク テクスチャの値を制御する 0-1 のスカラー値を保持します。この値を超えると **darker** ピクセルとなりレンダリングされません。 
+
+[REGION:imagetable]
+| [INCLUDE:#OpacityMaskClipValue] | ![](OpacityMaskMaterial.png)(w:445 h:465) |
+| --- | --- |
+| Opacity Mask Clip Value (スライダーをドラッグしてプレビューする) | マテリアル ネットワーク |
+[/REGION]
+
+[REGION:note]
+	前述の例で、マテリアルの **Two Sided** プロパティは _True (チェックあり)_ に設定されています。ボックスの中が見える理由はこの設定にあります。
+
+	ここで表示する相互作用の例にもかかわらず、**Opacity Mask Clip Value** プロパティはランタイム時に変更できる設計にはなっていません。
+[/REGION]
+
+## Translucent
+
+Translucent Blend モードは、何らかの形で透過処理が必要なオブジェクトに使用します。 
+
+![](TranslucentNetwork.png)(w:400)
+
+Blend モードはオパシティ値またはテクスチャを受け取り、黒い領域が完全に透過している表面、白い領域が完全に不透明な表面、その間のさまざまな影のグラデーションが対応する透明レベルの結果へ適用することにより機能します。つまり、グレーのオパシティ テクスチャは、背景の一部のみを透過した処理がされているように見えるオブジェクトを持つことができます。
+
+[REGION:imagetable]
+| ![](TranslucentSetup.png)(w:500) | ![](TranslucentCamera.png)(h:192) |
+| --- | --- |
+| シーンの設定 | カメラのビュー|
+[/REGION]
+
+透過処理のされたマテリアルを使用する場合は、現時点ではスペキュラリティ (鏡面反射性) がサポートされていないことを考慮することが重要です。つまり、表面上で反射を見ることはできません。以下とのようなネットワークで [キューブマップ](Engine/Content/Types/Textures\Cubemaps) を使用すると、このような反射に見せかけることができます。
+
+[REGION:lightbox]
+[![](FakedReflections.png)(w:930)](FakedReflections.png)
+[/REGION]**クリックして拡大**
+
+
+
+## 加算
+
+Additive Blend モードは、マテリアルのピクセルを背景のピクセルへ追加します。この機能は、Photoshop の _Linear Dodge (Add)_ ブレンドモードと非常に似ています。つまり、ピクセル全ての値は一緒に _混ぜ合わされて_、黒は透明でレンダリングされるので暗い部分がありません。Blend モードは、火、スチーム、ホログラムなどの特殊効果に実用的です。 
+
+[REGION:fullwidth]
+![](AdditiveNetwork.png)
+[/REGION]
+
+Translucent Blend モード同様に、Blend モードはスペキュラリティ (例えば反射) を考慮しません。ユーザーはブレンドの付加的な性質をおそらく使用しないと思いますが、上記の Translucen セクションで紹介したキューブマップの手法で反射のような効果をシミュレーションすることが可能です。
+
+
+[REGION:imagetable]
+| ![](AdditiveSetup.png)(w:500) | ![](AdditiveCamera.png)(h:192) |
+| --- | --- |
+| シーンの設定 | カメラのビュー|
+[/REGION]
+
+
+
+## Modulate
+
+Modulate Blend モードは、マテリアルの値を背景のピクセルに対して乗算します。この機能は Photoshop の _Multiply_ ブレンドモードと非常に似ています。 
+
+
+![](ModulateNetwork.png)
+
+上のグラフでは、マテリアルはシェーディング モデルが _Unlit_ でブレンドモードが_Modulate_ に設定されています。
+
+[REGION:imagetable]
+| ![](ModulateScene.png)(w:500) | ![](ModulateCamera.png)(h:192) |
+| --- | --- |
+| シーンの設定 | カメラのビュー|
+[/REGION]
+
+
+[REGION:warning]
+Modulate ブレンドモードは、一部のパーティクル エフェクトで最適なものです。しかし、ライティングや透過分離をサポートしていないため注意を払わなければなりません。
+[/REGION]
+
+<!------------------- 
+
+[EXCERPT:OpacityMaskClipValue]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:max]
+	19
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	opacityMaskClipValue
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	 
+	[/PARAM]
+	[PARAM:image_list]
+	![](opacityMaskClipValue_1.png)
+	![](opacityMaskClipValue_2.png)
+	![](opacityMaskClipValue_3.png)
+	![](opacityMaskClipValue_4.png)
+	![](opacityMaskClipValue_5.png)
+	![](opacityMaskClipValue_6.png)
+	![](opacityMaskClipValue_7.png)
+	![](opacityMaskClipValue_8.png)
+	![](opacityMaskClipValue_9.png)
+	![](opacityMaskClipValue_10.png)
+	![](opacityMaskClipValue_11.png)
+	![](opacityMaskClipValue_12.png)
+	![](opacityMaskClipValue_13.png)
+	![](opacityMaskClipValue_14.png)
+	![](opacityMaskClipValue_15.png)
+	![](opacityMaskClipValue_16.png)
+	![](opacityMaskClipValue_17.png)
+	![](opacityMaskClipValue_18.png)
+	![](opacityMaskClipValue_19.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:OpacityMaskClipValue]
+
+
+
+
+| モード | 説明 |
+| ---- | ----------- |
+| **_BLEND_Opaque_** | 最終カラーはソースカラーになります。つまり、マテリアルは背景の上に描画されるということです。ブレンドモードは光源処理と互換性があります。
+| **_BLEND_Masked_** | OpacityMask > OpacityMaskClipValue の場合、最終カラーはソースカラーになります。そうでなければ、ピクセルは破棄されます。ブレンドモードは光源処理と互換性があります。
+| **_BLEND_Translucent_** | 最終カラーは「ソースカラー * オパシティ + Dest カラー * (1-オパシティ)」となります。このブレンドモードは、動的な光源処理と互換性が **ありません**。
+| **_BLEND_Additive_** | 最終カラーは「ソースカラー + Dest カラー」となります。このブレンドモードは、動的な光源処理と互換性が **ありません**。
+| **_BLEND_Modulate_** | 最終カラーは「ソースカラー + Dest カラー」となります。デカール マテリアルでない限り、このブレンドモードは動的な光源処理とは互換性が **ありません**。
+[/EXCERPT:BlendModes]
+

@@ -1,0 +1,112 @@
+﻿INTSourceChangelist:2656789
+Availability:Public
+Title:游戏性定时器
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture/Reference, Programming/UnrealArchitecture/Reference/Functions
+Description:以设定间隔执行操作的定时器。
+Version:4.9
+
+[EXCERPT:Overview]
+利用 **定时器** 可单次或以设定间隔反复执行操作。使用定时器可延迟执行操作或在一段时间内执行操作。例如使玩家在获得特定道具后进入无敌状态，10 秒钟后恢复正常。或者在玩家进入充满毒气的房间后每秒对其造成伤害。这些功能均可通过定时器实现。
+[/EXCERPT:Overview]
+
+## 定时器管理
+
+定时器在全局 **FTimerManager** 中进行管理，位于 AActor 的边界之外，可对其指定任意委托类型。FTimerManager 中有数个函数可用于管理定时器。在定时器委托中使用这些函数是安全操作，因为系统允许在处理一个定时器时操控其他定时器。意味着可以设置或清除一个定时器委托中的定时器。
+
+**AActor::GetWorldTimerManager()** 函数用于访问当前世界场景中的计时器管理员实例。
+
+### 创建和清理计时器
+
+**FTimerManager::SetTimer()** 用于创建定时器，以设定间隔调用特定的本地函数。 
+
+范例：
+
+	GetWorldTimerManager().SetTimer(this, &AMatineeActor::CheckPriorityRefresh, 1.0f, true);
+
+[REGION:tip]
+SetTimer() 还可重设现有的定时器。因此，如此委托已设置定时器，它将把当前定时器更新到新参数并将其实际运算时间重设为 0。
+[/REGION]
+
+**FTimerManager::ClearTimer()** 可清理之前设置的定时器，使其不再执行。
+
+范例：
+
+	GetWorldTimerManager().ClearTimer(this, &AMatineeActor::CheckPriorityRefresh);
+
+[REGION:tip]
+使用 ClearTimer() 清理定时器和以 <= 0.f 的频率调用 SetTimer() 完全相同。
+[/REGION]
+
+### 暂停定时器
+
+**FTimerManager::PauseTimer()** 可将之前设置的定时器暂停在其当前状态。这意味着定时器将不会执行，但实际运算时间和剩余时间将保持不变，直到定时器的暂停状态解除。
+
+**FTimerManager::UnPauseTimer()** 可再次激活设为暂停状态的定时器。
+
+## 定时器信息
+
+除管理定时器外，FTimermanager 还可提供函数获取特定定时器的信息，如定时器频率、实际运算时间、剩余时间等。
+
+### Is Timer Active
+
+**FTimerManager::IsTimerActive()** 用于确定特定的定时器当前处于活动或暂停状态。
+
+范例：
+
+	GetWorldTimerManager().IsTimerActive(this, &APlayerController::DelayedPrepareMapChange)
+
+### 定时器频率
+
+**FTimerManager::GetTimerRate()** 可获得特定定时器当前的频率（启用的时间间隔）。
+
+范例：
+
+	GetWorldTimerManager().GetTimerRate(this, &AUTWeapon::RefireCheckTimer)
+
+### 实际运算时间和剩余时间
+
+**FTimermanager::GetTimerElapsed()** 和 **FTimerManager::GetTimerRemaining()** 分别返回特定定时器的实际运算时间和剩余时间。 
+
+范例：
+
+	GetWorldTimerManager().GetTimerElapsed(this, &AUTWeapon::RefireCheckTimer)
+
+[REGION:note]
+定时器的实际运算时间和剩余时间合计应等于定时器的频率。
+[/REGION]
+
+## 定时器函数重载
+
+每个定时器操控函数拥有 3 种和定时器进行交互的重载。
+
+* 选取一个对象和一个函数。
+                
+		GetWorldTimerManager().SetTimer( this, &UMyClass::DoSomethingWithNoParams, 5.f, FALSE );
+
+	这是最简单的形式，与之前的系统最为接近。它和以下内容效果相同 
+    
+		GetWorldTimerManager().SetTimer( FTimerDelegate::CreateUObject(this, &UMyClass::DoSomethingWithNoParams), 5.f, FALSE );
+
+	它略有冗余，但较为干净，可成为最常见的使用情况。
+
+* 选取可聚集的任意类型的非动态委托。它在语法上有些模糊，但灵活性较高。如： 
+
+		GetWorldTimerManager().SetTimer( FTimerDelegate::CreateUObject(this, &AMyClass::MyFunc), 5.0f, TRUE );
+		GetWorldTimerManager().SetTimer( FTimerDelegate::CreateRaw(&MyStaticFunc, MyPassThruArg, MyOtherArg, YesOneMoreArg), 5.0f, TRUE );
+                
+		FTimerDelegate MyDel;
+		Del.BindRaw(this, &AMyClass::MyFunc2);
+		GetWorldTimerManager().SetTimer( MyDel, 5.0f, TRUE );
+
+* 选取一个动态（即 UFunction）委托。
+                
+		FTimerDynamicDelegate D;
+		D.BindDynamic( this, &AMyClass::MyUFunction );
+		GetWorldTimerManager().SetTimer( D, 5.0f, TRUE );
+
+	这些委托可通过 UFUNCTION 事件机制调用，意味着它们将遵守非本地覆盖之类的操作，正如在蓝图中那样。
+
+
+## 已知问题
+               
+* 代码当前并非线程安全。如从游戏线程外进行访问，将导致断言的出现。

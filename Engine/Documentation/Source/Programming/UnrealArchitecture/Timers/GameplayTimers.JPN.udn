@@ -1,0 +1,125 @@
+﻿INTSourceChangelist:2656789
+Availability:Public
+Title:ゲームプレイ タイマー
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture/Reference, Programming/UnrealArchitecture/Reference/Functions
+Description:指定したインターバルで実行アクションを作成するタイマー
+Version:4.9
+
+[EXCERPT:Overview]
+タイマーを使用して、指定したインターバルでアクションを一度もしくは繰り返し実行することができます。タイマーは 
+アクションを遅らせてもしくはある期間に渡って発生させる際に使用します。例えば、 
+プレイヤーがあるアイテムを取得したその 10 秒後に、無敵キャラクターとなる例が挙げられます。もしくは、 
+プレイヤーが毒ガスで充満した部屋に入ると、 1 秒おきにダメージを受ける場合などです。いずれの場合も 
+タイマーを使用して実現します。
+[/EXCERPT:Overview]
+
+## タイマーの管理
+
+タイマーは AActor 領域外のグローバル **FTimerManager** で管理され、 
+幅広いタイプの中からデリゲートを割り当てることができます。FTimerManager にあるいくつかの関数は、タイマーの 
+管理に利用できます。タイマーの処理中にタイマーを操作してもシステムには問題がないため、 
+タイマーデリゲート内のこれらの関数を使用しても問題は起きません。つまり、タイマーデリゲート内の 
+タイマーを設定もしくはクリアしても問題ありません。
+
+**AActor::GetWorldTimerManager()** を使って、 
+現在のワールドのタイム マネージャ インスタンスにアクセスします。
+
+### タイマーの作成とクリア
+
+**FTimerManager::SetTimer()** は、任意のネイティブ関数を指定インターバルで呼ぶタイマーの作成に使用します。 
+
+例：
+
+	GetWorldTimerManager().SetTimer(this, &AMatineeActor::CheckPriorityRefresh, 1.0f, true);
+
+[REGION:tip]
+SetTimer() で既存タイマーをリセットすることも出来ます。タイマーが既にこのデリゲートに設定されている場合、 
+現在のタイマーのパラメータが更新されて、経過時間が 0 にリセットされます。
+[/REGION]
+
+**FTimerManager::ClearTimer()** は、設定済みのタイマーをクリアし今後は実行をしません。
+
+例：
+
+	GetWorldTimerManager().ClearTimer(this, &AMatineeActor::CheckPriorityRefresh);
+
+[REGION:tip]
+ClearTimer() でタイマーをクリアすることは、<= 0.f に設定した SetTimer() を呼ぶことと同一です。
+[/REGION]
+
+### タイマーの一時停止
+
+**FTimerManager::PauseTimer()** は、設定済みのタイマーを現在のステートで一時停止します。つまり、実行はしませんが、 
+経過および残り時間は、タイマーの一時停止が解かれるまで同じ状態のままとなります。
+
+**FTimerManager::UnPauseTimer()** は、一時停止されたタイマーを解除します。
+
+## タイマーの情報
+
+FTimermanager は、タイマーの管理に加え情報を取得する関数があります。 
+例えば、特定タイマーの速度、経過時間、残り時間などを取得します。
+
+### IsTimerActive 関数
+
+**FTimerManager::IsTimerActive()** は、特定のタイマーが現在アクティブで一時停止されていないことの確認に使用します。
+
+例：
+
+	GetWorldTimerManager().IsTimerActive(this, &APlayerController::DelayedPrepareMapChange)
+
+### GetTimerRate 関数
+
+**FTimerManager::GetTimerRate()** は、特定のタイマーの現在の速度 (実行間隔) を取得します。
+
+例：
+
+	GetWorldTimerManager().GetTimerRate(this, &AUTWeapon::RefireCheckTimer)
+
+### GetTimerElapsed&Remaining 関数
+
+**FTimermanager::GetTimerElapsed()** と **FTimerManager::GetTimerRemaining()** は特定のタイマーの 
+経過時間と残り時間をそれぞれ返します。 
+
+例：
+
+	GetWorldTimerManager().GetTimerElapsed(this, &AUTWeapon::RefireCheckTimer)
+
+[REGION:note]
+タイマーの経過時間と残り時間の合計は、タイマーの速度と同じでなくてはいけません。
+[/REGION]
+
+## Timer 関数のオーバーロード
+
+タイマーを操作するそれぞれの関数には、タイマーと相互作用するための 3 つのオーバーロードの特性があります。
+
+* オブジェクトと関数の受け取り
+                
+		GetWorldTimerManager().SetTimer( this, &UMyClass::DoSomethingWithNoParams, 5.f, FALSE );
+
+	これは最もシンプルな形状で、旧バージョンに最も近いものです。選択したゲームインスタンス (4c) に対して 
+    
+		GetWorldTimerManager().SetTimer( FTimerDelegate::CreateUObject(this, &UMyClass::DoSomethingWithNoParams), 5.f, FALSE );
+
+	多少冗長構成ですが、よりクリーンなコードで今後一般的なユースケースになると考えられます。
+
+* 呼出しが可能なすべてのタイプの非動的デリゲートを受け取ります。構文的には多少不明瞭ですが、はるかに柔軟性があります。 
+
+		GetWorldTimerManager().SetTimer( FTimerDelegate::CreateUObject(this, &AMyClass::MyFunc), 5.0f, TRUE );
+		GetWorldTimerManager().SetTimer( FTimerDelegate::CreateRaw(&MyStaticFunc, MyPassThruArg, MyOtherArg, YesOneMoreArg), 5.0f, TRUE );
+                
+		FTimerDelegate MyDel;
+		Del.BindRaw(this, &AMyClass::MyFunc2);
+		GetWorldTimerManager().SetTimer( MyDel, 5.0f, TRUE );
+
+* 動的 (例えば UFunction) デリゲートを受け取ります。
+                
+		FTimerDynamicDelegate D;
+		D.BindDynamic( this, &AMyClass::MyUFunction );
+		GetWorldTimerManager().SetTimer( D, 5.0f, TRUE );
+
+	これらのデリゲートは、UFUNCTION イベント構造を通じて呼ばれます。つまり、ブループリントにおけるノンネイティブのオーバーライド等に適切な注意をはらいます。
+
+
+## 周知の問題
+               
+* 現状のコードはスレッドセーフではありません。ゲームスレッド外でアクセスがあるとアサートします。

@@ -1,0 +1,294 @@
+﻿INTSourceChangelist:3429264
+Availability:Public
+Title:C++ のコンソール変数
+Crumbs:%ROOT%, Engine, Programming, Programming/Basics
+Description:コンソール マネージャの概要とコンソール変数を作成するための実装の詳細
+Version:4.16
+Parent:Programming/Development/Tools
+Order:
+topic-image:consoleVar_topicImage.png
+
+[TOC(start:2)]
+
+
+
+
+**コンソール コマンド** はユーザーが入力する文字列であり、エンジンに送られます。エンジンは何らかの方法でこれに反応します。(例 : コンソール / ログの反応。内部状態の変更)。 
+**コンソール変数** は何らかの状態を追加で保存し、これはコンソールを介して変更できます。コンソール コマンドと変数をコンソール マネージャに登録することで、
+オートコンプリートと列挙型関数を使えるようにし、すべてのコンソール オブジェクトのリストを取得します (コンソール コマンドの Help や DumpConsoleVariables)。このため、古い Exec インターフェースは
+避けてください。中央にあるコンソール マネージャは上記のものなど (例、ユーザー入力の履歴) を制御します。
+
+
+## コンソール変数とは何でしょう？
+
+コンソール変数は、エンジン全体に及ぶ状態を保持する単純なデータ型 (例 : float 型、int 型、string 型) です。ユーザーは、この状態を読み取ったり、設定したりすることができます。
+コンソール変数は名前を持ちます。コンソールに名前をタイプし始めるとオートコンプリートされます。
+
+|**ユーザーによるコンソール入力**|**コンソールの出力**|**説明**|
+| --- | --- | --- |
+|`MyConsoleVar`|`MyConsoleVar = 0`|変数の現在の状態がコンソールに出力されます。| 
+|`MyConsoleVar 123`|`MyConsoleVar = 123 LastSetBy:Constructor`|変数の状態が変更されて新しい状態がコンソールに出力されます。| 
+|`MyConsoleVar ?`|`Possibly multi line help text.`|コンソール変数のヘルプ テキストをコンソールに出力します。|
+
+
+
+## コンソール変数を作成 / 登録する
+
+変数は、エンジンが作成される際に早期に登録される必要があります。この例では、登録を行う最良の方法を示します (C++ ファイルで)。
+
+	static TAutoConsoleVariable<int32> CVarRefractionQuality(
+		TEXT("r.RefractionQuality"),
+		2,
+		TEXT("Defines the distortion/refraction quality, adjust for quality or performance.\n")
+		TEXT("<=0: off (fastest)\n")
+		TEXT("  1: low quality (not yet implemented)\n")
+		TEXT("  2: normal quality (default)\n")
+		TEXT("  3: high quality (e.g. color fringe, not yet implemented)"),
+		ECVF_Scalability | ECVF_RenderThreadSafe);
+
+ここでは、int32 型のコンソール変数を登録しています。名前は、r.RefractionQuality で、デフォルト値の 2 で、および複数行のヘルプ テキストといくつかのフラグがあります。
+多くのフラグがありますが、最も重要なものは、ECVF_Cheat です。これについては、IConsoleManager.h で詳細に説明します。
+コンソール変数の後に "?" を使用すると、ヘルプ テキストが表示されます。
+
+必要があれば、関数内でコンソール変数を生成することもできます。
+
+	IConsoleManager::Get().RegisterConsoleVariable(TEXT("r.RefractionQuality"),
+       2,
+       TEXT("Defines the distortion/refraction quality, adjust for quality or performance.\n")
+		TEXT("<=0: off (fastest)\n")
+		TEXT("  1: low quality (not yet implemented)\n")
+		TEXT("  2: normal quality (default)\n")
+		TEXT("  3: high quality (e.g. color fringe, not yet implemented)"),
+       ECVF_Scalability | ECVF_RenderThreadSafe);
+    
+`IConsoleManager::Get()` はグローバル アクセス ポイントです。ここでコンソール変数を登録するか、既存のものを探すことができます。最初のパラメータはコンソール変数の名前です。
+2 つめのパラメータはデフォルト値です。この定数の型に応じて、int、float、 string (!FString) など様々なコンソール変数型が作成されます。
+次のパラメータは、コンソール変数のヘルプ用テキストを定義します。
+
+既存の変数への参照を登録することも可能です。これは便利で高速ですが、複数の機能 (例、thread safety, callback, sink, cheat) をバイパスします。そのため、この方法は使用しないことをお勧めします。以下は例です。
+
+	FAutoConsoleVariableRef CVarVisualizeGPUSimulation(
+		TEXT("FX.VisualizeGPUSimulation"),
+		VisualizeGPUSimulation,
+		TEXT("Visualize the current state of GPU simulation.\n")
+		TEXT("0 = off\n")
+		TEXT("1 = visualize particle state\n")
+		TEXT("2 = visualize curve texture"),
+		ECVF_Cheat
+		);
+
+ここでは、その型は変数の型から推測されます。
+
+
+
+## コンソール変数の状態を取得する
+
+**RegisterConsoleVariableRef** で作成されたコンソール変数の状態を取得するには、例えば以下で登録された変数を使うと効率的に行うことができます。
+
+	// only needed if you are not in the same cpp file (同じ cpp ファイル内ではない場合のみ必要) 
+	extern TAutoConsoleVariable<int32> CVarRefractionQuality;
+	// get the value on the game thread (ゲーム スレッドで値を取得) 
+	int32 MyVar = CVarRefractionQuality.GetValueOnGameThread();
+
+Getter 関数 (すなわち、!GetInt(), !GetFloat(), !GetString()) を使って、コンソール変数の状態を判断すると、実装が若干遅くなります (仮想関数呼び出し、キャッシュ化の失敗など)。
+最高のパフォーマンスを得るには、変数が登録されたものと同じ型を使用します。変数へのポインターを取得するには、登録関数の戻り値の引数を保存するか、
+変数が必要となる直前に **FindConsoleVariable** を呼び出します。例:
+
+    static const auto CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("TonemapperType")); 
+	int32 Value = CVar->GetInt();
+   
+ここでの static は、名前検索 (map として実装) がこのコードが初めて呼ばれたときだけ行われるようにします。
+これが正しいのは、変数が決して移動せず、エンジンがシャットダウンした時にのみ消滅するからです。
+
+
+## コンソール変数の変化を追跡する方法
+
+コンソール変数が変化する場合にカスタム コードを実行したい場合、方法として 3 つの選択肢があります。 
+
+多くの場合、以下の最も単純な方法が最適なものになります。サブシステムに古い状態を保存し、各フレームが異なっているかをチェックします。いつこれを行うかを自由に制御できます(例、レンダー スレッド、ゲーム スレッド、ストリーミング スレッド、ティックまたはレンダリングの前後)。違いが見つかったら、コンソール変数の状態を
+コピーして例えば以下のカスタム コードを使います。
+
+	void MyFunc()
+	{
+		int GBufferFormat = CVarGBufferFormat.GetValueOnRenderThread();
+
+		if(CurrentGBufferFormat != GBufferFormat)
+		{
+			CurrentGBufferFormat = GBufferFormat;
+
+			// custom code (カスタム コード) 
+		}
+	}
+
+例えばコンソール変数、sink を登録することもできます。 
+
+	static void MySinkFunction()
+	{
+		bool bNewAtmosphere = CVarAtmosphereRender.GetValueOnGameThread() != 0;
+
+		// by default we assume the state is true (デフォルトでこの状態が true であることを前提とします) 
+		static bool GAtmosphere = true;
+
+		if (GAtmosphere != bNewAtmosphere)
+		{
+			GAtmosphere = bNewAtmosphere;
+
+			// custom code (カスタム コード) 
+		}
+	}
+
+	FAutoConsoleVariableSink CMyVarSink(FConsoleCommandDelegate::CreateStatic(&MySinkFunction));
+
+sink はレンダリング前のメイン スレッドの特定のポイントで呼び出されます。この関数はコンソール変数の名前 / ポインタを取得しません。これは、誤った挙動になることが多いためです。
+複数のコンソール変数 (例、r.SceneColorFormat, r.GBufferFormat) のすべてが変更をトリガーする場合、ひとつひとつではなく、すべての変更が終わってからコードを呼び出すのが最善です。
+
+最後の方法は、コールバックを使ったものですが注意深く使用しないと問題が生じるため使用を避けてください。
+
+* サイクルはデッドロックを生じる可能性があります (デッドロックを防ぐことはできますが、どのコールバックを優先させるかははっきりしません)。
+* このコールバックは、**!Set()** が呼び出されるとどの時点でも戻ることができます。コードはあらゆるケースで機能しなければなりません (初期化中、シリアライズ中)。
+  常にメイン スレッド側にあることを前提にします。
+
+言及した他のメソッドで解決できない場合に限り、この方法を使うようにしてください。 
+
+例:
+
+	void OnChangeResQuality(IConsoleVariable* Var)
+	{
+		SetResQualityLevel(Var->GetInt());
+	}
+
+	CVarResQuality.AsVariable()
+		->SetOnChangedCallback(FConsoleVariableDelegate::CreateStatic(&OnChangeResQuality));
+
+
+
+## 意図されたコンソール変数の動作とスタイル
+
+* コンソール変数は、必ずしもシステムの状態ではなく、ユーザーによる入力を反映すべきです (例 :!MotionBlur 0/1 をサポートしていないプラットフォームがあることも考えられます)。
+  変数の状態はコードを使って変更しないようにします。変数が自分の指定した状態ではないため、ユーザーがミスタイプしたかと考えるかもしれないからです。
+  あるいは、他の変数の状態が原因でコンソール変数を変更できないかもしれないからです。
+* 常に、変数が何のために使用され、どのような値を指定すると良いのかということについて説明するヘルプを提供すべきです。
+* 大半のコンソール変数は開発のみに使うことを意図したものです。したがって、 ECVF_Cheat フラグを早期に指定するのが良いでしょう。
+  さらに良いのは、define を使用して機能をコンパイルすることでしょう (例、#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST))。
+* 変数名はできる限り短くすべきです。同時に、説明的な名前や意味のないものは避けるべきです
+  (以下は不適当な名前の例です。!EnableMotionBlur 、 !MotionBlurDisable 、 MBlur 、 !HideMotionBlur )。
+  大文字と小文字を使用することによって、見やすく一貫性のあるものにします(例 : !MotionBlur)。
+* インデント付けのために、固定幅のフォント (非比例フォント) 出力を前提とします。
+* エンジンの初期化中に変数を登録することが重要です。これは、オートコンプリート、 !DumpConsoleCommands、 !Help が機能するようにするためです。 
+
+詳細については `IConsoleManager.h` を参照してください。
+
+
+## コンソール変数のロード
+
+エンジン起動時にコンソール変数の状態を **Engine/Config/ConsoleVariables.ini** ファイルからロードすることができます。この場所はローカル デベロッパー用にリザーブされています。プロジェクト設定には使わないでください。
+詳細は、そのファイル自体に次のように書かれています。
+
+    ; This file allows you to set console variables on engine startup (In undefined order).
+    ; Currently there is no other file overriding this one.
+    ; This file should be in the source control database (for the comments and to know where to find it)
+    ; but kept empty from variables.
+    ; A developer can change it locally to save time not having to type repetitive
+    ; console variable settings.The variables need to be in the section called [Startup].
+    ; Later on we might have multiple named sections referenced by the section name.
+    ; This would allow platform specific or level specific overrides.
+    ; The name comparison is not case sensitive and if the variable does not exist, it is ignored.
+    ;
+    ; Example file content:
+    ;
+    ; [Startup]
+    ; FogDensity = 0.9
+    ; ImageGrain = 0.5
+    ; FreezeAtPosition = 2819.5520 416.2633 75.1500 65378 -25879 0
+    
+    [Startup]
+    
+例えば、"Engine/Config/BasEngine.ini" という設定を入れることもできます。
+
+	[SystemSettings]
+	r.MyCvar = 2
+
+	[SystemSettingsEditor]
+	r.MyCvar = 3
+
+**Script/Engine.RendererSettings** からの設定も可能です。こうしたプロジェクト設定は以下のようにエクスポーズされます。
+
+	UPROPERTY(config, EditAnywhere, Category=Optimizations, meta=(
+		ConsoleVariable="r.EarlyZPassMovable",DisplayName="Movables in early Z-pass",
+		ToolTip="Whether to render movable objects in the early Z pass.Need to reload the level!"))
+		uint32 bEarlyZPassMovable:1;
+
+こうした設定はエディタ UI で変更できます。プロジェクト設定と拡張性の設定 (scalability settings) とを混在させないでください (優先度の問題を避けるため)。
+
+他の設定は拡張性機能からのものである場合があります。詳しい情報は、 **Config/BaseScalability.ini** または拡張性のドキュメントをご覧ください。
+
+## コマンドライン
+
+コマンドラインを使うとコンソール変数を設定し、コンソール コマンドや実行コマンドを呼び出すことができます。以下は例です。
+
+	UE4Editor.exe GAMENAME -ExecCmds="r.BloomQuality 12;vis 21;Quit"
+
+ここでは 3 つのコマンドを実行しています。このようにコンソール変数を設定すると、ini ファイルで必要になる '=' を除外する必要があります。
+
+## 優先度
+
+コンソール変数は様々なソースからオーバーライドされます。例えば、user/editor/project の設定、コマンドライン、consolevariables.ini からオーバーライドされます。
+指定されたオーバーライドを維持しながら (例、コマンドラインから)、一部の設定 (例、プロジェクト設定をエディタの UI で変更可能にする) を再適用できるようにするために
+優先度を導入しました。これですべての設定をどのような順序でも適用できるようになりました。 
+
+see IConsoleManager.h:
+
+	// 優先度最低 (コンソール変数作成後のデフォルト)
+	ECVF_SetByConstructor =			0x00000000,
+	// Scalability.ini から
+	ECVF_SetByScalability =			0x01000000,
+	// (ゲーム内 UI またはファイルから)
+	ECVF_SetByGameSetting =			0x02000000,
+	// プロジェクト設定
+	ECVF_SetByProjectSetting =		0x03000000,
+	// デバイス毎の設定
+	ECVF_SetByDeviceProfile =		0x04000000,
+	// プロジェクト毎の設定
+	ECVF_SetBySystemSettingsIni =	0x05000000,
+	// consolevariables.ini (複数プロジェクトに対して)
+	ECVF_SetByConsoleVariablesIni = 0x06000000,
+	// マイナス コマンド、例 -VSync 
+	ECVF_SetByCommandline =			0x07000000,
+	// あまり役立ちません。ハックの可能性あり。正しい SetBy...を見つけた方がいいかもしれません。
+	ECVF_SetByCode =				0x08000000,
+	//エディタ UI、またはインゲームのコンソール、エディタ
+	ECVF_SetByConsole =				0x09000000,
+
+以下のログ出力が表示される場合があります。
+
+	Console variable 'r.MyVar' wasn't set (Priority SetByDeviceProfile < SetByCommandline)
+
+これは、意図したもの (例、コマンドラインがユーザー設定を強制) であるか、何らかのコード問題によって生じた可能性があります。
+優先度は変数を最後に設定したのが誰であるかを見るのにも役立ちます。例えば、コンソール変数の状態を得る場合にこの情報を取得できます。
+
+	> r.GBuffer
+	r.GBuffer = "1"      LastSetBy:Constructor
+
+
+
+
+
+## 今後のこと
+
+* 現在、コンソール変数は、C++ でしか作成できませんが、これは変更される可能性があります。
+* 列挙型変数や bool 型変数を追加することを検討しましたが、これには問題が多々あります。現時点では、int 型または必要に応じて文字列を使用するのが良いと考えています。
+* ヘルプ用テキストは便利ですが、実行ファイルのサイズ抑制やチーター対策のために、定義を追加することによって、ヘルプ用テキストが実行ファイルに入らないようにすることを検討しています。
+
+
+## コンソール変数の登録削除
+
+**UnregisterConsoleVariable** メソッドによってコンソール変数を削除することができます。少なくとも、ユーザーの視点からはそのように見えます。
+変数は依然として保持されています (登録削除のフラグをともなって)。これは、ポインタがデータにアクセスした場合にクラッシュしないようにするための措置です。新たな変数が同じ名前で登録されると、
+古い変数がリストアされ、フラグが新変数からコピーされます。このようにして、変数の状態を失うこともなく、DLL (ダイナミック リンクライブラリ) のロードとアンロードが機能します。
+なお、コンソール変数の参照についてはこれは機能しません。 
+<!--Sentence below deprecated for clarification.-->
+<!--This can be fixed by giving up on one: do not store pointers, do not unregistered or not use references.-->
+
+
+
+

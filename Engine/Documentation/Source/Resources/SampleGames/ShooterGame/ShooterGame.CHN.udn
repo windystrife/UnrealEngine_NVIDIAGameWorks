@@ -1,0 +1,181 @@
+﻿INTSourceChangelist:2492260
+Availability: Public
+Title:射击游戏
+Crumbs:%ROOT%, Resources
+Description:C++示例游戏项目ShooterGame的文档
+Related: Programming/Basics
+Related: Gameplay/ClassCreation/CodeOnly
+Related: Programming/UnrealArchitecture/Reference/Functions
+Related: Gameplay/Networking/Actors/Components
+Related: Gameplay/Networking/Actors/RPCs
+Related: Engine/Blueprints/Editor
+Related: Engine/Animation/AnimMontage
+Related: Engine/Animation/Blendspaces
+Related: Engine/Audio/Overview
+Related: Programming/Slate
+Related: Gameplay/Input
+Related: Engine/Rendering/ParticleSystems
+
+
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Resources/SampleGames/ShooterGame:title%](Shooter_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%\anim_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/ShooterGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/ShooterGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/ShooterGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Resources/SampleGames/ShooterGame:title%](Shooter_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%\anim_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/ShooterGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/ShooterGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/ShooterGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+
+[REGION:fullwidth]
+![](ShooterGame.png)
+[/REGION]
+
+[TOC(start:2)]
+
+## 概述
+
+第一人称射击游戏示例是PC上的多人第一人称射击游戏的实例。 它包括了武器和游戏类型的基础应用，以及简单的前端菜单系统。
+
+特性的完整列表如下：
+
+* 即时伤害武器(ShooterWeapon_Instant)
+* 射弹武器(ShooterWeapon_Projectile + ShooterProjectile)
+* 非团队游戏模式(ShooterGame_FreeForAll)
+* 团队游戏模式(ShooterGame_TeamDeathMatch)
+* 可拾取物品(ShooterPickup)
+* 主菜单(ShooterHUD_Menu)
+
+
+## 武器射击系统
+
+武器的基础射击功能 - 例如弹药管理，上子弹以及复制 - 都在`AShooterWeapon`类中应用。
+
+武器在本地客户端和服务器上被切换到射击状态（通过RPC调用）。 `DetermineWeaponState()`在`StartFire()`/`StopFire()`中进行调用，它执行一些逻辑来决定武器应处于哪个状态，并随后调用`SetWeaponState()`以将武器放置于合适的状态中。 在开火状态中，本地客户端将会重复调用`HandleFiring()`，而它会调用`FireWeapon()`。 然后它会更新弹药并调用`ServerHandleFiring()`，从而在服务器上执行同样的内容。 服务器版本同时负责通过`BurstCounter`变量来通知远程客户端每一轮射击。
+
+在远程客户端上执行的操作纯粹是为了装饰。 武器射击通过`BurstCounter`属性来进行复制，以使得远程客户端可以播放动画并生成特效 - 执行武器射击的所有视觉效果。
+
+### 即时伤害武器射击
+
+即时伤害检测被用于射速较快的武器，例如步枪或激光枪。 基本的执行原理如下，当玩家开火时，在瞬间对武器瞄准方向执行线性检测以查看是否击中了任意物体。
+
+这种方式的准确度高，并且对于不存在于服务器上的Actors也有效果（例如，起修饰作用或已脱离的Actors） 本地客户端执行计算并告知服务器击中了什么物体。 随后，服务器确认此射击并在需要的情况下复制它。
+
+在`FireWeapon()`中，本地客户端执行来自相机位置的轨迹以搜寻在准星下的首次阻挡碰撞并将其传递到`ProcessInstantHit()`。 从此处会发生以下3件事之一：
+
+* 此次碰撞被传递到服务器以供确认(`ServerNotifyHit()` --> `ProcessInstantHit_Confirmed()`)。
+* 如果碰撞Actor不存在于服务器上，则此射击在本地进行处理 (`ProcessInstantHit_Confirmed()`)。
+* 如果未击中任何物体，则告知服务器(`ServerNotifyMiss()`)。
+
+
+已确认的碰撞会应用伤害到碰撞Actors，生成尾迹和冲击效果，并通过在`HitNotify`变量中设置碰撞数据来告知远程客户端。 未击中的射击仅仅对远程客户端生成尾迹并设置`HitNotify`，远程客户端会查找`HitNotify`变更并执行和本地客户端相同的轨迹，按需生成尾迹和冲击。
+
+即时伤害的应用同时还具有武器散布。 为了轨迹/验证的一致性，本地客户端会在每次执行`FireWeapon()`时选取随机种子并在每个RPC和`HitNotify`包中传递它。
+
+### 射弹武器射击
+
+射弹射击被用来模拟发射具有移动缓慢，在冲击时产生爆炸，受重力影响等特性的子弹的武器。有时武器发射的结果位置无法在武器被发射的瞬间决定，比如发射枪榴弹。 对这种类型的武器来说，实际的物理对象，或 _射弹_ ，将按照武器瞄准的方向生成并移动。 伤害由射弹与世界中的另一个对象的碰撞所决定。
+
+对射弹射击来说，本地客户端采用来自相机的轨迹来查看在`FireWeapon()`内的准星下存在何种Actor，类似于即时伤害的应用。 如果玩家正在瞄准某处，它会调整射击方向以对该点造成伤害，并调用服务器上的`ServerFireProjectile()`，从而在武器瞄准的方向上生成射弹Actor。
+
+当射弹的移动组件检测到服务器上产生的伤害，它会在处理损伤时爆炸，生成特效并从复制处脱离，以告知客户端该事件。 随后，射弹关闭碰撞，移动和可见度并在一秒后销毁自身以给予复制更新足够的客户端时间。
+
+在客户端上，爆炸特效通过`OnRep_Exploded()`进行复制。
+
+## 玩家武器库
+
+玩家武器库是存储在玩家Pawn的`Inventory`（武器库）属性中的`AShooterWeapon`数组引用。 当前装备的武器复制于服务器，并且，`AShooterCharacter`在`CurrentWeapon`属性中在本地存储当前属性，这样当新武器被装备时，之前的武器会被取消装备。
+
+当玩家装备武器时，合适的武器网格物体-本地为第一人称，其它为第三人称-被附加到Pawn上，同时在武器上播放动画。 武器在动画持续期间被切换到装备状态。
+
+## 玩家相机
+
+在第一人称模式中，Pawn的网格物体被强制附加到相机上，这样手臂将总是与玩家的视角相关。 这种处理方法的缺点是，这意味着腿在玩家的视角中不可见，因为整个网格物体会旋转以匹配相机的偏转和倾斜。
+
+相机更新的基础工作流程为：
+
+* `AShooterCamera::UpdateCamera()`在每次更新时执行。
+* `APlayerCamera::UpdateCamera()`被调用，以更新基于玩家输入的相机旋转。
+* `AShooterCharacter::OnCameraUpdate()`被调用，以执行为旋转第一人称网格物体而匹配相机的必要计算。
+
+
+玩家死时，会切换到 _死亡_ 相机，它在`AShooterPlayerController::PawnDied()`处理器中具有固定的位置和旋转设置。 这个函数调用`AShooterPlayerController::FindDeathCameraSpot()`，它在几个不同的位置间循环，并使用不由关卡几何体阻挡的首个位置。
+
+## 在线多人游戏
+
+在线多人游戏比赛被分为3个阶段： 
+
+* 热身
+* 对抗赛
+* 游戏结束
+
+
+当首个玩家加入游戏时， **热身** 阶段开始。 这个阶段很短，由倒计时的计时器所标记，这样可以让其它玩家有机会加入游戏。 在这个阶段中，玩家处于 _观察者_ 模式，他们可以四处浏览地图。 当倒计时计数器过期时，调用`StartMatch()`，从而重启所有玩家并生成他们的Pawns。 
+
+比赛有时间限制，游戏时间在服务器中的`AShooterGameMode::DefaultTimer()`函数中进行计算，这是通过循环计时器来执行的，这个计时器的速度类似于当前时间膨胀的速度，也就是每个 _游戏_ 秒发生一次。 它被存储在游戏复制信息类(`AShooterGRI`)的`RemainingTime`属性中，该属性会随后被复制到客户端。 当剩余时间到达0时，调用`FinishMatch()`以终止游戏会话。 这样会告知所有玩家，比赛已经结束，并禁用移动和生命值。
+
+## 菜单系统
+
+我们使用[Slate用户界面框架](Programming/Slate)来创建菜单系统。 它包含 **菜单**, **菜单控件**, 以及 **菜单项目** 。 每个菜单都包含负责所有菜单项目的布局，内部事件处理以及动画的单个菜单控件(`SSHooterMenuWidget`)。 菜单项目(`SSHooterMenuItem`)是可以执行操作并包含任意数量的其它菜单项目的复合对象。 它们可以是标签或按钮或包含由其它菜单项目组成的完整子菜单的“选项卡”。 这个菜单可以用键盘或控制器来操作，但本次仅限于有限的鼠标操作。
+
+每个菜单都通过`Construct()`函数来 _构建_ ，这个函数添加了所有的必要菜单项目，包括子项目，并在需要时在函数上附加代理。 这是通过辅助方式来完成的 - `AddMenuItem()`, `AddMenuItemSP()`等- 它们在`SShooterMenuWidget.h`文件的`MenuHelper`命名空间中进行定义。
+
+浏览到上一菜单是通过菜单的共享指针的数组来完成的，并且被存储在菜单控件的`MenuHistory`变量中。 `MenuHistory`类似于存储先前输入菜单的堆栈，并且可以让返回操作更为方便。 通过这种方式，在菜单间不创建直接联系，并且如有需要，可以把同一菜单重复用于不同的位置。
+
+动画通过在`SShooterMenuWidget::SetupAnimations()`中定义的插值曲线执行。 每条曲线都有其起始时间，持续时间以及插值方式。 动画可以被正反向播放，并且其属性可以使用`GetLerp()`在特定时间进行动画处理，而这个函数会返回从0.0f到1.0f的值。 在`SlateAnimation.h`的`ECurveEaseFunction::Type`中定义了几个不同的可用插值方式。
+
+
+### 主菜单
+
+![](menu.png)
+
+通过指定 _ShooterEntry_ 贴图为默认值，主菜单在游戏开始时自动打开。 它会载入特殊的游戏模式`AShooterGameMode`，这个模式使用`APlatformerPlayerController_Menu`类，它会通过创建`PostInitializeComponents()`函数中的`FShooterMainMenu`类的新实例来打开主菜单。
+
+### 游戏中菜单
+
+![](ingame_menu.png)
+
+这个游戏中菜单在`AShooterPlayerController`类的`PostInitializeComponents()`函数中进行创建，并且通过`OnToggleInGameMenu()`函数来打开或关闭。
+
+### 选项菜单
+
+选项菜单作为主菜单和游戏中菜单的子菜单来使用。 唯一的区别是应用变更的方式：
+
+* 对主菜单的变更，在玩家开始游戏时进行应用。 
+* 对游戏中菜单的变更，在菜单被关闭时马上进行应用。
+
+
+选项菜单中的设置被保存到`GameUserSettings.ini`，并且在启动时被自动载入。

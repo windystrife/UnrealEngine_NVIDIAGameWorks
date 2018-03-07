@@ -1,0 +1,150 @@
+﻿INTSourceChangelist:2638793
+Availability:Public
+Title:断言
+Crumbs:
+Description:
+Version:4.9
+
+断言是一种工具，用于确认一段给定代码所依赖的假设。简单而言，它可确认指针不为 NULL；复杂而言，它可确认特定函数无法被重新进入。UE4 提供一系列宏，以执行这些类型的确认。它们为宏，以便在特定编译配置中进行译出（出于性能因素或因为最终版本中不需要它们）。在以下路径中可查看宏：
+
+`/UE4/Engine/Source/Runtime/Core/Public/Misc/AssertionMacros.h.`
+
+运行时断言宏有三种类型：停止执行、在调试版本中停止执行和不停止执行报告错误。第一种和第三种类型的编译取决于 DO_CHECK 定义。第二种类型的编译使用 DO_GUARD_SLOW 定义。如任意定义设为 0，宏将被禁用且不影响执行。
+
+我们一起来看看断言宏的第一类。如断言不为 true，以下宏将全部停止执行。如在调试器中运行，断言将导致断点的出现，以便查看如何到达此点。
+
+**check(expression);**
+
+此宏执行表达式；如出现 false 的断言，将停止执行。在宏被编译到版本中后（DO_CHECK=1），才会执行表达式。这是 check() 宏的最简单形态。
+
+范例：
+
+	check(Mesh != nullptr);
+	check(bWasInitialized && "Did you forget to call Init()?");
+
+**verify(expression);**
+
+启用 DO_CHECK 后，此宏的行为与 check() 完全相同。然而 DO_CHECK 被禁用后表达式仍然在执行。可使用它确认变量的指定符合假设。
+
+范例：
+
+	verify((Mesh = GetRenderMesh()) != nullptr);
+
+**checkf(expression, ...);**
+
+checkf() 宏允许您将一个表达式断言为 true，并在调试时打印有帮助的额外信息。在编译行为方面，它和 check() 行为相同。
+
+范例：
+
+	checkf(WasDestroyed, TEXT( "Failed to destroy Actor %s (%s)"), *Actor->GetClass()->GetName(), *Actor->GetActorLabel());
+	checkf( TCString<ANSICHAR>::Strlen( Key ) >= KEYLENGTH( AES_KEYBITS ), TEXT( "AES_KEY needs to be at least %d characters" ), KEYLENGTH( AES_KEYBITS ) );
+
+**verifyf(expression, ...);**
+
+verify() 宏固定执行表达式，verifyf() 也是如此。和 checkf(); 一样，它通过额外的调试信息停止执行
+
+范例：
+
+	verifyf(Module_libeay32, TEXT("Failed to load DLL %s"), *DLLToLoad);
+
+**checkCode(expression);**
+
+与通常的 check() 相比，该宏稍显复杂。该宏在执行一次的 do/while 循环中执行表达式。表达式被放置在标出其范围的 do/while 括号中。这在引擎中不常用，但如有需要也可使用。和一个标准 check() 宏相同，DO_CHECK 被禁用时此宏将编译出结果。不使用存在必需副作用的表达式，因为 DO_CHECK 被禁用时代码已移除。
+
+范例：
+
+	checkCode( if( Object->HasAnyFlags( RF_PendingKill ) ) { UE_LOG(LogUObjectGlobals, Fatal, TEXT(“对象 %s 是被标记为 RF_PendingKill! 的根集的一部分”), *Object->GetFullName() ); } );
+
+**checkNoEntry();**
+
+此宏不接受表达式，用于标记从不执行的代码路径。
+
+范例：
+
+	switch (MyEnum)
+	{
+		case MyEnumValue:
+			break;
+		default:
+			checkNoEntry();
+			break;
+	}
+
+**checkNoReentry();**
+
+checkNoReentry() 宏可防止调用重新进入一个给定函数。在只应被调用一次的函数上使用它，必须完成后方可再次被调用。
+
+范例：
+
+	void NoReentry()
+	{
+		checkNoReentry();
+	}
+
+**checkNoRecursion();**
+
+执行和 checkNoReentry() 相同的检查，但使用能更清楚表达含义的命名。
+
+范例：
+
+	int32 Recurse(int32 A, int32 B)
+	{
+		checkNoRecursion();
+		return Recurse(A - 1, B - 1);
+	}
+
+**unimplemented();**
+
+DO_CHECK 宏第一类中的最后一个宏用于标记在特定类上应被覆写或不应被调用的函数，因为此函数不包含实现。
+
+范例：
+
+	class FNoImpl
+	{
+		virtual void DoStuff()
+		{
+			// 必须对此进行覆写
+			unimplemented();
+		}
+	};
+
+启用 DO_GUARD_SLOW 后，断言宏的第二类才会执行。DO_GUARD_SLOW 通常只在调试版本中启用，但也可针对项目进行修改。它们的运行较为缓慢，在开发或发布版本中不需要进行许多无谓的检查。这些宏的执行与较快的宏并无差异。这些宏是 checkSlow()、checkfSlow() 和 verifySlow()。 
+
+范例：
+
+	checkSlow(List->HasCycle());
+	checkfSlow(Class->IsA(AActor::StaticClass()), TEXT("Class (%s) is wrong type"), Class->GetName());
+	verifySlow(LastValue == Current);
+
+运行时断言的最终类不会停止执行，它用于创建一个调用堆栈报告，帮助追踪问题。这些宏中的表达式固定被执行，并可被放置在条件语句中。这些宏可通过 DO_CHECK 定义启用。
+
+**ensure(expression);**
+
+确认表达式，以及引导到此点调用堆栈的生成是否失败。
+
+范例：
+
+	if (ensure( InObject != NULL ))
+	{
+	InObject->Modify();
+	}
+
+**ensureMsg(expression, message);**
+
+确认表达式并生成一个带额外信息的调用堆栈（作为报告的部分）。
+
+范例：
+
+	ensureMsg(Node != nullptr, TEXT("Node is invalid"));
+
+**ensureMsgf(expression, message, ...);**
+
+确认表达式并包含带生成报告调用堆栈的更多信息。和 checkf() 或 verifyf() 相同，包括上下文信息有助于追踪问题。
+
+范例：
+
+	if (ensureMsgf(!bModal, TEXT("Could not create dialog because modal is set to (%d)"), int32(bModal)))
+	{
+		...
+	}
+

@@ -1,0 +1,105 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title: 게임내 슬레이트 사용하기
+Crumbs:%ROOT%, Programming, Programming/Slate
+Description:게임내 유저 인터페이스에 Slate UI 위젯 사용하기 입니다.
+Version:4.9
+
+
+Slate (슬레이트) 위젯은 게임내에서 HUD 나 메뉴같은 기타 UI 요소를 만드는 데 사용할 수 있습니다.
+일반적으로는 하나 이상의 _컨테이너_ 위젯을 만들며, 그 각각은 UI 의 특정 부분을 담당하는 
+여러가지 유형의 위젯으로 구성될 수 있습니다.
+
+<!-- HUD widget w/ menu overlay -->
+
+예를 들어 게임 HUD 에 하나의 커다란 위젯이, 메인 메뉴, 옵션 메뉴, 일시정지 메뉴, 점수판 등에 여러개의 위젯이 
+있을 수 있습니다. 여기서 이들 위젯 각각은 여러가지 커스텀 위젯, 라벨, 텍스트 박스, 이미지, 기타 엘리먼트 유형의 
+조합으로 만들 수도 있을 것입니다.
+
+<!-- container widget breakdown -->
+
+그 후 이들 컨테이너 위젯 각각을 게임 내 상황에 따라 추가 또는 제거하면 됩니다:
+
+* 게임이 시작되면 메인 메뉴 위젯이 추가됩니다.
+* 메뉴의 옵션 중 하나를 선택하면, 이를테면 게임 시작을 선택했다면 메인 메뉴 위젯이 제거됩니다.
+* 일정 시점에서 플레이어가 게임을 일시정지시킨 경우, 일시정지 메뉴 위젯이 추가됩니다.
+* 게임이 재개되면 일시정지 메뉴 위젯이 제거됩니다.
+* 플레이어의 HUD 가 초기화되면, HUD 위젯이 추가됩니다.
+
+
+## 프로젝트 셋업
+
+[INCLUDE:Programming/Slate/Setup#main(offset:1)]
+
+## 위젯 표시
+
+게임에 슬레이트 위젯을 표시하기 위해서는, 게임의 뷰포트에 추가해 줘야 합니다. 오버레이된 위젯은 
+추가시 지정된 Z 순서 (Z-order) 값에 따라 순서가 정해지는데, Z 순서 값이 큰 것이 작은 것 위에 
+그려집니다.
+
+###게임 뷰포트 접근
+
+게임의 뷰포트는 `GameViewportClient` 클래스의 인스턴스입니다. 현재 게임 뷰포트로의 레퍼런스는 
+UEngine 멤버인 `GameViewport` 를 통해 가능하며, 이것은 게임에 대한 현재 UEngine 인스턴스로의 
+`GEngine` 글로벌 포인터를 사용하여 접근 가능합니다.
+
+예:
+
+	GEngine->GameViewport
+
+[REGION:note]
+`GEngine` 과 `GameViewport` 는 `NULL` 일 수 있으므로 이들이나 그 멤버에 접근하기 전 반드시 그 값을 
+확인해야 합니다.
+[/REGION]
+
+### 뷰포트에 위젯 추가
+
+뷰포트에 슬레이트 위젯을 추가하려면 위젯으로의 레퍼런스, 정확히는 `TSharedref<SWidget>` 을 
+`GameViewportClient::AddViewportWidgetContent()` 에 전달하면 됩니다. 이 함수는 위젯과 Z 순서값 
+둘 다 받아들이는데, 앞서 말했듯이 새로운 위젯에 대한 소트 순서를 나타냅니다. Z 순서는 옵션이긴 
+하지만 기본값은 `0` 입니다.
+
+뷰포트에 추가하려는 위젯으로의 레퍼런스는 HUD 와 같은 클래스의 멤버로 저장 가능하며,
+또는 함수 호출 시점에서 생성하여 전달해주는 것도 가능합니다.
+
+멤버 변수에 (`TSharedPtr` 로) 저장된 위젯으로의 레퍼런스 전달:
+
+	GEngine->GameViewport->AddViewportWidgetContent(
+		SNew(MyWidgetPtr.ToSharedRef())
+	);
+
+그것을 `GameViewportClient::AddViewportWidgetContent()` 에 전달시 `SNew()` 로 위젯 생성:
+
+	GEngine->GameViewport->AddViewportWidgetContent(
+		SNew(SWeakWidget)
+		.PossiblyNullContent(MyWidgetClass)
+	); 
+
+혹은 `SAssignNew()` 로 생성, `TSharedPtr` 멤버에 할당한 다음 전달해 줍니다:
+
+	GEngine->GameViewport->AddViewportWidgetContent(
+		SAssignNew(MyWidgetPtr, SWeakWidget)
+		.PossiblyNullContent(MyWidgetClass)
+	);
+
+### 뷰포트에서 위젯 제거
+
+뷰포트에서 슬레이트 위젯을 제거하려면 기존에 추가된 위젯에 대한 각각의 레퍼런스를 
+`GameViewportClient::RemoveViewportWidgetContent()`. 에 전달하면 됩니다.
+
+예:
+
+	GEngine->GameViewport->RemoveViewportWidgetContent(
+		SNew(MyWidgetPtr.ToSharedRef())
+	);
+
+추가로 `GameViewportClient::RemoveAllViewportWidgets()` 를 호출하면 뷰포트에서 모든 위젯을 한 번에 제거할 수 있습니다.
+
+예:
+
+	GEngine->GameViewport->RemoveAllViewportWidgets();
+
+[REGION:note]
+`GEngine` 과 `GameViewport` 는 `NULL` 일 수 있으므로 이들이나 그 멤버에 접근하기 전 반드시 그 값을 
+확인해야 합니다.
+[/REGION]

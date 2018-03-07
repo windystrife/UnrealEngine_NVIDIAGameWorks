@@ -1,0 +1,98 @@
+//// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	GpuSkinCacheCommon.usf: Common properties and defines for GPU Skinning Cache
+=============================================================================*/
+
+// These offsets are in uint32/floats; they attempt to match TGPUSkinVertexBase<> & derived classes:
+//	TGPUSkinVertexBase
+//	TGPUSkinVertexFloat16Uvs<1..N>
+//	TGPUSkinVertexFloat32Uvs<1..N>
+
+// As we know the properties of the Vertices, the layout looks like this (offset, size in u32):
+//	MEMBER				TGPUSkinVertexBase	TGPUSkinVertexFloat16Uvs<1..N>	TGPUSkinVertexFloat32Uvs<1..N>
+//	TangentX			0,1					0,1								0,1
+//	TangentZ			1,1					1,1								1,1
+//	Position			2,3					2,3								2,3
+//	UVs[1..N]			N/A					5,1..N							5,(1..N)*2
+
+// TSkinWeightInfo<true>
+// TSkinWeightInfo<false>
+
+// Members of weight array
+//	MEMBER				TSkinWeightInfo<true>		TSkinWeightInfo<false>
+//	InfluenceBones		0,1							0,2	
+//	InfluenceWeights	1,1							2,2	
+
+#define	GPUSKIN_VB_OFFSET_TANGENT_X			0
+#define	GPUSKIN_VB_OFFSET_TANGENT_Z			1
+#define	GPUSKIN_VB_OFFSET_POSITION			2
+#define	GPUSKIN_VB_OFFSET_UVS				5
+
+#define	GPUSKIN_VB_OFFSET_INFLUENCEBONES	0
+#define	GPUSKIN_VB_OFFSET_INFLUENCEWEIGHTS	(1 + GPUSKIN_USE_EXTRA_INFLUENCES)
+
+
+// Should be set from FGPUSkinCacheCS!
+#ifndef GPUSKIN_RWBUFFER_OFFSET_POSITION
+#define GPUSKIN_RWBUFFER_OFFSET_POSITION	0
+#endif
+
+#ifndef GPUSKIN_RWBUFFER_OFFSET_TANGENT_X
+#define GPUSKIN_RWBUFFER_OFFSET_TANGENT_X	3
+#endif
+
+#ifndef GPUSKIN_RWBUFFER_OFFSET_TANGENT_Z
+#define GPUSKIN_RWBUFFER_OFFSET_TANGENT_Z	4
+#endif
+
+// Must match RWStrideInFloats
+#ifndef GPUSKIN_RWBUFFER_NUM_FLOATS
+#define GPUSKIN_RWBUFFER_NUM_FLOATS			5
+#endif
+
+// @return 0..255
+uint4 UnpackU8x4(uint Packed)
+{
+	uint4 Unpacked;
+	Unpacked.x = (Packed >> 0) & 0xff;
+	Unpacked.y = (Packed >> 8) & 0xff;
+	Unpacked.z = (Packed >> 16) & 0xff;
+	Unpacked.w = (Packed >> 24) & 0xff;
+	return Unpacked;
+}
+
+// @return 0..1
+float4 UnpackU8x4N(uint Packed)
+{
+	return UnpackU8x4(Packed) / 255.0f;
+}
+
+// @return -1..1
+float4 UnpackS8x4N(uint Packed)
+{
+	return UnpackU8x4(Packed) / 127.5f - 1;
+}
+
+// @param Unpacked -1..1
+// @return layout 0xWWZZYYXX where 0..0xff is mapped to -1..1
+uint PackS8x4N(float4 Unpacked)
+{
+	uint Packed = asuint(
+		(uint((Unpacked.x + 1.0f) * 127.499f) << 0) |
+		(uint((Unpacked.y + 1.0f) * 127.499f) << 8) |
+		(uint((Unpacked.z + 1.0f) * 127.499f) << 16) |
+		(uint((Unpacked.w + 1.0f) * 127.499f) << 24));
+	return Packed;
+}
+
+// @param Unpacked -1..1
+// @return layout 0x00ZZYYXX where 0..0xff is mapped to -1..1
+uint PackS8x3N(float3 Unpacked)
+{
+	uint Packed = asuint(
+		(uint((Unpacked.x + 1.0f) * 127.499f) << 0) |
+		(uint((Unpacked.y + 1.0f) * 127.499f) << 8) |
+		(uint((Unpacked.z + 1.0f) * 127.499f) << 16));
+	return Packed;
+}

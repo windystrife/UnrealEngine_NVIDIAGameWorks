@@ -1,0 +1,50 @@
+﻿INTSourceChangelist:2713438
+Availability:Public
+Title:Actor 相关性与优先级
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking, Gameplay/Networking/Actors
+Description:关于 Actor 的相关性与优先级的信息
+Related: Gameplay/Networking/Actors
+Related: Gameplay/Networking/Actors/ReplicationPerformance
+version: 4.9
+
+[TOC (start:2 end:3)]
+
+## 相关性
+
+场景的规模可能非常大，在特定时刻某个玩家只能看到关卡中的一小部分 Actor。场景中的其他大多数 Actor 都不会被看到和听到，
+对玩家也不会产生显著的影响。被服务器认为可见或能够影响客户端的 Actor 组会被视为该客户端的相关 Actor 组。
+虚幻引擎的网络代码中包含一处重要的带宽优化：服务器只会让客户端知道其相关组内的 Actor。
+
+虚幻引擎（依次）参照以下规则确定玩家的相关 Actor 组。这些测试是在虚拟函数 `AActor::IsNetRelevantFor()` 中实施。
+
+1. 如果 Actor 是 bAlwaysRelevant、归属于 Pawn 或 PlayerController、本身为 Pawn 或者 Pawn 是某些行为（如噪音或伤害）的发起者，则其具有相关性。
+1. 如果 Actor 是 bNetUseOwnerRelevancy 且拥有一个所有者，则使用所有者的相关性。 
+1. 如果 Actor 是 bOnlyRelevantToOwner 且没有通过第一轮检查，则不具有相关性。
+1. 如果 Actor 被附加到另一个 Actor 的骨架模型，它的相关性将取决于其所在基础的相关性。
+1. 如果 Actor 是不可见的 (bHidden == _true_) 并且它的 Root Component 并没有碰撞，那么则不具有相关性，
+	* 如果没有 Root Component 的话，`AActor::IsNetRelevantFor()` 会记录一条警告，提示是否要将它设置为 bAlwaysRelevant=_true_。
+1. 如果 AGameNetworkManager 被设置为使用基于距离的相关性，则只要 Actor 低于净剔除距离，即被视为具有相关性。
+
+[REGION:note]
+Pawn 和 PlayerController 将覆盖 `AActor::IsNetRelevantFor()` 并最终具有不同的相关性条件。 
+[/REGION]
+
+请注意，bStatic Actor（保留在客户端上）也是可以复制的。
+
+这些规则可以在很大程度上接近于那些可能真正影响玩家的 Actor 组。当然，这种做法还算不上完美：距离检查在遇到大型 Actor 时可能会出现漏报（尽管我们用了一些启发式方法来应对），也不能处理环境声音的吸收，另外还有其他的问题。然而，相对于互联网的延迟和数据包丢失这些网络环境所固有的问题来说，这种近似法产生的错误就不那么明显了。
+
+## 优先级设定
+
+虚幻引擎采用了负载平衡技术来安排所有 Actor 的优先级，并根据它们对游戏的重要性为其分别提供一个公平的带宽份额。
+
+每个 Actor 都有一个名为 NetPriority 的浮点变量。这个变量的数值越大，Actor 相对于其他“同伴”的带宽就越多。和优先级为 1.0 的 Actor 相比，优先级是 2.0 的 Actor 
+可以得到两倍的更新频度。唯一影响优先顺序的就是它们的比值；所以很显然，您无法通过提高所有优先级的数值来增加虚幻引擎的 
+网络性能。下面是我们在性能调整中分配的部分 NetPriority 值：
+
+* Actor = 1.0
+* Matinee = 2.7
+* Pawn = 3.0 
+* PlayerController = 3.0
+
+计算 Actor 的当前优先级时使用了虚拟函数 AActor::GetNetPriority()。为避免出现饥荒（starvation），`AActor::GetNetPriority()` 使用 Actor 上次复制后经过的时间 
+去乘以 NetPriority。同时，`GetNetPriority` 函数还考虑了 Actor 与观察者的相对位置以及两者之间的距离。

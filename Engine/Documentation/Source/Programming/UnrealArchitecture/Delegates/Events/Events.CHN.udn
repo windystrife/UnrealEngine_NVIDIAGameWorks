@@ -1,0 +1,99 @@
+﻿INTSourceChangelist:2728743
+Availability:Public
+Title:事件
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture, Programming/UnrealArchitecture/Delegates
+Description:可绑定到多个函数并同时全部执行的委托。
+Version:4.9
+
+事件与 [组播委托](Programming/UnrealArchitecture/Delegates\Multicast) 十分相似。虽然任意类均可绑定事件，但只有声明事件的类可以调用事件 
+的 `Broadcast`、`IsBound` 和 `Clear` 函数。这意味着事件对象可在公共接口中公开，而无需让外部类访问这些敏感度函数。事件使用情况有：在纯抽象类中包含回调、限制外部类调用 `Broadcast`、`IsBound` 和 `Clear` 函数。
+
+## 声明事件
+
+事件的声明和 [组播委托声明](Programming/UnrealArchitecture/Delegates/Multicast#DeclaringMulti-castDelegates) 方式几乎相同，唯一的区别是它们使用事件特有的宏变体。
+
+| 声明宏 | 描述 |
+| --- | --- |
+| `DECLARE_EVENT( OwningType, EventName )` | 创建一个事件。|
+| `DECLARE_EVENT_OneParam( OwningType, EventName, Param1Type )` | 创建带一个参数的事件。|
+| `DECLARE_EVENT_TwoParams( OwningType, EventName, Param1Type, Param2Type )` | 创建带两个参数的事件。|
+| `DECLARE_EVENT_<Num>Params( OwningType, EventName, Param1Type, Param2Type, ...)` | 创建带 N 个参数的事件。|
+
+[REGION:tip]	
+`DECLARE_EVENT` 宏的首个参数是“拥有”此事件的类，因此可调用 `Broadcast()` 函数。
+[/REGION]
+
+## 绑定事件
+
+事件绑定与 [组播委托绑定](Programming/UnrealArchitecture/Delegates/Multicast#BindingMulti-CastDelegates) 方式相同。
+
+## 事件执行
+
+事件允许附带多个函数委托，然后调用事件的 `Broadcast()` 函数将它们一次性全部执行。事件签名不允许使用返回值。对于事件而言，只有定义事件的类才能调用 `Broadcast()` 函数。
+
+即使不存在绑定，在事件上调用 `Broadcast()` 也是安全操作。唯一需要注意的情况是使用事件初始化输出变量，通常不建议执行此操作。
+
+调用 `Broadcast()` 函数时，被绑定函数的执行顺序尚未定义。有可能不按照函数的添加顺序执行。
+
+| 函数 | 描述 |
+| --- | --- |
+| `Broadcast()` | 将此事件广播到所有绑定对象，已失效的对象除外。|
+
+
+
+## 实现范例
+
+### 简单事件
+
+	public:
+	/** Broadcasts whenever the layer changes */
+	DECLARE_EVENT( FLayerViewModel, FChangedEvent )
+	FChangedEvent& OnChanged() { return ChangedEvent; }
+
+
+	private:
+	/** Broadcasts whenever the layer changes */
+	FChangedEvent ChangedEvent;
+
+[REGION:tip]
+事件的访问器应该依照 OnXXX 模式，而非常规的 GetXXX 模式。
+[/REGION]
+
+### 继承的抽象事件
+
+**基础类实现：**
+	
+	/** Register/Unregister a callback for when assets are added to the registry */
+	DECLARE_EVENT_OneParam( IAssetRegistry, FAssetAddedEvent, const FAssetData&);
+	virtual FAseetAddedEvent& OnAssetAdded() = 0;
+
+**派生类实现：**
+
+	DECLARE_DERIVED_EVENT( FAssetRegistry, IAssetRegistry::FAssetAddedEvent, FAssetAddedEvent);
+	virtual FassetAddedEvent& OnAssetAdded() override { return AssetAddedEvent; }
+
+[REGION:tip]
+在派生类中声明一个派生事件时，不要在 `DECLARE_DERIVED_EVENT` 宏中重复函数签名。此外，`DECLARE_DERIVED_EVENT` 宏的最后一个参数是事件的新命名，通常与基础类型相同。
+[/REGION]
+
+### 继承事件
+
+派生类不会继承对基础类敏感事件成员的访问。允许派生类广播其事件的基础类需要公开事件受保护的广播函数。
+
+**基础类：**
+	
+	public:
+	/** Broadcasts whenever the layer changes */
+	DECLARE_EVENT( FLayerViewModel, FChangedEvent )
+	FChangedEvent& OnChanged() { return ChangedEvent; }
+
+	protected:
+	void BroadcastChanged()
+	{
+		ChangedEvent.Broadcast();
+	}
+
+	private:
+	/** Broadcasts whenever the layer changes */
+	FChangedEvent ChangedEvent;
+

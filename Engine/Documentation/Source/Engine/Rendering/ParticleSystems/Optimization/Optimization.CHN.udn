@@ -1,0 +1,88 @@
+﻿INTSourceChangelist:2741685
+Availability:Public
+Title:VFX 优化指南
+Crumbs: %ROOT%, Engine, Engine/Rendering/ParticleSystems
+Description:通过优化粒子系统解决性能问题。
+Version:4.9
+
+
+[TOC (start:2 end:3)]
+
+如要理解此文档中的内容，应先了解级联（Cascade）、材质编辑器（Material Editor）、蓝图（Blueprints）、Matinee、以及与常见特效相关的性能问题。解决性能问题存在多种途径。该文档将讲述 Epic Games 的特效团队如何利用现有工具解决这些问题。
+
+
+## 造成特效性能不佳的常见原因
+
+$ **过度绘制** : 粒子所覆盖屏幕空间的量，以及这些粒子上的指令数量。过度绘制 = 层数量 * 所影响的像素数（GPU）
+$ **Tick 时间** : 游戏线程更新所有粒子系统所花费的时间。（游戏线程）
+$ **绘制调用** : 为 GPU 所准备的状态设置。（渲染线程）
+$ **边界计算** : 更新特效边界所花费的时间。边界用于确定基于摄像机视锥的可视性。（特效边界是否在画面中？）
+
+这些主要问题存在许多子集，正是它们造成了问题的出现。每个子集中均有一个用于对性能问题进行管控的工具。
+
+
+## 特效性能的核心系统
+
+$ **GPU**: 在屏幕上绘制像素所花费的时间。（过度绘制）
+$ **游戏线程**: 更新粒子系统行为所花费的时间。（Tick 时间）
+$ **渲染线程**: 打包粒子几何体和相关绘制调用所花费的时间：（绘制调用）
+
+## 性能注意事项
+
+在性能的大方面而言，粒子数量实际上是一个可以忽略的部分。无论是否分屏，材质复杂程度和屏幕覆盖范围（过度绘制）都会对特定系统总体消耗产生重大影响。在一个只含顶点颜色纹理、并在一个不照亮材质上进行自发光输入的简单自发光火星上只存在数个指令。可以成群结队地长时间生成这类特效，对整体性能的影响非常小。Sprites 非常小，意味着屏幕覆盖范围较小，材质复杂程度决定它们便于生成，渲染迅速的特点。在这个过程中无需在意顶点数量，除非数量庞大（成百上千，或更多）。
+
+此外对总体性能产生影响的还有材质上的指令数。对于火或烟之类的材质，有两种处理方法。第一种是为特效创建一个更复杂的材质。以火焰为例，生成更少的 sprites，利用强化的材质随机性和复杂度使发射器活跃起来。另一个选择是使用更简单的材质并生成更多粒子，保持总体消耗相近，但利用更大的粒子数获得随机性，而不使用更多的复杂材质。请牢记，随距离减少可以极大地降低材质消耗（如果一个屏幕上绘制的四线组远离摄像机一倍的距离，消耗将减少 4 倍。因为总体像素区域将随距离的拉大而缩小，进而减少被过度绘制的像素数量）。
+
+在实际情况中，应该对材质的精细度、生成的 sprites 数、特效与屏幕之间的距离进行分析。这三大属性是发射器复杂度的主要确定因素，需要在它们之间达成平衡。另外需要明智地 LOD 系统在移至或离开粒子系统时对 sprite 数量、材质复杂度以及其他因素进行调整。
+
+总体而言，着重于减少材质复杂度，提升性能；并在使用发射器时对潜在的过度绘制了如指掌。除非生成粒子数量巨大，或使用顶点数极多的网格体发射器生成网格体，否则无需过于纠结粒子数量。
+
+确定问题所在之后，便可利用以下内容进行优化。
+
+
+[OBJECT:TopicList]
+	[PARAM:icon]
+		![](%ROOT%/fx_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		疑难排解链接
+	[/PARAM]
+	[PARAM:description]
+	[/PARAM]
+	[PARAM:links]
+		* [我在 GPU 中遇到问题。](Engine/Rendering/ParticleSystems/Optimization/Results#OverdrawGraphics)
+		* [我在游戏线程中遇到问题。](Engine/Rendering/ParticleSystems/Optimization/Results#GameThread)
+		* [我在渲染线程中遇到问题。](Engine/Rendering/ParticleSystems/Optimization/Results#RenderThread)
+	[/PARAM]
+[/OBJECT]
+
+ 
+
+
+[OBJECT:TopicList]
+	[PARAM:icon]
+		![](%ROOT%/fx_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		粒子系统主题
+	[/PARAM]
+	[PARAM:description]
+	[/PARAM]
+	[PARAM:links]
+		* [VFX 优化：平衡视觉效果和性能](Engine/Rendering/ParticleSystems/Optimization/Balance)
+		* [VFX 优化：核心优化概念](Engine/Rendering/ParticleSystems/Optimization/Concepts)
+		* [VFX 优化：获取结果](Engine/Rendering/ParticleSystems/Optimization/Results)
+		* [VFX 优化：分屏](Engine/Rendering/ParticleSystems/Optimization/SplitScreen)
+	[/PARAM]
+[/OBJECT]
+
+
+
+
+
+ 
+
+
+
+
+

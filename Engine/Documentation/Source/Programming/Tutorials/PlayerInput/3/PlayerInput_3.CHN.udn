@@ -1,0 +1,265 @@
+﻿Availability: Public
+Title:3. 编程和绑定游戏操作
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/PlayerInput
+Description:绑定输入到C++代码
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[上一步](Programming\Tutorials\PlayerInput\2 "%Programming\Tutorials\PlayerInput\2:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[编程指南主页](Programming\Tutorials\)
+	[/PARAM]
+	[PARAM:next]
+		[下一步](Programming\Tutorials\PlayerInput\4 "%Programming\Tutorials\PlayerInput\4:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+1. 在 **Visual Studio** 中，打开`MyPawn.h`并添加如下代码到MyPawn的类定义的底部位置： 
+
+		// 输入函数
+		void Move_XAxis(float AxisValue);
+		void Move_YAxis(float AxisValue);
+		void StartGrowing();
+		void StopGrowing();
+
+		//输入变量
+		FVector CurrentVelocity;
+		bool bGrowing;
+
+	[REGION:note]我们会绑定四个输入函数到输入事件中。 在它们运行时，它们会更新在新输入变量中存储的值，而MyPawn会使用这些值来确定其在游戏时应执行的操作。[/REGION]
+
+1. 我们会切换到`MyPawn.cpp`并对刚声明的四个函数进行编程。 添加以下代码：
+
+		void AMyPawn::Move_XAxis(float AxisValue)
+		{
+			// 以每秒100单位的速度向前或向后移动
+			CurrentVelocity.X = FMath::Clamp(AxisValue, -1.0f, 1.0f) * 100.0f;
+		}
+
+		void AMyPawn::Move_YAxis(float AxisValue)
+		{
+			// 以每秒100单位的速度向右或向左移动
+			CurrentVelocity.Y = FMath::Clamp(AxisValue, -1.0f, 1.0f) * 100.0f;
+		}
+
+		void AMyPawn::StartGrowing()
+		{
+			bGrowing = true;
+		}
+
+		void AMyPawn::StopGrowing()
+		{
+			bGrowing = false;
+		}
+	我们使用 **FMath::Clamp** 来约束从输入中获得的值，使之处于-1到+1的范围。尽管在这个示例中，这样不会产生问题，但是如果存在以相同方式来影响坐标值的多个关键值，那么如果玩家同时按下这些输入，这个值将会被相加到一起。 例如，如果W和向上箭头被同时映射到范围为1.0的MoveX 轴，当他同时按下两个键，将会导致AxisValue的值为2.0，如果不加限制，玩家就会以两倍的速度进行移动。
+	[REGION:note] 您可能注意到了，两个"Move"（移动）函数都将坐标轴的值作为浮点数来处理，而"Grow"函数则不会。 这是因为它们会被映射到MoveX轴和MoveY轴，也就是坐标轴映射，因此会存在浮点参数。 动作映射没有这个参数。[/REGION]
+
+1. 现在我们定义了输入函数，我们需要对它们进行绑定，这样它们会对合适的输入进行响应。 在 **AMyPawn::SetupPlayerInputComponent** 中添加如下代码：
+
+		// 在按下或松开"Grow"键时进行响应。
+		InputComponent->BindAction("Grow", IE_Pressed, this, &AMyPawn::StartGrowing);
+		InputComponent->BindAction("Grow", IE_Released, this, &AMyPawn::StopGrowing);
+
+		// 在每一帧都对两个移动坐标轴的值进行响应，它们分别是"MoveX"和"MoveY"。
+		InputComponent->BindAxis("MoveX", this, &AMyPawn::Move_XAxis);
+		InputComponent->BindAxis("MoveY", this, &AMyPawn::Move_YAxis);
+
+1. 我们现在具有了由配置的输入所更新的变量。 接下来我们只需写一些代码来对其进行操作。 让我们添加以下代码到 **AMyPawn::Tick** 中：
+
+		// 基于"Grow"操作来处理增长和收缩
+		{
+			float CurrentScale = OurVisibleComponent->GetComponentScale().X;
+			if (bGrowing)
+			{
+				//  在一秒的时间内增长到两倍的大小
+				CurrentScale += DeltaTime;
+			}
+			else
+			{
+				// 随着增长收缩到一半
+				CurrentScale -= (DeltaTime * 0.5f);
+			}
+			// 确认永不低于起始大小，或增大之前的两倍大小。
+			CurrentScale = FMath::Clamp(CurrentScale, 1.0f, 2.0f);
+			OurVisibleComponent->SetWorldScale3D(FVector(CurrentScale));
+		}
+
+		// 基于"MoveX"和 "MoveY"坐标轴来处理移动
+		{
+			if (!CurrentVelocity.IsZero())
+			{
+				FVector NewLocation = GetActorLocation() + (CurrentVelocity * DeltaTime);
+				SetActorLocation(NewLocation);
+			}
+		}
+
+1. 在编译完代码后，我们可以返回 **虚幻编辑器** ，然后按下 **Play（游玩）** 。 我们应该可以使用WASD键来控制 **Pawn** ，而且我们应该可以通过按住空格键来使之增大，并在松开后看着其缩小。
+
+[![](PlayingGame1.png)](PlayingGame1.png)
+[![](PlayingGame2.png)](PlayingGame2.png)
+
+----
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    代码
+    [/PARAMLITERAL]
+    [PARAM:heading]
+    完成的代码
+    [/PARAM]
+    [PARAM:content]
+		**MyPawn.h**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "GameFramework/Pawn.h"
+			#include "MyPawn.generated.h"
+
+			UCLASS()
+			class HOWTO_PLAYERINPUT_API AMyPawn : public APawn
+			{
+				GENERATED_BODY()
+
+			public:
+				// 设置默认值
+				AMyPawn();
+
+				// 当游戏开始或生成时调用
+				virtual void BeginPlay() override;
+
+				// 在每一帧调用
+				virtual void Tick(float DeltaSeconds) override;
+
+				// 调用以绑定功能到输入
+				virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override;
+
+				UPROPERTY(EditAnywhere)
+				USceneComponent* OurVisibleComponent;
+
+				// 输入函数
+				void Move_XAxis(float AxisValue);
+				void Move_YAxis(float AxisValue);
+				void StartGrowing();
+				void StopGrowing();
+
+				//输入变量
+				FVector CurrentVelocity;
+				bool bGrowing;
+			};
+
+		**MyPawn.cpp**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_PlayerInput.h"
+			#include "MyPawn.h"
+
+			// 设置默认值
+			AMyPawn::AMyPawn()
+			{
+				// 将此pawn设置为在每一帧都调用Tick()。  如果您不需要这项功能，您可以关闭它以改善性能。
+				PrimaryActorTick.bCanEverTick = true;
+
+				// 将此pawn设置为由最低数量的玩家进行控制
+				AutoPossessPlayer = EAutoReceiveInput::Player0;
+
+				// 创建一个可供添加对象的空根组件。
+				RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+				// 创建相机和可见项目
+				UCameraComponent* OurCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("OurCamera"));
+				OurVisibleComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("OurVisibleComponent"));
+				// 附加相机和可见对象到根组件。 偏移并旋转相机。
+				OurCamera->AttachTo(RootComponent);
+				OurCamera->SetRelativeLocation(FVector(-250.0f, 0.0f, 250.0f));
+				OurCamera->SetRelativeRotation(FRotator(-45.0f, 0.0f, 0.0f));
+				OurVisibleComponent->AttachTo(RootComponent);
+			}
+
+			// 当游戏开始或生成时调用
+			void AMyPawn::BeginPlay()
+			{
+				Super::BeginPlay();
+
+			}
+
+			// 在每一帧调用
+			void AMyPawn::Tick(float DeltaTime)
+			{
+				Super::Tick(DeltaTime);
+
+				// 基于"Grow"操作来处理增长和收缩
+				{
+					float CurrentScale = OurVisibleComponent->GetComponentScale().X;
+					if (bGrowing)
+					{
+						//  在一秒的时间内增长到两倍的大小
+						CurrentScale += DeltaTime;
+					}
+					else
+					{
+						// 随着增长收缩到一半
+						CurrentScale -= (DeltaTime * 0.5f);
+					}
+					// 确认永不低于起始大小，或增大之前的两倍大小。
+					CurrentScale = FMath::Clamp(CurrentScale, 1.0f, 2.0f);
+					OurVisibleComponent->SetWorldScale3D(FVector(CurrentScale));
+				}
+
+				// 基于"MoveX"和 "MoveY"坐标轴来处理移动
+				{
+					if (!CurrentVelocity.IsZero())
+					{
+						FVector NewLocation = GetActorLocation() + (CurrentVelocity * DeltaTime);
+						SetActorLocation(NewLocation);
+					}
+				}
+			}
+
+			// 调用以绑定功能到输入
+			void AMyPawn::SetupPlayerInputComponent(class UInputComponent* InputComponent)
+			{
+				Super::SetupPlayerInputComponent(InputComponent);
+
+				// 在按下或松开"Grow"键时进行响应。
+				InputComponent->BindAction("Grow", IE_Pressed, this, &AMyPawn::StartGrowing);
+				InputComponent->BindAction("Grow", IE_Released, this, &AMyPawn::StopGrowing);
+
+				// 在每一帧都对两个移动坐标轴的值进行响应，它们分别是"MoveX"和"MoveY"。
+				InputComponent->BindAxis("MoveX", this, &AMyPawn::Move_XAxis);
+				InputComponent->BindAxis("MoveY", this, &AMyPawn::Move_YAxis);
+			}
+
+			void AMyPawn::Move_XAxis(float AxisValue)
+			{
+				// 以每秒100单位的速度向前或向后移动
+				CurrentVelocity.X = FMath::Clamp(AxisValue, -1.0f, 1.0f) * 100.0f;
+			}
+
+			void AMyPawn::Move_YAxis(float AxisValue)
+			{
+				// 以每秒100单位的速度向右或向左移动
+				CurrentVelocity.Y = FMath::Clamp(AxisValue, -1.0f, 1.0f) * 100.0f;
+			}
+
+			void AMyPawn::StartGrowing()
+			{
+				bGrowing = true;
+			}
+
+			void AMyPawn::StopGrowing()
+			{
+				bGrowing = false;
+			}
+
+
+	[/PARAM]
+[/OBJECT]
+
+%Steps%

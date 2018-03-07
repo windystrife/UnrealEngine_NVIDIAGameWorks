@@ -1,0 +1,134 @@
+﻿INTSourceChangelist:3454520
+Availability:Public
+Title:파생 데이터 캐시
+Crumbs:%ROOT%, Engine
+Description: Derived Data Cache 및 UE4 와 그 타겟 플랫폼에서 사용되는 포맷의 애셋 저장에 대한 개요입니다.
+version: 4.9
+Parent:Engine
+type:overview
+order:24
+
+**Derived Data Cache** (DDC, 파생 데이터 캐시)는 여러 버전의 애셋을 엔진과 그 타겟 플랫폼에서 
+사용되는 포맷으로 저장하는 기능입니다. 아티스트가 만들어서 에디터로 임포트하여 .uasset 파일로 
+저장되는 소스 포맷과는 다르지요. DDC 에 저장된 콘텐츠는 .uasset 파일에 저장된 데이터를 사용하여 
+언제든지 재생성할 수 있다는 의미에서 _일회성_ 이라 볼 수 있습니다. 이렇게 _파생된_ 포맷을 
+외부에 저장함으로써 소스 애셋 파일을 수정할 필요 없이 엔진이 사용하는 포맷을 쉽게 
+추가 또는 변경할 수 있습니다.
+
+## 공유 DDC 사용하기
+
+개발사에서는 모든 사용자가 접근할 수 있는 특정 위치에 공유 DDC 를 사용하는 것이 좋습니다. 
+이런 식으로 한 사람만 파생된 애셋 포맷을 빌드해 줘도 다른 모든 사용자도 자동으로 사용할 수 
+있게 됩니다. 애셋 처리가 필요할 때는 잠깐씩 버벅일 수가 있습니다. 하지만 그 결과가 공유되기 
+때문에, 개발자가 열 명 정도만 되어도 거의 영향을 느끼기 힘든 수준입니다.
+
+[REGION:warning]
+절대로 전체 DDC 를 인터넷을 통해 복사하거나, DDC 를 백업하거나, 백업에서 DDC 를 복원하지 마세요. 그렇다고 
+어떤 해가 되는 것은 아니지만, 보통은 DDC 에 저장된 데이터를 전송하는 것보다 로컬에서 그냥 아예 새로 만드는 
+것이 더 빠르기에 시간 낭비가 되고 맙니다.
+[/REGION]
+
+공유 DDC 구성을 위해서는, 게임의 DefaultEngine.ini 에서 (에픽 게임즈 런처의 바이너리 버전을 사용하는지 소스 컴파일 버전을 사용하는지에 따라) `[InstalledDerivedDataBackendGraph]` 또는 `[DerivedDataBackendGraph]` 섹션을 선언하여 
+그에 대한 경로를 덮어씁니다. 이 섹션은 원래 BaseEngine.ini 에 선언되며, 기본적으로 에픽의 내부 DDC 
+공유 경로로 설정되어 있습니다. 다른 네트워크 공유 경로로 설정하려면 이 섹션을 다시 선언하고 
+경로를 (Path=\\mystudio.net\DDC 식으로) 바꿔 주어야 합니다.
+
+%Globals:BinarySourceSelectVar%
+
+[OBJECT:ToggleButtonContent]
+	[PARAMLITERAL:category]
+	BinarySourceSelect
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	binaryinstall
+	[/PARAMLITERAL]
+	[PARAMLITERAL:active]
+	active_button_content
+	[/PARAMLITERAL]
+	[PARAM:content]
+			[InstalledDerivedDataBackendGraph]
+			MinimumDaysToKeepFile=7
+			Root=(Type=KeyLength, Length=120, Inner=AsyncPut)
+			AsyncPut=(Type=AsyncPut, Inner=Hierarchy)
+			Hierarchy=(Type=Hierarchical, Inner=Boot, Inner=Pak, Inner=EnginePak, Inner=Local, Inner=Shared)
+			Boot=(Type=Boot, Filename=\%GAMEDIR\%DerivedDataCache/Boot.ddc, MaxCacheSize=256)
+			Local=(Type=FileSystem, ReadOnly=false, Clean=false, Flush=false, PurgeTransient=true, DeleteUnused=true, UnusedFileAge=17, FoldersToClean=-1, Path=../../../Engine/DerivedDataCache)
+			Shared=(Type=FileSystem, ReadOnly=false, Clean=false, Flush=false, DeleteUnused=true, UnusedFileAge=19, FoldersToClean=-1, Path=\\mystudio.net\DDC, EnvPathOverride=UE-SharedDataCachePath)
+			AltShared=(Type=FileSystem, ReadOnly=true, Clean=false, Flush=false, DeleteUnused=true, UnusedFileAge=19, FoldersToClean=-1, Path=\\mystudio.net\DDC2, EnvPathOverride=UE-SharedDataCachePath2)
+			Pak=(Type=ReadPak, Filename=\%GAMEDIR\%DerivedDataCache/DDC.ddp)
+			EnginePak=(Type=ReadPak, Filename=../../../Engine/DerivedDataCache/DDC.ddp)
+	[/PARAM]
+[/OBJECT]
+[OBJECT:ToggleButtonContent]
+	[PARAMLITERAL:category]
+	BinarySourceSelect
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	sourceinstall
+	[/PARAMLITERAL]
+	[PARAMLITERAL:active]
+	[/PARAMLITERAL]
+	[PARAM:content]
+			[DerivedDataBackendGraph]
+			MinimumDaysToKeepFile=7
+			Root=(Type=KeyLength, Length=120, Inner=AsyncPut)
+			AsyncPut=(Type=AsyncPut, Inner=Hierarchy)
+			Hierarchy=(Type=Hierarchical, Inner=Boot, Inner=Pak, Inner=EnginePak, Inner=Local, Inner=Shared)
+			Boot=(Type=Boot, Filename=\%GAMEDIR\%DerivedDataCache/Boot.ddc, MaxCacheSize=256)
+			Local=(Type=FileSystem, ReadOnly=false, Clean=false, Flush=false, PurgeTransient=true, DeleteUnused=true, UnusedFileAge=17, FoldersToClean=-1, Path=../../../Engine/DerivedDataCache)
+			Shared=(Type=FileSystem, ReadOnly=false, Clean=false, Flush=false, DeleteUnused=true, UnusedFileAge=19, FoldersToClean=-1, Path=\\mystudio.net\DDC, EnvPathOverride=UE-SharedDataCachePath)
+			AltShared=(Type=FileSystem, ReadOnly=true, Clean=false, Flush=false, DeleteUnused=true, UnusedFileAge=19, FoldersToClean=-1, Path=\\mystudio.net\DDC2, EnvPathOverride=UE-SharedDataCachePath2)
+			Pak=(Type=ReadPak, Filename=\%GAMEDIR\%DerivedDataCache/DDC.ddp)
+			EnginePak=(Type=ReadPak, Filename=../../../Engine/DerivedDataCache/DDC.ddp)
+	[/PARAM]
+[/OBJECT]
+
+
+
+여러 지사에서 하나의 공유 코드 베이스로 작업을 하려는 경우, UE-SharedDataCachePath 환경 변수를 
+각 지사의 모든 사용자가 읽고 쓸 수 있는 경로로 설정해 줍니다. 그러면 각 지사 자체적으로 
+공유 DDC 가 생깁니다.
+
+예:
+
+	UE-SharedDataCachePath=\\mystudio.net\DDC
+
+## 로컬 DDC 사용하기
+
+솔로 개발자나 원격 작업을 하는 개발자는 보통 그냥 로컬 DDC 를 사용합니다. 엔진에서 공유 DDC 사용을 
+시도하지 않도록 하는 방법은 다음과 같습니다:
+
+* 명령줄에 -ddc=noshared 를 붙입니다.
+* 환경 변수를 로컬 하드 디스크 위치로 설정합니다:
+    
+		UE-SharedDataCachePath=c:\DDC
+
+
+## 파생 데이터 빌드하기
+
+일반적으로는 애셋을 임포트하는 사람이 파생 데이터도 빌드하게 마련인데, 거의 그 사람이 엔진에서 사용하고 
+테스트하기 때문입니다. 그런데 새로운 애셋을 처리해야 할 때가 있을 수가 있습니다.
+그 작업은 요청에 따라 자동으로 이루어지며, 빠른 하드웨어에서는 약간의 버벅인다 해도 
+그다지 무리는 없을 것입니다.
+ 
+파생 데이터 캐시는 아래와 같은 명령으로 언제든 채울 수 있습니다:
+ 
+	UE4\Engine\Binaries\Win64\UE4Editor.exe MyGame -run=DerivedDataCache -fill 
+
+저희는 DDC 최신 상태 유지를 위해 매일 밤 이 명령을 내려줍니다만, 일반적으로 꼭 그래 줄 필요는 
+없는 것이, 자동 캐시로도 충분할 것이기 때문입니다.
+
+## DDC 포함 배포하기
+
+게임 패키징에 있어 일반적으로 선호되는 방식은 쿠킹으로, 쿠킹된 빌드는 DDC 를 빌드하지도 사용하지도 않기 때문입니다.
+하지만 필요에 따라 DDC 를 배포 패키지에 포함시킬 수도 있습니다.
+
+**DDC 패키징을 위해서는:**
+ 
+1. UE4/Engine/Binaries/Win64 디렉토리에서 UE4Editor.exe 에 다음과 같은 인수를 붙여 실행합니다:
+
+		UE4Editor.exe [GameName] -run=DerivedDataCache -fill -DDC=CreatePak
+ 
+1. UE4\[GameName]\DerivedDataCache 디렉토리에 DDC.ddp 파일이 생깁니다.
+
+1. 이 .ddp 파일은 엔진에서 자동으로 찾아 사용합니다.

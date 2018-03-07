@@ -1,0 +1,160 @@
+﻿INTSourceChangelist:2854430
+Availability:Public
+Title: 固定光源
+Crumbs: %ROOT%, Engine, Engine/Rendering/LightingAndShadows,Engine/Rendering/LightingAndShadows/LightMobility
+Description: 这种类型的光源，可以在运行时改变颜色和亮度，但是不能移动、旋转或修改影响范围。
+Version: 4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+	![%Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights:title%](%ROOT%/Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights/stationarylights_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+	![](%ROOT%/ue4_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+	%Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights:title%
+	[/PARAM]
+	[PARAM:description]
+	%Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights:description%
+	[/PARAM]
+	[PARAM:path]
+	[RELATIVE:Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+	![%Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights:title%](%ROOT%/Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights/stationarylights_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+	![](%ROOT%/ue4_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+	%Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights:title%
+	[/PARAM]
+	[PARAM:description]
+	%Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights:description%
+	[/PARAM]
+	[PARAM:path]
+	[RELATIVE:Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:banner]
+![](Engine/Rendering/LightingAndShadows/lighting_overview_banner_001.png)(convert:false)
+[/REGION]
+
+[TOC(start:2 end:2)]
+
+
+
+[INCLUDE:Resources/ContentExamples\Lighting\2_2#StationaryLights01]
+
+## 直接光照
+
+固定光源的直接光照使用延迟着色直接进行渲染。这使得在运行时可以改变光源的亮度和颜色，同时提供了光源函数或IES概述文件。该光源具有和可移动光源一样的高质量解析高光。在游戏中，可以通过修改光源的 **Visible** 属性来显示或隐藏该光源。
+
+[REGION:fullwidth]
+	![](DirectLighting.png)
+[/REGION]
+
+[REGION:caption]
+来自固定光源的直接光照
+[/REGION]
+
+## 直接阴影
+
+光源的实时阴影具有较大的性能消耗。渲染一个有阴影的完全动态的光源所带来的性能消耗，通常是渲染一个没有阴影的动态光源的性能消耗的 20 倍。所以，固定光源可以在静态物体上投射静态阴影，但仍有一些限制。
+
+### 静态阴影
+
+#### 在不透明表面
+
+[**Lightmass**](Engine/Rendering/LightingAndShadows/Lightmass) 在重新构建光照过程中为静态对象上的固定光源生成 _距离场阴影贴图_。距离场阴影贴图即时在分辨率非常低的情况下，也可以提供非常精确的阴影变换，产生的运行时性能消耗非常小。和光照贴图类似，距离场阴影贴图要求所有静态光照的 _静态网格体_ 具有唯一的展开的 UV。
+
+![](DistanceFieldShadows.png)
+
+[REGION:caption]
+使用距离场阴影的一个 _StaticMeshActor_ 投射到不透明表面的精准阴影
+[/REGION]
+
+[REGION:note]
+必须构建光照才能显示距离场阴影，否则在预览时将会使用全景动态阴影。
+[/REGION]
+
+最多只能有 4 个重叠的固定光源具有静态阴影，因为这些光源必须被分配到阴影贴图的不同通道。这是个图形色彩问题，由于这种拓扑结构，所以通常仅允许少于4个的光源重叠。阴影不能影响这个重叠测试，所以 **太阳光一般需要从它所在关卡获得一个通道，即使地下区域也如此**。一旦达到通道的极限，其他固定光源将会使用全景动态阴影，这会带来很大的性能消耗。您可以使用 **StationaryLightOverlap** 视图模式来可视化地查看重叠效果，它会随着您修改光源而动态地更新。当某个光源无法分配到一个通道时，该光源的图标会变为红色的 X。
+
+![](OverlapError.png)
+
+[REGION:caption]
+StationaryLightOverlap 视图模式显示了多个光源的重叠。请注意在 **Spot 光源** 后面的三个光源。左侧和中间的两个光源可以看到已经和 **Spot 光源的** 半径重叠了。而右侧那个并未重叠。
+[/REGION]
+
+#### 在半透明表面
+
+半透明表面也能够在开销较小的情况下接受固定光源的阴影投射—— Lightmass 会根据场景静态物体预计算阴影深度贴图，这将在运行时被应用到半透明表面。这种形式的阴影是比较粗糙的，仅仅在米的度量单位上计算阴影。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![没有阴影的半透明显示](1OriginalCropped.png)(w:700)
+	[/PARAM]
+	[PARAM:after]
+	![接收定向光源的静态阴影的半透明显示](1ShadowedCropped.png)(w:700)
+	[/PARAM]
+[/OBJECT]
+
+静态阴影深度贴图的分辨率由 BaseLightmass.ini 文件中的 StaticShadowDepthMapTransitionSampleDistanceX 和 StaticShadowDepthMapTransitionSampleDistanceY 控制，默认参数是 100，意味着每个纹素对应于 1 米。
+
+### 动态阴影
+
+[EXCERPT:StationaryShadows]
+动态物体（比如 StaticMeshComponent 或 SkeletalMeshComponent）必须要从距离场阴影贴图中集成环境世界的静态阴影。这是通过使用 _每个对象_ 的阴影完成的。每个可移动的对象从固定光源创建两个动态阴影：一个用于处理静态环境世界投射到该对象上的阴影，一个处理该对象投射到环境世界中的阴影。通过使用这种设置，固定光源唯一的阴影消耗就来源于它所影响的动态对象。这意味着，根据所具有的动态对象的数量不同，该性能消耗可能很小，也可能很大。如果足够多的动态对象，那么使用可移动光源会更加高效。
+
+在下面的场景中，几个球体都是动态物体，它们即接收来自静态世界的阴影，也会投射它们自己的阴影，这些阴影和距离场阴影合并计算。每个可移动组件的的阴影锥体也显示在图上。
+
+[REGION:fullwidth]
+	![](DynamicObjectShadowFrustums.png)
+[/REGION]
+
+[REGION:note]
+由可移动组件形成的 _一个物体_ 的阴影被用于该物体的边界框上，因此边界框必须是精确的。对骨骼网格体而言，这意味着需要有对应的物理资源（Physic Asset），对粒子系统而言，固定的边界框需要足够大来包含所有的粒子才行。
+[/REGION]
+
+[/EXCERPT:StationaryShadows]
+
+#### 定向光源的动态阴影
+
+[EXCERPT:CascadedShadowMaps]
+**定向固定光源** 是特殊的，它们支持采用 _联级阴影贴图（Cascaded Shadow Maps）_ 的全景阴影，同时作为静态阴影。这在具有很多带动画的植被的关卡是非常有用的；您想在玩家周围产生可以动的阴影，但是不想付出以让很多阴影重叠来覆盖较大的视图范围这样的代价。动态阴影会随着距离而渐变为静态阴影，但这种变换通常是很难察觉到。要想设置这样的处理，仅需把 _DirectionalLightStationary_ 的 **Dynamic Shadow Distance StationaryLight** 修改为您想让渐变发生的范围即可。
+[/EXCERPT:CascadedShadowMaps]
+
+即便在定向光源上使用联级阴影贴图的时候，可移动组件仍然将会创建 PerObject 的阴影。这么做在较小的 Dynamic Shadow Distances 时比较有用，但如果设置较大的时候这么做就会产生不必要的性能开销。要禁用 PerObject 阴影来优化性能的话，可以在光源属性上禁用 *Use Inset Shadows For Movable Objects*。
+
+## 间接光照
+
+和静态光源一样，固定光源把间接光照信息存储在光照贴图中。在运行时，通过修改亮度和颜色来改变直接光照的做法并不适用于改变间接光照。这意味着，即使当一个光源未选中 **Visible** 项时，在构建光照时，它的间接光照仍会存放到光照贴图中。光源属性中的 **IndirectLightingIntensity** 可以用于控制或禁用该光源的间接光照强度，以便当在构建光照时减小甚至彻底关闭它的间接光照。
+
+不过，还有一个后处理 Volume，叫做 **IndirectLightingIntensity**，它能够控制所有光源在光照贴图中的间接光照强度效果，这个 Volume 可以在运行时修改，并可以从蓝图控制。
+
+## 固定光源使用区域阴影
+
+在虚幻引擎的 4.9 版本及以后的版本中，固定的定向光源提供了一个新的阴影选项，在 Lightmass 区块内，叫 **Use Area Shadows for Stationary Lights**。
+
+![](Area_Shadows_Options.png)
+
+如果想使用固定光源的区域阴影选项，先选择场景中的 **定向光源** 并确认它的 **移动性（Mobility）** 设置为 **固定（Stationary）**。然后在该定向光源属性的 **Lightmass** 区域中，勾选 Use Area Shadows for Stationary Lights 选项。当该选项被勾选时，该固定光源将会使用区域阴影来做与计算阴影贴图。区域阴影能在光照投影较远处产生柔和的阴影边界。下图中可以看到是否使用区域阴影的差异。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![区域阴影开启](AreaShadows.png)(w:900)
+	[/PARAM]
+	[PARAM:after]
+	![区域阴影关闭](UniformPenumbraSharp.png)(w:900)
+	[/PARAM]
+[/OBJECT]
+
+_请注意区域阴影只能在固定光源上工作，可能还需要增大光照贴图的分辨率来获得和非区域阴影同样的阴影质量和锐度。_

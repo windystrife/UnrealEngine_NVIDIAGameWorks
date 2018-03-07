@@ -1,0 +1,81 @@
+﻿INTSourceChangelist:3429264
+Availability:Public
+Title:게임플레이 모듈
+Crumbs:%ROOT%, Programming
+Description:DLL 에 컴파일되는 게임 프로젝트에 속하는 게임플레이 클래스 모음입니다.
+Version: 4.9
+Parent:Programming/UnrealArchitecture/Reference
+
+[TOC(start:2)]
+
+[EXCERPT:Intro]
+엔진 자체가 여러 모듈로 이루어져 있는 것과 마찬가지로, 각 게임은 하나 이상의 게임플레이 모듈로 이루어져 있습니다. 이들은 관련 클래스들의 모음을 담는 그릇이라는 점에서 예전 버전 엔진에서의 패키지와 비슷합니다. 언리얼 엔진 4 에서는 게임플레이가 모두 C++ 로 처리되기에, 모듈은 별도의 패키지 파일이라기 보다는 사실상 DLL 에 가깝습니다.
+[/EXCERPT:Intro]
+
+[REGION:note]
+자신의 게임 프로젝트가 준비되어 있지 않은 경우, 게임 프로젝트 생성과 셋업에 대한 안내는 [게임 프로젝트 만들기](Engine/Basics/Projects/Browser#새프로젝트만들기) 페이지를 참고해 주시기 바랍니다.
+[/REGION]
+
+## 모듈 생성
+
+게임플레이 모듈에는 반드시, 최소한 하나의 헤더 (`.h`) 파일, C++ (`.cpp`) 파일, 빌드 (`*.Build.cs`) 파일이 들어있어야 합니다. 헤더 파일은 모듈 디렉토리의 `Public` 폴더, 즉 `[게임명]\Source\[모듈명]\Public` 디렉토리에 있어야 합니다. 이 파일에는 모듈의 자동 생성 헤더를 포함해서, 모듈에 들어있는 클래스를 컴파일하는 데 필요한 헤더 파일이 포함됩니다.
+
+	#include "Engine.h"
+	#include "EnginePrivate.h"
+	#include "<ModuleName>Classes.h"
+
+C++ 파일은 모듈 디렉토리의 `Private` 폴더, 즉 `[게임명]\Source\[모듈명]\Private` 디렉토리에 들어가며, 모듈을 등록하고 구현합니다.
+
+[REGION:note]게임 내 최소 모듈 하나는 `IMPLEMENT_PRIMARY_GAME_MODULE` 를 사용해서 등록해야 합니다. 그 이후의 모듈은 대안으로 `IMPLEMENT_GAME_MODULE` 메소드를 사용할 수 있습니다. 하나의 게임 프로젝트에서 게임플레이 모듈을 여럿 사용하는 법에 대한 것은 [다중 게임플레이 모듈](#다중게임플레이모듈) 부분을 참고하시기 바랍니다.[/REGION]
+
+	// 게임의 헤더 파일 포함
+	#include "<ModuleName>.h"
+
+	// 모듈을 Primary 로 지정
+	IMPLEMENT_PRIMARY_GAME_MODULE( <ModuleName>, "<GameName>" );
+
+빌드 파일은 게임플레이 모듈의 루트 디렉토리, 즉 `[게임명]\Source\[모듈명]` 에 들어가며, UnrealBuildTool 이 모듈을 컴파일하는 데 사용되는 약간의 정보를 정의합니다.
+
+	using UnrealBuildTool;
+
+	public class <ModuleName> : ModuleRules
+	{
+		public <ModuleName>( TargetInfo Target )
+		{
+			PublicDependencyModuleNames.AddRange( new string[] { "Core", "Engine" } );
+			PrivateDependencyModuleNames.AddRange( new string[] { "RenderCore" } );
+		}
+	}
+
+### INI 파일 셋업
+
+새 게임플레이 모듈은 `UObject` 코드를 가질 것이기에, 약간의 환경설정이 필요합니다.
+
+1. `DefaultEngine.ini` 파일의 여러 부분에 모듈을 추가시켜야 합니다:
+
+	`[UnrealEd.EditorEngine]` 섹션의 `EditPackages` 배열:
+
+		[UnrealEd.EditorEngine]
+		+EditPackages=<ModuleName>
+
+	`[Launch]` 섹션:
+
+		[Launch]
+		Module=<ModuleName>
+
+	`[/Script/Engine.UObjectPackages]` 섹션의 `NativePackages` 배열:
+
+		[/Script/Engine.UObjectPackages]
+		+NativePackages=<ModuleName>
+
+
+## 다중 게임플레이 모듈
+
+게임 DLL 모듈성에 대해서는 철학적 선택이 있습니다. 게임을 다수의 DLL 파일로 나누는 것은 그 이득보다 문제가 많을 수가 있지만, 이것은 각 팀의 요구와 원칙에 따라 결정해야 할 것입니다. 다중 게임플레이 모듈을 사용하면 링크 시간이나 코드 반복처리 시간이 빨라지겠지만, DLL 익스포트 및/또는 인터페이스 클래스를 처리해야 하는 모듈 수가 늘어나게 됩니다. 이러한 상충 관계는 엔진이나 에디터 코드에 대해서는 올바른 것이나, 게임플레이에 대해서는 미심쩍은 것입니다.
+
+primary 게임 모듈을 만든 이후에는 추가적인 게임 전용 모듈을 몇이든 추가할 수 있습니다. 이러한 새 모듈에 대해 `*.Build.cs` 파일을 만들고, 이 모듈에 대한 레퍼런스를 자기 게임의 [`Target.cs` 파일](Programming/UnrealBuildSystem/TargetFiles) (OutExtraModuleNames 배열)에 추가합니다. C++ 코드에서 게임 모듈에 적합한 매크로를 사용했는지 확인하시구요. 최소한 하나의 모듈에서는 `IMPLEMENT_PRIMARY_GAME_MODULE` 매크로를 사용해야 하는 반면, 다른 모든 것들은 `IMPLEMENT_GAME_MODULE` 매크로를 사용해야 합니다. 그러면 UBT (언리얼 빌드 툴)은 자동으로 모듈을 발견하여 부가 게임 DLL 파일을 컴파일합니다.
+
+## 한계
+
+ 교차 의존하는 모듈 (익스포트와 임포트 함수 양쪽, 그리고 그 서로에서의 데이터. 예로 Engine 과 UnrealEd 모듈) 생성을 지원은 하나, 컴파일 시간 측면에서 이상적이지는 않으며, 변수의 정적인 초기화(init)에 가끔 문제를 일으킬 수 있습니다. 게임플레이 모듈을 교차 의존적이지 않게 디자인하고 유지하기란 어려운 일이지만, 코드는 더욱 깔끔해 질 것입니다.
+

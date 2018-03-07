@@ -1,0 +1,245 @@
+﻿INTSourceChangelist:3184883
+Availability:Public
+Title:모바일 플랫폼용 라이팅
+Crumbs:%ROOT%, Platforms, Platforms/Mobile
+Description:모바일 게임용 라이팅 셋업하기 입니다.
+Platform:Mobile
+Related: Platforms/Mobile/Performance
+Related: Platforms/Mobile/Textures
+Related: Engine/Rendering/Materials/CustomizedUVs
+Related: Engine/Rendering/Materials/MaterialProperties/BlendModes
+Related: Engine/Rendering/Materials/ExpressionReference/Utility
+Related: Engine/Rendering/LightingAndShadows/ReflectionEnvironment
+version: 4.12
+parent:Platforms/Mobile
+order:3
+type:overview
+tags:mobile
+
+[TOC(start:2 end:3)]
+
+UE4 의 모바일 플랫폼에서 라이트 사용시, UE4 프로젝트를 여러가지 다양한 모바일 디바이스에서 제대로 실행시키기 위해 준수해야 하는 유의 및 제한사항이 있습니다. 여기서는 그 주의 및 제한사항과 그에 대한 회피책을 알아보도록 하겠습니다.
+
+## 지원되는 기능
+
+모바일 플랫폼에서 지원되는 기능은 다음과 같습니다:
+
+* 리니어 HDR 라이팅
+* 디렉셔널 라이트맵 (노멀을 고려합니다.)
+* 디스턴스 필드 섀도 + 태양에 분석적 스페큘러
+* 이미지 기반 스페큘러 라이팅 - 각 오브젝트마다 가장 가까운 [리플렉션 캡처](Engine/Rendering/LightingAndShadows/ReflectionEnvironment/) 가 시차 보정(parallax correction) 없이 적용됩니다. 그래서 오브젝트 사이에 이음새가 보일 수 있습니다.
+* 다이내믹 오브젝트는 라이팅을 올바르게 받지만 그림자를 드리우지 않습니다.
+
+## 지원되는 라이트 유형
+
+모바일 플랫폼에서는 언리얼 엔진에 지원되는 라이트 유형 중 일부만 지원됩니다:
+
+| 유형 | 부가 정보 |
+| ---- | --------------- |
+| 스테이셔너리 디렉셔널 라이트 | **Mobility = Stationary** 인 디렉셔널 라이트입니다. 퀄리티가 최상입니다. |
+| 스태틱 디렉셔널 라이트 | **Mobility = Static** 인 디렉셔널 라이트입니다. 퍼포먼스가 최상입니다. (디스턴스 필드 섀도나 태양 스페큘러가 없습니다) |
+| 스태틱 포인트 라이트 | **Mobility = Static** 인 포인트 라이트입니다. |
+| 스태틱 스포트 라이트 | **Mobility = Static** 인 스포트 라이트입니다. |
+
+## 리플렉션
+리플렉션이 모바일 프로젝트의 생동감과 사실감에 생명력을 불어넣어 주는 것은 사실이지만, 모바일 디바이스에서 사용할 때 유의해야 하는 사항이 몇 가지 있습니다. 아래에서는 타겟 모바일 디바이스에서 리플렉션이 정상 작동되도록 하는 데 필요한 작업을 몇 가지 다뤄보겠습니다.
+
+* Intensity (강도)를 0 으로 설정하여 포스트 프로세스 볼륨에 있는 앰비언트 큐브맵을 끕니다.
+	
+	![](PP_Settings.png)
+
+* 라이팅을 캡처하고자 하는 곳에 [SphereReflectionCaptures](Engine/Rendering/LightingAndShadows/ReflectionEnvironment) 액터를 배치합니다. 많이 필요하지는 않으며, 주변 라이팅 상황이 고유한 부분에만 놓으면 됩니다. 첨부된 스크린 샷을 예로 들자면, 협곡을 내려가면서 큰 것 3 개, 구체가 있는 곳 안쪽에 작은 것 3 개 정도입니다.
+
+	[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![구체 리플렉션 캡처 꺼짐](Reflection_Probes_Off.png)(w:800 h:473)
+	[/PARAM]
+	[PARAM:after]
+	![구체 리플렉션 캡처 켜짐](Reflection_Probes_On.png)(w:800 h:473)
+	[/PARAM]
+	[/OBJECT]
+
+* 머티리얼에 리플렉션 설정이 다음과 같이 제대로 되었는지 확인합니다: 
+
+	* 노멀 맵에 고빈도와 저빈도 디테일이 많이 포함되도록 해야 리플렉션이 시각적으로 보다 흥미로워 지도록 만드는 데 도움이 됩니다.
+
+		[OBJECT:ComparisonSlider]
+		[PARAM:before]
+		![밋밋한 노멀 맵](Interesting_Normal_Map_00.png)(w:800 h:473)
+		[/PARAM]
+		[PARAM:after]
+		![거친 노멀 맵](Interesting_Normal_Map_01.png)(w:800 h:473)
+		[/PARAM]
+		[/OBJECT]
+
+	* 러프니스 맵도 흑백 강도를 다양하게 주어야 리플렉션의 광택 정도를 다양하게 하는 데 도움이 됩니다.
+
+		[OBJECT:ComparisonSlider]
+		[PARAM:before]
+		![다양한 러프니스](Interesting_Roughness_Map_00.png)(w:624 h:723)
+		[/PARAM]
+		[PARAM:after]
+		![밋밋한 러프니스](Interesting_Roughness_Map_01.png)(w:624 h:723)
+		[/PARAM]
+		[/OBJECT]
+
+	* 표면 유형에 따라 메탈릭 입력은 1 또는 0 으로 합니다.
+
+		[OBJECT:ComparisonSlider]
+		[PARAM:before]
+		![메탈릭 꺼짐](Metallic_Off.png)(w:341 h:600)
+		[/PARAM]
+		[PARAM:after]
+		![메탈릭 켜짐](Metallic_On.png)(w:341 h:600)
+		[/PARAM]
+		[/OBJECT]
+
+각 스태틱 메시 컴포넌트는 가장 가까운 리플렉션 캡처에 할당됩니다. 오브젝트 사이의 리플렉션에 이음새가 생겨, 커다란 메시의 경우 리플렉션 캡처가 메시 중앙 가까이 있게 되면 바람직하지 못한 리플렉션이 사용된다는 뜻입니다.
+
+## 모듈레이트 섀도
+
+풀 다이내믹 섀도는 모바일 프로젝트에 생명력과 현실감을 더하는 데 정말 큰 도움이 됩니다.
+하지만 일부 모바일 디바이스에서 완전 동적인 그림자는 그림의 떡인데, 하드웨어상의 제약이나 그 렌더링에 필요한 높은 하드웨어 요구치때문에 그렇습니다. 이에 대한 우회책으로 새로운 유형의 보다 저렴한 동적인 그림자 방식이 UE4 에 도입되었는데, 바로 **Modulated Shadows** (모듈레이트 섀도)라 합니다. 여기서는 [모듈레이트 섀도](Platforms/Mobile/Lighting/HowTo/ModulatedShadows/) 란 무엇이며 UE4 안에서 어떻게 켜고 사용하는지에 대해 알아보도록 하겠습니다.
+
+## 다이내믹 캐스케이드 섀도 맵
+스테이셔너리 디렉셔널 라이트는 씬의 다이내믹 오브젝트에 대해서만 전체 씬 다이내믹 캐스케이드 섀도 맵(CSM) 섀도를 드리우도록 할 수 있습니다. CSM 섀도를 사용하는 데 있어서 한 가지 장점은, 씬의 스태틱 오브젝트에 드리워지는 미리계산 그림자와 제대로 블렌딩된다는 점입니다. CSM 섀도가 모듈레이트 섀도와 겹쳐도 이중으로 보이지 않으며, 다수의 오브젝트에 대해 다이내믹 섀도를 그리는 작업도 더욱 빠릅니다. 캐스케이드 섀도 구성 관련 상세 정보는 [](Platforms\Mobile\Lighting\HowTo\CascadedShadow\) 문서를 참고하세요.
+
+### 모듈레이트 섀도 vs 다이내믹 섀도
+
+모듈레이트 섀도나 다이내믹 섀도나 동적인 그림자를 드리우는데 있어서 모양이나 작동 방식이 매우 비슷한데, 공통으로 갖는 속성때문에 그렇습니다. 
+이는 모듈레이트 섀도에 있는 몇 가지 제한사항이나 엄격한 한계가 다이내믹 섀도에는 없어 모바일 디바이스의 열악한 하드웨어 성능에서도 보다 나은 퍼포먼스를 낼 수 있기 때문입니다. 
+아래는 다이내믹 섀도와 모듈레이트 섀도 비교 화면입니다.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Dynamic Shadows](Dynamic_Shadows.png)
+	[/PARAM]
+	[PARAM:after]
+	![Modulated Shadows](Modulated_Shadows.png)
+	[/PARAM]
+[/OBJECT]
+
+
+위 그림에 드리워지는 다이내믹 섀도는 서로 공통인 듯 비슷해 보이기는 합니다. 모듈레이트 섀도가 할 수 있고 없는 몇 가지 사항은 다음과 같습니다.
+
+* **그림자 색 변경:** 모듈레이트 섀도가 드리우는 그림자의 색 변경이 가능합니다. 디렉셔널 라이트의 **Light** 섹션에 있는 **Modulated Shadow Color** 옵션을 조절하면 됩니다. 미적인 이유나 게임 플레이 상의 이유로 그림자의 색을 조정하고자 할 때 좋습니다.
+
+	[REGION:lightbox]
+	[![](Change_Mod_Shadow_Color.png)(w:771 h:252)](Change_Mod_Shadow_Color.png)
+	[/REGION]
+
+	[REGION:caption]
+	클릭하면 원래 크기로 봅니다.
+	[/REGION]
+
+* **그림자 블렌딩:** 다이내믹 섀도와는 달리, 모듈레이트 섀도는 구은 것이든 동적인 것이든 프로젝트에 보이는 다른 그림자와의 블렌딩이 불가능합니다. 무슨 뜻이냐면, 그림자가 여럿 있을 때 서로 합쳐진 하나의 그림자가 아닌 모듈레이트 섀도가 다른 그림자 위에 보인다는 뜻입니다.
+
+	[OBJECT:ComparisonSlider]
+		[PARAM:before]
+		![Dynamic Shadows](Dyn_Shadow_Stacking.png)
+		[/PARAM]
+		[PARAM:after]
+		![Modulated Shadows](Mod_Shadow_Stacking.png)
+		[/PARAM]
+	[/OBJECT]
+
+## 모듈레이트 및 다이내믹 섀도 작업
+
+모듈레이트 섀도 작업을 할 때 몇 가지 콘솔 명령과 .INI 세팅으로 모듈레이트 섀도의 모양과 퍼포먼스를 조절할 수 있습니다. 여기서는 이러한 세팅이 무엇인지, UE4 프로젝트에 적용하는 방법은 어떻게 되는지 알아보겠습니다.
+
+[region:note]
+모듈레이트 섀도는 가급적 많은 부분을 기존 그림자 기법과 공유합니다.
+즉 다른 섀도잉 메소드에도 사용할 수 있는 여러가지 그림자 콘솔 변수와 .INI 세팅이 모듈레이트 섀도에도 작동한다는 뜻입니다.
+[/region]
+
+* **그림자 품질:** 처음 모듈레이트 섀도를 켜고 모바일 디바이스에서 보면 모듈레이트 섀도의 선명도나 품질이 예상보다 약간 낮을 수 있습니다. 이 문제 해결을 위해서는, 언리얼 콘솔을 열고 **r.shadowquality** 명령 뒤에 수치를 입력하여 그림자의 퀄리티를 조절할 수 있습니다. 입력한 수치가 클 수록 FPS 를 희생시켜 모듈레이트 섀도 품질을 향상시킵니다. 다음 그림에서 r.shadowquality 값을 0, 1, 2, 3, 4, 5 로 설정하여 모듈레이트 섀도 퀄리티에 이것이 어떠한 영향을 끼치는지 보일 수 있습니다.
+
+	[REGION:fullwidth]
+	[INCLUDE:Platforms\Mobile\Lighting\#SQ]
+	[/REGION]
+
+* **셀프 섀도잉:** 기본적으로 모듈레이트 섀도는 캐릭터나 픽업같은 다이내믹 오브젝트에 셀프 섀도를 제공하나, 모듈레이트 섀도의 퍼포먼스를 최대한 높이기 위해 이러한 부분을 없앴습니다.
+프로젝트가 셀프 섀도에 요구되는 부가 비용을 감당할 수 있다면, UE4 콘솔에 **r.Shadow.EnableModulatedSelfShadow 1** 명령을 입력하여 켤 수는 있습니다.
+셀프 섀도잉을 끄려면 콘솔에 **r.Shadow.EnableModulatedSelfShadow 0** 를 입력하면 됩니다.
+
+	[OBJECT:ComparisonSlider]
+		[PARAM:before]
+		![Self Shadow On](SS_On.png)(h:600)
+		[/PARAM]
+		[PARAM:after]
+		![Self Shadow Off](SS_Off.png)
+		[/PARAM]
+	[/OBJECT]
+
+* **그림자 깊이:** **r.Shadow.CSMDepthBias** 명령을 사용하면 그림자 렌더링이 시작되는 위치에 오프셋을 줄 수 있습니다.
+아래 그림에서 제일 왼쪽은 r.Shadow.CSMDepthBias 가 기본값 0 일 때, 그 오른쪽으로 값이 10, 100, 500, 1000, 1500 일때 어떤 일이 벌어지는지 확인할 수 있습니다.
+	
+	[REGION:fullwidth]
+	[INCLUDE:Platforms\Mobile\Lighting\#SD]
+	[/REGION]
+
+
+
+
+<!-----
+[EXCERPT:SQ]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:max]
+	6
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	SQ
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	**슬라이더를 끌면 r.shadowquality 값이 0 에서 5 로 갈 때의 변화를 확인할 수 있습니다.**
+	[/PARAM]
+	[PARAM:image_list]
+	![](SQ_1.png)
+	![](SQ_2.png)
+	![](SQ_3.png)
+	![](SQ_4.png)
+	![](SQ_5.png)
+	![](SQ_6.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:SQ]
+-->
+
+<!-----
+[EXCERPT:SD]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:max]
+	6
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	SD
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	**슬라이더를 끌면 r.Shadow.CSMDepthBias 값이 0 에서 1500 으로 갈 때의 변화를 확인할 수 있습니다.**
+	[/PARAM]
+	[PARAM:image_list]
+	![](SD_1.png)
+	![](SD_2.png)
+	![](SD_3.png)
+	![](SD_4.png)
+	![](SD_5.png)
+	![](SD_6.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:SD]
+-->
+
+
+
+
+
+
+
+
+

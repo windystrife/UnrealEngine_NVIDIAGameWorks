@@ -1,0 +1,105 @@
+Availability:Public
+Title: Component Replication
+Crumbs:Gameplay, Gameplay/Networking, Gameplay/Networking/Actors
+Description:Setting up components for replication across the network
+Related: Gameplay/Networking/Actors
+Related: Gameplay/Networking/Actors/Properties
+Related: Gameplay/Networking/Actors/ReplicationPerformance
+version: 4.9
+
+[TOC (start:2 end:3)]
+
+Unreal Engine 4 supports component replication. While it is straightforward to use, it is not that common: most components do not replicate. Most gameplay logic is done in the Actor class and components 
+usually just represent smaller pieces that make up the Actor. That gameplay logic in the Actor is what replicates, and its results sometimes end up in calls/changes to the components. However, cases exist
+ where properties or events on components themselves need to directly replicate. This guide explains how to use this.
+
+Components replicate as part of their owning Actor. The Actor still dictates role, priority, relevancy, culling, etc. Once the Actor is replicating, it may also replicate its components. These components 
+may replicate properties and RPCs in the same way an Actor can. Components must implement a `::GetLifetimeReplicatedProps (...)` function in the same way Actors do.
+
+There are two broad categories of components when talking about component replication. Static components are components that are created when the Actor is created. That is, when the owning Actor is spawned 
+on client or server, these components are also spawned, whether the component is replicated or not. The server does not tell the clients to explicitly spawn these components. In this context, static components are components created in the C++ constructor as Default Subobjects or that are created in the Blueprint Editor's Component Mode. Static components do not need to be made to replicate to exist on 
+clients; they exist by default. It only needs to replicate when properties or events need to be automatically synchronized between server and client.
+
+Dynamic components are components spawned on the server at runtime and whose creation and deletion replicate down to clients. They work very much in the same way Actors do. Unlike static components, 
+dynamic components need to replicate to exist on all clients. Alternatively, clients can spawn their own local, non-replicating components. This is actually fine in many cases. It is only when properties 
+or events that trigger on the server need to be automatically synchronized to clients does replication come into play.
+
+## Usage
+Setting up properties and RPCs on components works exactly the same as an Actor. Once a class is set up to have replicated things, the actual instances of these components must be set to replicate. 
+
+### C++
+To make a component replicate, simply call `AActorComponent::SetIsReplicated(true)`. If your component is a default subobject, this should be done in the class constructor after spawning the component. 
+
+Example:
+	ACharacter::ACharacter()
+	{
+		// Etc...
+
+		CharacterMovement = CreateDefaultSubobject<UMovementComp_Character>(TEXT("CharMoveComp"));
+		if (CharacterMovement)
+		{
+			CharacterMovement->UpdatedComponent = CapsuleComponent;
+
+			CharacterMovement->GetNavAgentProperties()->bCanJump = true;
+			CharacterMovement->GetNavAgentProperties()->bCanWalk = true;
+			CharacterMovement->SetJumpAllowed(true);
+			CharacterMovement->SetNetAddressable(); // Make DSO components net addressable
+			CharacterMovement->SetIsReplicated(true); // Enable replication by default
+
+		}
+	}
+
+### Blueprints
+
+To make a static Blueprint component replicate, simply toggle the **Replicates** bool in the component defaults. Again, this only needs to be done if that component has properties or events that you 
+need to replicate. The creation of the static component is implicit on both client and server.
+ 
+![](components_checkbox.png)
+
+Note that not all components will show this, only ones that support some form of replication. 
+
+This can also be done in dynamically spawned components by calling the **SetIsReplicated** function:
+
+![](components_function.png)
+ 
+## Timelines
+
+Timelines must have replication enabled via the Replicated option in their properties. This will replicate the server controlled play position, rate, and direction to clients. This is a basic 
+implementation that may evolve as needs change. Most timelines will not need to replicate. Like any replicated gameplay object, replicated timelines should only be directly manipulated on the 
+server (start/stop etc). Clients should only look at the replicated play positions but not attempting to alter the timeline themselves. In between replication updates, the client does extrapolate 
+play position.
+
+## Bandwidth Overhead
+
+The overhead for component replication is relatively low. Each component within an Actor that replicates will add an additional NetGUID (4 bytes) 'header' and an approximately 1 byte 'footer' along 
+with its properties. CPU wise, there should be minimal difference between replicating a property on an Actor vs replicating on a component.
+
+## Generalized Subobject Replication
+
+This can be taken a step further: all Actor subobjects can replicate, not just components.
+
+The application of this is very narrow but very useful in some cases. The interface for doing this is defined at the class level:
+
+	/** FActory method for instantiating templatized TobjectReplicator class for subobject replication */
+	virtual class FObjectReplicatorBase * InstantiateReplicatorForSubObject(UClass *SubobjClass);
+
+	/** Method that allows an Actor to replicate subobjects on its Actor channel */
+	virtual bool ReplicateSubobjects(class UActorChannel *Channel, class FOutBunch *Bunch, FReplicationFlags *RepFlags);
+
+	/** Called on the Actor when a new subobject is dynamically created via replication */
+	virtual void OnSubobjectCreatedFromReplication(UObject *NewSubobject);
+
+Classes wishing to replicate non-ActorComponent subobjects should implement the above three methods.
+
+### Use Case
+This is useful since it allows UObjects and polymorphism to be utilized at the Actor channel level. Previously replication for complex data structures was always restricted to structures whose type 
+had to be statically defined within an Actor class. With subobject replication, you can now have, for example, an inventory system where each item is a class that extends from a base inventory class, 
+can be fully replicated, and does not require the items to be Actors (which would be too resource-heavy).
+
+## Optimizations
+In the case of having many subobjects to replicate, an Actor can save a lot of time by knowing which, if any, subobjects have recently changed and need to be replicated. This means keeping track of the subobjects changing through accessor functions.
+The interface for doing this is in UActorChannel:
+	bool KeyNeedsToReplicate(int32 ObjID, int32 RepKey);
+This function should be called by the Actor in their `::ReplicateSubobjects` implementation. The Actor class can setup an arbitrary Object ID and Replication Key that the replication system will keep track of for each client. When ReplicateSubobjects returns _true_, the caller is expected to call ReplicateSubobjects on whichever subobjects are being tracked with that Object ID.
+Look at AQAInventory::ReplicateSubobjects for an example. The key thing to remember is that the object ID and replication key are completely arbitrary. Object ID is just used to reference 'things'. It could be the entire list of subobjects, a partial list, or individual objects. The replication key is also arbitrary - it can just be a counter that increments when whatever Object ID is tracking changes. The optimizations discussed here are completely optional.
+

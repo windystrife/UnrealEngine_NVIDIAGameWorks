@@ -1,0 +1,150 @@
+﻿INTSourceChangelist:2728687
+Availability:Public
+Title:アクタのスポーン
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture
+Description:ゲームプレイコードでアクタの新インスタンスを作成する方法
+Version:4.9
+
+[TOC (start:2 end:3)]
+
+## SpawnActor メソッド
+
+**アクタ** の新インスタンスを作成するプロセスは **スポーン** として知られています。アクタのスポーンは `UWorld::SpawnActor()` 関数で実行します。この関数は指定されたクラスの新インスタンスを作成し、 
+新規に作成されたアクタへポインターを返します。`UWorld::SpawnActor()` 関数は、 
+階層にある Actor クラスから継承されるクラスのインスタンスの作成時のみに使用されます。 
+
+	AActor* UWorld::SpawnActor
+	(
+		UClass*			Class,
+		FName			InName,
+		FVector const*	Location,
+		FRotator const*	Rotation,
+		AActor*			Template,
+		bool			bNoCollisionFail,
+		bool			bRemoteOwned,
+		AActor*			Owner,
+		APawn*			Instigator,
+		bool			bNoFail,
+		ULevel*			OverrideLevel,
+		bool			bDeferConstruction
+	)
+
+| パラメータ | 説明 |
+| --- | --- |
+| `Class` | スポーンされる アクタ のクラスを指定する  UClass  。 |
+| `InName` | 任意です。スポーンされるアクタの `Name` として割り当てる `FName`。値が指定されない場合、スポーンされたアクタの名前は *[Class]_[Number]* の形式で自動生成されます。 |
+| `Location` | 任意です。アクタをスポーンする初期位置を設定する `FVector` です。 |
+| `Rotation` | 任意です。アクタと一緒にスポーンする初期回転を設定する `FRotator` です。 |
+| `Template` | 任意です。新規アクタのスポーン時にテンプレートとして使用する `AActor` です。スポーンされたアクタを、テンプレート アクタのプロパティ値を使用して初期化します。テンプレート アクタが指定されない場合、スポーンされたアクタの初期化にはクラス デフォルト オブジェクト (CDO) を使用します。|
+| `bNoCollisionFail` | 任意です。アクタのスポーン時にコリジョンテストを実行するかどうかを決定する `bool` です。`True` の場合、ルート コンポーネントまたはテンプレート アクタのコリジョン設定に関係なく、アクタのスポーン時にコリジョンテストは実行されません。 |
+| `bRemoteOwned` | 任意の bool です。 |
+| `Owner` | 任意です。スポーンされたアクタを所有する `AActor` です。 |
+| `Instigator` | 任意です。スポーンされたアクタによって与えられたダメージの原因となる `APawn` です。 |
+| `bNoFail` | 任意です。特定の条件に満たなかった場合にスポーンを成功させるか否かを決定する `bool` です。`true` の場合、スポーンされているクラスが bStatic=true であるため、もしくはテンプレート アクタのクラスはスポーンされているアクタのクラスとは異なるため、スポーンは失敗しません。 |
+| `OverrideLevel` | 任意です。例えばアクタの Outer など、アクタをスポーンする `ULevel` です。レベルが指定されない場合、`Owner` の `Outer` を使用します。`Owner`  が指定されない場合、永続的なレベルを使用します。 |
+| `bDeferConstruction` | 任意です。コンストラクション スクリプトの実行を決定する `bool` です。`true` の場合、スポーンされたアクタ上でコンストラクション スクリプトは実行されません。アクタが [ブループリント](Engine/Blueprints) からスポーンされた時のみ適用します。 |
+|[REGION:tablesection]戻り値[/REGION]||
+| `AActor` ポインター形式のスポーンされたアクターです。戻り値は `Class` パラメータによって指定された派生タイプへ変換するため、キャストしなくてはいけません。||
+
+### 使用法
+
+	AKAsset* SpawnedActor1 = (AKAsset*) GetWorld()->SpawnActor(AKAsset::StaticClass(), NAME_None, &Location);
+
+## Spawn 関数のテンプレート
+
+スポーンされたアクタをより扱いやすくするために、最も一般的に使用されている関数のテンプレートをいくつか用意しました。これらのテンプレートは、パラメータのテンプレートのサブセットを最小限にとどめることにより容易にアクタを作成し、 
+返されるアクタのタイプの指定が可能となります。
+
+### Spawn T Instance、 Return T Pointer
+
+この関数テンプレートは、同位置に、同回転で、アクタのルートコンポーネントがスポーン操作を実行時に、テンプレートクラス `T` のインスタンスをスポーンします。 
+そしてテンプレートクラスとして同タイプのインスタンスへポインターを返します。例えば `T*` です。所有するアクタ、ポーンの扇動、またスポーンされたアクタが侵害された場合、スポーン操作を失敗させるかまたは衝突させるかの決定、 
+ワールドに存在する別のアクタの指定をすることができます。
+
+	/** Spawns and returns class T, respects default rotation and translation of root component. */
+	template< class T >
+	T* SpawnActor
+	(
+		AActor* Owner=NULL,
+		APawn* Instigator=NULL,
+		bool bNoCollisionFail=false
+	)
+	{
+		return (T*)(GetWorld()->SpawnActor(T::StaticClass(), NAME_None, NULL, NULL, NULL, bNoCollisionFail, false, Owner, Instigator));
+	}
+
+#### 使用法
+
+	MyHUD = SpawnActor<AHUD>(this, Instigator);
+
+### Spawn T Instance with Transform、 Return T Pointer
+
+この関数テンプレートは、指定された `Location` に指定された `Rotation` でテンプレートクラス `T` のインスタンスをスポーンします。 
+そしてテンプレートクラスとして同タイプのインスタンスへポインターを返します。例えば `T*` です。位置と回転に加え、所有するアクタ、ポーンの扇動、またスポーンされたアクタが侵害された場合、スポーン操作を失敗させるかまたは衝突させるかの決定、 
+ワールドに存在する別のアクタの指定をすることができます。
+
+	/** Spawns and returns class T, forcibly sets world position. */
+	template< class T >
+	T* SpawnActor
+	(
+		FVector const& Location,
+		FRotator const& Rotation,
+		AActor* Owner=NULL,
+		APawn* Instigator=NULL,
+		bool bNoCollisionFail=false
+	)
+	{
+		return (T*)(GetWorld()->SpawnActor(T::StaticClass(), NAME_None, &Location, &Rotation, NULL, bNoCollisionFail, false, Owner, Instigator));
+	}
+
+#### 使用法
+
+	Controller = SpawnActor<AController>(GetLocation(), GetRotation(), NULL, Instigator, true);
+
+### Spawn Class Instance、 Return T Pointer
+
+この関数テンプレートは、同位置に、同回転で、アクタのルートコンポーネントがスポーン操作を実行時に、指定されたクラスのインスタンスをスポーンします。 
+そしてテンプレートクラスとして同タイプのインスタンスへポインターを返します。例えば `T*` です。指定した `Class` は、テンプレートクラス `T` の子でなくていはいけません。クラスに加え、 
+所有するアクタ、ポーンの扇動、またスポーンされたアクタが侵害された場合、スポーン操作を失敗させるかまたは衝突させるかの決定、 
+ワールドに存在する別のアクタの指定をすることができます。
+
+	/** Spawns given class and returns class T pointer, respects default rotation and translation of root component. */
+	template< class T >
+	T* SpawnActor
+	(
+		UClass* Class,
+		AActor* Owner=NULL,
+		APawn* Instigator=NULL,
+		bool bNoCollisionFail=false
+	)
+	{
+		return (Class != NULL) ?Cast<T>(GetWorld()->SpawnActor(Class, NAME_None, NULL, NULL, NULL, bNoCollisionFail, false, Owner, Instigator)) :NULL;
+	}
+#### 使用法
+
+	MyHUD = SpawnActor<AHUD>(NewHUDClass, this, Instigator);
+
+### Spawn Class Instance with Transform、 Return T Pointer
+
+この関数テンプレートは、指定された `Location` に指定された `Rotation` で、指定された`Class`のインスタンスをスポーンします。 
+そしてテンプレートクラスとして同タイプのインスタンスへポインターを返します。例えば `T*` です。指定した `Class` は、テンプレートクラス `T` の子でなくていはいけません。クラス、位置、回転に加え、 
+所有するアクタ、ポーンの扇動、またスポーンされたアクタが侵害された場合、スポーン操作を失敗させるかまたは衝突させるかの決定、ワールドに存在する別アクタの指定をすることができます。
+
+	/** Spawns given class and returns class T pointer, forcibly sets world position. */
+	template< class T >
+	T* SpawnActor
+	(
+		UClass* Class,
+		FVector const& Location,
+		FRotator const& Rotation,
+		AActor* Owner=NULL,
+		APawn* Instigator=NULL,
+		bool bNoCollisionFail=false
+	)
+	{
+		return (Class != NULL) ?Cast<T>(GetWorld()->SpawnActor(Class, NAME_None, &Location, &Rotation, NULL, bNoCollisionFail, false, Owner, Instigator)) :NULL;
+	}
+
+#### 使用法
+
+	APawn* ResultPawn = SpawnActor<APawn>(DefaultPawnClass, StartLocation, StartRotation, NULL, Instigator);

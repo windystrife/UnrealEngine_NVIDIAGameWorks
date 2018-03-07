@@ -1,0 +1,444 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+
+=============================================================================*/
+
+#include "Common.ush"
+#include "DeferredShadingCommon.ush"
+#include "BRDF.ush"
+#include "SHCommon.ush"
+#include "ReflectionEnvironmentShared.ush"
+#include "MonteCarlo.ush"
+#include "SkyLightingShared.ush"
+
+struct FCopyToCubeFaceVSOutput
+{
+	float2 UV : TEXCOORD0;
+	float3 ScreenVector : TEXCOORD1;
+	float4 Position : SV_POSITION;
+};
+
+void CopyToCubeFaceVS(
+	in float2 InPosition : ATTRIBUTE0,
+	in float2 InUV       : ATTRIBUTE1,
+	out FCopyToCubeFaceVSOutput Out
+	)
+{	
+	DrawRectangle(float4(InPosition.xy, 0, 1), InUV, Out.Position, Out.UV);
+	Out.ScreenVector = mul(float4(Out.Position.xy, 1, 0), View.ScreenToTranslatedWorld).xyz;
+}
+
+int CubeFace;
+
+Texture2D InTexture;
+SamplerState InTextureSampler;
+
+/** 
+ * X = 0 if capturing sky light, 1 if capturing reflection capture with MaxDistance fade, 2 otherwise, 
+ * Y = Sky distance threshold, 
+ * Z = whether a skylight's lower hemisphere should be replaced with LowerHemisphereColor.
+ */
+float3 SkyLightCaptureParameters;
+float4 LowerHemisphereColor;
+
+void CopySceneColorToCubeFaceColorPS(
+	FCopyToCubeFaceVSOutput Input,
+	out float4 OutColor : SV_Target0
+	)
+{ 
+	float SceneDepth = CalcSceneDepth(Input.UV);
+	float3 SceneColor = Texture2DSample(InTexture, InTextureSampler, Input.UV).rgb;
+
+	// Convert INF's to valid values
+	SceneColor = min(SceneColor, 65503);
+	float3 WorldPosition = Input.ScreenVector * SceneDepth + View.WorldCameraOrigin;
+
+	float Alpha = 1;
+
+	if (SkyLightCaptureParameters.x == 0)
+	{
+		// Assuming we're on a planet and no sky lighting is coming from below the horizon
+		// This is important to avoid leaking from below since we are integrating incoming lighting and shadowing separately
+		if (Input.ScreenVector.z < 0 && SkyLightCaptureParameters.z >= 1)
+		{
+			SceneColor = lerp(SceneColor, LowerHemisphereColor.rgb, LowerHemisphereColor.a);
+		}
+	}
+	else if (SkyLightCaptureParameters.x == 1)
+	{
+		float RadialDistance = length(WorldPosition - View.WorldCameraOrigin);
+		float MaxDistance = SkyLightCaptureParameters.y;
+
+		// Setup alpha to fade out smoothly past the max distance
+		// This allows a local reflection capture to only provide reflections where it has valid data, falls back to sky cubemap
+		Alpha = 1 - smoothstep(.8f * MaxDistance, MaxDistance, RadialDistance);
+	}
+
+	// We need pre-multiplied alpha for correct filtering
+	// However, we need to compute average brightness before masking out sky areas, so premultiplying happens later
+	OutColor = float4(SceneColor, Alpha);
+}
+
+float3 GetCubemapVector(float2 ScaledUVs)
+{
+	float3 CubeCoordinates;
+
+	//@todo - this could be a 3x3 matrix multiply
+	if (CubeFace == 0)
+	{
+		CubeCoordinates = float3(1, -ScaledUVs.y, -ScaledUVs.x);
+	}
+	else if (CubeFace == 1)
+	{
+		CubeCoordinates = float3(-1, -ScaledUVs.y, ScaledUVs.x);
+	}
+	else if (CubeFace == 2)
+	{
+		CubeCoordinates = float3(ScaledUVs.x, 1, ScaledUVs.y);
+	}
+	else if (CubeFace == 3)
+	{
+		CubeCoordinates = float3(ScaledUVs.x, -1, -ScaledUVs.y);
+	}
+	else if (CubeFace == 4)
+	{
+		CubeCoordinates = float3(ScaledUVs.x, -ScaledUVs.y, 1);
+	}
+	else
+	{
+		CubeCoordinates = float3(-ScaledUVs.x, -ScaledUVs.y, -1);
+	}
+
+	return CubeCoordinates;
+}
+
+float CubeTexelWeight( float3 N )
+{
+	uint Axis = 2;
+	if( abs(N.x) >= abs(N.y) && abs(N.x) >= abs(N.z) )
+	{
+		Axis = 0;
+	}
+	else if( abs(N.y) > abs(N.z) )
+	{
+		Axis = 1;
+	}
+
+	N = Axis == 0 ? N.zyx : N;
+	N = Axis == 1 ? N.xzy : N;
+
+	float2 UV = N.xy / N.z;
+
+	float VecLengthSqr = 1 + dot( UV, UV );
+	return 4.0 / ( sqrt( VecLengthSqr ) * VecLengthSqr );
+}
+
+
+TextureCube SourceTexture;
+SamplerState SourceTextureSampler;
+float2 SinCosSourceCubemapRotation;
+
+void CopyCubemapToCubeFaceColorPS(
+	FScreenVertexOutput Input,
+	out float4 OutColor : SV_Target0
+	)
+{ 
+	float2 ScaledUVs = Input.UV * 2 - 1;
+	float3 CubeCoordinates = GetCubemapVector(ScaledUVs);
+	// Rotate around Z axis
+	CubeCoordinates.xy = float2(dot(CubeCoordinates.xy, float2(SinCosSourceCubemapRotation.y, -SinCosSourceCubemapRotation.x)), dot(CubeCoordinates.xy, SinCosSourceCubemapRotation));
+	OutColor = TextureCubeSampleLevel(SourceTexture, SourceTextureSampler, CubeCoordinates, 0);
+
+	if (SkyLightCaptureParameters.x > 0)
+	{
+		// Assuming we're on a planet and no sky lighting is coming from below the horizon
+		// This is important to avoid leaking from below since we are integrating incoming lighting and shadowing separately
+		if (CubeCoordinates.z < 0 && SkyLightCaptureParameters.z >= 1)
+		{
+			OutColor.rgb = lerp(OutColor.rgb, LowerHemisphereColor.rgb, LowerHemisphereColor.a);
+		}
+	}
+
+	OutColor.a = 1;
+}
+
+uint MipIndex;
+uint NumMips;
+
+void DownsamplePS(
+	FScreenVertexOutput Input,
+	out float4 OutColor : SV_Target0
+	)
+{ 
+	float2 ScaledUVs = Input.UV * 2 - 1;
+	float3 CubeCoordinates = GetCubemapVector(ScaledUVs);
+
+	uint MipSize = 1 << ( NumMips - MipIndex - 1 );
+
+	float3 TangentZ = normalize( CubeCoordinates );
+	float3 TangentX = normalize( cross( GetCubemapVector( ScaledUVs + float2(0,1) ), TangentZ ) );
+	float3 TangentY = cross( TangentZ, TangentX );
+
+	const float SampleOffset = 2.0 * 2 / MipSize;
+
+	float2 Offsets[] =
+	{
+		float2(-1, -1) * 0.7,
+		float2( 1, -1) * 0.7,
+		float2(-1,  1) * 0.7,
+		float2( 1,  1) * 0.7,
+		
+		float2( 0, -1),
+		float2(-1,  0),
+		float2( 1,  0),
+		float2( 0,  1),
+	};
+
+	OutColor = SourceTexture.SampleLevel( SourceTextureSampler, CubeCoordinates, 0 );
+
+	UNROLL
+	for( uint i = 0; i < 8; i++ )
+	{
+		float Weight = 0.375;
+
+		float3 SampleDir = CubeCoordinates;
+		SampleDir += TangentX * ( Offsets[i].x * SampleOffset );
+		SampleDir += TangentY * ( Offsets[i].y * SampleOffset );
+		OutColor += SourceTexture.SampleLevel( SourceTextureSampler, SampleDir, 0 ) * Weight;
+	}
+
+	OutColor *= rcp( 1.0 + 1.0 + 2.0 );
+}
+
+int NumCaptureArrayMips;
+
+/** Cube map array of reflection captures. */
+TextureCube ReflectionEnvironmentColorTexture;
+SamplerState ReflectionEnvironmentColorSampler;
+
+#if COMPUTEBRIGHTNESS_PIXELSHADER
+
+void ComputeBrightnessMain(
+	in float4 UVAndScreenPos : TEXCOORD0, 
+	out float4 OutColor : SV_Target0
+	)
+{ 
+	// Sample the 6 1x1 cube faces and average
+	float3 AverageColor = TextureCubeSampleLevel(ReflectionEnvironmentColorTexture, ReflectionEnvironmentColorSampler, float3(1, 0, 0), NumCaptureArrayMips - 1).rgb;
+	AverageColor += TextureCubeSampleLevel(ReflectionEnvironmentColorTexture, ReflectionEnvironmentColorSampler, float3(-1, 0, 0), NumCaptureArrayMips - 1).rgb;
+	AverageColor += TextureCubeSampleLevel(ReflectionEnvironmentColorTexture, ReflectionEnvironmentColorSampler, float3(0, 1, 0), NumCaptureArrayMips - 1).rgb;
+	AverageColor += TextureCubeSampleLevel(ReflectionEnvironmentColorTexture, ReflectionEnvironmentColorSampler, float3(0, -1, 0), NumCaptureArrayMips - 1).rgb;
+	AverageColor += TextureCubeSampleLevel(ReflectionEnvironmentColorTexture, ReflectionEnvironmentColorSampler, float3(0, 0, 1), NumCaptureArrayMips - 1).rgb;
+	AverageColor += TextureCubeSampleLevel(ReflectionEnvironmentColorTexture, ReflectionEnvironmentColorSampler, float3(0, 0, -1), NumCaptureArrayMips - 1).rgb;
+
+	OutColor = dot(AverageColor / 6, .3333f); 
+}
+
+#endif
+
+float4 SampleCubemap(float3 Coordinates, uint InMipIndex)
+{
+	return TextureCubeSampleLevel(SourceTexture, SourceTextureSampler, Coordinates, InMipIndex);
+}
+
+uint SourceMipIndex;
+float4 SampleCubemap(float3 Coordinates)
+{
+	return SampleCubemap(Coordinates, SourceMipIndex);
+}
+
+void DownsamplePS_Mobile(
+	FScreenVertexOutput Input,
+	out float4 OutColor : SV_Target0
+)
+{
+	float2 ScaledUVs = Input.UV * 2 - 1;
+	float3 CubeCoordinates = GetCubemapVector(ScaledUVs);
+
+	OutColor = SampleCubemap(CubeCoordinates);
+}
+
+void FilterPS(
+	FScreenVertexOutput Input,
+	out float4 OutColor : SV_Target0
+	)
+{ 
+	float2 ScaledUVs = Input.UV * 2 - 1;
+	float3 CubeCoordinates = GetCubemapVector(ScaledUVs);
+
+#if ES2_PROFILE || METAL_PROFILE
+//@todo - mwassmer.  Write filtering that works for ES2 so specular will work.
+#define FILTER_CUBEMAP 0
+#else
+#define FILTER_CUBEMAP 1
+#endif
+
+#if FILTER_CUBEMAP
+
+	float3 N = normalize(CubeCoordinates);
+	float3x3 TangentToWorld = GetTangentBasis( N );
+
+	float Roughness = ComputeReflectionCaptureRoughnessFromMip( MipIndex, NumMips - 1 );
+
+	if( Roughness < 0.01 )
+	{
+		OutColor = SourceTexture.SampleLevel( SourceTextureSampler, CubeCoordinates, 0 );
+		return;
+	}
+
+	uint CubeSize = 1 << ( NumMips - 1 );
+	const float SolidAngleTexel = 4*PI / ( 6 * CubeSize * CubeSize ) * 2;
+
+	//const uint NumSamples = 1024;
+	const uint NumSamples = Roughness < 0.1 ? 32 : 64;
+	
+	float4 FilteredColor = 0;
+	BRANCH
+	if( Roughness > 0.99 )
+	{
+		// Roughness=1, GGX is constant. Use cosine distribution instead
+
+		LOOP
+		for( uint i = 0; i < NumSamples; i++ )
+		{
+			float2 E = Hammersley( i, NumSamples, 0 );
+
+			float3 L = CosineSampleHemisphere( E ).xyz;
+
+			float NoL = L.z;
+
+			float PDF = NoL / PI;
+			float SolidAngleSample = 1.0 / ( NumSamples * PDF );
+			float Mip = 0.5 * log2( SolidAngleSample / SolidAngleTexel );
+
+			L = mul( L, TangentToWorld );
+			FilteredColor += SourceTexture.SampleLevel( SourceTextureSampler, L, Mip );
+		}
+
+		OutColor = FilteredColor / NumSamples;
+	}
+	else
+	{
+		float Weight = 0;
+
+		LOOP
+		for( uint i = 0; i < NumSamples; i++ )
+		{
+			float2 E = Hammersley( i, NumSamples, 0 );
+
+			// 6x6 Offset rows. Forms uniform star pattern
+			//uint2 Index = uint2( i % 6, i / 6 );
+			//float2 E = ( Index + 0.5 ) / 5.8;
+			//E.x = frac( E.x + (Index.y & 1) * (0.5 / 6.0) );
+
+			E.y *= 0.995;
+
+			float3 H = ImportanceSampleGGX( E, Roughness ).xyz;
+			float3 L = 2 * H.z * H - float3(0,0,1);
+
+			float NoL = L.z;
+			float NoH = H.z;
+
+			if( NoL > 0 )
+			{
+				//float TexelWeight = CubeTexelWeight( L );
+				//float SolidAngleTexel = SolidAngleAvgTexel * TexelWeight;
+
+				//float PDF = D_GGX( Roughness, NoH ) * NoH / (4 * VoH);
+				float PDF = D_GGX( Roughness, NoH ) * 0.25;
+				float SolidAngleSample = 1.0 / ( NumSamples * PDF );
+				float Mip = 0.5 * log2( SolidAngleSample / SolidAngleTexel );
+
+				float ConeAngle = acos( 1 - SolidAngleSample / (2*PI) );
+
+				L = mul( L, TangentToWorld );
+				FilteredColor += SourceTexture.SampleLevel( SourceTextureSampler, L, Mip ) * NoL;
+				Weight += NoL;
+			}
+		}
+
+		OutColor = FilteredColor / Weight;
+	}
+
+#else
+
+	OutColor = SampleCubemap(CubeCoordinates, MipIndex);
+
+#endif
+}
+
+float4 CoefficientMask0;
+float4 CoefficientMask1;
+float CoefficientMask2;
+int NumSamples;
+
+void DiffuseIrradianceCopyPS(
+	FScreenVertexOutput Input,
+	out float4 OutColor : SV_Target0
+	)
+{ 
+	float2 ScaledUVs = Input.UV * 2 - 1;
+	float3 CubeCoordinates = normalize(GetCubemapVector(ScaledUVs));
+
+	float SquaredUVs = 1 + dot(ScaledUVs, ScaledUVs);
+	// Dividing by NumSamples here to keep the sum in the range of fp16, once we get down to the 1x1 mip
+	float TexelWeight = 4 / (sqrt(SquaredUVs) * SquaredUVs);
+
+	FThreeBandSHVector SHCoefficients = SHBasisFunction3(CubeCoordinates);
+	float CurrentSHCoefficient = dot(SHCoefficients.V0, CoefficientMask0) + dot(SHCoefficients.V1, CoefficientMask1) + SHCoefficients.V2 * CoefficientMask2;
+	float3 TexelLighting = SampleCubemap(CubeCoordinates).rgb;
+
+	OutColor = float4(TexelLighting * CurrentSHCoefficient * TexelWeight, TexelWeight);
+}
+
+float4 Sample01;
+float4 Sample23;
+
+void DiffuseIrradianceAccumulatePS(
+	FScreenVertexOutput Input,
+	out float4 OutColor : SV_Target0
+	)
+{ 
+	float4 AccumulatedValue = 0;
+
+	{
+		float2 ScaledUVs = saturate(Input.UV + Sample01.xy) * 2 - 1;
+		float3 CubeCoordinates = GetCubemapVector(ScaledUVs);
+		AccumulatedValue += SampleCubemap(CubeCoordinates);
+	}
+	
+	{
+		float2 ScaledUVs = saturate(Input.UV + Sample01.zw) * 2 - 1;
+		float3 CubeCoordinates = GetCubemapVector(ScaledUVs);
+		AccumulatedValue += SampleCubemap(CubeCoordinates);
+	}
+
+	{
+		float2 ScaledUVs = saturate(Input.UV + Sample23.xy) * 2 - 1;
+		float3 CubeCoordinates = GetCubemapVector(ScaledUVs);
+		AccumulatedValue += SampleCubemap(CubeCoordinates);
+	}
+
+	{
+		float2 ScaledUVs = saturate(Input.UV + Sample23.zw) * 2 - 1;
+		float3 CubeCoordinates = GetCubemapVector(ScaledUVs);
+		AccumulatedValue += SampleCubemap(CubeCoordinates);
+	}
+	
+	OutColor = float4(AccumulatedValue.rgb / 4.0f, AccumulatedValue.a / 4.0f);
+}
+
+void AccumulateCubeFacesPS(
+	FScreenVertexOutput Input,
+	out float4 OutColor : SV_Target0
+	)
+{
+	float4 AccumulatedValue = TextureCubeSampleLevel(SourceTexture, SourceTextureSampler, float3(1, 0, 0), SourceMipIndex);
+	AccumulatedValue += TextureCubeSampleLevel(SourceTexture, SourceTextureSampler, float3(-1, 0, 0), SourceMipIndex);
+	AccumulatedValue += TextureCubeSampleLevel(SourceTexture, SourceTextureSampler, float3(0, 1, 0), SourceMipIndex);
+	AccumulatedValue += TextureCubeSampleLevel(SourceTexture, SourceTextureSampler, float3(0, -1, 0), SourceMipIndex);
+	AccumulatedValue += TextureCubeSampleLevel(SourceTexture, SourceTextureSampler, float3(0, 0, 1), SourceMipIndex);
+	AccumulatedValue += TextureCubeSampleLevel(SourceTexture, SourceTextureSampler, float3(0, 0, -1), SourceMipIndex);
+	OutColor = float4(4 * PI * AccumulatedValue.rgb / ( max(AccumulatedValue.a, .00001f)), 0);	
+}

@@ -1,0 +1,95 @@
+﻿INTSourceChangelist:3599948
+Availability: Docs
+Title:머티리얼 표현식 만들기
+Crumbs:%ROOT%, Programming, Programming/Rendering
+Description:머티리얼 에디터에서 사용할 수 있는 머티리얼 표현식을 새로 만드는 방법 안내입니다.
+Version: 4.9
+tags:Rendering
+
+[TOC (start:2 end:3)]
+
+UE4에서 머티리얼 표현식 새로 만들기는 간단합니다. 예로 MaterialExpressionSquare 라는, 입력을 제곱하는 머티리얼 표현식을 새로 만들어 보겠습니다. 알아두실 점은, UE4의 모든 머티리얼 표현식은 MaterialExpressions.cpp 에 구현된다는 점입니다.
+
+
+
+## 선언
+
+먼저 MaterialExpression 에서 파생된 새 유형으로 된 엔진 스크립트 파일을 새로 추가합니다. 표현식의 입력 및 가상 함수를 선언합니다. 예를 들어:<br>  
+
+	MaterialExpressionSquare.h
+
+	UCLASS(HeaderGroup=Material, collapsecategories, hidecategories=Object)
+	public class UMaterialExpressionSquare : public UMaterialExpression
+	{
+		GENERATED_UCLASS_BODY()
+
+		UPROPERTY()
+		FExpressionInput   A;
+
+	#if CPP
+		virtual int32 Compile(FMaterialCompiler* Compiler);
+		virtual FString GetCaption() const;
+	#endif
+
+	}
+
+머티리얼 에디터의 프로퍼티 페이지에서 편집 가능하게 하고픈 표현식 변수를 추가하려는 경우, 다음과 같이 `UPROPERTY()` 매크로에 카테고리를 정의해 줘야 합니다:
+
+	UPROPERTY(Category=MaterialExpressionSquare)
+	float ClampMin;
+
+
+## 구현
+
+프로퍼티의 기본값을 설정하는 데는 생성자가 사용됩니다. 이 예제에서는 머티리얼 에디터 안의 표현식 라이브러리에 있는 다양한 카테고리에 머티리얼 표현식을 할당하고 있습니다.
+
+	UMaterialExpressionSquare::UMaterialExpressionSquare(const FObjectInitializer& ObjectInitializer)
+		: Super(ObjectInitializer)
+	{
+		// 일회성 초기화를 담을 구조체
+		struct FConstructorStatics
+		{
+			FName NAME_Particles;
+			FName NAME_Constants;
+			FConstructorStatics()
+				: NAME_Particles(TEXT("Particles"))
+				, NAME_Constants(TEXT("Constants"))
+			{
+			}
+		};
+		static FConstructorStatics ConstructorStatics;
+
+		// 프로퍼티 초기화
+		MenuCategories.Add(ConstructorStatics.NAME_Particles);
+		MenuCategories.Add(ConstructorStatics.NAME_Constants);
+	}
+
+`Compile()` 는 `FMaterialCompiler` 상의 적합한 함수를 호출합니다. 이 경우 기존 (`Mul`) 컴파일러 함수성을 사용하여 Square 를 구현할 수 있으나, 자체 구현한 커스텀 표현식에 따라 새로운 머티리얼 컴파일러 함수성을 추가해 줘야 할 수도 있습니다.
+
+	int32 UMaterialExpressionSquare::Compile(FMaterialCompiler* Compiler)
+	{
+	   if(!A.Expression)
+		  return Compiler->Errorf(TEXT("Missing Multiply input A"));
+	   else
+	   {
+		  int32 Arg1 = A.Compile(Compiler);
+		  return Compiler->Mul(
+			 Arg1,
+			 Arg1
+			 );
+	   }
+	}
+
+`GetCaption()` 은 머티리얼 에디터 그래프에서 노드의 캡션으로 표시할 텍스트를 반환합니다.
+
+	FString UMaterialExpressionSquare::GetCaption() const
+	{
+	   return TEXT("Square");
+	}
+
+
+이제 머티리얼 에디터의 목록에 새로운 머티리얼 표현식이 나타날 것입니다. Square 표현식이 돌아가는 모습입니다:  
+
+[REGION:todo]
+![](MaterialExpression.png)
+[/REGION]

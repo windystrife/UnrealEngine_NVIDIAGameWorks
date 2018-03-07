@@ -1,0 +1,269 @@
+Availability: Public
+Title:Getting Results
+Crumbs: %ROOT%, Engine, Engine/Rendering/ParticleSystems, Engine/Rendering/ParticleSystems/Optimization
+Description:Profiling common trouble areas with Particle Systems.
+Version: 4.9
+tags:Particles
+
+
+[TOC]
+
+
+
+## Core Systems in Cascade - GPU/Game Thread/Render Thread
+
+Cascade creates robust particle systems which have dynamic costs spread across three core engine systems in UE4.  Game Thread,  Render Thread, and GPU.
+
+
+* Particle simulation times (Tick) are calculated on the Game Thread.
+* Particle data finalization (Packing Geometry, Draw calls) are calculated on the Render Thread.
+* Particle visuals (Shader complexity, overdraw) are calculated on the GPU.
+
+
+All of these systems calculate parallel to each other, so a slow down on any single system can mean bottlenecks in the rendering process, which equates to low framerate. It is important to consider all 3 processes when creating particle systems in Cascade.
+
+It is also important to note that Cascade runs Particle evaluation on the Game Thread, which is the same location gameplay calculations are done.
+
+(#OverdrawGraphics)
+
+
+
+## Overdraw - GPU
+
+When you add a Material to the surface of a sprite, that Material has a cost in instruction count.  For translucent objects, this instruction cost adds up as translucency stacks up, creating overdraw.  The more layers of translucency, the higher the cost. In its simplest form, overdraw can be described as:
+
+
+    
+    Overdraw = Pixel shader cost = Number of layers * avg number of pixels affected by a layer * avg number of instructions for a layer
+    
+
+
+You can easily see this cost in the **Shader Complexity Mode**.  Bright Red = 300 instructions, pink = 600 instructions, and white >= 900 instructions.  Press **Alt+8** to view shader complexity on PC.
+
+[REGION:note]
+The instruction count for a Material can be seen in the Material editor.
+[/REGION]
+
+Shader complexity outputs an approximation of what the cost of a system will be; however, it is also dependent upon the scene since translucency is calculated against opaque objects which also have a cost.
+
+Checking the usage of your effects is critical.  An effect which may be called in any given scenario (weapon impact) will generally need to be lighter than an effect you can custom build to match a specific scenario, since it will be drawn in fluctuating cost scenarios.
+
+Some steps that can be taken to get overdraw impact under control are:
+
+
+* Reduce emission rates.
+* Reduce Material instruction count.
+* Reduce particle scale (fill less of the screen).
+* Create LODs for near/far particle emissions to reduce cost at different view distances.
+* Check for emitters placed in a line stacking against each other (static placed effects).
+
+
+(#GameThread)
+
+
+
+## LODs - Level of Detail - GPU/Game Thread
+
+LODs in Cascade provide users the ability to control modules and behavior based upon the distance from the player to the emitter.  Any attribute in a particle system can be modified to make use of the LOD system.
+
+Refer to the [Particle System Level of Detail (LOD)](Engine/Rendering/ParticleSystems/Cascade#PartileSystemLODs) section of the [Cascade Reference Guide](Engine/Rendering/ParticleSystems/Cascade) for more technical information on setting up LODs.
+
+It is important to keep in mind when creating LODs, there are memory costs associated with unshared modules.  Sharing as many modules across LODs as possible reduces memory footprint. Only create unique module settings for the attributes you wish to modify.
+
+
+
+[OBJECT:topiclistnotitlealt]
+	[PARAM:icon]
+		![detailModes.png](detailModes.png)(convert:false)
+	[/PARAM]
+	[PARAM:description]
+	[INCLUDE:#lodfloat]
+	[/PARAM]
+[/OBJECT]
+
+<!--
+[EXCERPT:LODFloat]
+The preview modes in Cascade and the editors perspective view behave in different ways. In order to get proper viewing in Cascade, make certain to set the **View** -> **Detail Mode** to **High**.
+
+Cascade allows for a switch between LODs and displays the LOD specified.  Be certain to disable the Editor LOD view mode in order to see Cascade update correctly.
+
+Enabling the editor preview grants the ability to fly through the scene and see the particle systems switch between LODs as you move around.
+
+It is important to measure the scene and get a realistic idea of just how many units are needed to see effects in the proper state.  In the case of ambient particle systems, it is possible to emit 0.00 particles and reduce tick time when the particle systems might not be visible.  Measuring distance can be done by holding down the middle mouse button and dragging in any orthographic view (front, side, top.)
+[/EXCERPT:LODFloat]
+-->
+
+### LOD Distance Check Time
+
+The **LOD Distance Check Time** feature dictates how often the game checks the distance of the player to the emitter placed in the scene to determine which LOD to use.  LOD Distance Check Time works when the LOD Method is set to automatic.
+
+Automatic essentially lets the game determine the LOD as you play.  If you increase the LOD Distance Check Time, the amount of time between checks will increase.  LOD DistanceCheckTime is calculated in seconds, so consider your player's max movement speed when setting this.  If you set LOD Distance Check Time to a value of 0.00 the distance is checked every frame, which may equate to lower performance.
+
+
+### LOD Method - Game Thread
+
+Appropriately setting the LOD Method can be vital to performance and visuals.
+
+**Automatic** - the game will set the LOD based on the distance parameters defined in the effect, using the LOD Distance Check Time settings. Typically used on ambient effects which loop and are not called by game code.
+
+**Direct Set** - the LOD is determined (typically by game code) when the effect is spawned and stays at the LOD defined.  Typically used in burst effects like explosions or impacts.
+
+**Activate Automatic** - The LOD is defined when the effect is spawned, based upon the distance parameters defined in the LOD.  Typically used on burst effects called by Blueprints etc. which require LODs to never shift once spawned.
+
+
+## Fixed vs. Non Fixed Bounds - Game Thread
+
+Bounds are one of the ways in which the engine determines visibility of an effect.  These invisible coordinates tell the engine if an effect is in view or out of view.  If a corner of your bounds is visible, the engine will calculate any components of the effect necessary.
+
+Bounds are costly, they check and update each frame, therefore it is a good idea to set your bounds to be fixed and determine how large bounds need to be.  In some cases, you might want your bounds to be rather large if you need to see every piece of debris flying out of an explosion.  If you wish to keep costs low, tightening bounds to core components can increase performance, at the risk of effects popping off when the bounds go out of view.
+
+There are some considerations for fixed vs. non-fixed bounds to keep in mind.
+
+Fast moving effects such as rocket trails, tracers, or anything attached to a projectile should not have fixed bounds set nor have the fixed bounds set so large that the emitter cannot fly outside of the bounds.
+
+When setting bounds, be aware of local vs. world space coordinates defined in your system.  If an emitter is rotated the opposite direction of your bounds orientation, it is possible for elements of the effect to fly out of your bounds and elements popping out of view can occur.
+
+(#RenderThread)
+
+
+
+## Draw Calls - Render Thread
+
+Draw calls within particle systems can be tricky to track at times.  There are several combined factors to keep in mind when determining draw call costs.
+
+Sprite particle emission is 1 draw call per emitter, regardless of screen orientation.
+
+Mesh emission is 1 draw call per mesh emitter, regardless of the number of meshes emitted. However, on mobile devices the cost is 1 draw call per mesh _emitted_. So, on a mobile device, if you have 2 emitters in your effect, each emitting 10 meshes, you have a total cost of 20 draw calls associated with that particle system.
+
+Material passes also determine draw call costs. The more passes in your Material, the more draw calls in your effect.
+
+For Instance:
+
+
+* Particle System A consists of:  1 emitter, spawning 12 sprites, using a Material with 1 Pass, the entire system costs 1 draw.
+* Particle System B consists of:  1 emitter, spawning 12 sprites, using a Material with 2 Passes, the entire system costs 2 draws.
+* Particle System C consists of:  1 emitter spawning 12 meshes, using a Material with 2 Passes
+	* **On mobile platforms**: the entire system costs 24 draws. (2 passes per call X 12 meshes since each mesh is a single draw call = 24 draws.)
+	* **On all other platforms**: the entire system costs 2 draws.
+* Particle System D consists of:  1 emitter spawning 6 meshes, using a Material with 2 Passes, and 1 emitter spawning 10 sprites with 1 pass the entire system costs 13 draws. ( 2 passes per call X 6 meshes since each mesh is a single draw call = 12 draws, 1 pass X 10 sprites = 1 draw call.)
+
+
+Material Attributes which contribute passes include:
+
+Translucent Material = 1 pass base
+
+* +2 for distortion
+* +1 for `bUseLitTranslucencyDepthPass`
+* +1 for `bUseLitTranslucencyPostRenderDepthPass`
+* +2 for `bUsedWithFogVolumes`
+
+Opaque / masked Material = 2 passes base
+
+Draw calls for a particular scene can be viewed using the command `DumpParticleFrameRenderingStats`.  This command outputs a spreadsheet which lists draw call costs in detail.
+
+Impact from draw calls increases proportionally to the number of views being rendered. This means that in split-screen, the effects are multiplied. See the [VFX Optimization: SplitScreen](Engine/Rendering/ParticleSystems/Optimization/SplitScreen) page for more detailed information on optimizing effects for split screen.
+
+It is important to keep these costs in mind when constructing your effects, and when optimizing effects.  If your render thread is high due to draw calls, and the environment is within budget, this is the place to start looking.
+
+
+
+## Mesh Emission - Game Thread/Render Thread
+
+Mesh emission is one of the more powerful features of Cascade. It is a feature which can be accidentally abused on mobile devices as the emission rate equates to the number of draw calls.  Further, it is also a good idea to keep the vertex count on your meshes low.
+
+In some cases, a single mesh emission can be used to fake a large volume of objects without the cost of calculating the positions all of the sprites which would be needed to create a volume of debris for instance.
+
+
+
+## CPU Collisions - Game Thread
+
+Typically there is a high cost associated with doing CPU particle collision in Unreal Engine 4, so they should be used only when needed.
+
+Several settings can be used to minimize collision costs these include:
+
+
+* **MaxCollisions**: keep this value as low as possible.
+* **Collision Completion** Option: set this to HaltCollisions/Freeze to stop doing collision checks against the scene once MaxCollisions is reached.
+* The **Damping Factor** determines the bounce of objects following collision, lower values may result in objects coming to rest faster (lower Max Collisions value).
+
+
+
+
+
+## Spawn Per Unit - GPU/Game Thread
+
+**Spawn Per Unit** is a feature in Cascade which is helpful for filling in gaps when particle systems are moving.  While this feature is handy for creating great looking trails of particles, it is important to balance visuals with performance limitations when using Spawn Per Unit.
+
+There are a few tricks to controlling emission:
+
+* Keep the Unit Scalar to a value as high as possible, and balance it with the emission rate to get the fill you need, without making the effect too heavy.
+* Try and use lower instruction count Materials if you know you are going to have high emission rates using Spawn Per Unit.
+* Adjust the Max Frame Distance to limit how many particles can be emitted.  If the emitter goes above this, Max Frame Distance Spawn Per Unit will cease emission until it returns below the distance.  This prevents the emitter from dumping large amounts of sprites into the scene.
+
+
+
+
+## Memory Costs
+
+Cascade offers the ability to display large amounts of valuable information relative to particle system creation.  It is often helpful to turn these displays on to get a good idea of just how many particles your system is allocating, and how many particles your system is emitting.
+
+Particle Allocation determines how many particles it is possible for the emitter to place in the world at any given time, this plays a large part in determining how much memory your particle system will consume.  You can see a memory estimation by enabling the particle memory overlay in the View drop down menu in Cascade.
+
+By adjusting settings, it is possible to see memory cost increase and decrease.
+
+Several ways to reduce memory footprint include:
+
+
+* Reduce the number of modules in a system to the essential modules required for a given behavior.
+* For looping effects reduce Loop Time/Duration (allocates fewer particles per loop).
+* Reduce Lifetime (fewer particles overall).
+* Share as many modules as possible.
+
+
+Cascade features the ability to share modules from one emitter to the next.  Using this feature has two benefits.  First, if you wish to edit values across multiple emitters it is possible to edit one module and update all other settings.  Second, sharing modules reduces memory footprint since the cooked version sees the module cost as one instance of the module.
+
+A more recent addition to the Cooker evaluates all modules in a particle system and determines identical modules, then shares modules to automatically reduce memory footprint at cook time.
+
+
+
+## Tick Time - Game Thread
+
+**Tick Time** represents the amount of time spent updating particle systems in the scene.  Tick Time can be viewed with the stat particles command which lists out all relative information required to assess particle evaluation costs.
+
+There are many methods which can be used to reduce Tick costs.
+
+Tick Time is directly influenced by the number of active EmitterActors in your scene.  The more active emitters in the scene, the higher Tick Time will be.  Emitters should only be set to autoActivate if they are required to loop when the level starts.
+
+If large amounts of sprites/explosions/burst effects are visible on level load in the editor, these effects are automatically evaluated at run time and can cause visible hitching when a level is loaded.
+
+A Particle Parameter can be used in an effect to allow for position offsets once the effect is placed in the world.  By using a particle parameter, it is possible to reduce emitter counts, which reduces tick cost overall.  Particle Parameters can be setup by selecting particleParameter from the distribution list in the module for the individual setting.
+
+It is possible to stream out and disable EmitterActors when they are not in view, or if they are associated with an area of a level which is no longer in memory.  Streaming EmitterActors with level geometry is a good practice to reduce tick overhead.  In some cases where atmospheric effects are heavy, Blueprint actions can be used to toggle atmosphere off and on during combat sequences to lower tick time and overdraw.
+
+Particle Systems loaded into memory, but out of view (say on the floor above you) can also be toggled with Blueprint actions and streaming volumes to reduce evaluation costs.
+
+In some cases, a mesh effect can be a good replacement for a particle system.  A placed Static Mesh does not have an evaluation cost on the Game Thread.  In many cases it is more beneficial to place a Static Mesh as a replacement for a particle system.  This includes vista effects, fog effects etc.
+
+Particle counts play directly into evaluation cost.  The more particles in a scene, and the longer they live, the more evaluation is required.  Limiting lifespan to the duration required for the effect is good practice all around.
+
+Enabling LODs in particle systems allows for lower particle emissions when a system is not within optimal viewing range.  It may help to think of your effect in terms of a hero state, and an acceptable level of lower quality for longer viewing distances.  Tightening LODs to required distances can go a long way to lowering evaluation costs in a scene without dramatically losing visual quality.
+
+Check your effects for expensive evaluation costs which can be lowered such as collisions, non-fixed bounds, and spawn per unit counts which are too high.  Setting bounds to a fixed state can increase performance significantly and should be used whenever possible.
+
+
+<!-- Old, UE3
+## Non Directional Lighting Costs - Game Thread
+
+Non Directional lighting adds depth and realism to particle effects by doing a trace within the world to determine lighting information around emitters spawned into the scene.  Non Directional Lighting comes at a Game Thread evaluation cost.  Non directional lighting is often used for weapon effects, impact effects, character effects, ambient fog effects, and Binked cinematic effects .
+
+Another option for matching particle color to a light environment would be to utilize a Particle Parameter to control color and alpha per Actor.   By using a particle parameter on a placed ambient effect which never moves, several costs are eliminated.
+
+
+1. Cost to store a unique color variant of an effect in memory.
+1. Cost to load a unique color variant at run-time.
+1. Cost to create each color variant in Cascade.
+1. Cost to light the effect to match the environment with Non Directional Lighting on the Game Thread.
+
+
+__It is recommended to use Non Directional Lighting in as many cases as performance allows, it can be helpful to setup your effects with a Particle Parameter in mind should you be required to use this method due to performance restrictions.__
+-->

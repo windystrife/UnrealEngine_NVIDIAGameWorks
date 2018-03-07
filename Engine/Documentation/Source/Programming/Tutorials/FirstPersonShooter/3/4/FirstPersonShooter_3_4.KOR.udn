@@ -1,0 +1,212 @@
+﻿INTSourceChangelist:3388666
+Availability: Public
+Title: 3.4 - 월드와 상호작용하는 프로젝타일
+Crumbs: %ROOT%, Programming, Programming/Tutorials/FirstPersonShooter, Programming/Tutorials/FirstPersonShooter/3
+Description: 일인칭 슈팅 프로젝트에서 프로젝타일이 월드와 상호작용하도록 하는 법을 배워봅니다.
+SkillLevel: Beginner
+Version: 4.15
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[예전 단계](Programming/Tutorials/FirstPersonShooter/3/3)
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[섹션 홈](Programming/Tutorials/FirstPersonShooter/3)
+	[/PARAM]
+	[PARAM:next]
+		[다음 단계](Programming/Tutorials/FirstPersonShooter/3/5)
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+프로젝타일의 콜리전 상호작용을 감지할 수 있으니, 이제 그 콜리전에 어떻게 반응할지를 결정하면 됩니다. 이번 단계에서는, 콜리전 이벤트에 반응하는 `FPSProjectile` 에 `OnHit` 함수를 추가하겠습니다.
+
+## 프로젝타일이 콜리전에 반응하도록 만들기
+
+1.	**Solution Explorer** 에서 `FPSProjectile` 클래스 헤더 파일을 찾고 `FPSProjectile.h` 를 엽니다.
+
+1.	`FPSProjectile` 클래스 정의에 다음 코드를 추가합니다:
+
+		// 프로젝타일이 무언가에 맞으면 호출되는 함수입니다.
+		UFUNCTION()
+		void OnHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, FVector NormalImpulse, const FHitResult& Hit);
+
+1.	`FPSProjectile.h` 는 이제 다음과 같을 것입니다:
+
+		// 프로젝트 세팅의 설명 페이지에 저작권 문구를 채우세요.
+		
+		#pragma once
+		
+		#include "GameFramework/Actor.h"
+		#include "FPSProjectile.generated.h"
+		
+		UCLASS()
+		class FPSPROJECT_API AFPSProjectile : public AActor
+		{
+			GENERATED_BODY()
+			
+		public:	
+			// 이 액터 프로퍼티의 기본값을 설정합니다.
+			AFPSProjectile();
+		
+		protected:
+			// 게임 시작 또는 스폰 시 호출됩니다.
+			virtual void BeginPlay() override;
+			
+		public:
+			// 매 프레임 호출됩니다.
+			virtual void Tick( float DeltaSeconds ) override;
+		
+			// 구체 콜리전 컴포넌트입니다.
+			UPROPERTY(VisibleDefaultsOnly, Category = Projectile)
+			USphereComponent* CollisionComponent;
+		
+			// 프로젝타일 무브먼트 컴포넌트입니다.
+			UPROPERTY(VisibleAnywhere, Category = Movement)
+			UProjectileMovementComponent* ProjectileMovementComponent;
+		
+			// 프로젝타일의 속도를 발사 방향으로 초기화시키는 함수입니다.
+			void FireInDirection(const FVector& ShootDirection);
+		
+			// 프로젝타일에 무언가 맞으면 호출되는 함수입니다.
+			void OnHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, FVector NormalImpulse, const FHitResult& Hit);
+		};
+
+1.	**Solution Explorer** 에서 `FPSProjectile` 클래스 CPP 파일을 찾고 `FPSProjectile.cpp` 를 열고 다음 코드를 추가합니다:
+
+		// 프로젝타일에 무언가 맞으면 호출되는 함수입니다.
+		void AFPSProjectile::OnHit(AActor* OtherActor, UPrimitiveComponent* OtherComponent, FVector NormalImpulse, const FHitResult& Hit)
+		{
+			if (OtherActor != this && OtherComponent->IsSimulatingPhysics())
+			{
+				OtherComponent->AddImpulseAtLocation(ProjectileMovementComponent->Velocity * 100.0f, Hit.ImpactPoint);
+			}
+		}
+
+1.	`FPSProjectile` 생성자에서, `CollisionComp` 생성 후 다음 줄을 추가합니다:
+
+		CollisionComponent->OnComponentHit.AddDynamic(this, &AFPSProjectile::OnHit);
+
+1.	`FPSProjectile.cpp` 는 이제 다음과 같은 모습일 것입니다:
+
+		// 프로젝트 세팅의 설명 페이지에 저작권 문구를 채우세요.
+		
+		#include "FPSProject.h"
+		#include "FPSProjectile.h"
+		
+		// Sets default values
+		AFPSProjectile::AFPSProjectile()
+		{
+		 	// 이 액터가 매 프레임 Tick() 을 호출하도록 설정합니다. 필요치 않은 경우 끄면 퍼포먼스가 향상됩니다.
+			PrimaryActorTick.bCanEverTick = true;
+		
+			// 구체를 단순 콜리전 표현으로 사용합니다.
+			CollisionComponent = CreateDefaultSubobject<USphereComponent>(TEXT("SphereComponent"));
+			CollisionComponent->BodyInstance.SetCollisionProfileName(TEXT("Projectile"));
+			CollisionComponent->OnComponentHit.AddDynamic(this, &AFPSProjectile::OnHit);
+		
+			// 구체의 콜리전 반경을 설정합니다.
+			CollisionComponent->InitSphereRadius(15.0f);
+			// 루트 컴포넌트를 콜리전 컴포넌트가 되도록 설정합니다.
+			RootComponent = CollisionComponent;
+		
+			// 이 컴포넌트를 사용하여 이 프로젝타일의 무브먼트를 구동시킵니다.
+			ProjectileMovementComponent = CreateDefaultSubobject<UProjectileMovementComponent>(TEXT("ProjectileMovementComponent"));
+			ProjectileMovementComponent->SetUpdatedComponent(CollisionComponent);
+			ProjectileMovementComponent->InitialSpeed = 3000.0f;
+			ProjectileMovementComponent->MaxSpeed = 3000.0f;
+			ProjectileMovementComponent->bRotationFollowsVelocity = true;
+			ProjectileMovementComponent->bShouldBounce = true;
+			ProjectileMovementComponent->Bounciness = 0.3f;
+		
+			// 3 초 후 죽습니다.
+			InitialLifeSpan = 3.0f;
+		}
+		
+		// 게임 시작시 또는 스폰시 호출됩니다.
+		void AFPSProjectile::BeginPlay()
+		{
+			Super::BeginPlay();
+			
+		}
+		
+		// 매 프레임 호출됩니다.
+		void AFPSProjectile::Tick( float DeltaTime )
+		{
+			Super::Tick( DeltaTime );
+		
+		}
+		
+		// 프로젝타일의 속도를 발사 방향으로 초기화시키는 함수입니다.
+		void AFPSProjectile::FireInDirection(const FVector& ShootDirection)
+		{
+			ProjectileMovementComponent->Velocity = ShootDirection * ProjectileMovementComponent->InitialSpeed;
+		}
+		
+		// 프로젝타일이 무언가에 맞으면 호출되는 함수입니다.
+		void AFPSProjectile::OnHit(AActor* OtherActor, UPrimitiveComponent* OtherComponent, FVector NormalImpulse, const FHitResult& Hit)
+		{
+			if (OtherActor != this && OtherComponent->IsSimulatingPhysics())
+			{
+				OtherComponent->AddImpulseAtLocation(ProjectileMovementComponent->Velocity * 100.0f, Hit.ImpactPoint);
+			}
+		}
+
+1.	Visual Studio 에서 `FPSProjectile.h` 와 `FPSProjectile.cpp` 를 저장합니다.
+
+1.	**Solution Explorer** 에서 **FPSProject** 를 찾습니다.
+
+1.	**FPSProject** 에 우클릭한 다음 **Build** 를 선택하여 프로젝트를 빌드합니다.
+
+	![](BuildFPSProject.png)
+
+## 프로젝타일 콜리전 테스트
+
+1.	빌드 완료 후, **언리얼 에디터** 로 돌아가 **FPSProject** 를 엽니다.
+
+1.	**Floor** `StaticMesh` 를 선택합니다.
+
+1.	바닥 메시를 **복사 & 붙여넣기** 합니다.
+
+1.	비율 고정이 풀렸는지 확인하고, (이름이 Floor2 인) 바닥 메시 사본의 스케일을 {0.2, 0.2, 3.0} 으로 설정합니다.
+
+1.	바닥 메시 사본 위치는 {320, 0, 170} 으로 조정합니다.
+
+	[REGION:lightbox]
+		[![](Floor2_CubeTransform.png)(w:750)](Floor2_CubeTransform.png)
+	[/REGION]
+	_이미지를 클릭하면 줌인합니다._
+
+1.	**Physics** 섹션으로 스크롤해 내려간 뒤 **Simulate Physics** (피직스 시뮬레이션) 옵션을 체크합니다.
+
+	[REGION:lightbox]
+		[![](Floor2_CubePhysics.png)(w:750)](Floor2_CubePhysics.png)
+	[/REGION]
+	_이미지를 클릭하면 줌인 합니다._
+
+1.	맵을 저장하고 **BP_FPSProjectile** 에 더블클릭하여 프로젝타일 블루프린트를 편집용으로 엽니다.
+
+1.	**클래스 디폴트 모드** 를 열고 **컴포넌트** 탭에서 **ProjectileMesh** 를 클릭합니다.
+
+1.	**Collision** 아래에서 **Collision Presets** 프로퍼티를 찾은 다음 **Projectile** 로 설정합니다..
+
+	![](SetCollisionPresets.png)
+
+1.	블루프린트를 **컴파일**, **저장** 한 뒤 **블루프린트 에디터** 를 닫습니다.
+
+1.	**레벨 에디터 툴바** 의 **플레이** 버튼을 클릭합니다.
+
+1.	**좌클릭** 하여 프로젝타일을 발사하고 레벨에 큐브를 이동시킬 수 있습니다. 
+
+	![](ProjectileComplete.png)
+
+	축하합니다, 프로젝타일이 완성되었습니다!
+
+1.	레벨 에디터에서 **중지** 버튼을 눌러 에디터에서 플레이 (PIE) 모드를 빠져나갑니다.
+
+%Steps%

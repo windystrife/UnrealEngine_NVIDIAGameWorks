@@ -1,0 +1,188 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+
+/**
+ * TranslucentLightingShaders.usf: Shaders for calculating lighting in a volume to use on translucency
+ */
+
+#include "Common.ush"
+#include "SHCommon.ush"
+
+#if INJECTION_PIXEL_SHADER
+	#include "ShadowProjectionCommon.ush"
+#endif
+
+struct FWriteToSliceVertexOutput
+{
+	FScreenVertexOutput Vertex;
+#if USING_VERTEX_SHADER_LAYER
+	uint LayerIndex : SV_RenderTargetArrayIndex;
+#else
+	uint LayerIndex : TEXCOORD1;
+#endif
+};
+
+/** Z index of the minimum slice in the range. */
+int MinZ;
+
+float4 UVScaleBias;
+uint VolumeCascadeIndex;
+
+/** Vertex shader that writes to a range of slices of a volume texture. */
+void WriteToSliceMainVS(
+	float2 InPosition : ATTRIBUTE0,
+	float2 InUV       : ATTRIBUTE1,
+	uint LayerIndex : SV_InstanceID,
+	out FWriteToSliceVertexOutput Output
+	)
+{
+	Output.Vertex.Position = float4( InPosition, 0, 1 );
+	// Remap UVs based on the subregion of the volume texture being rendered to
+    Output.Vertex.UV = InUV * UVScaleBias.xy + UVScaleBias.zw;
+	Output.LayerIndex = LayerIndex + MinZ;
+}
+
+void CopySceneAlphaMain(
+	FScreenVertexOutput Input,
+	out float OutAlpha : SV_Target0
+	)
+{
+    OutAlpha = Texture2DSample(SceneColorTexture, SceneColorTextureSampler, Input.UV).a;
+}
+
+void CopySceneColorMain(
+	FScreenVertexOutput Input,
+	out float4 OutColor : SV_Target0
+	)
+{
+    float4 LinearColor = Texture2DSample(SceneColorTexture, SceneColorTextureSampler, Input.UV);
+	OutColor = float4(EncodeSceneColorForMaterialNode(LinearColor.rgb), 0);
+}
+
+#if FEATURE_LEVEL >= FEATURE_LEVEL_SM4
+/** Geometry shader that writes to a range of slices of a volume texture. */
+[maxvertexcount(3)]
+void WriteToSliceMainGS(triangle FWriteToSliceVertexOutput Input[3], inout TriangleStream<FWriteToSliceGeometryOutput> OutStream)
+{
+	FWriteToSliceGeometryOutput Vertex0;
+	Vertex0.Vertex = Input[0].Vertex;
+	Vertex0.LayerIndex = Input[0].LayerIndex;
+
+	FWriteToSliceGeometryOutput Vertex1;
+	Vertex1.Vertex = Input[1].Vertex;
+	Vertex1.LayerIndex = Input[1].LayerIndex;
+
+	FWriteToSliceGeometryOutput Vertex2;
+	Vertex2.Vertex = Input[2].Vertex;
+	Vertex2.LayerIndex = Input[2].LayerIndex;
+
+	OutStream.Append(Vertex0);
+	OutStream.Append(Vertex1);
+	OutStream.Append(Vertex2);
+}
+
+/** Filter pass inputs. */
+Texture3D TranslucencyLightingVolumeAmbient;
+SamplerState TranslucencyLightingVolumeAmbientSampler;
+Texture3D TranslucencyLightingVolumeDirectional;
+SamplerState TranslucencyLightingVolumeDirectionalSampler;
+
+float TexelSize;
+
+/** Filters the volume lighting to reduce aliasing. */
+void FilterMainPS(
+	FWriteToSliceGeometryOutput Input,
+	out float4 OutColor0 : SV_Target0,
+	out float4 OutColor1 : SV_Target1
+	)
+{
+	float4 TextureValue0 = 0;
+	float4 TextureValue1 = 0;
+
+	float3 VolumeUV = float3(Input.Vertex.UV, (Input.LayerIndex + .5f) * TexelSize);
+
+#define USE_FILTER 1
+
+#if USE_FILTER
+
+	// Use trilinear filtering to filter neighbors to the current voxel with minimal texture fetches
+	TextureValue0 += Texture3DSample(TranslucencyLightingVolumeAmbient, TranslucencyLightingVolumeAmbientSampler, VolumeUV + .5f * TexelSize * float3(1, 1, 1));
+	TextureValue0 += Texture3DSample(TranslucencyLightingVolumeAmbient, TranslucencyLightingVolumeAmbientSampler, VolumeUV + .5f * TexelSize * float3(-1, 1, 1));
+	TextureValue0 += Texture3DSample(TranslucencyLightingVolumeAmbient, TranslucencyLightingVolumeAmbientSampler, VolumeUV + .5f * TexelSize * float3(1, -1, 1));
+	TextureValue0 += Texture3DSample(TranslucencyLightingVolumeAmbient, TranslucencyLightingVolumeAmbientSampler, VolumeUV + .5f * TexelSize * float3(-1, -1, 1));
+	TextureValue0 += Texture3DSample(TranslucencyLightingVolumeAmbient, TranslucencyLightingVolumeAmbientSampler, VolumeUV + .5f * TexelSize * float3(1, 1, -1));
+	TextureValue0 += Texture3DSample(TranslucencyLightingVolumeAmbient, TranslucencyLightingVolumeAmbientSampler, VolumeUV + .5f * TexelSize * float3(-1, 1, -1));
+	TextureValue0 += Texture3DSample(TranslucencyLightingVolumeAmbient, TranslucencyLightingVolumeAmbientSampler, VolumeUV + .5f * TexelSize * float3(1, -1, -1));
+	TextureValue0 += Texture3DSample(TranslucencyLightingVolumeAmbient, TranslucencyLightingVolumeAmbientSampler, VolumeUV + .5f * TexelSize * float3(-1, -1, -1));
+
+	TextureValue1 += Texture3DSample(TranslucencyLightingVolumeDirectional, TranslucencyLightingVolumeDirectionalSampler, VolumeUV + .5f * TexelSize * float3(1, 1, 1));
+	TextureValue1 += Texture3DSample(TranslucencyLightingVolumeDirectional, TranslucencyLightingVolumeDirectionalSampler, VolumeUV + .5f * TexelSize * float3(-1, 1, 1));
+	TextureValue1 += Texture3DSample(TranslucencyLightingVolumeDirectional, TranslucencyLightingVolumeDirectionalSampler, VolumeUV + .5f * TexelSize * float3(1, -1, 1));
+	TextureValue1 += Texture3DSample(TranslucencyLightingVolumeDirectional, TranslucencyLightingVolumeDirectionalSampler, VolumeUV + .5f * TexelSize * float3(-1, -1, 1));
+	TextureValue1 += Texture3DSample(TranslucencyLightingVolumeDirectional, TranslucencyLightingVolumeDirectionalSampler, VolumeUV + .5f * TexelSize * float3(1, 1, -1));
+	TextureValue1 += Texture3DSample(TranslucencyLightingVolumeDirectional, TranslucencyLightingVolumeDirectionalSampler, VolumeUV + .5f * TexelSize * float3(-1, 1, -1));
+	TextureValue1 += Texture3DSample(TranslucencyLightingVolumeDirectional, TranslucencyLightingVolumeDirectionalSampler, VolumeUV + .5f * TexelSize * float3(1, -1, -1));
+	TextureValue1 += Texture3DSample(TranslucencyLightingVolumeDirectional, TranslucencyLightingVolumeDirectionalSampler, VolumeUV + .5f * TexelSize * float3(-1, -1, -1));
+
+	float InvWeight = 1.0f / 8;
+
+#else
+
+	TextureValue0 = Texture3DSample(TranslucencyLightingVolumeAmbient, TranslucencyLightingVolumeAmbientSampler, VolumeUV);
+	TextureValue1 = Texture3DSample(TranslucencyLightingVolumeDirectional, TranslucencyLightingVolumeDirectionalSampler, VolumeUV);
+	float InvWeight = 1;
+
+#endif
+	
+	OutColor0 = TextureValue0 * InvWeight;
+	OutColor1 = TextureValue1 * InvWeight;
+}
+
+#if INJECTION_PIXEL_SHADER
+
+/** Parameters needed to access the shadow map of the light. */
+float4x4 WorldToShadowMatrix;
+float4 ShadowmapMinMax;
+
+/** Pixel shader that calculates per object shadowing from translucency for a volume texture and outputs the shadow factor. */
+void PerObjectShadowingMainPS(
+	FWriteToSliceGeometryOutput Input,
+	out float4 OutColor : SV_Target0
+	)
+{
+	float ZPosition = View.TranslucencyLightingVolumeMin[VolumeCascadeIndex].z + (Input.LayerIndex + .5f) * View.TranslucencyLightingVolumeInvSize[VolumeCascadeIndex].w;
+	float3 WorldPosition = float3(View.TranslucencyLightingVolumeMin[VolumeCascadeIndex].xy + Input.Vertex.UV / View.TranslucencyLightingVolumeInvSize[VolumeCascadeIndex].xy - .5f * View.TranslucencyLightingVolumeInvSize[VolumeCascadeIndex].w, ZPosition);
+	float VoxelSize = View.TranslucencyLightingVolumeInvSize[VolumeCascadeIndex].w;
+
+	float ShadowFactor = 1;
+
+	float3 WorldPositionForShadowing = WorldPosition;
+	// Transform the world position into shadowmap space
+	float4 HomogeneousShadowPosition = mul(float4(WorldPositionForShadowing, 1), WorldToShadowMatrix);
+	float2 ShadowUVs = HomogeneousShadowPosition.xy / HomogeneousShadowPosition.w;
+
+	// Treat as unshadowed if the voxel is outside of the shadow map
+	if (all(ShadowUVs >= ShadowmapMinMax.xy && ShadowUVs <= ShadowmapMinMax.zw))
+	{
+		ShadowFactor = CalculateTranslucencyShadowing(ShadowUVs, HomogeneousShadowPosition.z);
+	}
+
+	OutColor = float4(ShadowFactor.xxx, 0);
+}
+
+#endif // #if INJECTION_PIXEL_SHADER
+
+#include "CubemapCommon.ush"
+
+/** Add AmbientCubemap color to the volume. */
+void InjectAmbientCubemapMainPS(
+	FWriteToSliceGeometryOutput Input,
+	out float4 OutColor : SV_Target0
+	)
+{
+	// can be optimized by moving it into the vertex/geometry shader
+	OutColor = float4(ComputeAmbientCubemapAvgColor(), 0);
+}
+
+
+#endif // FEATURE_LEVEL

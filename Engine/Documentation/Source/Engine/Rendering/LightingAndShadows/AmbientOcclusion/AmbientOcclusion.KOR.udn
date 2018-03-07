@@ -1,0 +1,89 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title:앰비언트 오클루전
+Crumbs: %ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description:Occlusion, 차폐에 의한 빛의 감쇠를 추정합니다.
+Version: 4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/AmbientOcclusion:title%](ao.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/tech_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/AmbientOcclusion:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/AmbientOcclusion:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/AmbientOcclusion]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[EXCERPT:AmbientOcclusion_Desc]
+**Screen Space Ambient Occlusion** (SSAO, 스크린 스페이스 앰비언트 오클루전)은 빛의 차폐로 인한 감쇠 근사치를 구하는 이펙트입니다. 현실에서도 방의 구석 부분은 훨씬 더 어둡듯이, 구석이나 틈 같은 곳을 더 어둡게 하여 더욱 자연스럽고 사실적인 느낌을 낼 수 있도록, 표준 글로벌 일루미네이션에 더해 미묘한 이펙트로 사용하는 것이 보통 가장 좋습니다.
+[/EXCERPT:AmbientOcclusion_Desc]
+
+[REGION:imagetable]
+| ![Ambient Occlusion - Off](ao_0.png)(w:300) | ![Ambient Occlusion - Visualized](ao_1.png)(w:300) | ![Ambient Occlusion - Final](ao_2.png)(w:300) |
+| :----: | :----: | :----: |
+| 앰비언트 오클루전이 없는 씬 | 앰비언트 오클루전만 | 앰비언트 오클루전이 있는 씬 |
+[/REGION]
+
+이 이펙트는 SSAO 메소드를 사용하여 이뤄내는데, 즉 AO 양은 스크린 스페이스의 디퍼드 패스에서 계산된다는 뜻입니다.
+저희 메소드는 뎁스 버퍼를 활용하며, 노멀은 GBuffer 를 이룹니다 (디퍼드 셰이딩 참고). 이는 노멀맵 디테일이 결과에 영향을 끼친다는 뜻입니다. UE4 에서 이펙트는 AmbientCubemap 과 Voxel Lighting 에 적용됩니다. 직사광에는 영향을 끼치지 않는데, 여기서는 섀도 매핑을 사용하기 때문입니다.
+
+"Visualize GBuffer" 뷰모드를 사용하거나 (뷰모드 참고) 표시 플래그 "Visualize Ambient Occlusion" 를 사용하면 AO 값을 직접 확인할 수 있습니다.
+
+AO 는 GBuffer 의 일부이기에 머티리얼이 출력하는 것도 가능합니다. SSAO 와 머티리얼 AO 를 합치면 더욱 어두운 AO 가 나올 수도 있습니다.
+
+| 프로퍼티 | 설명 |
+| -------- | ---- |
+| **Intensity** | 강도 - 전체적인 앰비언트 오클루전 양을 조절합니다. 값이 0.0 이면 앰비언트 오클루전 없음, 1.0 이면 최대를 뜻합니다. [INCLUDE:Engine/Rendering/LightingAndShadows/AmbientOcclusion#Intensity] |
+| **Radius** | 반경 - 반경을 언리얼 유닛으로 정합니다. 반경이 클 수록 제한된 샘플 수 때문에 부작용도 심해지고 속도도 (텍스처 캐시 트래싱 때문에) 느려질 수 있습니다. [INCLUDE:#Radius] |
+| **Radius in WorldSpace** | 반경 월드스페이스에 - 켜면 **AO Radius** 프로퍼티 값은 월드 스페이스에, 끄면 뷰 스페이스에 있다고 가정합니다. |
+| **Distance** | 거리 - SSAO 기법은 zbuffer 만 있어서 오브젝트의 두께를 알 길이 없기 때문에 그 주변에 발생하는 검은 테두리를 피하기 위해 사용하는 트윅 파라미터입니다. [INCLUDE:Engine/Rendering/LightingAndShadows/AmbientOcclusion#Distance] |
+| **Power** | 세기 - 계산을 통한 어둡게 하는 효과의 세기를 조절합니다. [INCLUDE:Engine/Rendering/LightingAndShadows/AmbientOcclusion#Power] |
+| **Bias** | 편향 - AO 디테일 트윅이 가능합니다. 약간의 편향치는 원거리의 부작용을 방지하기 위해 필요합니다. 언리얼 유닛으로 0 초과이며, 기본값 (3.0) 으로 평평한 표면에는 잘 돌아가나 디테일이 떨어질 수 있습니다. <!--TODO: images--> |
+
+<!--
+[EXCERPT:Intensity]
+[REGION:imagetable]
+| ![AO Intensity - 0.0](ao_intensity_0.png)(w:390) | ![AO Intensity - 1.0](ao_intensity_1.png)(w:390)
+| :-----------: | :----------------: |
+| 0.0 | 1.0 |
+[/REGION]
+[/EXCERPT:Intensity]
+
+[EXCERPT:Radius]
+[REGION:imagetable]
+| ![AO Radius - 40.0](ao_radius_0.png)(w:255) | ![AO Radius - 80.0](ao_radius_1.png)(w:255) | ![AO Radius - 200.0](ao_radius_2.png)(w:255) |
+| :--------: | :---------: | :---------: |
+| 40.0 | 80.0 | 200.0 |
+[/REGION]
+[/EXCERPT:Radius]
+
+[EXCERPT:Distance]
+[REGION:imagetable]
+| ![AO Distance - 100.0](ao_distance_0.png)(w:390) | ![AO Distance - 1200.0](ao_distance_2.png)(w:390) |
+| :--------: | :--------: |
+| 100.0 | 1200.0 |
+[/REGION]
+[REGION:note]
+	오른쪽 예제 캐릭터의 뿔 주변의 빛에 주목해 보세요. 디스턴스 세팅을 크게 잡으니 뿔과 그 뒤의 표면에 대한 오클루전 계산이 비현실적으로 일어나고 있습니다.
+[/REGION]
+[/EXCERPT:Distance]
+
+[EXCERPT:Power]
+[REGION:imagetable]
+| ![AO Power - 1.0](ao_power_0.png)(w:255) | ![AO Power - 4.0](ao_power_1.png)(w:255) | ![AO Power - 10.0](ao_power_2.png)(w:255) |
+| :--------: | :--------: | :--------: |
+| 1.0 | 4.0 | 10.0 |
+[/REGION]
+[/EXCERPT:Power]
+-->

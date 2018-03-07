@@ -1,0 +1,576 @@
+//-----------------------------------------------------------------------------
+// File:		LPVFinalPass.usf
+//
+// Summary:		(SHADER HEADER) LPV Final pass functionality
+//
+// Created:		2013-03-01
+//
+// Author:		mailto:benwood@microsoft.com
+//
+//				Copyright (C) Microsoft. All rights reserved.
+//-----------------------------------------------------------------------------
+
+// Copyright 2013 Lionhead Studios
+// mailto:benwood@microsoft.com
+
+/*------------------------------------------------------------------------------
+	Compile time parameters:
+------------------------------------------------------------------------------*/
+
+#ifndef LPV_FINAL_PASS_USF
+#define LPV_FINAL_PASS_USF
+
+#include "LPVCommon.ush"
+
+//------------------------------------------------------------------------------
+
+#define REFLECTION_RAY_LENGTH_DEFAULT 2.0
+
+#define SHOW_GRID			0
+#define DEBUG_WEIGHTS		0
+
+// Indirect strength
+#define INDIRECT_LEVEL		( 0.00375 * REFINE_LIGHTING_MULTIPLIER )
+#define INDIRECT_DIFFUSE	1
+#define INDIRECT_SPECULAR	1
+
+// Filtering modes
+#define FILTER_NEAREST				0
+#define FILTER_TETRA				1 // Interpolate using tetrahedrons (4 points instead of 8)
+#define FILTER_TRILINEAR			2 
+#define FILTER_HARDWARE_TRILINEAR	3 // Use hardware volume texture filtering
+
+#ifndef LPV_USE_SEPARATE_AO_VOLUME
+#define LPV_USE_SEPARATE_AO_VOLUME	1 // Use the separate (low precision) AO texture for AO lookups
+#endif
+
+#define LPV_DEFAULT_AO_VALUE		0.4
+
+// Filtering settings
+	#define DIFFUSE_FILTER		FILTER_HARDWARE_TRILINEAR 
+	#define SPECULAR_FILTER		FILTER_HARDWARE_TRILINEAR 
+
+//-------------------------------------------------------------------------------------------------
+
+void GetGridIndicesAndWeightsTetra( float3 gridPos, out int indices[4], out float weights[4] )
+{
+//	gridPos.y+=0.43;
+	const float3 gridOffset[8] =
+	{
+		float3( -0.5f, -0.5f, -0.5f ), // c1
+		float3( -0.5f, -0.5f,  0.5f ),
+		float3( -0.5f,  0.5f, -0.5f ), 
+		float3( -0.5f,  0.5f,  0.5f ), // c0
+		float3(  0.5f, -0.5f, -0.5f ), 
+		float3(  0.5f, -0.5f,  0.5f ), // c3
+		float3(  0.5f,  0.5f, -0.5f ), // c2
+		float3(  0.5f,  0.5f,  0.5f ), 
+	};
+
+	int cubeIndices[8];
+	// Get cube indices
+	[unroll]
+	for ( int i=0; i<8; i++ )
+	{
+		int3 ui = int3( gridPos + gridOffset[i] );
+		ui %= 32;
+		cubeIndices[i] = GetGridAddress( ui );//ui.z*32*32 + ui.y*32 + ui.x;
+	}
+	
+
+	// Get the position in cube space
+	// Where cube is space is nearest 2x2x2 cells, with origin at 0,0,0
+	int3 cubeOriginI = int3( gridPos-float3(0.5f,0.5f,0.5f) );
+
+	float3 cubeOrigin = float3(cubeOriginI)+0.5;
+	float3 cubePos = ( gridPos - cubeOrigin );
+
+	int3 align = int3( LpvRead.mLpvGridOffset ) % 2;
+
+
+	float3 flip2 = ( (cubeOriginI + align ) % 2 ) * -2 + 1;
+
+	// Classification
+	uint tetra = 4;
+	const float3 tips[4] = 
+	{
+		float3( 0,1,0 ),
+		float3( 0,0,1 ),
+		float3( 1,0,0 ),
+		float3( 1,1,1 ),
+	};
+
+	float3 weights3 = 0;
+	if ( flip2.x < 0 ) cubePos.x = 1-cubePos.x;
+	if ( flip2.y < 0 ) cubePos.y = 1-cubePos.y;
+	if ( flip2.z < 0 ) cubePos.z = 1-cubePos.z;
+
+	[unroll]
+	for ( uint j=0; j<4; j++ )
+	{
+		float3 tip = tips[j];
+		float3 d = abs(cubePos-tip);
+		float mDist = d.x+d.y+d.z;
+		if ( mDist <= 1.0f ) tetra=j;
+	}
+
+	if ( tetra<4 )
+	{
+		float3 r4 = tips[tetra];
+		float3 diagMat = 1.0f - r4 * 2.0f;
+		float3 rMinusR4 = cubePos - r4;
+		weights3 = rMinusR4*diagMat;
+
+		// compute the 4 tetra vert positions
+		if ( flip2.x< 0 ) r4.x=1-r4.x;
+		if ( flip2.y< 0 ) r4.y=1-r4.y;
+		if ( flip2.z< 0 ) r4.z=1-r4.z;
+		int3 r4i = int3(r4);
+		int3 p[4];
+		p[0] = int3(1-r4i.x,r4i.y,r4i.z);
+		p[1] = int3(r4i.x,1-r4i.y,r4i.z);
+		p[2] = int3(r4i.x,r4i.y,1-r4i.z);
+		p[3] = r4i;
+
+		[unroll]
+		for ( int i=0; i<4; i++ )
+		{
+			int3 ui = ( cubeOriginI + p[i] ) % 32;
+			indices[i] = GetGridAddress( ui );//ui.z*32*32 + ui.y*32 + ui.x;
+		}
+	}
+	else
+	{
+		float3 centreR4 = float3( 1, 0, 1 );
+
+		// Inverse of tetrahedron matrix for the centre tetrahedron
+		const float3 centreM1 = float3( -0.5, 0.5, 0.5 );
+		const float3 centreM2 = float3( -0.5,-0.5,-0.5 );
+		const float3 centreM3 = float3(  0.5, 0.5,-0.5 );
+
+		float3 rMinusR4 = cubePos - centreR4;
+		weights3.x = dot( centreM1, rMinusR4 );
+		weights3.y = dot( centreM2, rMinusR4 );
+		weights3.z = dot( centreM3, rMinusR4 );
+
+		// compute the 4 tetra vert positions
+		//int3 r4i = int3(centreR4);
+		int3 r1i = int3(0,1,1);
+
+		if ( flip2.x< 0 ) r1i.x=1-r1i.x;
+		if ( flip2.y< 0 ) r1i.y=1-r1i.y;
+		if ( flip2.z< 0 ) r1i.z=1-r1i.z;
+
+		int3 p[4];
+		p[0] = r1i; 
+		p[1] = int3(r1i.x,1-r1i.y,1-r1i.z); 
+		p[2] = int3(1-r1i.x,r1i.y,1-r1i.z);
+		p[3] = int3(1-r1i.x,1-r1i.y,r1i.z);
+
+		[unroll]
+		for ( int i=0; i<4; i++ )
+		{
+			int3 ui = ( cubeOriginI + p[i] ) % 32;
+			indices[i] = GetGridAddress( ui );//ui.z*32*32 + ui.y*32 + ui.x;
+		}
+	}
+
+	weights[0] = weights3.x;
+	weights[1] = weights3.y;
+	weights[2] = weights3.z;
+	weights[3] = 1.0f-(weights3.x+weights3.y+weights3.z);
+
+#if DEBUG_WEIGHTS
+	float3 colour = 0;
+	float3 colours[9] =
+	{
+		float3(1,0,0),			// float3( -0.5f, -0.5f, -0.5f ), // c1
+		float3(0,1,0),			// float3( -0.5f, -0.5f,  0.5f ),
+		float3(0,0,1),			// float3( -0.5f,  0.5f, -0.5f ), 
+		float3(1,1,0),			// float3( -0.5f,  0.5f,  0.5f ), // c0
+		float3(0,2,2),			// float3(  0.5f, -0.5f, -0.5f ), 
+		float3(1,0,1),			// float3(  0.5f, -0.5f,  0.5f ), // c3
+		float3(0,0,0),			// float3(  0.5f,  0.5f, -0.5f ), // c2
+		float3(8,0.5,0.5),		// float3(  0.5f,  0.5f,  0.5f ), 
+		float3(10,0,0), // Invalid (very bright red!)
+	};
+
+	for ( int i=0;i<8; i++ )
+	{
+		LPVCell cell = ReadLpvCell( cubeIndices[i] );
+		colours[i] = cell.coeffs[0];
+
+		//int3 ui = int3( gridPos + gridOffset[i] );
+		//colours[i] = ( ( float3(ui) * 10 ) % 32 ) / 32;
+
+		int idx = cubeIndices[i];
+
+		int ix = idx % 32;
+		int iy = ( idx / 32 ) % 32;
+		int iz = ( idx / (32*32) ) % 32;
+
+		colours[i] = 0;
+		if ( ix == 16 && iy == 15 && iz == 16 ) colours[i] = float3(1,0,0);
+
+		int3 cp = int3(gridPos);//cubeOrigin-0.5;
+		if ( cp.x == 16 && cp.y == 15 && cp.z == 16 ) colours[i].b+=1;
+	}
+
+	for ( int i=0; i<4; i++ )
+	{
+		// Find the cube index
+		int cubeIndex = 8;
+		for ( int j=0; j<8; j++ )
+		{
+			if ( indices[i] == cubeIndices[j] )
+			{
+				cubeIndex = j;
+				break;
+			}
+		}
+		colour += colours[ cubeIndex ] * weights[i];
+	}
+	colour/=4.0;
+
+	//cubePos = 1-cubePos;
+	if ( flip2.x < 0 ) cubePos.x = 1-cubePos.x;
+	if ( flip2.y < 0 ) cubePos.y = 1-cubePos.y;
+	if ( flip2.z < 0 ) cubePos.z = 1-cubePos.z;
+	if ( cubePos.x < 0.0125 || cubePos.y < 0.0125 || cubePos.z < 0.0125 ) 
+	{
+		colour = 0.5;
+	}
+
+	//colour = ( ( cubeOrigin * 10 ) % 32 ) / 32;
+	weights[0] = colour.x;
+	weights[1] = colour.y;
+	weights[2] = colour.z;
+#endif
+}
+
+//-------------------------------------------------------------------------------------------------
+
+void GetGridIndicesAndWeights( float3 gridPos, out int indices[8], out float weights[8] )
+{
+	const float3 gridOffset[8] =
+	{
+		float3( -0.5f, -0.5f, -0.5f ),
+		float3( -0.5f, -0.5f,  0.5f ),
+		float3( -0.5f,  0.5f, -0.5f ),
+		float3( -0.5f,  0.5f,  0.5f ),
+		float3(  0.5f, -0.5f, -0.5f ),
+		float3(  0.5f, -0.5f,  0.5f ),
+		float3(  0.5f,  0.5f, -0.5f ),
+		float3(  0.5f,  0.5f,  0.5f ),
+	};
+
+	// Get indices
+	[unroll]
+	for ( int i=0; i<8; i++ )
+	{
+		int3 ui = int3( gridPos+gridOffset[i] );
+		float maxExtent = MaxGridExtent( ui );
+		if ( maxExtent > 15.5 )
+			indices[i] = -1;
+		else
+			indices[i] = GetGridAddress( ui );//ui.z*32*32 + ui.y*32 + ui.x;
+	}
+	
+	// Get weights
+	float3 baseTexelPos = floor( gridPos-0.5 ) + 0.5;
+	float3 texPos = gridPos-baseTexelPos; // Pos relative to bottom-left texel centre
+
+	float3 minVal = 1.0f-texPos;
+	float3 maxVal = texPos;
+	weights[0] = minVal.x * minVal.y * minVal.z;
+	weights[1] = minVal.x * minVal.y * maxVal.z;
+	weights[2] = minVal.x * maxVal.y * minVal.z;
+	weights[3] = minVal.x * maxVal.y * maxVal.z;
+	weights[4] = maxVal.x * minVal.y * minVal.z;
+	weights[5] = maxVal.x * minVal.y * maxVal.z;
+	weights[6] = maxVal.x * maxVal.y * minVal.z;
+	weights[7] = maxVal.x * maxVal.y * maxVal.z;
+
+#if 0
+	[unroll]
+	for ( int i=0; i<8; i++ )
+	{
+		weights[i] *= weights[i];
+	}
+#endif
+}
+
+//-------------------------------------------------------------------------------------------------
+
+float3 DebugGridColour( float3 gridPos, float3 originalColour )
+{
+	float3 cubePos = frac( gridPos + 0.5 );
+	float3 colour = saturate( ( 0.015 - cubePos ) * 10000 );
+
+	float3 cubePos2 = frac( gridPos );
+	float3 colour2 = saturate( ( 0.01 - cubePos2 ) * 10000 );
+	colour2 = ( colour2 * 0.05) + dot( colour2, colour2 ).xxx * 0.1;
+
+	colour += colour2;
+
+
+	if ( dot( colour,colour ) > 0.0 )
+	{
+		return colour * 8 + originalColour * 0.5;
+	}
+	return originalColour;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+LPVCell LPVGetCellNearest( float3 worldPos )
+{
+	int gridIndex = GetGridIndex( worldPos );
+	return ReadLpvCell( gridIndex );
+}
+
+//-------------------------------------------------------------------------------------------------
+
+LPVCell LPVGetCellTetra( float3 worldPos )
+{
+	float3 colour = 0;
+
+	float3 gridPos = WorldToGrid( worldPos );
+
+	const int n = 4;
+	int indices[4];
+	float weights[4];
+	GetGridIndicesAndWeightsTetra( gridPos, indices, weights );
+
+#if DEBUG_WEIGHTS
+	return float3(weights[0],weights[1],weights[2]);
+#endif 
+	LPVCell accumCell;
+	ClearCell( accumCell );
+
+	[unroll]
+	for ( int i=0; i<n; i++ )
+	{
+		// Decompress the cell and apply the weight
+		LPVCell cell = ReadLpvCell( indices[i] );
+		MultiplyCell( cell, weights[i] );
+		AddCell( accumCell, cell );
+	}
+
+	return accumCell;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+LPVCell LPVGetCellTrilinear( float3 worldPos )
+{
+	float3 colour = 0;
+
+	float3 gridPos = WorldToGrid( worldPos );
+
+	const int n = 8;
+	int indices[8];
+	float weights[8];
+	GetGridIndicesAndWeights( gridPos, indices, weights );
+
+#if DEBUG_WEIGHTS
+	return float3(weights[0],weights[1],weights[2]);
+#endif 
+
+	LPVCell accumCell;
+	ClearCell( accumCell );
+
+	[unroll]
+	for ( int i=0; i<n; i++ )
+	{
+		// Decompress the cell and apply the weight
+		LPVCell cell = ReadLpvCell( indices[i] );
+
+		MultiplyCell( cell, weights[i] );
+		AddCell( accumCell, cell );
+	}
+
+	return accumCell;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+LPVCell LPVGetCellHardwareTrilinear( float3 worldPos )
+{
+	float3 colour = 0;
+
+	float3 gridPos = WorldToGrid( worldPos );
+
+	return ReadLpvCellVolumeTextureFiltered( gridPos );
+}
+
+//-------------------------------------------------------------------------------------------------
+
+LPVCell LPVGetCell( float3 worldPos )
+{
+#if ( DIFFUSE_FILTER == FILTER_TETRA )
+	return LPVGetCellTetra( worldPos );
+#elif ( DIFFUSE_FILTER == FILTER_NEAREST )
+	return LPVGetCellNearest( worldPos );
+#elif ( DIFFUSE_FILTER == FILTER_TRILINEAR )
+	return LPVGetCellTrilinear( worldPos );
+#elif ( DIFFUSE_FILTER == FILTER_HARDWARE_TRILINEAR )
+	return LPVGetCellHardwareTrilinear( worldPos );
+#endif
+}
+
+float LPVGetCellAO_Grid( float3 gridPos )
+{
+	float3 absGridPos = abs(gridPos-16.0f);
+	float m = max( absGridPos.x, max( absGridPos.y, absGridPos.z ));
+	if ( m<=16.0f )
+	{
+		float3 texPos = gridPos / 32.0f;
+#if LPV_USE_SEPARATE_AO_VOLUME
+		return gAOVolumeTexture.SampleLevel( gLpv3DTextureSampler, texPos, 0 ).r;
+#else
+		return gLpv3DTexture0.SampleLevel( gLpv3DTextureSampler, texPos, 0 ).a;
+#endif
+	}
+	return LPV_DEFAULT_AO_VALUE;
+}
+
+float LPVGetCellAO( float3 WorldPos )
+{
+	float3 gridPos = WorldToGrid( WorldPos );
+	return LPVGetCellAO_Grid( gridPos );
+}
+
+//-------------------------------------------------------------------------------------------------
+
+float3 LPVSpecular( float3 worldPos, float3 reflectionVec, float rOffsetLength )
+{
+#if !INDIRECT_SPECULAR
+	return 0;
+#endif
+
+	LPVCell Cell = LPVGetCell( worldPos + reflectionVec * rOffsetLength * LpvRead.LpvScale );
+
+	float3 Colour = LPVCellLookup( Cell, reflectionVec ) * INDIRECT_LEVEL * LpvRead.SpecularIntensity;
+
+#if SHOW_GRID
+	Colour = DebugGridColour( WorldToGrid( worldPos ), colour );
+#endif
+
+	return Colour;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+float3 LPVSpecular( float3 worldPos, float3 reflectionVec )
+{
+	return LPVSpecular( worldPos, reflectionVec, REFLECTION_RAY_LENGTH_DEFAULT );
+}
+
+
+//-------------------------------------------------------------------------------------------------
+
+float3 LPVDiffuse( float3 worldPos, float3 normal )
+{
+#if !INDIRECT_DIFFUSE
+	return 0;
+#endif
+
+	LPVCell Cell = LPVGetCell( worldPos );
+
+	float3 Colour = LPVCellLookup( Cell, normal ) * INDIRECT_LEVEL * LpvRead.DiffuseIntensity;
+
+	return Colour;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+void LPVGetDiffuseAndSpecular( float3 worldPos, float3 normal, float3 reflectionVec, out float3 diffuseOut, out float3 specularOut )
+{
+	// TODO: could implement optimised ref lookup by using SH from diffuse for reflection
+
+	diffuseOut = LPVDiffuse( worldPos, normal ) ;
+	specularOut = LPVSpecular( worldPos, reflectionVec ) ; 
+}
+
+
+//-------------------------------------------------------------------------------------------------
+
+// Directional occlusion lookup
+float2 LPVGetDirectionalOcclusion_DiffuseSpec( float3 WorldPosition, float3 R, float Roughness, float3 N )
+{
+	BRANCH
+	if ( LpvRead.DirectionalOcclusionIntensity < 0.0001f )
+	{
+		return float2(1,1);
+	}
+	float SpecularOcclusion = 0.0f;
+	float DiffuseOcclusion = 0.0f;
+	const int NumSpecularSteps = 6; 
+	const int NumDiffuseSteps  = 2;
+
+	float3 gridPos = WorldToGrid( WorldPosition );
+	float StepLength = 1.333 / float(NumDiffuseSteps);//0.301f;
+	float Weight = 1.0f;
+	float TotalWeight = 0.0f;
+
+#if DEBUG_USE_RAW_AO
+	float ao = saturate( LPVGetCellAO_Grid( gridPos ) );
+	if ( ao > 0.5 ) return 1;
+	return ao.xx;
+#endif
+
+	float DiffuseOcclusionRaw = LPVGetCellAO_Grid( gridPos + N * 0.25 );
+	DiffuseOcclusion = saturate( DiffuseOcclusionRaw * 2.0f / LpvRead.DiffuseOcclusionIntensity );
+	DiffuseOcclusion = pow( DiffuseOcclusion, LpvRead.DiffuseOcclusionExponent );
+	DiffuseOcclusion = saturate(DiffuseOcclusion);
+
+	gridPos = WorldToGrid( WorldPosition );
+	StepLength = 2.0f / (float)NumSpecularSteps;
+	SpecularOcclusion = 0.0f;
+	TotalWeight=0;
+	Weight=1.0f;
+
+	// Use the diffuse occlusion tap as the first specular tap (since it's nearly identical)
+	SpecularOcclusion = saturate( 1-DiffuseOcclusionRaw ) * Weight;
+	StepLength *= 1.3f;
+	gridPos+=R*StepLength;
+	TotalWeight+=Weight; 
+	Weight *= 0.9;
+	for  ( int i=1; i<NumSpecularSteps; i++ )
+	{
+		float AO = saturate( 1-LPVGetCellAO_Grid( gridPos ) );
+		SpecularOcclusion += AO * Weight;
+		StepLength *= 1.3f;
+		gridPos+=R*StepLength;
+		TotalWeight+=Weight; 
+		Weight *= 0.9;
+	}
+
+	// Increase intensity as power increases	
+	float LerpValue = saturate( LpvRead.SpecularOcclusionExponent * 0.1f ); // 0-1 range
+	float Strength = lerp( 0.9f, 1.3f, LerpValue ) * LpvRead.SpecularOcclusionIntensity;
+	SpecularOcclusion *= Strength;
+	SpecularOcclusion /= TotalWeight;
+	SpecularOcclusion = pow( SpecularOcclusion, LpvRead.SpecularOcclusionExponent );
+
+	SpecularOcclusion = 1-SpecularOcclusion;
+
+	float2 DirectionalOcclusion = lerp( float2( 1,1 ), saturate( float2( DiffuseOcclusion, SpecularOcclusion) ), LpvRead.DirectionalOcclusionIntensity );
+
+#if LPV_OCCLUSION_EDGE_FADE
+	float3 grid = WorldToGrid( WorldPosition );
+	float minGrid = min( grid.x, min(grid.y,grid.z ) );
+	float maxGrid = max( grid.x, max(grid.y,grid.z ) );
+
+	float inside = min(	saturate(minGrid*0.5),
+						saturate((32.0f-maxGrid)*0.5) );
+
+	DirectionalOcclusion = lerp( float2(0.5,0.5), DirectionalOcclusion, inside );
+#endif
+
+	return DirectionalOcclusion;
+}
+
+
+#endif

@@ -1,0 +1,155 @@
+Availability:Public
+Title:粒子模块技术指南
+Crumbs:%ROOT%, Programming, Programming/Rendering
+Description:添加新粒子模块以用于粒子系统的自定义操作的程序员指南。
+
+[TOC (start:2 end:3)]
+
+
+
+## 概述
+
+UE4 中的粒子系统由任意数目的粒子放射器组成，其中每个都包含会影响其粒子行为方式的模块。使用自定义模块和发射器类型扩展系统十分简单，该文档将会示范如何进行这项操作。
+
+## ParticleModule基类 
+
+所有的粒子模块都衍生于相同的基类，`ParticleModule`（在`//depot/UE4/Engine/Source/Runtime/Engine/Classes/Particles/Modules/ParticleModule.h`中进行定义）。
+
+
+### 成员变量
+
+这个 `ParticleModule` 类包含以下成员变量：
+
+| 变量 | 概述 |
+| -------- | -------- |
+| `bSpawnModule` | 表示模块是否需要产生的粒子通过它的布尔变量（例如，`Spawn()`/`SpawnEditor()` 函数进行的一些操作）。默认值是 `false`（假）。|
+| `bUpdateModule` | 表示模块是否需要更新的粒子通过它的布尔变量（例如，`Update()`/`UpdateEditor()` 函数进行的一些操作）。默认值是 `false`（假）。|
+| `bCurvesAsColor` | 表示模块中的分布（曲线）属性是否包含颜色数据的布尔变量。如果是 `true`（真），曲线编辑器中描画的曲线会显示它们当前的颜色而不是指定的 `ModuleEditorColor`（模块编辑器颜色）。默认值是 `false`（假）。|
+| `b3DDrawMode` | 表示这个模块是否应该渲染它的 3D 可视化帮助程序的布尔变量。默认值是 `false`（假）。|
+| `bSupported3DDrawMode` | 表示这个模块是否支持渲染 3D 可视化帮助程序的布尔变量（例如，`Render3DPreview()` 函数进行的一些操作）。默认值是 `false`（假）。|
+| `bEnabled` | 表示是否启用这个模块的布尔变量。默认值是 `true`（真）。|
+| `bEditable` | 表示是否由设计师启用这个模块的布尔变量。在 LOD 关卡中使用以确定是否已经修改了较低的 LOD 关卡。默认值是 `true`（真）。|
+| `ModuleEditorColor` | 与这个模块相关的颜色。在曲线编辑器中描画的模块中的曲线会显示为这个颜色。[REGION:note]如果已经启用 `bCurvesAsColor`，将会使用它们代表的实际颜色值描画这些曲线。[/REGION] |
+
+`ModuleType`（模块类型）枚举值也在这个类中定义。这个类型表示哪些类型的发射器可以使用这个模块。下面的表格描述了可以使用的类型：
+
+| 类型 (EPMT) | 描述 |
+| ------------ | ----------- |
+| _常用_ |所有发射器类型都可以使用的常用模块。|
+| _类型数据_ |这种模块是 TypeData（类型数据）模块 – 指定作为实例的发射器类。|
+| _光束_ |只有光束发射器可以使用的模块。|
+| _尾迹_ |只有尾迹发射器可以使用的模块。|
+
+
+### 成员函数
+
+`ParticleModule` 类会包含一些可以在编写您自己的模块时提供一些权限的虚拟成员函数。（还有大量其他成员函数，但是它们都与自定义模块这个主题没有关系，所以不会在此进行讨论。） 下面是一些列出的成员函数：
+
+| 函数 | 概述 |
+| -------- | -------- |
+| `void Spawn(FParticleEmitterInstance* Owner, int32 Offset, float SpawnTime)` | 调用刚刚由发射器生成的粒子。在这里，模块可以在创建每个粒子时设置/修改它们的初始值。|
+| `void Update(FParticleEmitterInstance* Owner, int32 Offset, float DeltaTime)` | 调用刚刚由其发射器更新的粒子。在这里，模块可以在正在进行更新的粒子上执行操作，例如，更改它的颜色或速度。|
+| `uint32 RequiredBytes(FParticleEmitterInstance* Owner = NULL)` | 返回模块在粒子净荷块中需要的字节数。它可以使这个模块存储一些它的每个粒子需要的数据。|
+| `uint32 RequiredBytesPerInstance(FParticleEmitterInstance* Owner = NULL)` | 返回这个模块在发射器 _每个实例_ 的数据块中需要的字节数。这可以使这个模块存储一些它的每个反射器实例需要的数据。|
+| `virtual void CompileModule( struct FParticleEmitterBuildInfo& EmitterInfo )` | 必须对可与GPU粒子发射器一起使用的模块应用`CompileModule()`。模块应修改发射器信息结构体来应用模块的特效到模拟中。|
+
+## 创建自定义模块
+
+编写自定义模块只需覆盖上面提到的函数实现所想要的特效。例如，会创建一个可以实现将粒子颜色设置为基础颜色乘以由某个生成的分布因素进行调整的速度的模块。
+
+这个模块的基础类可以定义 _标题_ ，它会显示在 Cascade 的 **右击** 模块菜单的下方。这样，在我们的示例中，我们将需要从 `ParticleModuleColorBase` 类中衍生以确保这个模块可以显示在 **颜色** 的子菜单中。
+
+### 模块声明
+
+	UCLASS(editinlinenew,collapsecategories,hidecategories=Object)
+	public class UParticleModuleColorByVelocity : public UParticleModuleColorBase
+	{
+		/**
+
+		 *   在这个值设置为颜色之前，
+		 *   它可以调整每个对应的速度元素。这个值通过使用 
+		 *   Particle.RelativeTime来获得的。
+		 *
+		 *  例如，如果ScaleVelocity是(0.25,0.5,1.0) ，而速度是
+		 *   (2.0,2.0,0.0)，那么粒子颜色将会被设置为 (0.5,1.0,0.0)；
+		 */
+
+		var(Color)   rawdistributionvector   ScaleVelocity;
+
+		cpptext
+		{
+		   virtual void   Spawn(FParticleEmitterInstance* Owner, int32 Offset, float SpawnTime);
+		   virtual void   Update(FParticleEmitterInstance* Owner, int32 Offset, float DeltaTime);
+		}
+	}
+
+注意事项：
+
+1. 将这个模块标记为同时在产生和更新阶段中的粒子上进行操作（将 `bSpawnModule` 和 `bUpdateModule` 都设置成 `true`（真））。
+1. 我们的模块不需要粒子级或实例级数据，所以我们没有覆盖 `RequiredBytes*()` 函数。
+
+[REGION:warning]
+这个示例要求发射器在发射器模块栈中的 **ColorByVelocity** 模块前面具有一个 **InitialColor** 模块。
+此外，它还要求粒子发射器使用可以采用 **VertexColor** 表达式的材质以便可以显示正在进行操作的粒子颜色。
+[/REGION]
+
+#### 模块实现
+
+构造函数创建`DistributionVectorConstant`以指派给`ScaleVelocity`并告知引擎其应同时处理生成和更新粒子。
+
+	UParticleModuleColorByVelocity::UParticleModuleColorByVelocity(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+	{
+		bSpawnModule = true;
+		bUpdateModule = true;
+						
+		UDistributionVectorConstant* DistributionScaleVelocity = ConstructorHelpers::CreateDefaultSubobject<UDistributionVectorConstant>(this, TEXT("DistributionScaleVelocity"));
+		DistributionScaleVelocity->Constant = FVector(1.0f, 1.0f, 1.0f);
+		ScaleVelocity.Distribution = DistributionScaleVelocity;
+	}
+
+在 `Spawn()` 函数中，这个代码将会创建在粒子上具有的任何初始特效。并不是每一个模块都需要调用 `Spawn()`，但是这个模块需要调用。
+
+	void UParticleModuleColorByVelocity::Spawn(FParticleEmitterInstance* Owner, int32 Offset, float SpawnTime)
+	{
+	   SPAWN_INIT;
+	   {
+		  FVector ColorScale    = ScaleVelocity.GetValue(Particle.RelativeTime, Owner->Component);
+		  Particle.Color        = FLinearColor(
+												Particle.BaseColor.R * Particle.Velocity.X * ColorScale.X,
+												Particle.BaseColor.G * Particle.Velocity.Y * ColorScale.Y,
+												Particle.BaseColor.B * Particle.Velocity.Z * ColorScale.Z);
+	   }
+	}
+
+`Spawn()`函数从使用`Particle.RelativeTime`的发布中获取`ScaleVelocity`值。该值与速度值相乘以获得调整后的速度值。然后将 `Particle.Color`（粒子颜色）设置为 `BaseColor` 乘以调整后的速度计算的结果。
+
+`SPAWN_INIT` 是一个可以创建一个对正在产生的粒子的 `FBaseParticle` 引用的宏指令，以及在访问粒子数据时常用的一些其他值，例如，将跟踪偏移到粒子净荷中等等。要了解全部详细信息，请参阅 `//depot/UE4/Engine/Source/Runtime/Engine/Public/ParticleHelper.h`。
+
+[REGION:note]
+	它是一个毁灭性的模块，因为它可以直接设置 `Particle.Color`。在它前面只修改了 `Particle.Color`的所有模块都是毫无意义的。但是，如果它同时也修改了 `BaseColor`，例如 **InitialColor** （初始颜色）模块，那么它仍然会受到影响。
+[/REGION]
+
+在这个特定模块中的 `Update()` 函数与 `Spawn()` 或多或少是一样的。不同之处是每个活动的粒子都是在单独的循环中进行更新的。
+
+	void UParticleModuleColorByVelocity::Update(FParticleEmitterInstance* Owner, int32 Offset, float DeltaTime)
+	{
+	   BEGIN_UPDATE_LOOP;
+	   {
+		  FVector ColorScale    = ScaleVelocity.GetValue(Particle.RelativeTime, Owner->Component);
+		  Particle.Color        = FLinearColor(
+												 Particle.BaseColor.R * Particle.Velocity.X * ColorScale.X,
+												 Particle.BaseColor.G * Particle.Velocity.Y * ColorScale.Y,
+												 Particle.BaseColor.B * Particle.Velocity.Z * ColorScale.Z);
+	   }
+	   END_UPDATE_LOOP;
+	}
+
+`BEGIN_UPDATE_LOOP`/`END_UPDATE_LOOP` 是宏指令，它会创建可以在所有活动的粒子中循环代码块并在每个粒子上执行在粒子之间包含的代码。请参阅 `UnParticleHelper.h` 了解全部详细信息。
+
+下面的屏幕截图可以在操作中显示 **ColorByVelocity** 模块。将粒子的 **InitialVelocity** 随机设置为 **[(0,0,0),(200,200,0)]** 。将每个粒子的 **InitialColor** 设置为白色。将 **ColorByVelocity** 的 **VelocityScale** 值设置为常量 **(0.005, 0.005, 0)** 。这样可以将每个粒子的颜色都设置为   
+    
+	Velocity * VelocityScale
+
+![ColorByVelocity.JPG](ColorByVelocity.JPG)
+

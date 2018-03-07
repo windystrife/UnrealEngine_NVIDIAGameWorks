@@ -1,0 +1,350 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	DistanceFieldLightingShared.usf
+=============================================================================*/
+
+#include "SurfelMaterialShared.ush"
+
+#ifndef THREADGROUP_SIZEX
+#define THREADGROUP_SIZEX 1
+#endif   
+
+#ifndef THREADGROUP_SIZEY
+#define THREADGROUP_SIZEY 1
+#endif
+
+#define THREADGROUP_TOTALSIZE (THREADGROUP_SIZEX * THREADGROUP_SIZEY)
+
+#ifndef DOWNSAMPLE_FACTOR
+#define DOWNSAMPLE_FACTOR 1
+#endif
+
+#ifndef UPDATEOBJECTS_THREADGROUP_SIZE
+#define UPDATEOBJECTS_THREADGROUP_SIZE 1
+#endif
+
+float3 DistanceFieldVolumePositionToUV(float3 VolumePosition, float3 UVScale, float3 UVAdd)
+{
+	float3 VolumeUV = VolumePosition * UVScale + UVAdd;
+	return VolumeUV;
+}
+
+Texture3D DistanceFieldTexture;
+SamplerState DistanceFieldSampler;
+
+float SampleMeshDistanceField(float3 VolumeUV, float2 ObjectDistanceFieldMAD)
+{
+	float TextureValue = Texture3DSampleLevel(DistanceFieldTexture, DistanceFieldSampler, VolumeUV, 0).x;
+#if EIGHT_BIT_MESH_DISTANCE_FIELDS
+	TextureValue = TextureValue * ObjectDistanceFieldMAD.x + ObjectDistanceFieldMAD.y;
+#endif
+	return TextureValue;
+}
+
+float3 DistanceFieldAtlasTexelSize;
+
+RWBuffer<uint> RWObjectIndirectArguments;
+Buffer<uint> ObjectIndirectArguments;
+
+uint GetCulledNumObjects()
+{
+	// IndexCount, NumInstances, StartIndex, BaseVertexIndex, FirstInstance
+	return ObjectIndirectArguments[1];
+}
+
+// In float4's.  Must match equivalent C++ variables.
+#define OBJECT_DATA_STRIDE 18
+
+uint NumSceneObjects;
+
+// Have to make these R32F with 4x the reads and writes because of the horrible D3D11 limitation
+// "error X3676: typed UAV loads are only allowed for single-component 32-bit element types"
+Buffer<float> ObjectBounds;
+Buffer<float> ObjectData;
+
+RWBuffer<float> RWObjectBounds;
+RWBuffer<float> RWObjectData;
+
+float4 LoadGlobalObjectPositionAndRadius(uint ObjectIndex)
+{
+	uint VectorIndex = ObjectIndex * 4;
+	return float4(ObjectBounds[VectorIndex + 0], ObjectBounds[VectorIndex + 1], ObjectBounds[VectorIndex + 2], ObjectBounds[VectorIndex + 3]);
+}
+
+float4x4 LoadGlobalObjectWorldToVolume(uint ObjectIndex)
+{
+	uint VectorIndex = (ObjectIndex * OBJECT_DATA_STRIDE + 0) * 4;
+	float4 M0 = float4(ObjectData[VectorIndex + 0], ObjectData[VectorIndex + 1], ObjectData[VectorIndex + 2], ObjectData[VectorIndex + 3]);
+	VectorIndex = (ObjectIndex * OBJECT_DATA_STRIDE + 1) * 4;
+	float4 M1 = float4(ObjectData[VectorIndex + 0], ObjectData[VectorIndex + 1], ObjectData[VectorIndex + 2], ObjectData[VectorIndex + 3]);
+	VectorIndex = (ObjectIndex * OBJECT_DATA_STRIDE + 2) * 4;
+	float4 M2 = float4(ObjectData[VectorIndex + 0], ObjectData[VectorIndex + 1], ObjectData[VectorIndex + 2], ObjectData[VectorIndex + 3]);
+	VectorIndex = (ObjectIndex * OBJECT_DATA_STRIDE + 3) * 4;
+	float4 M3 = float4(ObjectData[VectorIndex + 0], ObjectData[VectorIndex + 1], ObjectData[VectorIndex + 2], ObjectData[VectorIndex + 3]);
+
+	return float4x4(M0, M1, M2, M3);
+}
+ 
+float3 LoadGlobalObjectLocalPositionExtent(uint ObjectIndex)
+{
+	uint VectorIndex = (ObjectIndex * OBJECT_DATA_STRIDE + 4) * 4;
+	return float3(ObjectData[VectorIndex + 0], ObjectData[VectorIndex + 1], ObjectData[VectorIndex + 2]);
+}
+
+float4 LoadGlobalObjectUVScale(uint ObjectIndex)
+{
+	uint VectorIndex = (ObjectIndex * OBJECT_DATA_STRIDE + 5) * 4;
+	return float4(ObjectData[VectorIndex + 0], ObjectData[VectorIndex + 1], ObjectData[VectorIndex + 2], ObjectData[VectorIndex + 3]);
+}
+
+float3 LoadGlobalObjectUVAdd(uint ObjectIndex)
+{
+	uint VectorIndex = (ObjectIndex * OBJECT_DATA_STRIDE + 6) * 4;
+	return float3(ObjectData[VectorIndex + 0], ObjectData[VectorIndex + 1], ObjectData[VectorIndex + 2]);
+}
+
+float2 LoadGlobalObjectDistanceFieldMAD(uint ObjectIndex)
+{
+	uint VectorIndex = (ObjectIndex * OBJECT_DATA_STRIDE + 7) * 4;
+	return float2(ObjectData[VectorIndex + 0], ObjectData[VectorIndex + 1]);
+}
+
+void LoadGlobalObjectLocalVolumeBoundsMinMax(uint ObjectIndex, out float3 LocalVolumeBoundsMin, out float3 LocalVolumeBoundsMax)
+{
+	uint VectorIndex = 4 * (ObjectIndex * OBJECT_DATA_STRIDE + 16);
+	LocalVolumeBoundsMin = float3(ObjectData[VectorIndex + 0], ObjectData[VectorIndex + 1], ObjectData[VectorIndex + 2]);
+
+	VectorIndex = 4 * (ObjectIndex * OBJECT_DATA_STRIDE + 17);
+	LocalVolumeBoundsMax = float3(ObjectData[VectorIndex + 0], ObjectData[VectorIndex + 1], ObjectData[VectorIndex + 2]);
+}
+
+uint LoadGlobalObjectOftenMoving(uint ObjectIndex)
+{
+	uint VectorIndex = (ObjectIndex * OBJECT_DATA_STRIDE + 17) * 4;
+	return ObjectData[VectorIndex + 3] > 0.0f ? 1 : 0;
+}
+
+// In float4's.  Must match equivalent C++ variables.
+#define CULLED_OBJECT_DATA_STRIDE 16
+#define CULLED_OBJECT_BOX_BOUNDS_STRIDE 5
+
+float4 LoadObjectPositionAndRadiusFromBuffer(uint ObjectIndex, StructuredBuffer<float4> InBuffer)
+{
+	return InBuffer[ObjectIndex];
+}
+
+float4x4 LoadObjectWorldToVolumeFromBuffer(uint ObjectIndex, StructuredBuffer<float4> InBuffer)
+{
+	float4 M0 = InBuffer[ObjectIndex * CULLED_OBJECT_DATA_STRIDE + 0];
+	float4 M1 = InBuffer[ObjectIndex * CULLED_OBJECT_DATA_STRIDE + 1];
+	float4 M2 = InBuffer[ObjectIndex * CULLED_OBJECT_DATA_STRIDE + 2];
+	float4 M3 = InBuffer[ObjectIndex * CULLED_OBJECT_DATA_STRIDE + 3];
+
+	return float4x4(M0, M1, M2, M3);
+}
+ 
+float3 LoadObjectLocalPositionExtentFromBuffer(uint ObjectIndex, StructuredBuffer<float4> InBuffer)
+{
+	return InBuffer[ObjectIndex * CULLED_OBJECT_DATA_STRIDE + 4].xyz;
+}
+
+float4 LoadObjectUVScaleFromBuffer(uint ObjectIndex, StructuredBuffer<float4> InBuffer, out bool bGeneratedAsTwoSided)
+{
+	float4 Value = InBuffer[ObjectIndex * CULLED_OBJECT_DATA_STRIDE + 5].xyzw;
+	bGeneratedAsTwoSided = Value.w < 0;
+	return float4(Value.xyz, abs(Value.w));
+}
+
+float4 LoadObjectUVAddAndSelfShadowBiasFromBuffer(uint ObjectIndex, StructuredBuffer<float4> InBuffer)
+{
+	return InBuffer[ObjectIndex * CULLED_OBJECT_DATA_STRIDE + 6];
+}
+
+float2 LoadObjectDistanceFieldMADFromBuffer(uint ObjectIndex, StructuredBuffer<float4> InBuffer)
+{
+	return InBuffer[ObjectIndex * CULLED_OBJECT_DATA_STRIDE + 7].xy;
+}
+
+float3x3 LoadObjectVolumeToWorldFromBuffer(uint ObjectIndex, StructuredBuffer<float4> InBuffer)
+{
+	float3 M0 = InBuffer[ObjectIndex * CULLED_OBJECT_DATA_STRIDE + 8].xyz;
+	float3 M1 = InBuffer[ObjectIndex * CULLED_OBJECT_DATA_STRIDE + 9].xyz;
+	float3 M2 = InBuffer[ObjectIndex * CULLED_OBJECT_DATA_STRIDE + 10].xyz;
+
+	return float3x3(M0, M1, M2);
+}
+
+float4x4 LoadObjectLocalToWorldFromBuffer(uint ObjectIndex, StructuredBuffer<float4> InBuffer)
+{
+	float4 M0 = InBuffer[ObjectIndex * CULLED_OBJECT_DATA_STRIDE + 11];
+	float4 M1 = InBuffer[ObjectIndex * CULLED_OBJECT_DATA_STRIDE + 12];
+	float4 M2 = InBuffer[ObjectIndex * CULLED_OBJECT_DATA_STRIDE + 13];
+	float4 M3 = InBuffer[ObjectIndex * CULLED_OBJECT_DATA_STRIDE + 14];
+
+	return float4x4(M0, M1, M2, M3);
+}
+
+// These are structured buffers so they can be scalar memory loads on GCN
+StructuredBuffer<float4> CulledObjectBounds;
+StructuredBuffer<float4> CulledObjectData;
+StructuredBuffer<float4> CulledObjectBoxBounds;
+
+RWStructuredBuffer<float4> RWCulledObjectBounds;
+RWStructuredBuffer<float4> RWCulledObjectData;
+RWStructuredBuffer<float4> RWCulledObjectBoxBounds;
+
+float4 LoadObjectPositionAndRadius(uint ObjectIndex)
+{
+	return LoadObjectPositionAndRadiusFromBuffer(ObjectIndex, CulledObjectBounds);
+}
+
+float4x4 LoadObjectWorldToVolume(uint ObjectIndex)
+{
+	return LoadObjectWorldToVolumeFromBuffer(ObjectIndex, CulledObjectData);
+}
+ 
+float3 LoadObjectLocalPositionExtent(uint ObjectIndex)
+{
+	return LoadObjectLocalPositionExtentFromBuffer(ObjectIndex, CulledObjectData);
+}
+
+float4 LoadObjectUVScale(uint ObjectIndex)
+{
+	bool bUnused;
+	return LoadObjectUVScaleFromBuffer(ObjectIndex, CulledObjectData, bUnused);
+}
+
+float4 LoadObjectUVScale(uint ObjectIndex, out bool bGeneratedAsTwoSided)
+{
+	return LoadObjectUVScaleFromBuffer(ObjectIndex, CulledObjectData, bGeneratedAsTwoSided);
+}
+
+float4 LoadObjectUVAddAndSelfShadowBias(uint ObjectIndex)
+{
+	return LoadObjectUVAddAndSelfShadowBiasFromBuffer(ObjectIndex, CulledObjectData);
+}
+
+float2 LoadObjectDistanceFieldMAD(uint ObjectIndex)
+{
+	return LoadObjectDistanceFieldMADFromBuffer(ObjectIndex, CulledObjectData);
+}
+
+float3x3 LoadObjectVolumeToWorld(uint ObjectIndex)
+{
+	return LoadObjectVolumeToWorldFromBuffer(ObjectIndex, CulledObjectData);
+}
+
+float4x4 LoadObjectLocalToWorld(uint ObjectIndex)
+{
+	return LoadObjectLocalToWorldFromBuffer(ObjectIndex, CulledObjectData);
+}
+
+// x = Offset in global buffer, y = NumLOD0, z = NumSurfels (all LODs), W = instance index
+uint4 LoadObjectSurfelCoordinate(uint ObjectIndex)
+{
+	return (uint4)CulledObjectData[ObjectIndex * CULLED_OBJECT_DATA_STRIDE + 15];
+}
+
+void LoadObjectViewSpaceBox(uint ObjectIndex, out float3 ObjectViewSpaceMin, out float3 ObjectViewSpaceMax)
+{
+	ObjectViewSpaceMin = CulledObjectBoxBounds[ObjectIndex * CULLED_OBJECT_BOX_BOUNDS_STRIDE + 0].xyz;
+	ObjectViewSpaceMax = CulledObjectBoxBounds[ObjectIndex * CULLED_OBJECT_BOX_BOUNDS_STRIDE + 1].xyz;
+}
+
+void LoadObjectAxes(uint ObjectIndex, out float3 ObjectAxisX, out float3 ObjectAxisY, out float3 ObjectAxisZ)
+{
+	ObjectAxisX = CulledObjectBoxBounds[ObjectIndex * CULLED_OBJECT_BOX_BOUNDS_STRIDE + 2].xyz;
+	ObjectAxisY = CulledObjectBoxBounds[ObjectIndex * CULLED_OBJECT_BOX_BOUNDS_STRIDE + 3].xyz;
+	ObjectAxisZ = CulledObjectBoxBounds[ObjectIndex * CULLED_OBJECT_BOX_BOUNDS_STRIDE + 4].xyz;
+}
+
+// VPLs generated by raytracing from the light
+#define VPL_DATA_STRIDE 3
+
+#define FINAL_GATHER_THREADGROUP_SIZE 64
+
+// Must match C++
+#define NUM_VISIBILITY_STEPS 10
+
+// Must match C++
+#define RECORD_CONE_DATA_STRIDE NUM_VISIBILITY_STEPS
+
+// Must match C++
+#define BENT_NORMAL_STRIDE 1
+
+Buffer<float4> IrradianceCachePositionRadius;
+Buffer<float> IrradianceCacheOccluderRadius;
+Buffer<uint2> IrradianceCacheTileCoordinate;
+Buffer<float4> IrradianceCacheNormal;
+Buffer<float4> IrradianceCacheBentNormal;
+Buffer<float4> IrradianceCacheIrradiance;
+
+Buffer<uint> ScatterDrawParameters;
+Buffer<uint> SavedStartIndex;
+
+uint NumConvexHullPlanes;
+float4 ViewFrustumConvexHull[6];
+
+bool ViewFrustumIntersectSphere(float3 SphereOrigin, float SphereRadius)
+{
+	for (uint PlaneIndex = 0; PlaneIndex < NumConvexHullPlanes; PlaneIndex++)
+	{
+		float4 PlaneData = ViewFrustumConvexHull[PlaneIndex];
+		float PlaneDistance = dot(PlaneData.xyz, SphereOrigin) - PlaneData.w;
+
+		if (PlaneDistance > SphereRadius)
+		{
+			return false;
+		}
+	}
+	
+	return true;
+}
+
+Buffer<float4> SurfelData;
+
+float4 LoadSurfelPositionAndRadius(uint SurfelIndex)
+{
+	return SurfelData[SurfelIndex * SURFEL_DATA_STRIDE + 0];
+}
+
+float3 LoadSurfelNormal(uint SurfelIndex)
+{
+	return SurfelData[SurfelIndex * SURFEL_DATA_STRIDE + 1].xyz;
+}
+
+float3 LoadSurfelDiffuseColor(uint SurfelIndex)
+{
+	return SurfelData[SurfelIndex * SURFEL_DATA_STRIDE + 2].xyz;
+}
+
+float3 LoadSurfelEmissiveColor(uint SurfelIndex)
+{
+	return SurfelData[SurfelIndex * SURFEL_DATA_STRIDE + 3].xyz;
+}
+
+float ApproximateConeConeIntersection(float ArcLength0, float ArcLength1, float AngleBetweenCones)
+{
+	float AngleDifference = abs(ArcLength0 - ArcLength1);
+
+	float Intersection = smoothstep(
+		0,
+		1.0,
+		1.0 - saturate((AngleBetweenCones - AngleDifference) / (ArcLength0 + ArcLength1 - AngleDifference)));
+
+	return Intersection;
+}
+
+float GetVPLOcclusion(float3 BentNormalAO, float3 NormalizedVectorToVPL, float VPLConeAngle, float VPLOcclusionStrength)
+{
+	float BentNormalLength = length(BentNormalAO);
+	float UnoccludedAngle = BentNormalLength * PI / VPLOcclusionStrength;
+	float AngleBetween = acos(dot(BentNormalAO, NormalizedVectorToVPL) / max(BentNormalLength, .0001f));
+	float Visibility = ApproximateConeConeIntersection(VPLConeAngle, UnoccludedAngle, AngleBetween);
+
+	// Can't rely on the direction of the bent normal when close to fully occluded, lerp to shadowed
+	Visibility = lerp(0, Visibility, saturate((UnoccludedAngle - .1f) / .2f));
+
+	return Visibility;
+}

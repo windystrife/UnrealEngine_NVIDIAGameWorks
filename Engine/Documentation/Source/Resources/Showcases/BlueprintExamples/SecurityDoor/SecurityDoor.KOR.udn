@@ -1,0 +1,248 @@
+﻿INTSourceChangelist:3108692
+Availability: Public
+Title:보안 카메라, 알람, 문
+Crumbs:%ROOT%, Resources, Resources/Showcases/BlueprintExamples
+Description:보안문 블루프린트 개요입니다.
+Related: Engine/Blueprints/Overview
+Related: Engine/Blueprints/UserGuide/Variables
+Related: Engine/Animation/AnimBlueprints/EventGraph
+Related: Engine/Blueprints/UserGuide/UserConstructionScript
+Related: Engine/Blueprints/UserGuide/Components
+Related: Engine/Blueprints/UserGuide/Timelines
+Related: Gameplay/Framework/Pawn
+Version: 4.9
+
+<div align= "center">
+![](SecurityCameraAndDoorHeader.png)(w:600)
+</div>
+
+[EXCERPT:Overview]
+레벨 곳곳에 보이는 보안 카메라 블루프린트는 플레이 모드에서 플레이어와 상호작용하도록 디자인된 것입니다. 플레이 도중 일정한 검색 패턴대로 전후 패닝합니다. 녹색의 검색 원뿔에 폰이 겹치면, 불빛이 빨강으로 변하면서 카메라가 플레이어 이동을 추적하기 시작합니다. 플레이어가 범위 밖으로 이동할 때까지 추적을 계속하다가, 몇 초 후에 원래 검색을 계속 합니다.
+[/EXCERPT:Overview]
+
+이 블루프린트는 나중에 보안 화면 블루프린트에 사용되는 씬 캡처의 처리를 담당하기도 합니다.
+
+이 블루프린트에서 특히나 중요한 부분은 [Blueprint Interface](Engine/Blueprints\UserGuide\Types\Interface) 를 사용하는 부분입니다. Blueprint Interface 는 도관처럼 작동하여, 다수의 블루프린트에서 함수성 공유가 가능합니다. 특정한 인터페이스를 구현하는 블루프린트는 자동으로 해당 인터페이스에 속하는 함수성 전부를 상속받게 됩니다. 이런 식으로 특정한 목표를 향해 유기적으로 작동하는 세련된 블루프린트 망을 만들 수 있습니다.
+
+이 예제에서 Security Alarm Interface 는 데이터 도관 역할을 하여, Alarm Beacon 와 Door Blueprints 사이에 함수성, 구체적으로 알람의 작동 상태를 공유할 수 있도록 합니다.
+
+[REGION:raw]![](InterfaceConceptDiagramNew.jpg)[/REGION]
+
+
+## 카메라 블루프린트
+
+Camera Blueprint 는 알람 시스템의 핵심으로, 플레이어와 상호작용하여 알람이 울리게 만드는 것이 바로 이 블루프린트입니다. 블루프린트 통신을 위한 인터페이스 구현과 함께, 카메라는 [Timeline](Engine/Blueprints\UserGuide\Timelines) 노드 역시도 활용합니다. 애니메이션 처리를 위해 만들어진 특수 노드입니다.
+
+![](Timeline_Camera.png)
+
+Timeline 에는 애니메이션 트랙이 몇 개든 있을 수 있으며, 그 데이터가 출력으로 전송되어 이펙트를 몇 개든 돌릴 수 있습니다. 이 경우 Timeline 을 사용하여 카메라의 전후 패닝 검색 방향을 구동하고 있습니다.
+
+### 블루프린트 셋업
+
+이 블루프린트의 Components List, Construction Script, Event Graph 가 하는 일은 다음과 같습니다:
+
+
+|블루프린트 측면|용도|
+|---|---|
+| **Components List** | [INCLUDE:#CameraCL] |
+| **Construction Script** | [INCLUDE:#CameraCS] |
+| **Event Graph** | [INCLUDE:#CameraEG]  |
+
+
+
+[REGION:lightbox]
+![](CameraEG.png)(w:920)
+[/REGION]
+
+
+### 편집가능 변수
+
+카메라에 노출된 프로퍼티는 다음과 같습니다:
+
+![](CameraProperties.png)
+
+|프로퍼티|용도|
+| --- | --- |
+|[REGION:tablesection]Scanning[/REGION]||
+| **Camera Max Yaw** | 측면 탐색 최대 각도입니다. |
+| **Camera Pitch** | 카메라의 상하 각도입니다. 이 변수에는 3D 위젯이 활성화되어 있어, 뷰포트에서 조작할 수 있습니다. |
+|[REGION:tablesection]Spot Light[/REGION]||
+| **Light Attenuation** | 스포트 라이트 컴포넌트에 대한 감쇠 반경을 설정합니다. |
+| **Spotlight Brightness** | Spot Light Component 의 밝기를 설정합니다. |
+| **Light Color Alarm On** | 알람이 켜졌을 때의 Spot Light 색입니다. |
+| **Light Color Alarm Off** | 알람이 꺼졌을 때의 Spot Light 색입니다. |
+|[REGION:tablesection]Targeting[/REGION]||
+| **Test Material Alarm Settings** | 알람 색 테스트와 조절을 위해 알람 상태를 토글시킵니다. |
+|[REGION:tablesection]Blueprint Interface[/REGION]||
+| **Blueprint To Trigger Alarm Array** | 알람 상태 업데이트를 받을 필요가 있는 모든 오브젝트 목록 배열입니다. |
+|[REGION:tablesection]Render Target[/REGION]||
+| **Scene Capture Texture** | 보안 카메라 모니터에 사용될 Render Target 텍스처를 담습니다. |
+| **Scene Capture View Distance** | Scene Capture Component 의 최대 뷰 거리를 설정합니다. 이 값을 낮추면 퍼포먼스가 향상됩니다. |
+
+
+
+
+## 알람 블루프린트
+<div align= "center">
+![](AlarmImage.png)
+</div>
+
+Alarm Blueprint 는 플레이어가 보안 카메라 범위에 걸려 알람을 울리는 시각 효과 역할을 합니다. 알람이 켜지면 초록에서 빨강으로 변하는 듯 하다가, 알람등이 회전하기 시작합니다. 알람이 꺼질 때까지 이러한 행위가 계속됩니다.
+
+알람을 켜고 끄는 것은 Security Alarm [Blueprint Interface](Engine/Blueprints\UserGuide\Types\Interface) 에서 메시지를 받는 것으로 이루어지는데, 이 인터페이스는 카메라, 문, 알람으로 구현되어 있습니다.
+
+
+### 블루프린트 셋업
+
+이 블루프린트용 Components List, Construction Script, Event Graph 가 하는 일은 다음과 같습니다:
+
+
+|블루프린트 측면|용도|
+|---|---|
+| **Components List** | [INCLUDE:#AlarmCL] |
+| **Construction Script** | [INCLUDE:#AlarmCS] |
+| **Event Graph** | [INCLUDE:#AlarmEG]  |
+
+[Region:lightbox]
+![](AlarmGraph.png)(w:920)
+[/region]
+
+
+### 편집가능 변수
+
+알람에 노출된 프로퍼티는 다음과 같습니다:
+
+![](AlarmProperties.png)
+
+|프로퍼티|용도|
+| --- | --- |
+| **Light Rotation Speed** | 알람 경고등 회전 속도입니다. |
+| **Test Alarm Material Settings** | 테스팅 목적으로 알람을 강제로 켜는 불리언입니다. 플레이 모드가 아닌 경우 경고등은 돌지 않습니다. |
+
+
+## 문 블루프린트
+<div align= "center">
+![](Door.png)
+</div>
+
+문은 알람이 울리지 않는 이상 열려있도록 설정되어 있습니다. 그러다가 알람이 발동되면, 문은 쾅 하고 닫히는 애니메이션과 함께 알람이 끝날 때까지 다시 열리지 않습니다. 여기서 문의 애니메이션에는 Timeline 노드가 사용되었다는 점이 중요합니다. 사실 Timeline 종류는 두 가지 있는데, 하나는 문을 여는 것이고 다른 하나는 닫는 것입니다. 이를 통해 문이 열리는 속도와 닫히는 속도를 달리 할 수 있습니다.
+
+문의 동작이 사실상 발동되는 것은 Security Alarm [Blueprint Interface](Engine/Blueprints\UserGuide\Types\Interface) 의 신호를 받고서인데, 이 인터페이스는 카메라, 문, 알람으로 구현됩니다.
+
+또 한가지 이 문 구성상 흥미로운 점은 Timeline 이 문 애니메이션에 직접 관여하지 않는다는 점입니다. 그보다 Timeline 각각은 하나의 실수 값을 출력하고, 이 값을 문의 "열린" 위치와 "닫힌" 위치를 나타내는 두 벡터 위치 사이를 보간하는 데 사용합니다.
+
+
+
+### 블루프린트 셋업
+
+이 블루프린트용 Components List, Construction Script, Event Graph 가 하는 일은 다음과 같습니다:
+
+
+|블루프린트 측면|용도|
+|---|---|
+| **Components List** | [INCLUDE:#DoorCL] |
+| **Construction Script** | [INCLUDE:#DoorCS] |
+| **Event Graph** | [INCLUDE:#DoorEG]  |
+
+
+### 편집가능 변수
+
+문에 노출된 프로퍼티는 다음과 같습니다:
+
+![](DoorProperties.png)
+
+|프로퍼티|용도|
+| --- | --- |
+| **Door Open Width** | 문이 열릴 때의 최종 위치를 설정합니다. 반대편 문에는 이 값을 미러링합니다. |
+| **Door Left Size** | 왼쪽 문의 스케일을 설정합니다. |
+| **Door Right Size** | 오른쪽 문의 스케일을 설정합니다. |
+
+
+
+<!-----------------------------------
+
+[EXCERPT:CameraCL]
+Camera 의 _Components List_ 에 들어있는 컴포넌트는 다음과 같습니다:
+[REGION:raw]![](CameraCS.png)[/REGION]
+대부분의 요소가 자체적으로 설명이 됩니다. SceneCapture 컴포넌트는 마치 카메라처럼 작동하는 데, 차이점이라면 잡히는 내용을 화면에 뿌리는 대신 나중에 머티리얼에서 사용할 수 있는 텍스처에다 채워 넣는 것입니다.
+[/EXCERPT:CameraCL]
+
+
+[EXCERPT:CameraCS]
+_Construction Script_ 가 하는 일은 다음과 같습니다:
+* Scene Capture 내용을 Render Target Texture 에 기록하도록 설정합니다.
+* 편집가능 변수에서 들어오는 값을 사용하여 카메라용 Spot Light 를 구성합니다.
+* 카메라의 기본 회전 각도를 설정합니다.
+* 카메라의 시야 원뿔을 나타내는 [Material Instance Dynamic (MID)](Engine/Rendering/Materials\MaterialInstances) 를 구성합니다.
+[/EXCERPT:CameraCS]
+
+
+
+[EXCERPT:CameraEG]
+폰이 시야 원뿔에 들어설 때 _Event Graph_ 가 하는 일은 다음과 같습니다:
+* 알람을 울립니다.
+* 시야 원뿔과 등의 색을 바꿉니다.
+* 플레이어의 움직임을 추적하기 시작합니다.  
+
+플레이어가 시야 원뿔에서 나가면:
+* 일정 기간 후 알람을 끕니다.
+* 보통의 전후 탐색 모드로 돌아갑니다.  
+* 매 프레임(틱)마다 카메라 방향을 업데이트합니다.
+* 인터페이스를 통해 현재 알람 상태를 전송합니다.
+[/EXCERPT:CameraEG]
+
+
+
+[EXCERPT:AlarmCL]
+Camera 의 _Components List_ 에 들어있는 컴포넌트는 다음과 같습니다:
+[REGION:raw]![](AlarmCS.png)[/REGION]
+알람의 _Component List_ 는 기본적으로 베이스 메시와 라이트 두 개인데, 하나는 알람용 (Spot Light)이고, 다른 하나는 해제 상태용 (OffLight)입니다.
+[/EXCERPT:AlarmCL]
+
+
+[EXCERPT:AlarmCS]
+_Construction Script_ 가 하는 일은 다음과 같습니다:
+* 노출된 사용자 입력으로부터 라이트 색을 설정합니다.
+* 알람 메시에 [Material Instance Dynamic (MID)](Engine/Rendering/Materials\MaterialInstances) 를 생성하여 적용합니다.
+* 사용자가 알람을 테스트하는 중이라면, 라이트와 머티리얼 세팅을 맞바꿔 알림이 켜졌을 때 어때 보이는지를 표시합니다.
+[/EXCERPT:AlarmCS]
+
+
+
+[EXCERPT:AlarmEG]
+_Event Graph_ 가 하는 일은 다음과 같습니다:
+알람 인터페이스에서 신호를 받으면:
+* 신호가 알람을 켜기 위한 것인지 끄기 위한 것인지 해석합니다.
+* 알람을 켜는 것이라면, Spot Light 를 켜고, Off Light 를 끄고, 머티리얼 색을 바꿉니다. 그리고 Spot Light 를 회전시키는 Gate 를 엽니다.
+* 알람을 끄는 것이라면, Spot Light 를 끄고, Off Light 를 켜고, 머티리얼 색을 원래 상태로 바꿉니다. Spot Light 를 회전시키는 Gate 를 닫습니다.
+
+[/EXCERPT:AlarmEG]
+
+
+
+
+[EXCERPT:DoorCL]
+Camera 의 _Components List_ 에 들어있는 컴포넌트는 다음과 같습니다:
+[REGION:raw]![](DoorCL.png)[/REGION]
+문의 _Component List_ 는 본질적으로 하나의 트리거 볼륨과 두 개의 문짝이 들어 있습니다.
+[/EXCERPT:DoorCL]
+
+
+[EXCERPT:DoorCS]
+_Construction Script_ 가 하는 일은 다음과 같습니다:
+* 트리거 박스 볼륨의 위치와 크기를 설정합니다.
+* 각 문의 위치와 크기를 설정합니다.
+[/EXCERPT:DoorCS]
+
+
+
+[EXCERPT:DoorEG]
+알람 인터페이스에서 신호를 받았을 때 _Event Graph_ 가 하는 일은 다음과 같습니다:
+* 신호가 알람을 켜기 위한 것인지 끄기 위한 것인지 확인합니다.
+* 알람을 켜는 것이라면, 문의 현재 상태를 확인한 다음, 이미 열려있지 않으면 엽니다.
+* 알람을 끄는 것이라면, 문의 현재 상태를 확인한 다음, 이미 닫혀있지 않으면 닫습니다.
+[/EXCERPT:DoorEG]
+
+
+
+------------------------------------>

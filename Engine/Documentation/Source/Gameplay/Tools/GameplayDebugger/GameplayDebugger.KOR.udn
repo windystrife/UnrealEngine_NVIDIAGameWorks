@@ -1,0 +1,288 @@
+﻿INTSourceChangelist:3238697
+Title:게임플레이 디버거
+Availability:Public
+Crumbs:
+Description: 실행시간에 실시간 게임플레이 데이터를 분석할 수 있도록 해주는 툴입니다.
+
+Gameplay Debugger, 게임플레이 디버거는 실행시간에 실시간 데이터를 감시하기 좋은 툴로, 심지어 리플리케이션을 사용하는 네트워킹 게임 내 클라이언트에서도 가능합니다. 에디터에서 플레이, 에디터에서 시뮬레이트, 독립형 게임 세션에서도 잘 돌아가며, 모든 데이터가 게임 뷰포트 위에 겹쳐 표시됩니다. 게임 전용 데이터의 디버깅을 가능하게 하기 위해 확장시킬 수 있는 프레임워크도 제공됩니다.
+
+엔진 구현에서 표시할 수 있는 내용:
+
+* 폰에서의 기본 데이터
+* AI 콘트롤러에서의 기본 데이터
+* 비헤이비어 트리 및 블랙보드 데이터 관련 정보
+* 실행된 인바이언먼트 쿼리 (EQS) 관련 정보
+* 인지 시스템에서의 정보
+* 플레이어 또는 선택된 폰 주변 내비메시에 링크나 영역같은 디테일 전부 포함
+
+보통 데이터 양이 많아서 GDT 는 카테고리별로 화면에 표시되는 정보 양을 제한합니다. 활성화된 카테고리에서의 데이터만 리플리케이트되어 리플리케이션 채널의 대역폭을 절약합니다. 다섯 개의 기본 카테고리와, 프로젝트에 사용되는 다섯 개의 카테고리입니다:
+
+![image alt text](image_1.png)
+
+* Navmesh 내비메시
+* Basic 기본
+* Behavior Tree 비헤이비어 트리
+* EQS 인바이언먼트 쿼리 시스템
+* Perception 인지
+* 그 외 프로젝트에 사용되는 다섯 개의 카테고리
+
+
+기존 카테고리를 확장시켜 좀 더 구체적인 정보를 표시하도록 할 수도 있습니다.
+
+아래는 기본, EQS, 내비메시, 비헤이비어 트리 등 몇 가지 카테고리를 활성화시킨 클라이언트에서 캡처한 스크린샷입니다:
+
+![image alt text](image_2.png)
+
+게임플레이 디버거는 기본적으로 ` (어포스트로피) 키 또는 *EnableGDT* 치트로 활성화시킬 수 있습니다. 키 바인딩은 파일에서 설정하며, 쉽게 변경 가능합니다. 디버깅을 위해 적을 선택하려면, 그 적이 화면상의 그 적을 가리키는 동안 ` 키를 누르면 됩니다. 숫자 키보드를 사용하여 가시 카테고리 사이를 전환합니다. 게임플레이 디버거 모듈을 활성화시켜 사용하기 위해서는, 프로젝트의 종속성 모듈에 게임플레이 디버거 모듈을 추가시켜야 합니다.
+
+## 에디터 - 게임플레이 디버거 작업
+
+에디터내 작업시 GDT 는 PIE 또는 SIE 에서 사용할 수 있습니다. 바인딩된 키 또는 *EnableGDT* 치트는 PIE 에서 GDT 를 활성화시키는 데 사용될 수 있습니다. 시뮬레이션 모드는 PIE 와 약간 다른데, 이 디버그 툴 활성화를 위해서는 *Debug AI* 표시 플래그를 켜줄 필요가 있습니다. 시뮬레이트에서 보이는 카테고리를 변경하는 옵션도 있습니다. *GameplayDebuggingReplicator* 액터가 사용되는데요. 이 액터는 씬 아웃라이너에서 찾을 수 있으며, 그 프로퍼티가 GDT 제어에 사용됩니다:
+
+![image alt text](image_3.jpg)
+
+
+## 기본 확장
+
+게임플레이 디버거는 C++ 코드로만 확장 가능합니다. 블루프린트 프로젝트의 경우 있는 그대로만 사용 가능, 현재로서는 기본적인 디버그 정보만 표시됩니다. 게임플레이 디버거를 확장시켜 게임 특정 데이터를 수집하고 표시하는 것은 꽤나 쉽습니다. *UGameplayDebuggingComponent* 클래스와 *AGameplayDebuggingHUDComponent* 클래스에서 상속된 커스텀 클래스가 필요합니다. 첫 클래스는 데이터 수집 및 나중에는 리플리케이션에도 사용되며, 두 번째 클래스는 수집된 데이터 전부를 화면에 표시하는 데 사용됩니다.
+
+아래는 게임 전용 데이터를 수집하는 간단한 클래스입니다:
+
+
+GDTComponent.h
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+	#pragma once
+	#include "GameplayDebuggingComponent.h"
+	#include "GDTComponent.generated.h"
+
+	UCLASS()
+	class UGDTComponent : public UGameplayDebuggingComponent
+	{
+	public:
+		GENERATED_UCLASS_BODY()
+		virtual void CollectBasicData() override;
+
+		UPROPERTY(Replicated)
+		float TestData; //custom data replicated to clients
+	};
+
+GDTComponent.cpp
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+	#include "MyGameProject.h"
+	#include "GameplayDebuggingComponent.h"
+	#include "GDTComponent.h"
+
+	UGDTComponent::UGDTComponent(const class FPostConstructInitializeProperties& PCIP) : Super(PCIP) { }
+
+	void UGDTComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const
+	{
+		Super::GetLifetimeReplicatedProps( OutLifetimeProps );
+	#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+		DOREPLIFETIME( UGDTComponent, TestData);
+	#endif
+	}
+
+	void UGDTComponent::CollectBasicData()
+	{
+		Super::CollectBasicData();
+	#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+		TestData= FMath::RandRange(2.75, 8.25); //collect data and store it
+	#endif
+	}
+
+다음 클래스는 새로운 데이터를 화면에 표시하는 데 사용됩니다:
+
+
+GDTHUDComponent.h
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+	#pragma once
+
+	#include "GameplayDebuggingHUDComponent.h"
+	#include "GDTHUDComponent.generated.h"
+
+	UCLASS(notplaceable)
+	class AGDTHUDComponent: public AGameplayDebuggingHUDComponent
+	{
+		GENERATED_UCLASS_BODY()
+	protected:
+		virtual void DrawBasicData(APlayerController* PC, class UGameplayDebuggingComponent *DebugComponent) override;
+	};
+
+GDTHUDComponent.cpp
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+	#include "MyGameProject.h"
+	#include "GDTComponent.h"
+	#include "GDTHUDComponent.h"
+
+	AGDTHUDComponent::AGDTHUDComponent(const class FPostConstructInitializeProperties& PCIP)
+		: Super(PCIP)
+	{
+	}
+	void AGDTHUDComponent::DrawBasicData(APlayerController* PC, class UGameplayDebuggingComponent *DebugComponent)
+	{
+		Super::DrawBasicData(PC, DebugComponent);
+	#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+		const UGDTComponent* MyComp = Cast<UGDTComponent>(DebugComponent);
+		if (MyComp)
+		{
+			PrintString(DefaultContext, FString::Printf(TEXT("{white}Test data: {red}%f\n"), MyComp->TestData));
+		}
+	#endif
+	}
+
+게임플레이 디버거는 새 클래스에 대해 알 필요가 있으며, 그 정보는 DefaultEngine.ini 환경설정 파일에 설정 가능합니다:
+
+
+DefaultEngine.ini
+
+	[/Script/GameplayDebugger.GameplayDebuggingReplicator]
+	DebugComponentClassName="/Script/MyGameProject.GDTComponent"
+	DebugComponentHUDClassName="/Script/MyGameProject.GDTHUDComponent" |
+
+## 커스텀 카테고리
+
+게임플레이 디버거에 프로젝트 전용 카테고리를 추가하는 데 필요한 단계가 조금 더 있습니다.
+
+GDTComponent 클래스를 확장합시다:
+
+
+GDTComponent.h
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+	#pragma once
+	#include "GameplayDebuggingComponent.h"
+	#include "GDTComponent.generated.h"
+
+	UCLASS()
+	class UGDTComponent : public UGameplayDebuggingComponent
+	{
+	public:
+		GENERATED_UCLASS_BODY()
+	protected:
+		virtual void CollectDataToReplicate(bool bCollectExtendedData) override;
+		void CollectCustomData();
+	public:
+		UPROPERTY(Replicated)
+		float TestData; //custom data replicated to clients
+	};
+
+GDTComponent.cpp
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+	#include "MyGameProject.h"
+	#include "GameplayDebuggingComponent.h"
+	#include "GDTComponent.h"
+
+	UGDTComponent::UGDTComponent(const class FPostConstructInitializeProperties& PCIP) : Super(PCIP) { }
+
+	void UGDTComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const
+	{
+		Super::GetLifetimeReplicatedProps( OutLifetimeProps );
+	#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+		DOREPLIFETIME( UGDTComponent, TestData);
+	#endif
+	}
+
+	void UGDTComponent::CollectCustomData()
+	{
+		Super::CollectBasicData();
+	#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+		TestData= FMath::RandRange(2.75, 8.25); //collect data and store it
+	#endif
+	}
+
+	void UGDTComponent::CollectDataToReplicate(bool bCollectExtendedData)
+	{
+		Super::CollectDataToReplicate(bCollectExtendedData);
+	#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+		if (ShouldReplicateData(EAIDebugDrawDataView::GameView1))
+		{ 
+			CollectCustomData();
+			if (bCollectExtendedData)
+			{
+				// collect additional data for selected Pawn/AIController 
+			}
+		}
+	#endif
+	}
+
+HUD 컴포넌트를 확장, 데이터를 새로운 뷰에 표시합니다:
+
+
+GDTHUDComponent.h
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+	#pragma once
+
+	#include "GameplayDebuggingHUDComponent.h"
+	#include "GDTHUDComponent.generated.h"
+
+	UCLASS(notplaceable)
+	class AGDTHUDComponent: public AGameplayDebuggingHUDComponent
+	{
+		GENERATED_UCLASS_BODY()
+	protected:
+		virtual void DrawGameSpecificView(APlayerController* PC, class UGameplayDebuggingComponent *DebugComponent) override;
+		virtual void GetKeyboardDesc(TArray<FDebugCategoryView>& Categories) override;
+		void DrawCustomData(APlayerController* PC, class UGameplayDebuggingComponent *DebugComponent);
+	};
+
+GDTHUDComponent.cpp
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+	#include "MyGameProject.h"
+	#include "GDTComponent.h"
+	#include "GDTHUDComponent.h"
+
+	AGDTHUDComponent::AGDTHUDComponent(const class FPostConstructInitializeProperties& PCIP)
+		: Super(PCIP)
+	{
+	}
+	void AGDTHUDComponent::DrawCustomData(APlayerController* PC, class UGameplayDebuggingComponent *DebugComponent)
+	{
+	#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+		const UGDTComponent* MyComp = Cast<UGDTComponent>(DebugComponent);
+		if (MyComp)
+		{
+			PrintString(DefaultContext, FString::Printf(TEXT("{white}Test data: {red}%f\n"), MyComp->TestData));
+		}
+	#endif
+	}
+	void AGDTHUDComponent::GetKeyboardDesc(TArray<FDebugCategoryView>& Categories)
+	{
+		Super::GetKeyboardDesc(Categories);
+	#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+		Categories.Add(FDebugCategoryView(EAIDebugDrawDataView::GameView1, TEXT("MyData")));
+	#endif
+	}
+	void AGDTHUDComponent::DrawGameSpecificView(APlayerController* PC, class UGameplayDebuggingComponent *InDebugComponent)
+	{
+		 Super::DrawGameSpecificView(PC, InDebugComponent);
+	#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+		if (InDebugComponent && GameplayDebuggerSettings(GetDebuggingReplicator()).CheckFlag(EAIDebugDrawDataView::GameView1))
+		{
+			PrintString(DefaultContext, FColor::Green, TEXT("\nMY GAME DATA\n"));
+			 DrawCustomData(PC, InDebugComponent);
+		}
+	#endif
+	}
+
+새 카테고리가 준비되어 프로젝트 전용 데이터 디버깅에 사용할 수 있습니다:
+
+![image alt text](image_4.jpg)
+
+디버그 정보를 컬러로 그리기 위해 *PrintString* 함수는 스트링에 태그를 사용하여 현재 색을 바꿉니다. 다양한 색으로 문자열을 그리는 것이 쉬워집니다:
+
+	void PrintString(FPrintContext& Context, const FString& InString );
+	void PrintString(FPrintContext& Context, const FColor& InColor, const FString& InString );
+	PrintString(DefaultContext, FColor::Green, TEXT("Whole text in green"));
+	PrintString(DefaultContext, TEXT("String {green}in green, {red}in red {white}or {R=0,G=0,B=255,A=255}in blue"));
+
+네 가지 색의 스트링을 생성하는 마지막 PrintString 함수입니다:
+
+![image alt text](image_5.jpg)
+

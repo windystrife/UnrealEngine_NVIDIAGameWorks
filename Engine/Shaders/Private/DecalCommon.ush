@@ -1,0 +1,97 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	DecalCommon.usf: decal shared things.
+=============================================================================*/
+
+#include "Common.ush"
+#include "DeferredShadingCommon.ush"		// GBufferData
+
+
+half3 FrameBufferDecalBlendOp(half4 Source)
+{
+#if (COMPILER_GLSL_ES2)
+	half4 Dest = FramebufferFetchES2();
+	Dest.rgb = Decode32BPPHDR(Dest).rgb;
+#else
+	half4 Dest = half4(0, 0, 0, 0);
+#endif
+    
+#if DECAL_BLEND_MODE == DECALBLENDMODEID_STAIN
+	return (Source.rgb*Dest.rgb) + (Dest.rgb*(1.0 - Source.a));
+#elif DECAL_BLEND_MODE == DECALBLENDMODEID_TRANSLUCENT
+	return (Source.rgb*Source.a) + (Dest.rgb*(1.0 - Source.a));
+#elif DECAL_BLEND_MODE == DECALBLENDMODEID_EMISSIVE
+	return (Source.rgb*Source.a) + Dest.rgb;
+#else
+	return Source.rgb;
+#endif
+}
+
+void DecalCommonOutput(inout FPixelShaderIn In, inout FPixelShaderOut Out, float3 Color, float Opacity, FGBufferData Data)
+{
+	// RETURN_COLOR not needed unless writing to SceneColor
+	Out.MRT[0] = float4(Color, Opacity);
+
+#if (ES2_PROFILE || ES3_1_PROFILE)
+#if (COMPILER_GLSL_ES2 || COMPILER_GLSL_ES3_1) || (MOBILE_EMULATION)
+	// Do decal blending if encoding requires it.
+	if (GetHDR32bppEncodeMode() == HDR_ENCODE_RGBE)
+	{
+		Out.MRT[0].rgb = FrameBufferDecalBlendOp(Out.MRT[0]);
+	}
+ 	// do 32bpp hdr encoding for mobile if required.
+	Out.MRT[0] = Encode32BPPHDR(Out.MRT[0], In.SvPosition.xy);
+#endif
+#endif
+
+#if DECAL_RENDERTARGET_COUNT > 1
+	// some MRT rendering
+
+	#if DECAL_RENDERSTAGE == 0
+	{
+		// before base pass (DBuffer)
+
+		// @param MultiOpacity .x: Color, .y:Normal, .z:Roughness
+		float3 MultiOpacity = Opacity;
+
+		EncodeDBufferData(Data, MultiOpacity, Out.MRT[0], Out.MRT[1], Out.MRT[2]);
+	}
+	#elif DECAL_RENDERSTAGE == 1
+	{
+		// after base pass (GBuffer)
+
+		// static lighting isn't updated by decals so we don't need to update that render target
+		float4 OutTarget4 = 0;
+		float4 OutTarget5 = 0;
+		float4 OutTarget6 = 0;
+
+		EncodeGBuffer(Data, Out.MRT[1], Out.MRT[2], Out.MRT[3], OutTarget4, OutTarget5, OutTarget6);
+	}
+	#elif DECAL_RENDERSTAGE == 2
+	{
+		// before lighting (GBuffer)
+
+		// static lighting isn't updated by decals so we don't need to update that render target
+		float4 OutTarget4 = 0;
+		float4 OutTarget5 = 0;
+		float4 OutTarget6 = 0;
+
+		EncodeGBuffer(Data, Out.MRT[1], Out.MRT[2], Out.MRT[3], OutTarget4, OutTarget5, OutTarget6);
+
+		#if DECAL_BLEND_MODE == DECALBLENDMODEID_STAIN
+		Out.MRT[3].rgb *= Opacity;
+		#endif
+
+		Out.MRT[0].a = Opacity;	// Emissive
+		Out.MRT[1].a = Opacity;	// Normal
+		Out.MRT[2].a = Opacity;	// Metallic, Specular, Roughness
+		Out.MRT[3].a = Opacity;	// BaseColor
+	}
+	#endif // DECAL_RENDERSTAGE
+#endif //DECAL_RENDERTARGET_COUNT > 1
+
+#if DECAL_RENDERTARGET_COUNT > 1 && !BIND_RENDERTARGET1 && COMPILER_METAL
+	Out.MRT[1] = 0;
+#endif
+}

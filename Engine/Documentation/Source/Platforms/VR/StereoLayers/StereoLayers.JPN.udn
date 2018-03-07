@@ -1,0 +1,229 @@
+﻿INTSourceChangelist:3580774
+Availability:Public
+Title:VR Stereo Layers
+Crumbs:%ROOT%,
+Description:VR Stereo Layers の設定と操作方法
+Version:4.17
+parent:Platforms/VR
+type:overview
+Skilllevel:Intermediate
+tags:VR
+tags:Oculus Rift
+tags:GearVR
+tags:SteamVR
+tags:PSVR
+order:1
+Topic-Image:VRSL_Topic_Image.png
+social-image:![](Platforms\VR\VirtualRealityDevelopment_topic.png)
+
+[TOC(start:2)]
+
+[EXCERPT:VRStereoLayersIntro]
+
+Virtuality Reality (VR) ステレオ レイヤーは、別々のテクスチャを VR ヘッドマウント ディスプレイ (HMD) に送り、そのまま個別のレンダリング パスに再投影する機能です。ポストプロセスやアンチ エイリアシングの影響を受けずに User Interface (UI) エレメントを HMD にアタッチしたい場合に非常に便利です。以下の操作ガイドでは、サポートされているすべての VR プラットフォームでステレオ レイヤーを設定および使用する方法について説明します。  
+
+[/EXCERPT:VRStereoLayersIntro]
+
+## サポート対象プラットフォーム 
+
+VR Stereo Layers は、次のような、アンリアル エンジン (UE4) がサポートするすべての VR プラットフォームでサポートされています。
+
+* [**Oculus VR**](https://www.oculus.com/)
+* [**Gear VR**](http://www.samsung.com/global/galaxy/gear-vr/)
+* [**Google VR**](https://vr.google.com/)
+* [**Steam VR**](http://store.steampowered.com/steamvr)
+* [**PSVR**](https://www.playstation.com/en-us/explore/playstation-vr/)
+* [**OSVR**](http://www.osvr.org/)
+
+## プラットフォームの違い
+
+ネイティブ VR プラットフォームは様々な機能を公開しているため、Stereo Layers のビヘイビアもプラットフォームによって異なります。このセクションでこれらのほとんどを説明します。
+
+* **World Locked:** レイヤー位置はゲーム ワールド座標内です。
+* **Tracker Locked:** レイヤー位置はプレイヤー周囲の現実世界のトラッキング空間に相対します。
+* **Face Locked:** 位置や回転に関係なく、レイヤーは HMD ビューで同じ場所にとどまります。
+
+また、ビュー ポイントと相対的なレイヤー位置を計算に考慮するプレイヤーの位置と回転の側面を使用しても、位置タイプを表示することができます。
+
+|位置タイプ | ワールド位置|ヘッド位置|ヘッド回転|
+|--------------|--------------|-|-|
+|World Locked  | Yes | Yes|Yes|
+|Tracker Locked| No  | Yes|Yes|
+|Face Locked   | No  | No |No|
+
+### Steam VR
+
+* Quad ステレオ レイヤー形状のみサポートします。
+
+* アルファ チャンネルを無視するための No Alpha フラグはサポートしません。テクスチャにアルファ チャンネルがないようにする、あるいは 100％不透明なテクスチャにすることで回避できます。
+
+* すべてのレイヤーにバックフェース カリングを実行し、レイヤーが逆側から見えないようにします。
+
+* 複数のレイヤーに同じプロパティがあると、レイヤーは HMD ビューからの平均距離でレンダリングされます。
+
+* Stereo Layers で使用されている UE4 Textures は UserInterFace2D (RGBA) に設定しないと表示されます。
+
+### Oculus VR
+
+* Quad ステレオ レイヤー形状のみサポートします。
+
+* World and Tracker ロック レイヤーで Support Depth フラグをサポートします。
+
+* 複数のレイヤーに同じプロパティがあると、レイヤーのレンダリング順序は定義されません。順序を定義したい場合は、異なる優先度を使用してください。
+
+### Gear VR 
+
+* 3 種類の形状すべてに実装されています。
+
+* World and Tracker ロック レイヤーで Support Depth フラグをサポートします。
+
+* 複数のレイヤーの優先度が同じだと、レイヤーのレンダリング順序は定義されません。順序を定義したい場合は、異なる優先度を使用してください。
+
+### その他の VR プラットフォーム
+
+現在、その他のすべての VR プラットフォームには共通して、以下をサポートするレイヤーがデフォルトで実装されています。
+
+* Quad ステレオ レイヤー形状のみサポートします。
+
+* vr.StereoLayers.bMixLayerPriorities コンソール変数を使った Face locked レイヤーの優先度と World レイヤーおよび Tracker locked レイヤーの混合はサポートされていません。
+
+* 複数のレイヤーの優先度が同じだと、レイヤーのレンダリング順序は定義されません。順序を定義したい場合は、異なる優先度を使用してください。
+
+[EXCERPT:VRStereoLayers]
+
+## レイヤー形状
+
+すべてのプラットフォームでサポートされているレイヤー形状は quadrilinear レイヤーのみです。これらの他に、Gear VR はレイヤーと Cube レイヤーをサポートします。
+
+## レイヤーの描画順序
+
+ステレオ レイヤーはゲーム ワールド外に存在し、レイヤーごとのプライオリティ設定に基づいて重ねられます。優先度の高いレイヤーは優先度の低いレイヤーの上に重なります。さらに、Face Locked レイヤーは優先度に関係なく常に World Tracker locked レイヤーの上に重なります。これは、すべてのレイヤー タイプが一緒に混ざる、UE 4.16 より古いバージョンです。**vr.StereoLayers.bMixLayerPriorities** コンソール変数を [1] に設定すると、古いビヘイビアになります。
+
+[region:note]
+レイヤーは常に 3D シーン上にレンダリングされますが、Ocululs Rift、Gear VR は Supports Depth フラグを切り替えることで World lock レイヤーと Tracker locked レイヤーとシーンの混合をサポートします。このフラグはすべて他のプラットフォームで無視されます。
+[/region]
+
+## ステレオ レイヤーの設定
+
+**VR Pawn** でこの機能を使用するには、以下の手順を行います。
+
+1. Stereo Layers で使用したい **ポーン** を開いて **[Viewport]** パネルを開きます。
+
+    [REGION:lightbox]
+    [![](VRSL_Pawn_Setup_01.png)(w:667)](VRSL_Pawn_Setup_01.png)
+    [/REGION]
+
+    [REGION:caption]
+    クリックしてフルサイズで表示
+    [/REGION]
+
+1. ドロップダウン リストが表示されたら [Add Components] ボタンをクリックして [Stereo layer Component] を検索します。
+
+    [REGION:lightbox]
+    [![](VRSL_Pawn_Setup_02.png)(w:667)](VRSL_Pawn_Setup_02.png)
+    [/REGION]
+
+    [REGION:caption]
+    クリックしてフルサイズで表示
+    [/REGION]
+
+1. **Stereo Layer** コンポーネントを **ポーン** のカメラ上にドラッグして、カメラの子アクタを作成します。
+    
+    ![](VRSL_Pawn_Setup_03.png)(convert:false)
+
+1. **コンポーネント リスト** から Stereo Layer コンポーネントを選択し、**[Details (詳細)]** パネルの **[Transform]** セクションで、**[Location]** の **[X]** 値を **「100」** にして VR で見やすいようにします。
+
+    [REGION:lightbox]
+    [![](VRSL_Pawn_Setup_04.png)(w:667)](VRSL_Pawn_Setup_04.png)
+    [/REGION]
+
+    [REGION:caption]
+    クリックしてフルサイズで表示
+    [/REGION]
+
+1. **[Details (詳細)]** パネルで、**[Stereo Layer]** セクションを展開します。
+
+    [REGION:lightbox]
+    [![](VRSL_Pawn_Setup_05.png)(w:667)](VRSL_Pawn_Setup_05.png)
+    [/REGION]
+
+    [REGION:caption]
+    クリックしてフルサイズで表示
+    [/REGION]
+
+1. **コンテンツ ブラウザ** で、表示したいテクスチャをクリックして選択します。**Pawn** ブループリントの [Stereo Layers] セクションに戻って、**Texture** 入力の横の **白い三角** を押して Stereo Layer が表示するテクスチャの使用を指定します。
+
+    [REGION:lightbox]
+    [![](VRSL_Pawn_Setup_06.png)(w:667)](VRSL_Pawn_Setup_06.png)
+    [/REGION]
+
+    [REGION:caption]
+    クリックしてフルサイズで表示
+    [/REGION]
+
+1. **[Play in VR]** ボタンを押して VR でプロジェクトを起動します。HMD を装着すると、Texture 入力で指定したテクスチャが正面に表示されます。そのテクスチャは以下の動画のように、頭の動きに合わせて、できるだけ早くぴったりと HMD に付いてきます。
+
+	[OBJECT:EmbeddedVideo]
+		[PARAMLITERAL:videoid]
+		Eb_kndx6tac
+		[/PARAMLITERAL]
+		[PARAMLITERAL:width]
+		100
+		[/PARAMLITERAL]
+		[PARAMLITERAL:height]
+		56.25
+		[/PARAMLITERAL]
+		[PARAMLITERAL:units]
+		%
+		[/PARAMLITERAL]
+		[PARAMLITERAL:type]
+		simple
+		[/PARAMLITERAL]
+	[/OBJECT]
+
+    [region:note]
+    プロジェクトを VR で表示した時に選択したテクスチャが現れない場合は、Texture Compressions 設定が正しくされているかを確認してください。使用する HMD の設定は、[Stereo Layers Texture Compression 設定] セクションで確認することができます。
+    [/region]
+[/EXCERPT:VRStereoLayers]
+
+## Stereo Layers Texture Compression 設定
+
+使用する HMD によっては、表示するテクスチャの Compression 設定を調整する必要な場合があります。各種 HMD で正確に表示するために、ステレオ レイヤーに必要な Texture Compression 設定に関する情報をご覧いただけます。
+
+[REGION:lightbox]
+[![](VRSL_Texture_Settings.png)(w:667)](VRSL_Texture_Settings.png)
+[/REGION]
+
+[REGION:caption]
+クリックしてフルサイズで表示
+[/REGION]
+
+|HMD 名| 必要な Texture Compression 設定|
+|---------------|----------------------------------------------------|
+|**Oculus Rift**| なし|
+|**Gear VR**| なし|
+|**HTC Vive**| UserInterFace2D (RGBA)|
+|**PSVR**| なし|
+
+## Stereo Layer のプロパティの詳細
+
+Stereo Layer にはレンダリング方法を設定するプロパティが数多くあります。以下の表は、これらの設定およびStereo Layers での効果の詳細です。
+
+![](VRSL_Prop_Breakdown_00.png)
+
+|設定名| 説明|
+|---------------|----------------------------------------------------|
+|**Live Texture**|ステレオ レイヤー テクスチャ自体をフレームごと (シーン、キャプチャ、ビデオなど) に更新する必要があれば True を設定します。 |
+|**Supports Depth**|使用可能な場合、ステレオ レイヤーがシーン ジオメトリとの深度交差をサポートする必要があれば True を設定します。|
+|**No Alpha Channel**|テクスチャがそのアルファ チャネルを使用すべきでない場合 (1.0 を代用) は True を設定します。|
+|**Texture**|ステレオ レイヤーに表示するテクスチャ (ステレオスコピック テクスチャがプラットフォームでサポートされ、2 つ以上のテクスチャが提供されている場合は右目用になります)。|
+|**Quad Preserve Texture Ratio**|設定されたテクスチャのディメンションを基に、クワッドが Y 値を内部設定する必要があれば True を設定します。|
+|**Stereo Layer Type**|クワッドの画面へのレンダリング方法とレンダリング場所を指定します。|
+|**Stereo Layer Shape**|レイヤーのタイプを指定します。形状によっては、一定のプラットフォームのみしかサポートしていない場合もあるのでご注意ください！|
+|**Priority**|すべてのステレオのレンダリング優先度です。高い方が低い方に優先します。|
+|**Left Texture**|プラットフォームがステレオスコピック テクスチャをサポートしている場合、左目用のステレオ レイヤーに表示されるテクスチャです。|
+|**Quad Size**|レンダリングされたステレオ レイヤー クワッドのサイズです。|
+|**UVRect**|クワッド フェースにマップされた UV 座標です。|
+|**Cylinder Radius**|レンダリングされたステレオ レイヤー シリンダーの半径です。|
+|**Cylinder Overly Arc**|ステレオ レイヤー シリンダーの円弧の角度です。|
+|**Cylinder Height**|ステレオ レイヤー シリンダーの高さです。|

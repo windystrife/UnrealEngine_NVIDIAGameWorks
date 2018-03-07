@@ -1,0 +1,91 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	PostProcessLensBlur.usf: PostProcessing Lens Flares.
+=============================================================================*/
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+
+// x.y:tilecount, zw:tilesize
+uint4 TileCountAndSize;
+// .xy:size in pixels
+float4 KernelSize;
+// small Bokeh like texture
+Texture2D LensTexture;
+SamplerState LensTextureSampler;
+// .x:ColorScale, .y:Threshold
+float4 ColorScale;
+
+// can be optimized
+float2 PixelToScreenPos(float2 PixelPos)
+{
+	return (PixelPos - ScreenPosToPixel.zw) / ScreenPosToPixel.xy;
+}
+
+// vertex shader
+void MainVS(
+	uint VId : SV_VertexID,
+	uint IId : SV_InstanceID,
+	out noperspective float2 OutTexCoord : TEXCOORD0,
+	out noperspective float4 OutColor : TEXCOORD1,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	uint2 TileCount = TileCountAndSize.xy;
+	uint2 TileSize = TileCountAndSize.zw;
+
+	// needs to be the same on shader side (faster on NVIDIA and AMD)
+	uint QuadsPerInstance = 4;
+	// remap the indices to get vertexid to VId and quadid into IId
+	IId = IId * QuadsPerInstance + (VId / 6);
+	VId = VId % 6;
+
+	// triangle A: 0:left top, 1:right top, 2: left bottom
+	// triangle B: 3:right bottom, 4:left bottom, 5: right top
+	float2 LocalPos = float2(VId % 2, VId > 1 && VId < 5);
+	float2 TilePos = float2(IId % TileCount.x, IId / TileCount.x) + ViewportRect.xy;
+	
+	OutPosition =  float4(0, 0, 0, 1);
+	OutTexCoord = LocalPos.xy;
+	
+	OutPosition.xy = PixelToScreenPos(TilePos * TileSize);
+
+	float2 InputTexCoord = PostprocessInput0Size.zw * TilePos * TileSize;
+
+	OutColor = Texture2DSampleLevel(PostprocessInput0, PostprocessInput0Sampler, InputTexCoord, 0);
+
+	// scale to blur outside of the view
+	OutPosition.xy *= 0.5f;
+
+	OutColor.rgb *= DiscMask(OutPosition.xy);
+
+	float LuminanceVal = dot(OutColor.rgb, 1);
+
+	float Threshold = ColorScale.y;
+
+	float2 ThisKernelSize = KernelSize.xy;	// done to avoid modifying input constant directly (OpenGL doesn't like it)
+	if(LuminanceVal < Threshold)
+	{
+		// reject this quad as it's not bright enough (should happen to most of them for good performance)
+		ThisKernelSize = 0;
+	}
+
+	OutColor *= ColorScale.x;
+
+	// offset the corners
+	OutPosition.xy += 2 * ViewportSize.zw * (LocalPos - 0.5f) * ThisKernelSize;
+}
+
+// pixel shader
+void MainPS(
+	noperspective float2 TexCoord : TEXCOORD0,
+	noperspective float4 InColor : TEXCOORD1,
+	out float4 OutColor : SV_Target0
+	)
+{
+	float4 Kernel = Texture2DSample(LensTexture, LensTextureSampler, TexCoord);
+
+	OutColor = float4(InColor.rgb * Kernel.rgb, 1);
+}
+

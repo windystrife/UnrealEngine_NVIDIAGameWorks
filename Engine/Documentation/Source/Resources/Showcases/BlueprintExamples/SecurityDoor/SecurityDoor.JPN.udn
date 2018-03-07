@@ -1,0 +1,248 @@
+﻿INTSourceChangelist:2723540
+Availability:Public
+Title:セキュリティ カメラ、アラーム、ドア
+Crumbs:%ROOT%, Resources, Resources/Showcases/BlueprintExamples
+Description:ブループリントのセキュリティドアの概要
+Related:Engine/Blueprints/Overview
+Related:Engine/Blueprints/UserGuide/Variables
+Related:Engine/Animation/AnimBlueprints/EventGraph
+Related:Engine/Blueprints/UserGuide/UserConstructionScript
+Related:Engine/Blueprints/UserGuide/Components
+Related:Engine/Blueprints/UserGuide/Timelines
+Related:Gameplay/Framework/Pawn
+Version:4.9
+
+<div align= "center">
+![](SecurityCameraAndDoorHeader.png)(w:600)
+</div>
+
+[EXCERPT:Overview]
+レベル内の Security Camera ブループリントは、プレイモードの間はプレイヤーと相互作用する設定になっています。再生中は、捜索パターンで前後にパンします。緑の捜索コーンがポーンにオーバーラップすると、ライトが赤くなり、カメラがプレイヤーの動きをトラックし始めます。プレイヤーが範囲から出て行くまでトラックし続けます。数秒後、捜索に戻ります。
+[/EXCERPT:Overview]
+
+Security Camera ブループリントは、シーン キャプチャにも対応しています。シーン キャプチャは後ほどセキュリティ スクリーンのブループリントで使用します。 
+
+このブループリントで特に重要なことは、 [ブループリント インターフェース](Engine/Blueprints\UserGuide\Types\Interface) の使い方です。ブループリント インターフェースはコンジットと同様に、他の複数のブループリント間で機能を共有できるようにします。インターフェースを実装しているブループリントはすべて、そのインターフェースの一部である機能を全て自動的に継承します。それにより、一定のゴールに向かって全部一緒に機能するブループリントの洗練されたネットワークを築くことができます。
+
+この例では、 Security Alarm インターフェースがデータルートとして機能し、 Alarm Beacon ブループリントと Door ブループリントの両方と機能を共有することができます。
+
+[REGION:raw]![](InterfaceConceptDiagramNew.jpg)[/REGION]
+
+
+## Camera ブループリント
+
+Camera ブループリントは、プレイヤーと相互作用してアラームを鳴らすので、アラーム システムの心臓部として機能します。ブループリントの通信用のインターフェースを実行すると共に、カメラも [Timeline](Engine/Blueprints\UserGuide\Timelines) ノードを活用します。これはアニメーションに対応するためにビルドされた特別なノードです。
+
+![](Timeline_Camera.png)
+
+タイムラインにはアニメートされたトラックをいくつでも含むことができます。その後このトラックのデータは出力として送られ、エフェクトの操作に使用されます。このケースでは、タイムラインはカメラのスキャン回転の操作に使用されます。
+
+### ブループリントの設定
+
+このブループリントのコンポーネント リスト、コンストラクション スクリプト、そしてイベント グラフで実行されるタスクは以下の通りです。
+
+
+| ブループリントの特徴 | 目的 |
+|---|---|
+| **コンポーネント リスト** | [INCLUDE:#CameraCL] |
+| **コンストラクション スクリプト** | [INCLUDE:#CameraCS] |
+| **イベント グラフ** | [INCLUDE:#CameraEG]  |
+
+
+
+[REGION:lightbox]
+![](CameraEG.png)(w:920)
+[/REGION]
+
+
+### 編集可能な変数
+
+カメラには以下のプロパテがエクスポーズされています。
+
+![](CameraProperties.png)
+
+| プロパティ | 目的 |
+| --- | --- |
+|[REGION:tablesection]Scanning[/REGION]||
+| **Camera Max Yaw** | 左右へのスキャンの最大角度です。 |
+| **Camera Pitch** | カメラのピッチ アングルを設定します。この変数は 3D ウィジェットをアクティベートさせてビューポートで操作することができます。 |
+|[REGION:tablesection]Spot Light[/REGION]||
+| **Light Attenuation** | スポットライト コンポーネントの減衰半径を設定します。 |
+| **Spotlight Brightness** | スポットライト コンポーネントの輝度値を設定します。 |
+| **Light Color Alarm On** | アラームがアクティブな時のスポットライトのカラーです。 |
+| **Light Color Alarm Off** | アラームが非アクティブな時のスポットライトのカラーです。 |
+|[REGION:tablesection]Targeting[/REGION]||
+| **Test Material Alarm Settings** | アラームカラーのテストと調整のために、アラームステートを切り替えます。|
+|[REGION:tablesection]Blueprint Interface[/REGION]||
+| **Blueprint To Trigger Alarm Array** | アラームのオンオフに関する情報を受け取る必要のある全てのオブジェクトのリストを含む配列です。 |
+|[REGION:tablesection]Render Target[/REGION]||
+| **Scene Capture Texture** | セキュリティ カメラ モニターに使用するレンダー ターゲット テクスチャを保持します。 |
+| **Scene Capture View Distance** | Scene Capture コンポーネントの最大表示距離を設定します。値が低いほどパフォーマンスをあげます。 |
+
+
+
+
+## Alarm ブループリント
+<div align= "center">
+![](AlarmImage.png)
+</div>
+
+Alarm ブループリントは、プレイヤーがセキュリティ カメラの正面にステップインすることでアラームを始動させるビジュアル キューの役割をします。アクティベートすると、緑色から赤色に変わり、ビーコンライトがスピンを開始します。アラームが非アクティブになるまでスピンし続けます。
+
+カメラ、ドア、アラームに実装されている Security Alarm [ブループリント インターフェース](Engine/Blueprints\UserGuide\Types\Interface) からのメッセージを受け取ることで、アラームはオンオフします。 
+
+
+### ブループリントの設定
+
+このブループリントのコンポーネント リスト、コンストラクション スクリプト、そしてイベント グラフで実行されるタスクは以下の通りです。
+
+
+| ブループリントの特徴 | 目的 |
+|---|---|
+| **Components List** | [INCLUDE:#AlarmCL] |
+| **Construction Script** | [INCLUDE:#AlarmCS] |
+| **Event Graph** | [INCLUDE:#AlarmEG]  |
+
+[Region:lightbox]
+![](AlarmGraph.png)(w:920)
+[/region]
+
+
+### 編集可能な変数
+
+アラームには以下のプロパテがエクスポーズされています。
+
+![](AlarmProperties.png)
+
+| プロパティ | 目的 |
+| --- | --- |
+| **Light Rotation Speed** | アラーム ビーコンがスピンする速度です。 |
+| **Test Alarm Material Settings** | テスト目的にアラームを強制的にオンにする Boolean です。Play モードになっている場合、ビーコンはスピンしませんのでご注意ください。 |
+
+
+## Door ブループリント
+<div align= "center">
+![](Door.png)
+</div>
+
+ドアは、アラームがセットされない限りは開いたままになるように設定されています。ただし、アラームがトリガされた瞬間、ドアはバタンと閉じられアラームが終了するまでは再度開かないようにアニメートされています。タイムラインを使ってドアをアニメートしていることに注目することが重要です。実際、ドアを開けるタイムラインと、ドアを閉めるタイムラインの 2 つが別々に存在します。こうすることで、ドアを開く速度と閉める速度を別々にすることができます。 
+
+カメラ、ドア、アラームに実装されている Security Alarm [ブループリント インターフェース](Engine/Blueprints\UserGuide\Types\Interface) からのシグナルを受け取ることで、ドアのモーションが実際にトリガされます。 
+
+ドアのタイムラインはドアを直接アニメートしないことも、ドア設定に関する面白い点です。その代わり、タイムラインはそれぞれが単精度浮動小数点値を出力し、「開く」位置と「閉める」位置である 2 つのベクター位置を補正するために使用されます。
+
+
+
+### ブループリントの設定
+
+このブループリントのコンポーネント リスト、コンストラクション スクリプト、そしてイベント グラフで実行されるタスクは以下の通りです。
+
+
+| ブループリントの特徴 | 目的 |
+|---|---|
+| **Components List** | [INCLUDE:#DoorCL] |
+| **Construction Script** | [INCLUDE:#DoorCS] |
+| **Event Graph** | [INCLUDE:#DoorEG]  |
+
+
+### 編集可能な変数
+
+ドアには以下のプロパテがエクスポーズされています。
+
+![](DoorProperties.png)
+
+| プロパティ | 目的 |
+| --- | --- |
+| **Door Open Width** | ドアが開いた際の終わり位置を設定します。反対のドアに対してミラーリングします。 |
+| **Door Left Size** | 左のドアにスケールを設定します。 |
+| **Door Right Size** | 右のドアにスケールを設定します。 |
+
+
+
+<!-----------------------------------
+
+[EXCERPT:CameraCL]
+カメラの コンポーネント リストには、以下のコンポーネントが含まれます。
+[REGION:raw]![](CameraCS.png)[/REGION]
+一目瞭然のエレメントがほとんどです。SceneCapture コンポーネントはカメラのように機能します。ただし、見たものをスクリーンに出力するのではなく、テクスチャを追加し、それをマテリアルで使用することができます。
+[/EXCERPT:CameraCL]
+
+
+[EXCERPT:CameraCS]
+コンストラクション スクリプトは以下のタスクを実行します。
+* レンダー ターゲット テクスチャを記録するためにシーン キャプチャを設定する。
+* 編集可能な変数からの入力値を使って、カメラにスポットライトを設定する。
+* カメラのデフォルトの回転角度を設定する。
+* カメラのビューコーンに [Material Instance Dynamic (MID)](Engine/Rendering/Materials\MaterialInstances) を設定する。
+[/EXCERPT:CameraCS]
+
+
+
+[EXCERPT:CameraEG]
+ポーンがビュー コーンに入ると、イベント グラフは以下のタスクを実行します。
+* アラームをセットする。
+* ビュー コーンとライトのカラーを変更する。
+* プレイヤーの移動のトラックを開始する。
+
+プレイヤーがビュー コーンから出ると、以下のタスクを実行します。
+* 少ししてから、アラームを解除する。
+* 標準の前後スキャニングに戻る。
+* フレーム (ティック) ごとに、カメラの回転を更新する。
+* アラームの現在のステートをインターフェース経由で送信する。
+[/EXCERPT:CameraEG]
+
+
+
+[EXCERPT:AlarmCL]
+カメラのコンポーネント リストには、以下のコンポーネントが含まれます。
+[REGION:raw]![](AlarmCS.png)[/REGION]
+アラーム用の **コンポーネント リスト** は基本的にベースメッシュと、アラーム用 (スポットライト) と中間ステート (オフライト) の 2 つのライトです。
+[/EXCERPT:AlarmCL]
+
+
+[EXCERPT:AlarmCS]
+コンストラクション スクリプトは以下のタスクを実行します。
+* エクスポーズされたユーザー入力からのライトカラーを設定する。
+* アラームメッシュに対して [Material Instance Dynamic (MID)] (Engine/Rendering/Materials\MaterialInstances) を作成し適用します。
+* ユーザーがアラームをテストすると、ライトとマテリアルの設定をスワップして、アラームがオンの時どのように見えるのか表示します。
+[/EXCERPT:AlarmCS]
+
+
+
+[EXCERPT:AlarmEG]
+イベント グラフ は以下のタスクを実行します。
+アラーム インターフェースからシグナルを受け取ると、次のようになります。
+* シグナルがアラームをオンまたはオフにするものかどうかパースする。
+* アラームがオンになると、スポットライトがオン、そしてオフライトはオフになり、マテリアル カラーが変わる。次にゲートを開いてスポットライトのスピンを開始します。
+* アラームがオフになると、スポットライトがオフ、そしてオフライトはオンになり、マテリアル カラーが元のステートに戻る。スポットライトをスピンしているゲートを閉じます。
+
+[/EXCERPT:AlarmEG]
+
+
+
+
+[EXCERPT:DoorCL]
+カメラのコンポーネント リストには以下のコンポーネントが含まれています。
+[REGION:raw]![](DoorCL.png)[/REGION]
+ドアのコンポーネント リストには基本的にトリガ ボリュームとドア パネルが 2 つ含まれます。
+[/EXCERPT:DoorCL]
+
+
+[EXCERPT:DoorCS]
+コンストラクション スクリプトは以下のタスクを実行します。
+* トリガー ボックス ボリュームの位置とサイズを設定する。
+* それぞれのドアに位置とスケールを設定する。
+[/EXCERPT:DoorCS]
+
+
+
+[EXCERPT:DoorEG]
+アラーム インターフェースからシグナルを受け取ると、イベント グラフは以下のタスクを実行します。
+* シグナルがアラームをオンまたはオフにするのか確認する。
+* アラームのスイッチがオンになると、現在のドアのステートを確認し、ドアがまだ開いていない場合はドアを開く。
+* アラームのスイッチがオフになると、現在のドアのステートを確認し、ドアがまだ閉じていない場合はドアを閉じる。
+[/EXCERPT:DoorEG]
+
+
+
+--->

@@ -1,0 +1,244 @@
+﻿Availability:Public
+Title:モバイル プラットフォーム向けのライティング
+Crumbs:%ROOT%, Platforms, Platforms/Mobile
+Description:モバイル ゲーム向けのライティング設定
+Platform:Mobile
+Related:Platforms/Mobile/Performance
+Related:Platforms/Mobile/Textures
+Related:Engine/Rendering/Materials/CustomizedUVs
+Related:Engine/Rendering/Materials/MaterialProperties/BlendModes
+Related:Engine/Rendering/Materials/ExpressionReference/Utility
+Related:Engine/Rendering/LightingAndShadows/ReflectionEnvironment
+version:4.12
+parent:Platforms/Mobile
+order:3
+type:overview
+tags:mobile
+
+[TOC(start:2 end:3)]
+
+UE4 のモバイル プラットフォームでライトを使う場合、UE4 プロジェクトが正しいフレームで、様々なモバイル デバイス上で動くようにするために、決められた注意事項と制限事項を守る必要があります。これらの注意事項と制限事項、および回避する方法について説明します。
+
+## サポート対象の機能
+
+以下の機能はモバイル プラットフォームでサポートされています。
+
+* HDR のリニア ライティング
+* 指向性ライトマップ (法線を考慮する)
+* 太陽上の距離フィールド シャドウ + 解析的なスペキュラ
+* 画像ベースのスペキュラ ライティング - 視差修正をせずに最も近い [Reflection Capture](Engine/Rendering/LightingAndShadows/ReflectionEnvironment/) が各オブジェクトに適用されます。従って、オブジェクト間にシームがあります。
+* 動的オブジェクトはライティングを正確に受け取りますが、シャドウはキャストしません。
+
+## サポート対象のライト タイプ
+
+モバイル プラットフォームは、アンリアル エンジンで利用できるライト タイプのサブセットのみをサポートしています。実際には以下の 4 種類のみです。
+
+| タイプ | 補足 |
+| ---- | ----------- |
+| Stationary Directional Light |**Mobility = Stationary** による指向性ライト。最高品質です。|
+| Static Directional Light | **Mobility = Static** による指向性ライト。最高のパフォーマンス (距離フィールドや太陽のスペキュラなし) です。|
+| Static Point Light | **Mobility = Static** によるポイントライト。|
+| Static Spot Light | **Mobility = Static** によるスポットライト。|
+
+## 反射
+反射を使用すると躍動感と写実性を出すことができますが、モバイル デバイスで反射を使用する際には注意すべき点がいくつかあります。対象のモバイル デバイスで反射がきちんと動くようにするために、以下の点を確認してください。
+
+* ポストプロセス ボリューム内のすべてのアンビエント キューブマップの **[Intensity (強度)]** を **[0]** に設定して無効にする。
+
+	![](PP_Settings.png)
+
+* 反射用のライティングをキャプチャする場所に [**SphereReflectionCaptures**](Engine/Rendering/LightingAndShadows/ReflectionEnvironment/#球体の形状) アクタを置きます。 
+
+	[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Sphere Reflection Captures Off ](Reflection_Probes_Off.png)(w:800 h:473)
+	[/PARAM]
+	[PARAM:after]
+	![Sphere Reflection Captures On](Reflection_Probes_On.png)(w:800 h:473)
+	[/PARAM]
+	[/OBJECT]
+
+* 反射をサポートするマテリアルを作成する場合は、以下のことに留意してください。 
+
+	* 法線マップに高周波および低周波細部が多くなるようにしてください。反射が分裂しやすくなり、面白い見た目の反射ができます。  
+
+		[OBJECT:ComparisonSlider]
+		[PARAM:before]
+		![Flat Normal Map ](Interesting_Normal_Map_00.png)(w:800 h:473)
+		[/PARAM]
+		[PARAM:after]
+		![Rough Normal Map](Interesting_Normal_Map_01.png)(w:800 h:473)
+		[/PARAM]
+		[/OBJECT]
+
+	* ラフネスマップにいろいろな強度の白と黒を入れるようにしてください。反射に光沢を付けたり、多方向にぼんやり反射させることができます。
+
+		[OBJECT:ComparisonSlider]
+		[PARAM:before]
+		![Varying Roughness ](Interesting_Roughness_Map_00.png)(w:624 h:723)
+		[/PARAM]
+		[PARAM:after]
+		![Flat Roughness](Interesting_Roughness_Map_01.png)(w:624 h:723)
+		[/PARAM]
+		[/OBJECT]
+
+	* サーフェスの種類に応じで、Metallic 入力は 1 または 0 になります。
+
+		[OBJECT:ComparisonSlider]
+		[PARAM:before]
+		![Metallic Off](Metallic_Off.png)(w:341 h:600)
+		[/PARAM]
+		[PARAM:after]
+		![Metallic On](Metallic_On.png)(w:341 h:600)
+		[/PARAM]
+		[/OBJECT]
+
+Static Mesh コンポーネントは、それぞれに最も近い [**Reflection Capature**](Engine/Rendering/LightingAndShadows/ReflectionEnvironment/) に割り当てられます。つまり、オブジェクト間の反射にシームができたり、メッシュが大きいとたまたまメッシュの中央の近くにある Reflection Capture を使用することになります。 
+
+## 変調シャドウイング
+
+完全に動的シャドウにすると、モバイル プロジェクトに躍動感と写実性を出しやすくなります。 
+ただしモバイル デバイスの中には、ハードウェア制限およびレンダリングに必要な動的シャドウのリソース要件が高すぎるため、完全には動的シャドウにできないものもあります。回避策として、負荷の低い動的シャドウの **変調シャドウ (Modulated Shadows)** が新しく UE4 に導入されました。変調シャドウの設定方法については、[**変調シャドウ**](Platforms/Mobile/Lighting/HowTo/ModulatedShadows/) をご覧ください。
+
+## 動的カスケード シャドウ マップ
+Stationary Directional Light (固定の指向性ライト) は、シーンの動的オブジェクトだけに Whole-scene Dynamic Cascade Shadow Maps (CSM) シャドウをキャストする場合に使います。CSM シャドウを使う利点の 1 つは、Stationary Directional Light (固定の指向性ライト) がシーンの静的オブジェクトによってキャストされた事前計算シャドウと正しくブレンドされる点です。ダブル シャドウイングは変調シャドウでは確認できても CSM シャドウでは表示されないので、複数のオブジェクトにシャドウをキャストすると処理が速くなります。カスケード シャドウの設定方法については、[**カスケード シャドウ**](Platforms\Mobile\Lighting\HowTo\CascadedShadow\) をご覧ください。
+
+## 変調シャドウイング VS 動的シャドウイング
+
+変調シャドウイングと動的シャドウイングは、外見も動作もよく似ています。 
+変調シャドウには動的シャドウにはない制約とハードリミットが多いので、ハードウェアの性能が制限され、モバイル デバイス上でのパフォーマンスを向上させることができるのです。
+以下の画像で、動的シャドウと変調シャドウを見比べてみましょう。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Dynamic Shadows](Dynamic_Shadows.png)
+	[/PARAM]
+	[PARAM:after]
+	![Modulated Shadows](Modulated_Shadows.png)
+	[/PARAM]
+[/OBJECT]
+
+
+以下は、UE4 プロジェクトで変調シャドウを使用する場合の代表的な機能と制約です。
+
+* **シャドウ カラーの変更：** [Directional Light (指向性ライト)] > **[Light]** セクション > **[Modulated Shadow Color]** オプションを調整して、変調シャドウがキャストしたシャドウの色を変更できます。ゲームプレイまはたアートに合わせてシャドウの色を調節する場合に便利です。
+
+	[REGION:lightbox]
+	[![](Change_Mod_Shadow_Color.png)(w:771 h:252)](Change_Mod_Shadow_Color.png)
+	[/REGION]
+
+	[REGION:caption]
+	クリックしてフルサイズで表示
+	[/REGION]
+
+* **シャドウのブレンド:** 動的シャドウとは違って、変調シャドウはベイク済みシャドウや動的シャドウなど、プロジェクトで表示される他のシャドウとはブレンドしません。つまり、変調シャドウが他のシャドウの上に重なると、ブレンドされている単独のシャドウではなく、両方のシャドウが表示されます。 
+
+	[OBJECT:ComparisonSlider]
+		[PARAM:before]
+		![Dynamic Shadows](Dyn_Shadow_Stacking.png)
+		[/PARAM]
+		[PARAM:after]
+		![Modulated Shadows](Mod_Shadow_Stacking.png)
+		[/PARAM]
+	[/OBJECT]
+
+## 変調シャドウと動的シャドウでの作業方法
+
+変調シャドウと動的シャドウには、変調シャドウの外見とパフォーマンスを調整するコンソールおよび .INI 設定がいくつかあります。これらの設定および UE4 プロジェクトへの適用方法について、次のセクションで説明します。
+
+[region:note]
+変調シャドウはできるだけ既存のシャドウ技術とコードを共有するようにします。 
+つまり、他のシャドウイング メソッドで使用できるシャドウ cvars と .INI 設定は、変調シャドウおよび動的シャドウでもほとんどが使用できます。
+[/region]
+
+* **シャドウの品質:** 動的シャドウを有効にしてモバイル デバイス上で初めて表示すると、変調シャドウの鮮明さと品質が思っていたより悪くなることがあります。その場合は、アンリアル コンソールを開いて backtick (`) キーを使って数字の後に **r.shadowquality** と入力すると、シャドウの品質を調整できます。数字が高いほど、変調シャドウは FPS の負荷を考慮するようになります。次の画像は、r.shadowquality の値を **0**、**1**、**2**、**3**、**4**、**5** に設定した場合に変調シャドウの品質に与える影響を見ることができます。
+
+	[REGION:fullwidth]
+	[INCLUDE:Platforms\Mobile\Lighting\#SQ]
+	[/REGION]
+
+* **セルフシャドウイング:** 変調シャドウでは、キャラクターもしくはピックアップなどの動的オブジェクト上にセルフ シャドウイングが可能です。ただし、変調シャドウのパフォーマンスを優先するためにデフォルトでは無効にされています。 
+セルフシャドウイングによる余分な負荷に対応できるプロジェクトの場合は、UE4 コンソールに **r.Shadow.EnableModulatedSelfShadow 1** を入力して有効にしてください。
+セルフシャドウイングを無効にするには、UE4 コンソールに **r.Shadow.EnableModulatedSelfShadow 0** を入力します。
+
+	[OBJECT:ComparisonSlider]
+		[PARAM:before]
+		![Self Shadow On](SS_On.png)(h:600)
+		[/PARAM]
+		[PARAM:after]
+		![Self Shadow Off](SS_Off.png)
+		[/PARAM]
+	[/OBJECT]
+
+* **シャドウ深度:** シャドウのレンダリングの開始位置をオフセットするには、**r.Shadow.CSMDepthBias** コマンドを使います。 
+以下の画像では、r.Shadow.CSMDepthBias をデフォルト値 **0** から **10**、**100**、**500**、**1000** に値を変更した場合の変調シャドウの変化が分かります。 
+
+	[REGION:fullwidth]
+	[INCLUDE:Platforms\Mobile\Lighting\#SD]
+	[/REGION]
+
+
+
+
+<!-----
+[EXCERPT:SQ]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:max]
+	6
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	SQ
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	**スライダーをドラッグすると、r.shadowquality の設定を 0 から 5 にした場合の変化が表示されます。**
+	[/PARAM]
+	[PARAM:image_list]
+	![](SQ_1.png)
+	![](SQ_2.png)
+	![](SQ_3.png)
+	![](SQ_4.png)
+	![](SQ_5.png)
+	![](SQ_6.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:SQ]
+-->
+
+<!-----
+[EXCERPT:SD]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:max]
+	6
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	SD
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	**スライダーをドラッグすると、r.Shadow.CSMDepthBias の設定を 0 から 1500 にした場合の変化が表示されます。**
+	[/PARAM]
+	[PARAM:image_list]
+	![](SD_1.png)
+	![](SD_2.png)
+	![](SD_3.png)
+	![](SD_4.png)
+	![](SD_5.png)
+	![](SD_6.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:SD]
+-->
+
+
+
+
+
+
+
+
+

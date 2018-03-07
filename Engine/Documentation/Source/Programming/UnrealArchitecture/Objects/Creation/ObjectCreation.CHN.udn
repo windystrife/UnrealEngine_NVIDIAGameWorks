@@ -1,0 +1,109 @@
+﻿Availability:Public
+Title: UObject实例创建
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture
+Description:在游戏代码中创建对象新实例的方式。
+
+[TOC (start:2 end:3)]
+
+## NewObject
+
+`NewObject()`是最为简单的UObject工厂模式。它需要可选的外部对象和类，并会创建拥有自动生成的名称的新实例。
+
+	template< class T >
+	T* NewObject
+	(
+		UObject* Outer=(UObject*)GetTransientPackage(),
+		UClass* Class=T::StaticClass() 
+	)
+
+| 参数 | 描述 |
+| --- | --- |
+| `外部` | 可选。`UObject`作为被创建的 **对象** 的外部参数。|
+| `类` | 可选。`UClass`定义待创建的 **对象** 类。|
+|[REGION:tablesection]返回值[/REGION]||
+| 指向指定类生成实例的指针。||
+
+## NewNamedObject
+
+`NewNamedObject()`展开于`NewObject()`，通过对新实例，[对象标识](#对象标识)以及模板对象命名，从而被作为参数定义。
+
+	template< class TClass >
+	TClass* NewNamedObject
+	(
+		UObject* Outer, 
+		FName Name, 
+		EObjectFlags Flags = RF_NoFlags, 
+		UObject const* Template=NULL
+	)
+
+| 参数 | 描述 |
+| --- | --- |
+| `外部` | `UObject`作为被创建的 **对象** 的外部参数。|
+| `名称` | `FName` 作为新 **对象** 的 `名称`参数。|
+| `标志` | 可选。`FObjectFlags`枚举值描述新 **对象** 。|
+| `Template` | 可选的。`UObject`在创建新 **对象** 时被作为模板使用。|
+|[REGION:tablesection]返回值[/REGION]||
+| 指向指定类生成实例的指针。||
+
+## ConstructObject
+
+为达到完全的灵活性，`UObjects`的新实例可以通过`ConstructObject()`函数来进行创建。此函数调用分配 **对象** 的`StaticConstructObject()`函数，执行 `ClassConstructor`并执行任何初始化任务，例如载入配置属性，载入本地化属性以及实例化组件。
+
+	template< class T >
+	T* ConstructObject
+	(
+		UClass* Class, 
+		UObject* Outer = (UObject*)GetTransientPackage(), 
+		FName Name=NAME_None, 
+		EObjectFlags SetFlags=RF_NoFlags, 
+		UObject const* Template=NULL, 
+		bool bCopyTransientsFromClassDefaults=false, 
+		struct FObjectInstancingGraph* InstanceGraph=NULL 
+	)
+
+| 参数 | 描述 |
+| --- | --- |
+| `类` |`UClass`定义待创建的 **对象** 类。|
+| `外部` | 可选。`UObject`作为被创建的 **对象** 的外部参数。|
+| `名称` | 可选。`FName` 作为新 **对象** 的 `名称`参数。|
+| `设置标识` |可选。`EObjectFlags`枚举值描述新 **对象** 。|
+| `Template` | 可选的。`UObject`在创建新 **对象** 时被作为模板使用。|
+| `bCopyTransientsFromClassDefaults` | 可选。`布尔值`决定是否从类默认对象而不是传入的原型指针处来复制临时属性。如此值为`真`，将使用类默认对象的临时值。|
+| `FObjectInstancingGraph` | 可选。`FObjectInstancingGraph`结构包含对实例化对象和组件到其模板的映射。在由新 **对象** 所拥有的组件进行实例化时使用。|
+|[REGION:tablesection]返回值[/REGION]||
+| 指向指定类生成实例的指针。||
+
+
+## 对象标识
+
+`EObjectFlags` 枚举值用来快速并简洁地描述 **对象** 。**对象** 类型，垃圾回收如何处理该类型以及 **对象** 在其生命周期的哪个阶段等信息都有不同的标识进行描述。同时还有特殊的全局蒙版/无蒙版以及预定义的标识组。
+
+| 标识 | 值 | 描述 |
+| ---- | ----- | ----------- |
+| [REGION:tablesection]对象类型[/REGION] |||
+| *RF_Public* | `0x00000001` | **对象** 在其其所包含的包外可见。|
+| *RF_Standalone* | `0x00000002` | 尽管没有被任何函数引用， **对象** 也被保存用来编辑。|
+| *RF_Native* | `0x00000004` | **对象** 为native类。这仅用于`UClass`对象。|
+| *RF_Transactional* | `0x00000008` | **对象** 为交互的。|
+| *RF_ClassDefaultObject* | `0x00000010` | **对象** 是其类的默认对象，例如，在被创建时该类使用的默认模板的新实例。|
+| *RF_ArchetypeObject* | `0x00000020` |**对象** 为其他对象的模板。它被作为类默认对象处理。|
+| *RF_Transient* | `0x00000040` | **对象** 没有被存储到硬盘上。|
+| [REGION:tablesection]垃圾回收[/REGION] |||
+| *RF_RootSet* | `0x00000080` |即使没有被任何函数引用， **对象** 也不会被垃圾回收。|
+| *RF_IsLazyReferenced* | `0x00000100` | **对象** 由缓慢的指针引用并且在删除时需要额外的清理。|
+| *RF_Unreachable* | `0x00000200` |该 **对象** 在对象图表上无法获得。|
+| *RF_TagGarbageTemp* | `0x00000400` | **对象** 由使用垃圾回收的不同工具标记来使用。此标识并不由垃圾回收器本身所定义。|
+| [REGION:tablesection]对象生命周期[/REGION] |||
+| *RF_NeedLoad* | `0x00000800` | **对象** 需要载入。|
+| *RF_AsyncLoading* | `0x00001000` | **对象** 正被异步载入。|
+| *RF_NeedPostLoad* | `0x00002000` | **对象** 需要被滞后加载。|
+| *RF_NeedPostLoadSubobjects* | `0x00004000` | **对象** 仍需要实例化子对象并修复序列化的组件引用 |
+| *RF_PendingKill* | `0x00008000` | **对象** 正等待销毁。将 **对象** 在游戏中标记为无效，但仍为有效 **对象** 。|
+| *RF_BeginDestroyed* | `0x00010000` | **对象** 已调用`BeginDestroy()`。|
+| *RF_FinishDestroyed* | `0x00020000` | **对象** 已调用 `FinishDestroy()`。|
+| [REGION:tablesection]特殊蒙板[/REGION] |||
+| *RF_AllFlags* | `0x0003ffff` | **对象** 拥有所有标识。主要用来检查错误。|
+| *RF_NoFlags* | `0x00000000` | **对象** 没有标识。被用来防止转换。|
+| [REGION:tablesection]预定义组[/REGION] |||
+| *RF_Load* | [REGION:wrap]`RF_Public | RF_Standalone | RF_Native | RF_Transactional | RF_ClassDefaultObject | RF_ArchetypeObject`[/REGION] |  标识被从虚幻文件中载入。|
+| *RF_PropagateToSubobjects* | [REGION:wrap]`RF_Public | RF_ArchetypeObject | RF_Transactional`[/REGION] | 由子对象从其超级对象继承的标识。|

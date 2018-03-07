@@ -1,0 +1,605 @@
+﻿INTSourceChangelist:2754055
+Title:TArray:アンリアル エンジンの配列
+Crumbs:
+Description:
+Availability:Public
+Version:4.9
+
+主要なコンテナ クラスは **TArray** です。TArray は、同じタイプを持つ他のオブジェクト (エレメントと呼びます) のシーケンスのオーナーシップと構成を定義するクラスです。TAarray はシーケンスで、エレメントの順序はきれいに定義され、関数を使ってこれらのオブジェクトと順序を確定的に操作します。
+
+## TArray
+
+TArray は、アンリアル エンジンで最も一般的なコンテナ クラスです。高速で、メモリ効率がよく、安全に作成されています。TArray タイプは 2 つのプロパティで定義されています。エレメント タイプがメインで、アロケータがオプションです。
+
+エレメント タイプは、配列に格納されているオブジェクトのタイプです。TArray は、いわゆる均一なコンテナです。つまり、すべてのエレメントが完全に同じタイプです。エレメントのタイプを混ぜることはできません。
+
+アロケータは多くの場合省略され、ほとんどのユースケースに適切なアロケータがデフォルト設定になります。メモリでのオブジェクトの置き方や、さらに多くのエレメントを収容できるように、配列の拡大方法を定義します。デフォルトと違うビヘイビアを使いたい、もしくは自分で書き出すことができると感じた場合は、他にも様々なアロケータを使用できます。これについては、後述します。
+
+TArray は value 型です。つまり、int32 や浮動小数点などの他のビルドインとしても同様に処理されます。継承はされないので、新規 / 削除を使ってヒープ上で TArray を作成 / 破棄することは通常はありません。エレメントも valaue 型で、コンテナに所有されます。配列そのものが破棄された時に破棄されます。他のものから TArray 変数を作成すると、そのエレメントは新しい変数へコピーされます。ステートが共有されることはありません。
+
+## 配列の作成と追加
+
+次のように定義して、配列を作成します。
+
+	TArray<int32> IntArray;
+
+整数のシーケンスを持つように設定された空の配列が作成されます。エレメント タイプには、int32、FString、 TSharedPtr などの一般的な C++ 値ルールに従ってコピーが可能で破棄することができれば、どんな値でも使うことができます。アロケータは指定されていないので、 TArray は通常のヒープ割り当てになります。この時点では、メモリは割り当てられていません。
+
+Tarray をエントリする方法は何通りかあります。1 つ目は、エレメントのコピーを多く使って配列を埋めていく **Init** 関数です。
+
+	IntArray.Init(10, 5);
+	// IntArray == [10,10,10,10,10]
+
+**Add** 関数と **Emplace** 関数は、配列の終わりにオブジェクトを新規作成する場合に使用します。
+
+	TArray<FString> StrArr;
+	StrArr.Add    (TEXT("Hello"));
+	StrArr.Emplace(TEXT("World"));
+	// StrArr == ["Hello","World"]
+
+メモリは、エレメントが追加されるとアロケータからアロケートされます。Add 関数と Emplace 関数は、次の点だけが若干異なります。
+
+* Add は element 型のインスタンスを配列にコピー (移動) します。
+* Emplace は、element 型のインスタンスを新規作成するために引数を使います。
+
+従って、TArray<FString> の場合、Add は文字列リテラルから一時 Fstring を作成し、その後で一時コンテンツをコンテナ内の新しい Fstring に移動しますが、Emplace は文字列リテラルを使って直接 Fstring を作成します。結果は同じですが、Emplace は一時的なものの作成を避けるので、FString などの重要な value 型には適さないこと場合が多いです。Push も Add と同じように使用することができます。
+
+呼び出し側で不必要に一時的なものが作成されてコンテナへコピーあるいは移動されないようにするので、通常、Add より Emplace の方が望ましいです。ざっくり分けると、Add は重要でないタイプ、Emplace はその他のものに使います。Emplace は Add よりも効率が低くなることはありませんが、Add の方がたまに読み込みが良い場合があります。
+
+**Append** により、複数のエレメントを別の TArray または pointer+size のいずれかから通常の C 配列に一度に追加することができるようになります。
+
+	FString Arr[] = { TEXT("of"), TEXT("Tomorrow") };
+	StrArr.Append(Arr, ARRAY_COUNT(Arr));
+	// StrArr == ["Hello","World","of","Tomorrow"]
+
+**AddUnique** は、同等のエレメントがまだ存在しない場合に、新規エレメントのみをコンテナに追加します。Element 型の演算子 == を使って、等価性をチェックします。
+
+	StrArr.AddUnique(TEXT("!"));
+	// StrArr == ["Hello","World","of","Tomorrow","!"]
+
+	StrArr.AddUnique(TEXT("!"));
+	// StrArr is unchanged as "!" is already an element
+
+Add、Emplace、Append と同様に **Insert** は、単一のエレメントまたはエレメントの配列のコピーを所定のインデックスに追加します。
+
+	StrArr.Insert(TEXT("Brave"), 1);
+	// StrArr == ["Hello","Brave","World","of","Tomorrow","!"]
+
+新しい数が現在よりも大きい場合、エレメント タイプのデフォルト コンストラクタを使って作成された新しいエレメントによって、**SetNum** 関数は配列エレメントの数を直接設定することができます。
+
+	StrArr.SetNum(8);
+	// StrArr == ["Hello","Brave","World","of","Tomorrow","!","",""]
+
+新しい数が現在の数より小さい場合、SetNum はエレメントも取り除きます。エレメントの除去について詳細は後述します:
+
+	StrArr.SetNum(6);
+	// StrArr == ["Hello","Brave","World","of","Tomorrow","!"]
+
+## イタレーション
+
+配列エレメントのイタレート方法はいくつかありますが、中でもお勧めは、C++ の ranged-for 機能を使う方法です。
+
+	FString JoinedStr;
+	for (auto& Str :StrArr)
+	{
+		JoinedStr += Str;
+		JoinedStr += TEXT(" ");
+	}
+	// JoinedStr == "Hello Brave World of Tomorrow ! "
+
+Regular index-based iteration is also possible of course:
+
+	for (int32 Index = 0; Index != StrArr.Num(); ++Index)
+	{
+		JoinedStr += StrArr[Index];
+		JoinedStr += TEXT(" ");
+	}
+
+結果、配列にはイタレーションの制御を強める独自のイタレータ タイプも含まれます。**CreateIterator** そして **CreateConstIterator** という 2 つの関数があります。CreateIterator はエレメントの読み書きが可能、CreateConstIterator は読み取り専用です:
+
+	for (auto It = StrArr.CreateConstIterator(); It; ++It)
+	{
+		JoinedStr += *It;
+		JoinedStr += TEXT(" ");
+	}
+
+## ソート
+
+**Sort** 関数を呼び出すだけで、配列をソートすることができます。
+
+	StrArr.Sort();
+	// StrArr == ["!","Brave","Hello","of","Tomorrow","World"]
+
+ここで、値は element 型の演算子 < によってソートされます。FString の場合、これは大文字・小文字を区別しない辞書式比較です。バイナリ述語を使って、異なる順序の動作を提供することもできます。
+
+	StrArr.Sort([](const FString& A, const FString& B) {
+		return A.Len() < B.Len();
+	});
+	// StrArr == ["!","of","Hello","Brave","World","Tomorrow"]
+
+この場合、文字列は長さによってソートされます。"Hello"、“Brave”、“World” という長さが同じの 3 つの文字列が、配列の位置に相対してどのように順序を変更しているかに注目してください。これは、Sort が不安定で、同等のエレメント (これらの文字列は長さが同じなので、ここでは同等です) の相対的な順序が保証されないためです。Sort はクイックソートとして実行されます。
+
+二引数の述語を使っても使わなくても、ヒープソートを実行するために **HeapSort** 関数を使用できます。HeapSort 関数を使用するかどうかは、特定のデータおよびそれが Sort 関数と比べた効率性によります。HeapSort は Sort のように安定はしていません。上の例で Sort の代わりに HeapSort を使った場合、結果はこのようになります (この場合でも同じ)：
+
+	StrArr.HeapSort([](const FString& A, const FString& B) {
+		return A.Len() < B.Len();
+	});
+	// StrArr == ["!","of","Hello","Brave","World","Tomorrow"]
+
+最後に、**StableSort** を使って、ソート後に同等のエレメントの相対順序を保証することができます。上の例の Sort や HeapSort の代わりに StableSort を呼び出していたら、結果は以下のようになるはずです：
+
+	StrArr.StableSort([](const FString& A, const FString& B) {
+		return A.Len() < B.Len();
+	});
+	// StrArr == ["!","of","Brave","Hello","World","Tomorrow"]
+
+つまり、辞書式比較的にソートした後、"Brave" 、"Hello" 、"World" の相対位置は変わりません。StableSort はマージソートとして実行されます。
+
+## クエリ
+
+**Num** 関数を使って、維持しているエレメント数を配列に問い合わせることができます。
+
+	int32 Count = StrArr.Num();
+	// Count == 6
+
+配列メモリに直接アクセスする必要がある場合、C-style API との相互運用性のために、**GetData()** 関数を使って配列中のエレメントへポインタを返すことができます。このポインタは、配列が存在し、配列に変異操作が行われるまでは有効です。StrPtr からの最初の Num() インデックスのみ間接参照が可能です。
+
+	FString* StrPtr = StrArr.GetData();
+	// StrPtr[0] == "!"
+	// StrPtr[1] == "of"
+	// ...
+	// StrPtr[5] == "Tomorrow"
+	// StrPtr[6] - undefined behavior
+
+コンテナが const であれば、返されるポインタも const になります。
+
+エレメントの大きさをコンテナに問い合わせることもできます。
+
+	uint32 ElementSize = StrArr.GetTypeSize();
+	// ElementSize == sizeof(FString)
+
+エレメントを取得するには、インデックス演算子[] を使って、ゼロから始まるインデックスを取得したいエレメントに渡します。
+
+	FString Elem1 = StrArr[1];
+	// Elem1 == "of"
+
+0 未満あるいは Num() 以上の無効の指標を渡すと、ランタイム エラーが発生します。**IsValidIndex** 関数を使って、特定の指標の有効性をコンテナに問い合わせることができます。
+
+	bool bValidM1 = StrArr.IsValidIndex(-1);
+	bool bValid0  = StrArr.IsValidIndex(0);
+	bool bValid5  = StrArr.IsValidIndex(5);
+	bool bValid6  = StrArr.IsValidIndex(6);
+	// bValidM1 == false
+	// bValid0  == true
+	// bValid5  == true
+	// bValid6  == false
+
+演算子[] はリファレンスを返します。従って、配列内でエレメントを可変するために使用することもできます。配列が const ではないと仮定します。
+
+	StrArr[3] = StrArr[3].ToUpper();
+	// StrArr == ["!","of","Brave","HELLO","World","Tomorrow"]
+
+GetData 関数と同様に、演算子[] は配列が const であれば const reference を返します。**Last** 関数を使って、インデックスを配列末尾から後ろ向きに開始することも可能です。インデックスのデフォルトはゼロに設定されています。**Top** 関数は、インデックスを受け取らない点を除けば、Last 関数と同じです。
+
+	FString ElemEnd  = StrArr.Last();
+	FString ElemEnd0 = StrArr.Last(0);
+	FString ElemEnd1 = StrArr.Last(1);
+	FString ElemTop  = StrArr.Top();
+	// ElemEnd  == "Tomorrow"
+	// ElemEnd0 == "Tomorrow"
+	// ElemEnd1 == "World"
+	// ElemTop  == "Tomorrow"
+
+所定のエレメントが含まれているかどうかを配列に問い合わせることができます。
+
+	bool bHello   = StrArr.Contains(TEXT("Hello"));
+	bool bGoodbye = StrArr.Contains(TEXT("Goodbye"));
+	// bHello   == true
+	// bGoodbye == false
+
+もしくは、特定の述語と一致するエレメントが含まれているかどうかを配列に問い合わせることができます。
+
+	bool bLen5 = StrArr.ContainsByPredicate([](const FString& Str){
+		return Str.Len() == 5;
+	});
+	bool bLen6 = StrArr.ContainsByPredicate([](const FString& Str){
+		return Str.Len() == 6;
+	});
+	// bLen5 == true
+	// bLen6 == false
+
+関数の **Find** ファミリを使って、エレメントの検索ができます。Find を使って、エレメントが存在しているか、インデックスを返すかどうかを確認します。
+
+	int32 Index;
+	if (StrArr.Find(TEXT("Hello"), Index))
+	{
+		// Index == 3
+	}
+
+これにより、最初に検出されたエレメントのインデックスを Index に設定します。エレメントが重複していて、最後のエレメントのインデックスを探したい場合は、**FindLast** 関数を使います。
+
+	int32 IndexLast;
+	if (StrArr.FindLast(TEXT("Hello"), IndexLast))
+	{
+		// IndexLast == 3, because there aren't any duplicates
+	}
+
+これらの関数は両方とも、エレメントが検出されると、エレメントのインデックスを変数に書き込みながら、bool を使ってエレメントの検索結果を表します。
+
+Find と FindLast はエレメント インデックスを直接返すこともできます。インデックスを明示的な引数として渡さない場合にそうなります。こちらの方が上記の関数より簡単です。ニーズや形式に適しているかどうかによって使い分けます。
+
+エレメントが検出されなかった場合は、INDEX_NONE という特別な値が返されます:
+
+	int32 Index2     = StrArr.Find(TEXT("Hello"));
+	int32 IndexLast2 = StrArr.FindLast(TEXT("Hello"));
+	int32 IndexNone  = StrArr.Find(TEXT("None"));
+	// Index2     == 3
+	// IndexLast2 == 3
+	// IndexNone  == INDEX_NONE
+
+**IndexOfByKey** も同様に機能し、さらに任意のオブジェクトとエレメントの比較が可能です。Find 関数を使うと、検索開始前に引数が実際にエレメント タイプ (このケースでは FString) に変換されます。IndexOfByKey 関数の場合は 'キー' を直接比較するので、key 型が直接 element 型に変換できない場合でも検索が可能です。
+
+IndexOfByKey は、演算子==(ElementType 、KeyType) に対して存在するすべての key 型に機能し、これがその後の比較に使用されます。IndexOfByKey は、最初に検出されたエレメントのインデックスを返すか、エレメントが検出されなかった場合は INDEX_NONE を返します。
+
+	int32 Index = StrArr.IndexOfByKey(TEXT("Hello"));
+	// Index == 3
+
+指定された述語と一致する最初のエレメントのインデックスを探すために **IndexOfByPredicate** 関数を使います。何も検出されなければ、ここでも特別な INDEX_NONE 値を返します。
+
+	int32 Index = StrArr.IndexOfByPredicate([](const FString& Str){
+		return Str.Contains(TEXT("r"));
+	});
+	// Index == 2
+
+インデックスではなく、ポインタを検出されたエレメントに返すこともできます。**FindByKey** は、エレメントを任意のオブジェクトと比較する点においては IndexOfByKey と同じですが、検出されたエレメントへポインタを返します。何も検出されたなかった場合は、 nullptr を返します。
+
+	auto* OfPtr  = StrArr.FindByKey(TEXT("of")));
+	auto* ThePtr = StrArr.FindByKey(TEXT("the")));
+	// OfPtr  == &StrArr[1]
+	// ThePtr == nullptr
+
+**FindByPredicate** も同様に、インデックスではなくポインタを返す点を除き、IndexOfByPredicate と同じです。
+
+	auto* Len5Ptr = StrArr.FindByPredicate([](const FString& Str){
+		return Str.Len() == 5;
+	});
+	auto* Len6Ptr = StrArr.FindByPredicate([](const FString& Str){
+		return Str.Len() == 6;
+	});
+	// Len5Ptr == &StrArr[2]
+	// Len6Ptr == nullptr
+
+最後に、特定の述語と一致するエレメントの配列が **FilterByPredicate** 関数で返されます。
+
+	auto Filter = StrArray.FilterByPredicate([](const FString& Str){
+		return !Str.IsEmpty() && Str[0] < TEXT('M');
+	});
+
+##Removal
+
+関数の **Remove** ファミリを使って、配列からエレメントを消去することができます。Remove 関数は、渡されたエレメントと同等のすべてのエレメント消去します。
+
+	StrArr.Remove(TEXT("hello"));
+	// StrArr == ["!","of","Brave","World","Tomorrow"]
+
+	StrArr.Remove(TEXT("goodbye"));
+	// StrArr is unchanged, as it doesn’t contain "goodbye" (StrArr は "goodbye" を含まないので変化しません)
+
+"hello" の削除を指示した場合ですら、"HELLO" が削除されていることに注目してください。Element 型の演算子 == によって等価がテストされます。FString の場合は、大文字・小文字を区別しない比較になります。
+
+配列の最後のエレメントは、**Pop** 関数で取り除くことができます。
+
+	StrArr.Pop();
+
+	// StrArr == ["!", "of", "Brave", "World"]
+
+Remove は同等と見なされるすべてのインスタンスを取り除きます。例:
+
+	TArray<int32> ValArr;
+	int32 Temp[] = { 10, 20, 30, 5, 10, 15, 20, 25, 30 };
+	ValArr.Append(Temp, ARRAY_COUNT(Temp));
+	// ValArr == [10,20,30,5,10,15,20,25,30]
+
+	ValArr.Remove(20);
+	// ValArr == [10,30,5,10,15,25,30]
+
+**RemoveSingle** を使って、配列の先頭に一番近いエレメントを消去することもできます。配列に複製が含まれているかもしれないのでそれを消去した場合や、検索結果を削除すると検索を止めてしまうので、配列にはそのエレメントのうち 1 つしか含むことができない時の最適化をする場合に便利です。
+
+	ValArr.RemoveSingle(30);
+	// ValArr == [10,5,10,15,25,30]
+
+インデックス番号を指定してエレメントを削除するために、**RemoveAt** 関数も使用できます。インデックス番号が必ず必要です。ない場合は、ランタイム エラーが発生します。インデックスはゼロから始まることを覚えておきましょう。
+
+	ValArr.RemoveAt(2); // Removes the element at index 2
+	// ValArr == [10,5,15,25,30]
+
+	ValArr.RemoveAt(99); // This will cause a runtime error as
+	                       // there is no element at index 99 (index 99 にエレメントが存在しないのでランタイム エラーが発生します)
+
+**RemoveAll** 関数を使って、述語と一致するエレメントを削除することもできます。例えば、3 の乗数となるすべての値を削除するには:
+
+	ValArr.RemoveAll([](int32 Val) {
+		return Val % 3 == 0;
+	});
+	// ValArr == [10,5,25]
+
+[REGION:note]
+これらすべてのケースでは、エレメントが削除されて配列内にできた「隙間」を埋める必要あるので、その後に続くエレメントを低いインデックス番号へずらしました。
+[/REGION]
+
+シャッフル処理にはオーバーヘッドが伴います。残りのエレメントの順序にこだわらない場合は、**RemoveSwap**、**RemoveAtSwap**、**RemoveAllSwap** 関数によって、このオーバーヘッドを減らすことができます。これらの関数は、残りのエレメントの順序を保証しない点を除いて non-swapping 変数と同じ動作をするので、より効率的に実行されます。
+
+	TArray<int32> ValArr2;
+	for (int32 i = 0; i != 10; ++i)
+		ValArr2.Add(i % 5);
+	// ValArr2 == [0,1,2,3,4,0,1,2,3,4]
+
+	ValArr2.RemoveSwap(2);
+	// ValArr2 == [0,1,4,3,4,0,1,3]
+
+	ValArr2.RemoveAtSwap(1);
+	// ValArr2 == [0,3,4,3,4,0,1]
+
+	ValArr2.RemoveAllSwap([](int32 Val) {
+		return Val % 3 == 0;
+	});
+	// ValArr2 == [1,4,4]
+
+最後にすべてのエレメントを **Empty** 関数で削除することができます。
+
+	ValArr2.Empty();
+	// ValArr2 == []
+
+##演算子
+
+配列は一般的な value 型です。標準のコピー コンストラクタもしくは代入演算子でコピーすることができます。配列は必ずエレメントを所有しているため、配列は「深いコピー」が行われ、新規の配列にはそのエレメントの個々のコピーが作られます。
+
+	TArray<int32> ValArr3;
+	ValArr3.Add(1);
+	ValArr3.Add(2);
+	ValArr3.Add(3);
+
+	auto ValArr4 = ValArr3;
+	// ValArr4 == [1,2,3];
+	ValArr4[0] = 5;
+	// ValArr3 == [1,2,3];
+	// ValArr4 == [5,2,3];
+
+Append 関数に変わるものとして、配列は += 演算子で連結することもできます。
+
+	ValArr4 += ValArr3;
+	// ValArr4 == [5,2,3,1,2,3]
+
+TArray は、**MoveTemp** 関数で呼び出し可能な移動の動作もサポートしています。移動後、もとの配列が空になることが保証されます。
+
+	ValArr3 = MoveTemp(ValArr4);
+	// ValArr3 == [5,2,3,1,2,3]
+	// ValArr4 == []
+
+配列は演算子 == 演算子 !=を使っても比較することができます。エレメントの順序は重要です。順序とエレメント数が同じ場合、その 2 つの配列は等しくなります。エレメントは固有の演算子 == で比較します。
+
+	TArray<FString> FlavorArr1;
+	FlavorArr1.Emplace(TEXT("Chocolate"));
+	FlavorArr1.Emplace(TEXT("Vanilla"));
+	// FlavorArr1 == ["Chocolate","Vanilla"]
+
+	auto FlavorArr2 = Str1Array;
+	// FlavorArr2 == ["Chocolate","Vanilla"]
+
+	bool bComparison1 = FlavorArr1 == FlavorArr2;
+	// bComparison1 == true
+
+	for (auto& Str :FlavorArr2)
+	{
+		Str = Str.ToUpper();
+	}
+	// FlavorArr2 == ["CHOCOLATE","VANILLA"]
+
+	bool bComparison2 = FlavorArr1 == FlavorArr2;
+	// bComparison2 == true, because FString comparison ignores case
+
+	Exchange(FlavorArr2[0], FlavorArr2[1]);
+	// FlavorArr2 == ["VANILLA","CHOCOLATE"]
+
+	bool bComparison3 = FlavorArr1 == FlavorArr2;
+	// bComparison3 == false, because the order has changed (順序が変わったので bComparison3 == false です)
+
+## Heap
+
+TArray にはバイナリ ヒープ データ構造をサポートする関数が含まれています。ヒープはとは、親ノードがその子ノードと同等あるいは上に順序付けされるバイナリ ツリーのタイプです。配列として実行されると、ツリーのルートノードがエレメント 0 、インデックス N のノードの左右の子ノードがそれぞれ 2N+1 と 2N+2 になります。子ノードには、特に決められた順序はありません。
+
+**Heapify** 関数によって、既存の配列をヒープに変えることができます。述語を使わないバージョンでは element 型の演算子 < を使って順序を決定します。
+
+	TArray<int32> HeapArr;
+	for (int32 Val = 10; Val != 0; --Val)
+		HeapArr.Add(Val);
+	// HeapArr == [10,9,8,7,6,5,4,3,2,1]
+	HeapArr.Heapify();
+	// HeapArr == [1,2,4,3,6,5,8,10,7,9]
+
+ツリーを視覚化すると下記のようになります。
+
+[REGION:raw] 
+![image alt text](image_0.png)
+[/REGION]
+
+ツリー内のノードは、ヒープ化された配列内のエレメントの順序通りに、左から右、上から下へ読み取られます。配列は必ずしもヒープ内へ移動された後にソートされるわけではありません。ソート中、配列は有効なヒープにもなります。ヒープ構造定義は緩いので、同じエレメント群に対して複数の有効なヒープを許可することができます。
+
+HeapPush 関数を使って、他のノードの順序を変更してヒープを維持しつつ、、エレメントをヒープに追加することができます。
+
+	HeapArr.HeapPush(4);
+	// HeapArr == [1,2,4,3,4,5,8,10,7,9,6]
+
+[REGION:raw] 
+![image alt text](image_1.png)
+[/REGION]
+
+ヒープの最上位にあるノードを削除するには、**HeapPop** 関数と **HeapPopDiscard** 関数を使います。この 2 つの違いは、HeapPop 関数が最上位のエレメントのコピーを返すために element 型を参照するのに対して、HeapPopDiscard 関数は最上位のノードを返さずにそのまま削除します。いずれの関数の場合も配列への変更結果は同じで、他のエレメントの順序を適切に入れ替えることでヒープが維持されます。
+
+	int32 TopNode;
+	HeapArr.HeapPop(TopNode);
+	// TopNode == 1
+	// HeapArr == [2,3,4,6,4,5,8,10,7,9]
+
+[REGION:raw] 
+![image alt text](image_2.png)
+[/REGION]
+
+**HeapRemoveAt** は所定のインデックス番号で配列からエレメントを削除し、エレメントの順序を入れ替えてヒープを維持します。
+
+	HeapArr.HeapRemoveAt(1);
+	// HeapArr == [2,4,4,6,9,5,8,10,7]
+
+[REGION:raw] 
+![image alt text](image_3.png)
+[/REGION]
+
+HeapPush、HeapPop、HeapPopDiscard、HeapRemoveAt は、例えば Heapify() の呼び出し、その他のヒープ操作、手動で配列をヒープに操作するなど、構造体が既に有効なヒープである場合のみ呼び出されることに注意してください。
+
+さらに、これらの各関数は、オプションでバイナリ述語を使ってヒープ内のノード エレメントの順序を決定できます。述語を使用する場合、正しい構造体を維持するために、すべてのヒープ操作において同じ述語を使用します。述語を何も指定しない場合、ヒープ操作では element 型の演算子 < を使って順序を決定します。
+
+最後に、ヒープの最上位ノードは、**HeapTop** を使えば配列を変更することなく確認できます。
+
+	int32 Top = HeapArr.HeapTop();
+	// Top == 2
+
+## Slack
+
+配列はリサイズすることができるので、使用するメモリ量も変動します。エレメントを追加するたびにメモリを再割り当てしなくて済むように、アロケータは常に必要以上のメモリを確保して、追加の呼び出しがあっても再度アロケートしなくてもパフォーマンスが維持できるようにしておきます。同様に、エレメントを削除しても通常はメモリは解放されません。コンテナ内のエレメント数と、次のアロケーションまでに追加できるエレメント数の差を **スラック** といいます。
+
+デフォルト構造の配列にはメモリがアロケートされていないので、スラックは最初はゼロです。**GetSlack** 関数を使って、配列内のスラック数を調べます。もしくは、コンテナが再割り当てを行うまでの間に配列が保有できるエレメントの最大数を Max 関数で取得できます。GetSlack() is equivalent to Max() - Num():
+
+	TArray<int32> SlackArray;
+	// SlackArray.GetSlack() == 0
+	// SlackArray.Num()      == 0
+	// SlackArray.Max()      == 0
+
+	SlackArray.Add(1);
+	// SlackArray.GetSlack() == 3
+	// SlackArray.Num()      == 1
+	// SlackArray.Max()      == 4
+
+	SlackArray.Add(2);
+	SlackArray.Add(3);
+	SlackArray.Add(4);
+	SlackArray.Add(5);
+	// SlackArray.GetSlack() == 17
+	// SlackArray.Num()      == 5
+	// SlackArray.Max()      == 22
+
+再割り当て後のコンテナ内のスラック数はアロケータが決定します。従って、配列のユーザーは関与しません。
+
+通常は、スラックを気にすることはほとんどありません。ただ、意識し始めると、配列を最適化するヒントに利用することができます。例えば、配列にエレメントを 100 個追加する場合、最低 100 個のスラックを追加前に確保することができるので、追加中にそれ以上の割り当てをすることはありません。上記の Empty 関数は、オプションでスラック引数を受け取ります。
+
+	SlackArray.Empty();
+	// SlackArray.GetSlack() == 0
+	// SlackArray.Num()      == 0
+	// SlackArray.Max()      == 0
+	SlackArray.Empty(3);
+	// SlackArray.GetSlack() == 3
+	// SlackArray.Num()      == 0
+	// SlackArray.Max()      == 3
+	SlackArray.Add(1);
+	SlackArray.Add(2);
+	SlackArray.Add(3);
+	// SlackArray.GetSlack() == 0
+	// SlackArray.Num()      == 3
+	// SlackArray.Max()      == 3
+
+**Reset** 関数は Empty 関数とよく似ていますが、要求されたスラック数が現在の割り当てで既に確保されている場合はメモリを解放しない点が異なります。ただし、要求されているスラック数が確保できていない場合はメモリの再割り当てが必要です。
+
+	SlackArray.Reset(0);
+	// SlackArray.GetSlack() == 3
+	// SlackArray.Num()      == 0
+	// SlackArray.Max()      == 3
+	SlackArray.Reset(10);
+	// SlackArray.GetSlack() == 10
+	// SlackArray.Num()      == 0
+	// SlackArray.Max()      == 10
+
+最後に、使われていないスラックは **Shrink** 関数で削除して、エレメント自体を実際に削除せずに、エレメントの現在のシーケンスの維持に必要なだけの大きさにリサイズすることができます。
+
+	SlackArray.Add(5);
+	SlackArray.Add(10);
+	SlackArray.Add(15);
+	SlackArray.Add(20);
+	// SlackArray.GetSlack() == 6
+	// SlackArray.Num()      == 4
+	// SlackArray.Max()      == 10
+	SlackArray.Shrink();
+	// SlackArray.GetSlack() == 0
+	// SlackArray.Num()      == 4
+	// SlackArray.Max()      == 4
+
+## Raw メモリ
+
+結局のところ、TArray はアロケートされたメモリの周囲のラッパーに過ぎません。アロケーションのバイト数を直接変更し、自分でエレメントを作成することで、そのように扱う時に便利です。TArray は常に持っている情報で最大限の実力を発揮しようとしますが、レベルを下げる必要がある場合があります。
+
+これらの関数によりコンテナを有効なステートにして、間違いをした時に未定義の動作を起こすことができます。これらの関数の呼び出し後にコンテナを有効なステートに戻すかどうかは自分で決めることができますが、他の一般的な関数が呼び出される前までに行います。
+
+**AddUninitialized** 関数と **InsertUninitialized** 関数は、配列に初期化されていない空間を追加します。それぞれ、Add 関数と Insert 関数と同じですが、element 型のコンストラクタを呼び出さない点が異なります。構造体が安全上または便宜上の理由でコンストラクタを含んでいれば便利ですが、ステートを完全に上書きしようとしているので (例えば Memcpy コールで) 構成のペナルティは必要ありません。
+
+	int32 SrcInts[] = { 2, 3, 5, 7 };
+	TArray<int32> UninitInts;
+	UninitInts.AddUninitialized(4);
+	FMemory::Memcpy(UninitInts.GetData(), SrcInts, 4*sizeof(int32));
+	// UninitInts == [2,3,5,7]
+
+自分で構成するプロセスに制御が必要な場合、自分で明示的に構成する予定のオブジェクトのｔまえのメモリ確保にも使用できます。
+
+	TArray<FString> UninitStrs;
+	UninitStrs.Emplace(TEXT("A"));
+	UninitStrs.Emplace(TEXT("D"));
+	UninitStrs.InsertUninitialized(1, 2);
+	new ((void*)(UninitStrs.GetData() + 1)) FString(TEXT("B"));
+	new ((void*)(UninitStrs.GetData() + 2)) FString(TEXT("C"));
+	// UninitStrs == ["A","B","C","D"]
+
+**AddZeroed** と InsertZeroed は、追加 / 挿入された空間のバイトもゼロにする点を除けば、機能は同じです。有効なビット単位のゼロステートを挿入したいタイプがある場合に便利です。
+
+	struct S
+	{
+		S(int32 InInt, void* InPtr, float InFlt)
+			:Int(InInt)
+			, Ptr(InPtr)
+			, Flt(InFlt)
+		{
+		}
+		int32 Int;
+		void* Ptr;
+		float Flt;
+	};
+	TArray<S> SArr;
+	SArr.AddZeroed();
+	// SArr == [{ Int: 0, Ptr: nullptr, Flt: 0.0f }]
+
+**SetNumUninitialized** 関数と **SetNumZeroed** 関数も SetNum と同じ動きをします。異なる点は、新しい数が実際の数より大きい場合、新規エレメントの空間はそれぞれ、初期化されないまま、全てのビットをゼロにされます。AddUninitialized 関数と InsertUninitialized 関数は、新規エレメントを新規の空間に適切に構築する必要のある場合、確実に行うことができます。
+
+	SArr.SetNumUninitialized(3);
+	new ((void*)(SArr.GetData() + 1)) S(5, (void*)0x12345678, 3.14);
+	new ((void*)(SArr.GetData() + 2)) S(2, (void*)0x87654321, 2.72);
+	// SArr == [
+	//   { Int:0, Ptr: nullptr,    Flt:0.0f  },
+	//   { Int:5, Ptr:0x12345678, Flt:3.14f },
+	//   { Int:2, Ptr:0x87654321, Flt:2.72f }
+	// ]
+
+	SArr.SetNumZeroed(5);
+	// SArr == [
+	//   { Int:0, Ptr: nullptr,    Flt:0.0f  },
+	//   { Int:5, Ptr:0x12345678, Flt:3.14f },
+	//   { Int:2, Ptr:0x87654321, Flt:2.72f },
+	//   { Int:0, Ptr: nullptr,    Flt:0.0f  },
+	//   { Int:0, Ptr: nullptr,    Flt:0.0f  }
+	// ]
+
+*Uninitialized 関数も *Zeroed 関数も、使用には注意が必要です。構成が必要なメンバを含むためにエレメント タイプを修正した場合、あるいは有効なビット単位のゼロステートがない場合、配列エレメントは無効となり、動作が未定義になります。これらの関数は、FMatrix や FVector などの変更することがほぼないタイプの配列上での使用が最も便利です。
+
+## その他
+
+**BulkSerialize** 関数は、エレメント別のシリアル化ではなく raw バイトのブロックとして配列をシリアル化するために演算子<< を代用することができるシリアル化関数です。ビルトインされたタイプあるいはプレーンなデータ構造体など、element 型が重要でない場合、パフォーマンスが上がります。
+
+**CountBytes** 関数と **GetAllocatedSize** 関数は、配列が使用中のメモリを概算します。CountBytes は FArchive を受け取り、GetAllocatedSize を直接呼び出すことが可能です。これらは一般的には統計情報の報告に使用されます。
+
+**Swap** 関数と **SwapMemory** 関数は両方とも 2 つのインデックス番号を受け取り、これらのインデックス番号のエレメントの値をスワップします。これらは同等の関数ですが、Swap 関数がインデックス上で追加のエラーチェックを行い、インデックスが範囲外の場合アサートするという点が異なります。
+

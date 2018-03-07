@@ -1,0 +1,558 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	DistanceFieldScreenGridLighting.usf
+=============================================================================*/
+
+#include "Common.ush"
+#include "DeferredShadingCommon.ush"
+#include "DistanceFieldLightingShared.ush"
+#include "DistanceFieldAOShared.ush"
+#include "GlobalDistanceFieldShared.ush"
+
+/** Computes the distance field normal from the GBuffer. */
+void ComputeDistanceFieldNormalPS(
+	in float4 UVAndScreenPos : TEXCOORD0, 
+	in float4 SVPos : SV_POSITION,
+	out float4 OutColor : SV_Target0)
+{
+	// Sample from the center of the top left full resolution texel
+	float2 ScreenUV = float2((floor(SVPos.xy) * DOWNSAMPLE_FACTOR + View.ViewRectMin.xy + .5f) * View.BufferSizeAndInvSize.zw);
+	float SceneDepth = CalcSceneDepth(ScreenUV);
+	FGBufferData GBufferData = GetGBufferData(ScreenUV);
+
+	OutColor = EncodeDownsampledGBuffer(GBufferData, SceneDepth);
+}
+
+RWTexture2D<float4> RWDistanceFieldNormal;
+
+[numthreads(THREADGROUP_SIZEX, THREADGROUP_SIZEY, 1)]
+void ComputeDistanceFieldNormalCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	float2 ScreenUV = float2((DispatchThreadId.xy * DOWNSAMPLE_FACTOR + View.ViewRectMin.xy + .5f) * View.BufferSizeAndInvSize.zw);
+	float SceneDepth = CalcSceneDepth(ScreenUV);
+	FGBufferData GBufferData = GetGBufferData(ScreenUV);
+
+	float4 OutValue = EncodeDownsampledGBuffer(GBufferData, SceneDepth);
+	RWDistanceFieldNormal[DispatchThreadId.xy] = OutValue;
+}
+
+Buffer<float4> TileConeDepthRanges;
+float TanConeHalfAngle;
+RWBuffer<uint> RWScreenGridConeVisibility;
+RWBuffer<float> RWConeDepthVisibilityFunction;
+
+#define CONE_TRACE_AGAINST_OBJECTS 1
+
+void HemisphereConeTraceAgainstTileCulledObjects(uint ObjectIndex, uint OutputBaseIndex, float3 WorldShadingPosition, float SceneDepth, float3 WorldNormal, float3 TangentX, float3 TangentY)
+{
+	float MaxWorldStepOffset = GetStepOffset(NUM_CONE_STEPS);
+	float InvMaxOcclusionDistance = 1.0f / AOObjectMaxDistance;
+
+#if USE_GLOBAL_DISTANCE_FIELD
+	InvMaxOcclusionDistance = 1.0f / AOGlobalMaxOcclusionDistance;
+#endif
+
+	float4 ObjectPositionAndRadius = LoadObjectPositionAndRadius(ObjectIndex);
+	float ObjectDistanceSq = dot(ObjectPositionAndRadius.xyz - WorldShadingPosition, ObjectPositionAndRadius.xyz - WorldShadingPosition);
+
+	BRANCH
+	// Skip tracing objects with a small projected angle 
+	if (ObjectPositionAndRadius.w * ObjectPositionAndRadius.w / ObjectDistanceSq > Square(.25f))
+	{
+		float3 LocalPositionExtent = LoadObjectLocalPositionExtent(ObjectIndex);
+		float4x4 WorldToVolume = LoadObjectWorldToVolume(ObjectIndex);
+		bool bGeneratedAsTwoSided;
+		float4 UVScaleAndVolumeScale = LoadObjectUVScale(ObjectIndex, bGeneratedAsTwoSided);
+		float3 VolumeShadingPosition = mul(float4(WorldShadingPosition, 1), WorldToVolume).xyz;
+		float BoxDistance = ComputeDistanceFromBoxToPoint(-LocalPositionExtent, LocalPositionExtent, VolumeShadingPosition) * UVScaleAndVolumeScale.w;
+
+		BRANCH
+		if (BoxDistance < AOObjectMaxDistance)
+		{
+			float4 UVAddAndSelfShadowBias = LoadObjectUVAddAndSelfShadowBias(ObjectIndex);
+			float2 DistanceFieldMAD = LoadObjectDistanceFieldMAD(ObjectIndex);
+
+			float ObjectOccluderRadius = length(LocalPositionExtent) * .5f * UVScaleAndVolumeScale.w;
+			float SelfShadowScale = 1.0f / max(UVAddAndSelfShadowBias.w, .0001f);
+
+			LOOP
+			for (uint ConeIndex = 0; ConeIndex < NUM_CONE_DIRECTIONS; ConeIndex++)
+			{
+				float3 ConeDirection = AOSamples2.SampleDirections[ConeIndex].xyz;
+				float3 RotatedConeDirection = ConeDirection.x * TangentX + ConeDirection.y * TangentY + ConeDirection.z * WorldNormal;
+				float3 ScaledLocalConeDirection = mul(RotatedConeDirection, (float3x3)WorldToVolume).xyz;
+		
+				float MinVisibility = 1;
+				float WorldStepOffset = GetStepOffset(0);
+
+				#if USE_GLOBAL_DISTANCE_FIELD
+					WorldStepOffset += 2;
+				#endif
+
+				float CurrentStepOffset = WorldStepOffset;
+
+				LOOP
+				for (uint StepIndex = 0; StepIndex < NUM_CONE_STEPS && WorldStepOffset < MaxWorldStepOffset; StepIndex++)
+				{
+					float3 StepSamplePosition = VolumeShadingPosition + ScaledLocalConeDirection * WorldStepOffset;
+					float3 ClampedSamplePosition = fastClamp(StepSamplePosition, -LocalPositionExtent, LocalPositionExtent);
+					float DistanceToClamped = lengthFast(StepSamplePosition - ClampedSamplePosition);
+
+					float3 StepVolumeUV = DistanceFieldVolumePositionToUV(ClampedSamplePosition, UVScaleAndVolumeScale.xyz, UVAddAndSelfShadowBias.xyz);
+					float DistanceToOccluder = (SampleMeshDistanceField(StepVolumeUV, DistanceFieldMAD).x + DistanceToClamped) * UVScaleAndVolumeScale.w;
+
+					float SphereRadius = WorldStepOffset * TanConeHalfAngle;
+					float InvSphereRadius = rcpFast(SphereRadius);
+
+					// Derive visibility from 1d intersection
+					float Visibility = saturate(DistanceToOccluder * InvSphereRadius);
+
+					// Don't allow small objects to fully occlude a cone step
+					float SmallObjectVisibility = 1 - saturate(ObjectOccluderRadius * InvSphereRadius);
+
+					// Don't allow occlusion within an object's self shadow distance
+					float SelfShadowVisibility = 1 - saturate(WorldStepOffset * SelfShadowScale);
+					
+					Visibility = max(Visibility, max(SmallObjectVisibility, SelfShadowVisibility));
+
+					float OccluderDistanceFraction = (WorldStepOffset + DistanceToOccluder) * InvMaxOcclusionDistance;
+
+					// Fade out occlusion based on distance to occluder to avoid a discontinuity at the max AO distance
+					float DistanceFadeout = saturate(OccluderDistanceFraction * OccluderDistanceFraction * .6f);
+					Visibility = max(Visibility, DistanceFadeout);
+					MinVisibility = min(Visibility, MinVisibility);
+					
+					float MinStepScale = .6f;
+
+					#if USE_GLOBAL_DISTANCE_FIELD
+						MinStepScale = 2;
+					#endif
+
+					float NextStepOffset = GetStepOffset(StepIndex + 1);
+					float MinStepSize = MinStepScale * (NextStepOffset - CurrentStepOffset);
+					CurrentStepOffset = NextStepOffset;
+					WorldStepOffset += max(DistanceToOccluder, MinStepSize);
+				}
+
+#if !PASS_THROUGH_DEBUG_VALUE
+				InterlockedMin(RWScreenGridConeVisibility[ConeIndex * ScreenGridConeVisibilitySize.x * ScreenGridConeVisibilitySize.y + OutputBaseIndex], asuint(MinVisibility));
+#endif
+			}
+		}
+	}
+}
+
+Buffer<uint> CulledTileDataArray;
+
+/** Traces cones of a hemisphere against intersecting object distance fields. */
+[numthreads(CONE_TRACE_OBJECTS_THREADGROUP_SIZE, 1, 1)]
+void ConeTraceObjectOcclusionCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint PixelIndex = GroupThreadId.x % (CONE_TILE_SIZEX * CONE_TILE_SIZEX);
+	uint SubCulledTileIndex = GroupThreadId.x / (CONE_TILE_SIZEX * CONE_TILE_SIZEX);
+
+	uint CulledTileDataBaseIndex = GroupId.x * CONE_TRACE_TILES_PER_THREADGROUP;
+	uint CulledTileIndex = CulledTileDataBaseIndex + SubCulledTileIndex;
+	uint TileIndex = CulledTileDataArray[CulledTileIndex * CULLED_TILE_DATA_STRIDE + 0];
+	uint ObjectIndex = CulledTileDataArray[CulledTileDataBaseIndex * CULLED_TILE_DATA_STRIDE + 1];
+	uint2 TileCoordinate = uint2(TileIndex % TileListGroupSize.x, TileIndex / TileListGroupSize.x);
+	uint2 PixelCoordinate = uint2(PixelIndex % CONE_TILE_SIZEX, PixelIndex / CONE_TILE_SIZEX);
+	uint2 OutputCoordinate = TileCoordinate * CONE_TILE_SIZEX + PixelCoordinate;
+
+	if (TileIndex != INVALID_TILE_INDEX && all(OutputCoordinate < ScreenGridConeVisibilitySize))
+	{
+		float2 BaseLevelScreenUV = GetBaseLevelScreenUVFromScreenGrid(OutputCoordinate);
+		uint OutputBaseIndex = OutputCoordinate.y * ScreenGridConeVisibilitySize.x + OutputCoordinate.x;
+
+		float3 WorldNormal;
+		float SceneDepth;
+		bool bHasDistanceFieldRepresentation;
+		bool bLit;
+		GetDownsampledGBuffer(BaseLevelScreenUV, WorldNormal, SceneDepth, bHasDistanceFieldRepresentation, bLit);
+
+		float3 TangentX;
+		float3 TangentY;
+		FindBestAxisVectors2(WorldNormal, TangentX, TangentY);
+
+		{
+			float2 ScreenUV = GetScreenUVFromScreenGrid(OutputCoordinate);
+			float2 ScreenPosition = (ScreenUV.xy - View.ScreenPositionScaleBias.wz) / View.ScreenPositionScaleBias.xy;
+		
+			float4 HomogeneousWorldPosition = mul(float4(ScreenPosition * SceneDepth, SceneDepth, 1), View.ScreenToWorld);
+			float3 OpaqueWorldPosition = HomogeneousWorldPosition.xyz / HomogeneousWorldPosition.w;
+			float3 WorldShadingPosition = OpaqueWorldPosition;
+
+			#if CONE_TRACE_AGAINST_OBJECTS
+
+				HemisphereConeTraceAgainstTileCulledObjects(ObjectIndex, OutputBaseIndex, WorldShadingPosition, SceneDepth, WorldNormal, TangentX, TangentY);
+		
+			#endif
+		}
+
+#if PASS_THROUGH_DEBUG_VALUE
+		// Just increment for every tile / object intersection
+		InterlockedAdd(RWScreenGridConeVisibility[OutputBaseIndex + 0], 1);
+#endif
+	}
+}
+
+void HemisphereConeTraceAgainstGlobalDistanceFieldClipmap(
+	uniform uint ClipmapIndex,
+	uint OutputBaseIndex, 
+	float3 WorldShadingPosition, 
+	float SceneDepth, 
+	float3 WorldNormal, 
+	float3 TangentX, 
+	float3 TangentY)
+{
+	float MinStepSize = GlobalVolumeCenterAndExtent[ClipmapIndex].w * 2 / 300.0f;
+	float InvAOGlobalMaxOcclusionDistance = 1.0f / AOGlobalMaxOcclusionDistance;
+
+	LOOP
+	for (uint ConeIndex = 0; ConeIndex < NUM_CONE_DIRECTIONS; ConeIndex++)
+	{
+		float3 ConeDirection = AOSamples2.SampleDirections[ConeIndex].xyz;
+		float3 RotatedConeDirection = ConeDirection.x * TangentX + ConeDirection.y * TangentY + ConeDirection.z * WorldNormal;
+
+		float MinVisibility = 1;
+		float MaxObjectWorldStepOffset = GetStepOffset(NUM_CONE_STEPS);
+		float WorldStepOffset = CONE_TRACE_AGAINST_OBJECTS ? MaxObjectWorldStepOffset : 20;
+
+		LOOP
+		for (uint StepIndex = 0; StepIndex < NUM_CONE_STEPS && WorldStepOffset < AOGlobalMaxOcclusionDistance; StepIndex++)
+		{
+			float3 WorldSamplePosition = WorldShadingPosition + RotatedConeDirection * WorldStepOffset;
+			float3 StepVolumeUV = ComputeGlobalUV(WorldSamplePosition, ClipmapIndex);
+			float DistanceToOccluder = SampleGlobalDistanceField(ClipmapIndex, StepVolumeUV).x;
+			float SphereRadius = WorldStepOffset * TanConeHalfAngle;
+			float InvSphereRadius = rcpFast(SphereRadius);
+
+			// Derive visibility from 1d intersection
+			float Visibility = saturate(DistanceToOccluder * InvSphereRadius);
+			
+			float OccluderDistanceFraction = (WorldStepOffset + DistanceToOccluder) * InvAOGlobalMaxOcclusionDistance;
+
+			// Fade out occlusion based on distance to occluder to avoid a discontinuity at the max AO distance
+			Visibility = max(Visibility, saturate(OccluderDistanceFraction * OccluderDistanceFraction * .6f));
+			
+			MinVisibility = min(MinVisibility, Visibility);
+
+			WorldStepOffset += max(DistanceToOccluder, MinStepSize);
+		}
+
+		#if PASS_THROUGH_DEBUG_VALUE
+			//InterlockedAdd(RWScreenGridConeVisibility[OutputBaseIndex + 0], 1);
+		#else
+			InterlockedMin(RWScreenGridConeVisibility[ConeIndex * ScreenGridConeVisibilitySize.x * ScreenGridConeVisibilitySize.y + OutputBaseIndex], asuint(MinVisibility));
+		#endif
+	}
+}
+
+void HemisphereConeTraceAgainstGlobalDistanceField(uint OutputBaseIndex, float3 WorldShadingPosition, float SceneDepth, float3 WorldNormal, float3 TangentX, float3 TangentY)
+{
+#define USE_GLOBAL_CLIPMAPS 1
+#if USE_GLOBAL_CLIPMAPS
+	float DistanceFromClipmap = ComputeDistanceFromBoxToPointInside(GlobalVolumeCenterAndExtent[0].xyz, GlobalVolumeCenterAndExtent[0].www, WorldShadingPosition);
+
+	BRANCH
+	if (DistanceFromClipmap > AOGlobalMaxOcclusionDistance)
+	{
+		HemisphereConeTraceAgainstGlobalDistanceFieldClipmap((uint)0, OutputBaseIndex, WorldShadingPosition, SceneDepth, WorldNormal, TangentX, TangentY);
+	}
+	else
+	{
+		DistanceFromClipmap = ComputeDistanceFromBoxToPointInside(GlobalVolumeCenterAndExtent[1].xyz, GlobalVolumeCenterAndExtent[1].www, WorldShadingPosition);
+
+		BRANCH
+		if (DistanceFromClipmap > AOGlobalMaxOcclusionDistance)
+		{
+			HemisphereConeTraceAgainstGlobalDistanceFieldClipmap((uint)1, OutputBaseIndex, WorldShadingPosition, SceneDepth, WorldNormal, TangentX, TangentY);
+		}
+		else
+		{
+			DistanceFromClipmap = ComputeDistanceFromBoxToPointInside(GlobalVolumeCenterAndExtent[2].xyz, GlobalVolumeCenterAndExtent[2].www, WorldShadingPosition);
+			float DistanceFromLastClipmap = ComputeDistanceFromBoxToPointInside(GlobalVolumeCenterAndExtent[3].xyz, GlobalVolumeCenterAndExtent[3].www, WorldShadingPosition);
+
+			BRANCH
+			if (DistanceFromClipmap > AOGlobalMaxOcclusionDistance)
+			{
+				HemisphereConeTraceAgainstGlobalDistanceFieldClipmap((uint)2, OutputBaseIndex, WorldShadingPosition, SceneDepth, WorldNormal, TangentX, TangentY);
+			}
+			else if (DistanceFromLastClipmap > AOGlobalMaxOcclusionDistance)
+			{
+				HemisphereConeTraceAgainstGlobalDistanceFieldClipmap((uint)3, OutputBaseIndex, WorldShadingPosition, SceneDepth, WorldNormal, TangentX, TangentY);
+			}
+		}
+	}
+#else
+
+	HemisphereConeTraceAgainstGlobalDistanceFieldClipmap((uint)0, OutputBaseIndex, WorldShadingPosition, SceneDepth, WorldNormal, TangentX, TangentY);
+
+#endif
+}
+
+#ifndef CONE_TRACE_GLOBAL_DISPATCH_SIZEX
+#define CONE_TRACE_GLOBAL_DISPATCH_SIZEX 1
+#endif
+ 
+/** */
+[numthreads(CONE_TRACE_GLOBAL_DISPATCH_SIZEX, CONE_TRACE_GLOBAL_DISPATCH_SIZEX, 1)]
+void ConeTraceGlobalOcclusionCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint2 OutputCoordinate = DispatchThreadId.xy;
+	
+	if (all(OutputCoordinate < ScreenGridConeVisibilitySize))
+	{
+		float2 BaseLevelScreenUV = GetBaseLevelScreenUVFromScreenGrid(OutputCoordinate);
+
+		float3 WorldNormal;
+		float SceneDepth;
+		bool bHasDistanceFieldRepresentation;
+		bool bLit;
+		GetDownsampledGBuffer(BaseLevelScreenUV, WorldNormal, SceneDepth, bHasDistanceFieldRepresentation, bLit);
+
+		float3 TangentX;
+		float3 TangentY;
+		FindBestAxisVectors2(WorldNormal, TangentX, TangentY);
+
+		float2 ScreenUV = GetScreenUVFromScreenGrid(OutputCoordinate);
+		float2 ScreenPosition = (ScreenUV.xy - View.ScreenPositionScaleBias.wz) / View.ScreenPositionScaleBias.xy;
+		
+		float4 HomogeneousWorldPosition = mul(float4(ScreenPosition * SceneDepth, SceneDepth, 1), View.ScreenToWorld);
+		float3 OpaqueWorldPosition = HomogeneousWorldPosition.xyz / HomogeneousWorldPosition.w;
+		float3 WorldShadingPosition = OpaqueWorldPosition;
+
+		uint OutputBaseIndex = OutputCoordinate.y * ScreenGridConeVisibilitySize.x + OutputCoordinate.x;
+
+		HemisphereConeTraceAgainstGlobalDistanceField(OutputBaseIndex, WorldShadingPosition, SceneDepth, WorldNormal, TangentX, TangentY);
+	}
+}
+
+Buffer<uint> ScreenGridConeVisibility;
+RWTexture2D<float4> RWDistanceFieldBentNormal;
+
+#ifndef COMBINE_CONES_SIZEX
+#define COMBINE_CONES_SIZEX 1
+#endif
+
+/** */
+[numthreads(COMBINE_CONES_SIZEX, COMBINE_CONES_SIZEX, 1)]
+void CombineConeVisibilityCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint2 OutputCoordinate = DispatchThreadId.xy;
+	float2 BaseLevelScreenUV = GetBaseLevelScreenUVFromScreenGrid(OutputCoordinate);
+
+	float3 WorldNormal;
+	float SceneDepth;
+	bool bHasDistanceFieldRepresentation;
+	bool bLit;
+	GetDownsampledGBuffer(BaseLevelScreenUV, WorldNormal, SceneDepth, bHasDistanceFieldRepresentation, bLit);
+
+	float3 TangentX;
+	float3 TangentY;
+	FindBestAxisVectors2(WorldNormal, TangentX, TangentY);
+
+	uint InputBaseIndex = OutputCoordinate.y * ScreenGridConeVisibilitySize.x + OutputCoordinate.x;
+
+#if PASS_THROUGH_DEBUG_VALUE
+	float BufferValue = ScreenGridConeVisibility[InputBaseIndex + 0] - asuint(1.0f);
+	float DebugValue = BufferValue / 100.0f;
+	RWDistanceFieldBentNormal[OutputCoordinate] = float4(DebugValue.xxx, SceneDepth);
+#else
+	float3 UnoccludedDirection = 0;
+	
+	for (uint ConeIndex = 0; ConeIndex < NUM_CONE_DIRECTIONS; ConeIndex++)
+	{
+		float ConeVisibility = asfloat(ScreenGridConeVisibility[ConeIndex * ScreenGridConeVisibilitySize.x * ScreenGridConeVisibilitySize.y + InputBaseIndex]);
+		
+		float3 ConeDirection = AOSamples2.SampleDirections[ConeIndex].xyz;
+		float3 RotatedConeDirection = ConeDirection.x * TangentX + ConeDirection.y * TangentY + ConeDirection.z * WorldNormal;
+		UnoccludedDirection += ConeVisibility * RotatedConeDirection;
+	}
+
+	float InvNumSamples = 1.0f / (float)NUM_CONE_DIRECTIONS;
+	float3 BentNormal = UnoccludedDirection * (BentNormalNormalizeFactor * InvNumSamples);
+
+	RWDistanceFieldBentNormal[OutputCoordinate] = float4(BentNormal, SceneDepth);
+#endif
+}
+
+float2 DistanceFieldGBufferTexelSize;
+float4 BentNormalBufferAndTexelSize;
+float MinDownsampleFactorToBaseLevel;
+
+float4 GetNormalWeights(float2 Corner00UV, float2 LowResTexelSize, float3 WorldNormal)
+{
+	float4 NormalWeights;
+
+	{
+		float3 SampleWorldNormal;
+		float Unused; bool Unused2; bool Unused3;
+		GetDownsampledGBuffer(Corner00UV, SampleWorldNormal, Unused, Unused2, Unused3);
+		NormalWeights.x = dot(SampleWorldNormal, WorldNormal);
+	}
+
+	{
+		float3 SampleWorldNormal;
+		float Unused; bool Unused2; bool Unused3;
+		GetDownsampledGBuffer(Corner00UV + float2(LowResTexelSize.x, 0), SampleWorldNormal, Unused, Unused2, Unused3);
+		NormalWeights.y = dot(SampleWorldNormal, WorldNormal);
+	}
+
+	{
+		float3 SampleWorldNormal;
+		float Unused; bool Unused2; bool Unused3;
+		GetDownsampledGBuffer(Corner00UV + float2(0, LowResTexelSize.y), SampleWorldNormal, Unused, Unused2, Unused3);
+		NormalWeights.z = dot(SampleWorldNormal, WorldNormal);
+	}
+
+	{
+		float3 SampleWorldNormal;
+		float Unused; bool Unused2; bool Unused3;
+		GetDownsampledGBuffer(Corner00UV + LowResTexelSize, SampleWorldNormal, Unused, Unused2, Unused3);
+		NormalWeights.w = dot(SampleWorldNormal, WorldNormal);
+	}
+
+	return max(NormalWeights, .0001f);
+}
+
+// 1 / ((1 - FadeDistanceFraction) * AOMaxViewDistance)
+float DistanceFadeScale;
+
+float ComputeSampleWeightBasedOnPosition(float4 ReferencePlane, float2 SampleScreenUV, float SampleDepth)
+{
+	float2 SampleScreenPosition = (SampleScreenUV.xy - View.ScreenPositionScaleBias.wz) / View.ScreenPositionScaleBias.xy;
+	float4 SampleHomogeneousWorldPosition = mul(float4(SampleScreenPosition * SampleDepth, SampleDepth, 1), View.ScreenToWorld);
+	float3 SampleWorldPosition = SampleHomogeneousWorldPosition.xyz / SampleHomogeneousWorldPosition.w;
+
+	float PlaneDistance = dot(ReferencePlane, float4(SampleWorldPosition, 1));
+
+	float Epsilon = .0001f;
+	float RelativeDistance = 1000 * abs(PlaneDistance) / SampleDepth;
+	return min(10.0f / (RelativeDistance + Epsilon), 1);
+}
+
+/**  */
+void GeometryAwareUpsamplePS(
+	in float4 UVAndScreenPos : TEXCOORD0
+	,out float4 OutBentNormal : SV_Target0
+	,out float OutConfidence : SV_Target1
+#if SUPPORT_IRRADIANCE
+	,out float4 OutIrradiance : SV_Target2
+#endif
+	)
+{
+	float3 WorldNormal;
+	float SceneDepth;
+	bool bHasDistanceFieldRepresentation;
+	bool bLit;
+	GetDownsampledGBuffer(UVAndScreenPos.xy, WorldNormal, SceneDepth, bHasDistanceFieldRepresentation, bLit);
+
+	float4 HomogeneousWorldPosition = mul(float4(UVAndScreenPos.zw * SceneDepth, SceneDepth, 1), View.ScreenToWorld);
+	float3 WorldPosition = HomogeneousWorldPosition.xyz / HomogeneousWorldPosition.w;
+
+	float4 ReferencePlane = float4(WorldNormal, -dot(WorldPosition, WorldNormal));
+
+	float2 LowResBufferSize = BentNormalBufferAndTexelSize.xy;
+	float2 LowResTexelSize = BentNormalBufferAndTexelSize.zw;
+	float2 Corner00UV = floor((UVAndScreenPos.xy - JitterOffset * DistanceFieldGBufferTexelSize) * LowResBufferSize) * LowResTexelSize;
+	float2 BilinearWeights = (UVAndScreenPos.xy - (Corner00UV + JitterOffset * DistanceFieldGBufferTexelSize)) * LowResBufferSize;
+	float2 LowResCorner00UV = Corner00UV + .5f * LowResTexelSize;
+
+	float4 TextureValues00 = Texture2DSampleLevel(BentNormalAOTexture, BentNormalAOSampler, LowResCorner00UV, 0);
+	float4 TextureValues10 = Texture2DSampleLevel(BentNormalAOTexture, BentNormalAOSampler, LowResCorner00UV + float2(LowResTexelSize.x, 0), 0);
+	float4 TextureValues01 = Texture2DSampleLevel(BentNormalAOTexture, BentNormalAOSampler, LowResCorner00UV + float2(0, LowResTexelSize.y), 0);
+	float4 TextureValues11 = Texture2DSampleLevel(BentNormalAOTexture, BentNormalAOSampler, LowResCorner00UV + LowResTexelSize, 0);
+
+	float4 CornerWeights = float4(
+		(1 - BilinearWeights.y) * (1 - BilinearWeights.x), 
+		(1 - BilinearWeights.y) * BilinearWeights.x,
+		BilinearWeights.y * (1 - BilinearWeights.x),
+		BilinearWeights.y * BilinearWeights.x);
+
+	float4 CornerDepths = float4(TextureValues00.w, TextureValues10.w, TextureValues01.w, TextureValues11.w);
+
+	float4 PositionWeights;
+	PositionWeights.x = ComputeSampleWeightBasedOnPosition(ReferencePlane, LowResCorner00UV, CornerDepths.x);
+	PositionWeights.y = ComputeSampleWeightBasedOnPosition(ReferencePlane, LowResCorner00UV + float2(LowResTexelSize.x, 0), CornerDepths.y);
+	PositionWeights.z = ComputeSampleWeightBasedOnPosition(ReferencePlane, LowResCorner00UV + float2(0, LowResTexelSize.y), CornerDepths.z);
+	PositionWeights.w = ComputeSampleWeightBasedOnPosition(ReferencePlane, LowResCorner00UV + LowResTexelSize, CornerDepths.w);
+
+	//float4 DepthWeights = max(exp2(-abs(CornerDepths - SceneDepth.xxxx) * .01f), .001f);
+	float Epsilon = .0001f;
+	//float4 DepthWeights = min(10.0f / (abs(CornerDepths - SceneDepth.xxxx) + Epsilon), 1);
+
+	float2 FullResCorner00UV = Corner00UV + (JitterOffset + .5f) * DistanceFieldGBufferTexelSize;
+	float4 NormalWeights = GetNormalWeights(FullResCorner00UV, LowResTexelSize, WorldNormal);
+	
+	float4 FinalWeights = CornerWeights * PositionWeights * NormalWeights;
+
+	float InvSafeWeight = 1.0f / max(dot(FinalWeights, 1), .00001f);
+
+	float3 AverageBentNormal = 
+		(FinalWeights.x * TextureValues00.xyz 
+		+ FinalWeights.y * TextureValues10.xyz
+		+ FinalWeights.z * TextureValues01.xyz 
+		+ FinalWeights.w * TextureValues11.xyz)
+		* InvSafeWeight;
+	
+	// Output a confidence value based on position weights
+	// Confidence will be 0 when we detect that foreground occlusion values have been leaked onto the background, because no better low res samples were available
+	OutConfidence = dot(PositionWeights, 1) < .5f ? 0 : 1;
+
+	float BentNormalLength = length(AverageBentNormal);
+
+#if !PASS_THROUGH_DEBUG_VALUE
+	float AverageLength = 
+		(FinalWeights.x * length(TextureValues00.xyz) 
+		+ FinalWeights.y * length(TextureValues10.xyz)
+		+ FinalWeights.z * length(TextureValues01.xyz)
+		+ FinalWeights.w * length(TextureValues11.xyz))
+		* InvSafeWeight;
+
+	if (BentNormalLength < AverageLength && BentNormalLength > 0)
+	{
+		// Fixup normal shortening due to weighted average of vectors
+		AverageBentNormal = AverageBentNormal / BentNormalLength * AverageLength;
+	}
+#endif
+
+	OutBentNormal = float4(AverageBentNormal, SceneDepth);
+
+	// Fade to unoccluded in the distance
+	//@todo - box distance from largest cascade
+	BentNormalLength = length(OutBentNormal.rgb);
+	float FadeAlpha = saturate((AOMaxViewDistance - SceneDepth) * DistanceFadeScale);
+	float3 NormalizedBentNormal = OutBentNormal.rgb / max(BentNormalLength, .0001f);
+	OutBentNormal.rgb = NormalizedBentNormal * lerp(1, BentNormalLength, FadeAlpha);
+	//OutBentNormal = float4(WorldNormal, SceneDepth);
+
+	#if SUPPORT_IRRADIANCE
+		float4 IrradianceValues00 = Texture2DSampleLevel(IrradianceTexture, IrradianceSampler, LowResCorner00UV, 0);
+		float4 IrradianceValues10 = Texture2DSampleLevel(IrradianceTexture, IrradianceSampler, LowResCorner00UV + float2(LowResTexelSize.x, 0), 0);
+		float4 IrradianceValues01 = Texture2DSampleLevel(IrradianceTexture, IrradianceSampler, LowResCorner00UV + float2(0, LowResTexelSize.y), 0);
+		float4 IrradianceValues11 = Texture2DSampleLevel(IrradianceTexture, IrradianceSampler, LowResCorner00UV + LowResTexelSize, 0);
+
+		float3 AverageIrradiance = 
+			(FinalWeights.x * IrradianceValues00.xyz 
+			+ FinalWeights.y * IrradianceValues10.xyz
+			+ FinalWeights.z * IrradianceValues01.xyz 
+			+ FinalWeights.w * IrradianceValues11.xyz)
+			* InvSafeWeight;
+
+		OutIrradiance = float4(AverageIrradiance, 0);
+	#endif
+}

@@ -1,0 +1,336 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+PostProcessFFTBloom.usf: Compute Shaders needed for the FFT bloom management
+=============================================================================*/
+
+#pragma once 
+
+#include "Common.ush"
+
+#ifdef INCLUDE_RESIZE_AND_CENTER
+
+#define SRCTYPE  float4
+#define DSTTYPE  float4
+
+#define Texture2DType    Texture2D<SRCTYPE>
+#define RWTexture2DType  RWTexture2D<DSTTYPE>
+
+Texture2DType   SrcTexture;
+SamplerState    SrcSampler;
+RWTexture2DType DstTexture;
+
+uint2 DstExtent;
+uint2 ImageExtent;
+float4 KernelCenterAndScale;  // .x,.y gives the center in uv.  .z the relative size of the kernal.  .w scales the center of the kernel.
+uint2 DstBufferExtent;
+
+
+[numthreads(THREADS_PER_GROUP, 1, 1)]
+void ResizeAndCenterTextureCS(uint3 GroupID : SV_GroupID, uint3 GroupThreadID : SV_GroupThreadID )
+{
+	// f(x) = T(x)  0 < x < k
+    //      = 0    x > k
+	// g(x) = f(L * frac(x/L))   - periodic extention of f with period L
+	// g_c(x) = f(L * frac( (x+c)/ L)  - periodic extension of offset f with period L
+	//
+	// 
+	// The pixel that this thread 'owns'
+
+	uint2 PixelId = uint2(THREADS_PER_GROUP * GroupID.x + GroupThreadID.x, GroupID.y);
+	
+	// If the actual scan line length was not divisible by THREADS_PER_GROUP we will have a few extra threads that don't
+	// own any pixels.  This will be 'false' for most thread groups.
+
+	if (! (PixelId.x  < DstBufferExtent.x )) return;
+	if (! (PixelId.y  < DstBufferExtent.y )) return;
+
+	float2 DstSize = float2(DstExtent.x, DstExtent.y);
+
+	// Where to find the center of the kernel, and the relative size of the kernel texture wrt the dst buffer.
+	float2 UVCenter    = KernelCenterAndScale.xy;
+	float  ResizeScale = KernelCenterAndScale.z;
+
+	// The minor axis of the target buffer
+	// NB: I should change this to the minor axis of the viewing window..  The target buffer is bigger and some power of two. 
+		
+	uint MajorAxisPixelCount = max(ImageExtent.y, ImageExtent.x);
+
+	// The number of kernels that could fit along the minor axis = ResizeScale.
+
+	// The length of the kernel is pixels in the Dst Buffer.  Here the kernel is assumed
+	// to come from a square texture.
+	
+	float KernelSizeInDstPixels = max( float(MajorAxisPixelCount) * (ResizeScale), 1.f);
+	
+	// We have a simple frac trick for making the periodic image, but it fails
+	// in the following case.  Then we just have to do it by hand.
+	bool bKernelTooBigForFrac = !(float(DstBufferExtent.y) > UVCenter.y * KernelSizeInDstPixels);
+	bKernelTooBigForFrac = bKernelTooBigForFrac || !(float(DstBufferExtent.x) > UVCenter.x * KernelSizeInDstPixels);
+
+
+	float4 ResultColor = float4(0.f, 0.f, 0.f, 0.f);
+
+	if ( bKernelTooBigForFrac )
+	{
+
+		// distance from each corner
+
+		float2 UL = float2(PixelId.x, PixelId.y) / KernelSizeInDstPixels;
+		float2 UR = float2(DstBufferExtent.x - PixelId.x, PixelId.y) / KernelSizeInDstPixels;
+		float2 LL = float2(PixelId.x, DstBufferExtent.y - PixelId.y) / KernelSizeInDstPixels;
+		float2 LR = float2(DstBufferExtent.x - PixelId.x, DstBufferExtent.y - PixelId.y) / KernelSizeInDstPixels;
+
+		float4 TmpColor = float4(0.f, 0.f ,0.f ,0.f);
+		if (UL.x < 0.5 && UL.y < 0.5)
+		{
+			float4 SampledColor = SrcTexture.SampleLevel(SrcSampler, UL + UVCenter, 0);
+			TmpColor.rgb += SampledColor.rgb;
+			TmpColor.a = max(TmpColor.a, SampledColor.a);
+		}
+		if (UR.x < 0.5 && UR.y < 0.5)
+		{
+			float2 SamplePoint = float2(UVCenter.x - UR.x, UVCenter.y + UR.y);
+			float4 SampledColor = SrcTexture.SampleLevel(SrcSampler,  SamplePoint, 0);
+			TmpColor.rgb += SampledColor.rgb;
+			TmpColor.a = max(TmpColor.a, SampledColor.a);
+		}
+		if (LL.x < 0.5 && LL.y < 0.5)
+		{
+			float2 SamplePoint = float2(UVCenter.x + LL.x, UVCenter.y - LL.y);
+			float4 SampledColor = SrcTexture.SampleLevel(SrcSampler,  SamplePoint, 0);
+			TmpColor.rgb += SampledColor.rgb;
+			TmpColor.a = max(TmpColor.a, SampledColor.a);
+		}
+		if (LR.x < 0.5 && LR.y < 0.5)
+		{
+			float2 SamplePoint = float2(UVCenter.x - LR.x, UVCenter.y - LR.y);
+			float4 SampledColor = SrcTexture.SampleLevel(SrcSampler,  SamplePoint, 0);
+			TmpColor.rgb += SampledColor.rgb;
+			TmpColor.a = max(TmpColor.a, SampledColor.a);
+		}
+		ResultColor = TmpColor;
+	}
+	else 
+	{
+		// Current Pixel in KernelUV space
+
+		float2 PixelInKernelUV = float2(float(PixelId.x) / KernelSizeInDstPixels, float(PixelId.y) / KernelSizeInDstPixels);
+
+		// The size of the Dst Buffer in terms of KernelSizeInDstPixels.  Note the Dst buffer is bigger than the image extent.
+	
+		float2 DstSizeInKernelUnits = float2( DstSize.x / KernelSizeInDstPixels, DstSize.y / KernelSizeInDstPixels);
+	
+		float2 InvDstSizeInKernelUnits = float2(1.f / DstSizeInKernelUnits.x, 1.f / DstSizeInKernelUnits.y );
+
+	
+	
+		// Offset by 1/2, 1/2 so we start in the middle of the kernel texture
+	 
+		float2 OffsetPixelInKernelUV = PixelInKernelUV + UVCenter;
+
+		// make periodic with period DstSizeInKernelUV
+
+		OffsetPixelInKernelUV *= InvDstSizeInKernelUnits;
+		OffsetPixelInKernelUV = frac(OffsetPixelInKernelUV); 
+		OffsetPixelInKernelUV *= DstSizeInKernelUnits; 
+
+		
+
+		if (OffsetPixelInKernelUV.x < 1.f && OffsetPixelInKernelUV.y < 1.f)
+		{
+			float4 SampledColor = SrcTexture.SampleLevel(SrcSampler, OffsetPixelInKernelUV, 0);
+			ResultColor.rgba += SampledColor; 
+		}
+
+		
+		float TmpSize = 0.0001;  
+		float CenterScale = KernelCenterAndScale.w;
+		// This should allow alpha to be unaffected by convolutions with this kernel.
+		float2 Dis = OffsetPixelInKernelUV - UVCenter;
+		if (sqrt(Dis.x * Dis.x + Dis.y * Dis.y) < TmpSize)
+		{
+			ResultColor.rgb *= CenterScale;
+		}
+
+	}
+
+
+	// Force the alpha kernel to be a delta function at the pixel center.
+#if 0	
+	ResultColor.w = (PixelId.x == 0 && PixelId.y == 0) ? 1.f : 0.f;
+	
+#endif
+
+	DstTexture[PixelId] =  ResultColor;
+
+}
+
+
+
+#endif // INCLUDE_RESIZE_AND_CENTER
+
+#ifdef INCLUDE_BLEND_LOW_RES
+
+#define SRCTYPE  float4
+#define DSTTYPE  float4
+
+#define Texture2DType    Texture2D<SRCTYPE>
+#define RWTexture2DType  RWTexture2D<DSTTYPE>
+
+// Textures used for the blend
+Texture2DType   SrcTexture;
+RWTexture2DType DstTexture;
+ 
+Texture2DType HalfResSrcTexture;
+SamplerState HalfResSrcSampler;
+Texture2DType CenterWeightTexture;
+uint4 HalfRect;
+uint2 HalfBufferSize;
+uint4 DstRect;
+[numthreads(THREADS_PER_GROUP, 1, 1)]
+void BlendLowResCS(uint3 GroupID : SV_GroupID, uint3 GroupThreadID : SV_GroupThreadID )
+{
+
+	// The pixel that this thread 'owns'
+
+	uint2 PixelId = uint2(THREADS_PER_GROUP * GroupID.x + GroupThreadID.x, GroupID.y);
+	uint2 DstExtent = uint2(DstRect.z-DstRect.x, DstRect.w - DstRect.y);
+
+	// The UV location within the highres image
+	float2 HighResUV = float2( float(PixelId.x) / float(DstExtent.x), float(PixelId.y)/ float(DstExtent.y));
+
+	// compute the corresponding point in the lowres buffer
+	uint2 HalfExtent = uint2(HalfRect.z-HalfRect.x, HalfRect.w - HalfRect.y);
+	float2 HalfResUV = HighResUV * float2(float(HalfExtent.x), float(HalfExtent.y));
+	HalfResUV  += float2(HalfRect.x, HalfRect.y);
+
+	HalfResUV *= float2(1.f / float(HalfBufferSize.x), 1.f / float(HalfBufferSize.y));
+
+	// Offset into the 
+	PixelId += DstRect.xy;	
+
+
+	// If the actual scan line length was not divisible by THREADS_PER_GROUP we will have a few extra threads that don't
+	// own any pixels.  This will be 'false' for most thread groups.
+
+	if (! (PixelId.x  < DstRect.z)) return;
+
+	// Full Res Source value
+	float4 FullResColor = SrcTexture[PixelId];
+
+	// Blend Values - not normalized.
+	float4 CenterValue  = CenterWeightTexture[uint2(0, 0)];
+
+	float4 Sum = CenterWeightTexture[uint2(1, 0)];
+	float OffCenterMax = max(Sum.x, max(Sum.y, Sum.z));
+
+	Sum += CenterValue;
+
+	float SumMax = max(Sum.x, max(Sum.y, Sum.z));
+	
+	// The color of the halfres pixel at this location.
+	float4 HalfResColor = HalfResSrcTexture.SampleLevel(HalfResSrcSampler, HalfResUV, 0);
+
+	float4 ResultColor = CenterValue * FullResColor +  OffCenterMax * HalfResColor;
+	ResultColor /= (SumMax);
+	
+	// Pass along the alpha value.
+
+	ResultColor.a = FullResColor.a; 
+
+	DstTexture[PixelId] =  ResultColor;
+
+}
+#endif //INCLUDE_BLEND_LOW_RES
+
+
+#ifdef INCLUDE_CAPTURE_KERNEL_WEIGHTS
+ 
+#define SRCTYPE  float4
+#define DSTTYPE  float4
+
+#define Texture2DType    Texture2D<SRCTYPE>
+#define RWTexture2DType  RWTexture2D<DSTTYPE>
+
+// This horrible shader just runs one thread.
+Texture2DType PhysicalSrcTexture;
+SamplerState  PhysicalSrcSampler;
+
+Texture2DType HalfResSrcTexture;
+SamplerState  HalfResSrcSampler;
+
+RWTexture2DType DstTexture;
+
+uint2 HalfResSumLocation;
+float2 UVCenter;
+
+[numthreads(1, 1, 1)]
+void CaptureKernelWeightsCS(uint3 GroupID : SV_GroupID, uint3 GroupThreadID : SV_GroupThreadID )
+{
+	// Get the value of the center of the physical space kerenl
+	float4 CenterValue = PhysicalSrcTexture.SampleLevel(PhysicalSrcSampler, UVCenter, 0);
+
+	// The off-center kernel sum
+	float2 KernelSum[2];
+	KernelSum[0] = HalfResSrcTexture[uint2(0, 0)].xz;
+	KernelSum[1] = HalfResSrcTexture[HalfResSumLocation].xz;
+
+	DstTexture[uint2(0,0)] = CenterValue;
+	DstTexture[uint2(1,0)] = float4(KernelSum[0].x, KernelSum[0].y, KernelSum[1].x, KernelSum[0].y );
+}
+
+#endif //#ifdef INCLUDE_CAPTURE_KERNEL_WEIGHTS
+
+
+
+#ifdef INCLUDE_PASSTHROUGH
+
+#define SRCTYPE  float4
+#define DSTTYPE  float4
+
+#define Texture2DType    Texture2D<SRCTYPE>
+#define RWTexture2DType  RWTexture2D<DSTTYPE>
+
+// Input SRV: 
+Texture2DType SrcTexture;
+
+// Output: 
+RWTexture2DType DstTexture;
+
+uint4 DstRect;
+uint4 SrcRect;
+[numthreads(THREADS_PER_GROUP, 1, 1)]
+void PassThroughCS(uint3 GroupID : SV_GroupID, uint3 GroupThreadID : SV_GroupThreadID )
+{
+	// The pixel that this thread 'owns'
+
+	uint2 DstMin = DstRect.xy;
+	uint2 PixelId = uint2(THREADS_PER_GROUP * GroupID.x + GroupThreadID.x, GroupID.y) + DstMin;
+	
+	// If the actual scan line length was not divisible by THREADS_PER_GROUP we will have a few extra threads that don't
+	// own any pixels.  This will be 'false' for most thread groups.
+
+
+	if ( !(PixelId.x  < DstRect.z )  ) return;
+	if ( !(PixelId.y  < DstRect.w )  ) return;
+
+	
+
+	// Check that this pixel is in the src window - otherwise copy black
+	bool bInSrcRect = true;
+	bInSrcRect = bInSrcRect && (PixelId.x < (SrcRect.z + 1)) && (PixelId.y < (SrcRect.w + 1));
+	bInSrcRect = bInSrcRect && !(PixelId.x < SrcRect.x ) && !(PixelId.y < SrcRect.y);
+
+	float4 ResultValue = float4(0.f, 0.f, 0.f, 0.f);
+	if (bInSrcRect)
+	{
+		ResultValue = SrcTexture[PixelId];
+	}
+
+	DstTexture[PixelId] = ResultValue;	
+}
+
+#endif  // INCLUDE_PASSTHROUGH
+
+

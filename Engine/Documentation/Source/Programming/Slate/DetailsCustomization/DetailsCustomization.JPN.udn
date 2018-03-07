@@ -1,0 +1,395 @@
+﻿INTSourceChangelist:2727112
+Availability:Public
+Title: 詳細パネルのカスタマイズ
+Crumbs:%ROOT%, Programming, Programming/Slate
+Description: アンリアル・エディタ内の詳細パネルのプロパティ表示のカスタマイズに関するガイド
+version:4.9
+
+**[Details (詳細)]** パネルが完全にカスタマイズ可能になりました。シンプルなシステムによるプロパティの再調整、あるいは、[](Programming/Slate) によるプロパティの完全なカスタマイズ化が可能です。   スレート記法を使って別の UI を詳細に追加することも可能です。
+
+[TOC (start:2 end:3)]
+
+## 設定方法
+
+1. プロパティをカスタマイズするためのクラスを作成します。**ILayoutDetails** から派生させなければなりません。
+    
+	* 関数 **void LayoutDetails( IDetailLayoutBuilder& )** を実装します。
+	* クラス プロパティのカスタマイズをカプセル化することが、このクラスの目的です。クラスのインスタンスは、それを必要とする **[Details (詳細)]** パネルに対し 1 つずつ作成されます。 
+
+2. **[Details (詳細)]** パネルが特定のクラスに対してプロパティを認識すると呼び出されるデリゲートを設定します。
+    
+	* このデリゲートの唯一の目的は、プロパティを持つ特定の **UObject** 用にカスタマイズしたクラスのインスタンスを作成することです。詳細ビューはほとんどの場合、複数であることを覚えておいてください。その場合、詳細ビューのインスタンスはそれぞれのカスタマイズ クラス インスタンスを取得します。これによりレイアウト クラス上に詳細のインスタンス データごとに格納できるようになります。  
+	* 例 (DetailCustomizations.cpp では他の例もご覧頂けます)：
+
+			FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
+			PropertyModule.RegisterCustomPropertyLayout( ABrush::StaticClass(), FOnGetDetailLayoutInstance::CreateRaw( &FBrushDetails::MakeInstance ) );
+
+			...
+			static TSharedRef<ILayoutDetails> FBrushDetails::MakeInstance()
+			{
+				return MakeShareable( new FBrushDetails );
+			}
+
+3. ステップ 1 で作成したクラスの LayoutDetails 関数にカスタマイズを実行します。
+    
+	* これがエンジン クラスの場合、カスタマイズ クラスを `DetailCustomizations` モジュール (既存する場合) に追加すべきです。このモジュールは、エディタを再起動させずに再コンパイルおよび再ロードが可能なので、プロパティの迅速な微調整に役立ちます。
+	* `FDetailCustomizationsModule.StartupModule` にデリゲートを結合し、`FDetailCustomizationsModule.ShutdownModule`で結合を解除します。
+	* ゲーム固有のクラスにはゲーム固有のモジュールを使ってください。
+	* 本ガイドと `DetailCustomizations` モジュールにある例をご覧ください (PrimitiveComponentDetails.cpp や StaticMeshComponentDetails.cpp など)。
+
+
+## カスタマイズ
+
+カスタマイズ クラスの LayoutDetails 関数内で全てのカスタマイズを処理します。この関数は、プロパティに対するインターフェースであり、カスタマイズ ウィジェットの戻し方 **IDetailLayoutBuilder** を受け取ります。
+
+主要関数 IDetailLayoutBuilder は、プロパティとその他の詳細が存在駐しているカテゴリを作成します。このクラスにはまだ他に、内容が一目瞭然のマイナーな関数があります (必要なものはほとんどありません)。これらの点に関する情報は DetailLayoutBuilder.h に掲載されています。
+
+カスタマイズの最初のステップは、カテゴリの編集です。
+
+	virtual void LayoutDetails( IDetailLayoutBuilder& DetailBuilder ) override
+	{
+		// Edit the lighting category (光源カテゴリを編集します)
+		IDetailCategory& LightingCategory = DetailBuilder.EditCategory("Lighting", TEXT("OptionalLocalizedDisplayName") );
+	}
+
+**EditCategory** 関数はプロパティが存在するカテゴリ用の **FName** とローカライズされたオプションの表示名を受け取ります。表示名を指定すると、既存の表示名がオーバーライドされます。カテゴリ名が同じの場合は `UPROPERTY` カテゴリを再利用しますが、`UPROPERTY` マクロで指定したカテゴリ名と同じでなくても構いません。プロパティがカスタマイズされずツリービューにある場合、マクロのカテゴリ名をデフォルト カテゴリとして使用します。
+
+EditCategory はプロパティのカテゴリ追加に使用する **IDetailCategoryBuilder&** を返します。2 通りの方法があります。
+
+* 単純に [multibox style layout](#MultiboxStyleLayout) を使用します。プロパティの再調整が早くできます。
+* もっとも剛健なカスタマイズ オプションを提供する [スレート記法](#スレートレイアウト) を使用します。
+
+
+### Multibox Style Layout
+
+上のセクションで作成した **LightingCategory** を使用した簡単な例です。
+
+	// Add a property to the category (プロパティをカテゴリに追加します)。最初のパラメータはプロパティ名で、2 番目は任意の表示名でオーバーライドします。
+	LightingCategory.AddProperty("bCastStaticShadow", TEXT("Static") );
+	LightingCategory.AddProperty("bCastDynamicShadow", TEXT("Dynamic") );
+	LightingCategory.AddProperty("bCastVolumetricTranslucentShadow", TEXT("Volumetric") );
+
+最も基本的な例を紹介します。3 つのプロパティを垂直にして追加し、表示名をオーバーライドします。(この例のテキストはスペース節約のためローカライズはされていませんが、実際の使用では常にローカライズされます)。
+
+[REGION:note]
+	カスタマイズ化されたプロパティとカテゴリは、カスタマイズ化ていないもの上に常に表示されることに注目してください。このシンプルな記法を使えば、埋もれてしまう可能性のある重量なプロパティを認識することができます。
+[/REGION]
+
+結果：
+
+![](multibox_layout_vertical.png)
+        
+この例は少し難しくなります (`PrimitiveComponentDetails.cpp` にあります)。
+
+	//  Create a non-collapsible group with the display name "Shadows" which is only visible if the CastShadow property is enabled ([CastShadow] プロパティが有効化されている場合のみ表示される表示名「Shadows」を使って、折りたためないグループを作成します)。この呼び出し下にあるプロパティは、EndGroup または別の BeginGroup が呼び出されるまで、全て同じグループに表示されます。
+	LightingCategory.BeginGroup( TEXT("Shadows"), GroupImageName, "CastShadow" );
+        // Begin a new line (新しい行を開始します)。この呼び出し下にあるプロパティは、EndLine() または別の BeginLine() が呼び出されるまでは、全て同じグループに表示されます。
+        LightingCategory.BeginLine();
+                // Add properties using their default look (デフォルトの見かけを使ってプロパティを追加します)
+                LightingCategory.AddProperty("bCastStaticShadow", TEXT("Static") );
+                LightingCategory.AddProperty("bCastDynamicShadow", TEXT("Dynamic") );
+                LightingCategory.AddProperty("bCastVolumetricTranslucentShadow", TEXT("Volumetric") );
+        LightingCategory.BeginLine();
+                LightingCategory.AddProperty("bCastInsetShadow", TEXT("Inset") );
+                LightingCategory.AddProperty("bCastHiddenShadow", TEXT("Hidden") );
+                LightingCategory.AddProperty("bCastShadowAsTwoSided", TEXT("Two Sided") );
+	LightingCategory.EndGroup();
+
+* `BeginGroup` はプロパティ グループの新規作成に使用します。グループの表示名、名前の隣に表示するオプションの画像名 (スレート ブラシ名)、 _false_ の場合、グループ全体をビューで非表示してプロパティができなくなるオプションの編集条件プロパティを受け取ります。これらの編集条件は、 1 つではなくグループのプロパティ上で動作する点を除けば `UPROPERTY` マクロスタイル編集と同じです。今後以下のことが追加されます！
+* `AddProperty` はデフォルトの見た目を使ってプロパティを追加します。通常はプロパティ名がついたパラメータが 1 つだけ必要です。構造体内にあるプロパティのような複雑なプロパティには、追加情報が必要です。必要な場合は、[詳細なヒント](#詳細なヒント) セクションまたは `DetailCategoryBuilder.h` のドキュメントをご覧ください。
+* `BeginLine` はプロパティの行を新規作成します。`AddProperty` で追加された全てのプロパティが新しい行にデフォルトで作成されます。 `BeginLine` は、同じ行上に `BeginLine` または `EndLine` が来るまで全てのプロパティが確実に追加されるようにします。
+
+
+結果：
+ 
+![](multibox_layout_horizontal.png)
+
+####Multibox Style Layout に関する注記
+
+* 非常にパワフルというわけではありませんが、必要に応じてさらに機能が追加されます。現在は、早く再編成する設定になっています。
+* スレート レイアウトは外見のカスタムが必要な場合のプロパティ ハンドルは特に、より高度なアクセスが必要になります。
+
+
+### プロパティ ハンドル
+
+プロパティ ハンドルの 2 つの主要な機能は、プロパティ値の読み取りと書き込み、プロパティを スレート カスタマイズ ウィジェットに認識させることです。詳細ビュー / プロパティ ツリーがどのようにプロパティへアクセスするのかは若干複雑なので、プロパティ ハンドルは全てを非表示にして、元に戻す / やり直し、編集前/後の変更、パッケージの dirty 化、ワールドの切り替えなどに対処します。 
+
+プロパティ ハンドルを取得するには、カスタマイズををしたい `IDetailCategory` に要請しないといけません。`IDetailCategory::GetProperty` を呼び出して行うことができます。通常は以下のプロパティ名を引数にするだけです。
+
+	IDetailCategoryBuilder& LightingCategory = DetailBuilder.EditCategory( "Lighting" );
+	// Get a handle to the "bOverrideLightmapRes" property
+	TSharedPtr<IPropertyHandle> OverrideLightmapRes = LightingCategory.GetProperty( "bOverrideLightmapRes" );
+
+Bool プロパティである `bOverrideLightmapRes` に対するハンドルを取得しました。
+
+ここからプロパティ値の読み書き、あるいはカスタマイズのためのスレート ウィジェットへその値を渡すことが可能になります。  
+
+Useful property handle functions (詳細なドキュメントは PropertyHandle.h を参照してください):
+
+| 関数 | 説明 |
+| -------- | ----------- |
+| `IPropertyHandle::SetValue(const ValueType& InValue)` and `IPropertyHandle::GetValue(ValueType& OutValue)` | プロパティ値の読み書きをします。これらはほとんどのビルドに対して (ベクタとローテータを含む) タイプがオーバーロードです。ユーザー定義の構造体など複雑な型の場合、子ハンドルを取得する必要があります。本ドキュメントの末尾の詳細セクションをご覧ください。 |
+| `ResetToDefault()` | プロパティをデフォルトにリセットします。 |
+| `IsValidHandle()` | プロパティ ハンドルが有効かどうかを返します。 |
+| `AsArray()` | Array プロパティ値は特殊です。本ドキュメントの末尾の詳細セクションをご覧ください。 |
+
+その他の注記：
+
+* プロパティが見つからない、または詳細ビューに表示されないと、 `GetProperty` から返されるハンドルは無効になる場合があります。`IsValidHandle()` にチェックをいれます。有効なハンドルで関数を呼び出すとクラッシュしません。
+* ウイークポインターである場合を除き、レイアウト クラスの外にプロパティ ハンドルを格納してはいけません。それらがアクセスするデータは内部的にはウィークポインタなので、無効のプロパティ上で値を設定または取得しようとするとクラッシュしますが、格納したものの整理していないと、使用できないオブジェクトへのリファレンスができてしまいます。
+* サポートされていないプロパティ (例えば、`String` プロパティの `float`) の value 型 の読み書きを試みると、失敗はしますが、データは一切壊れません。
+
+
+[REGION:warning]
+	[REGION:largetitle]
+		値へのアクセス時のエラー処理
+	[/REGION]
+
+	詳細ビューは一度に複数のオブジェクトを表示でき、ユーザーが多数のアクタを一度に選択することは稀であることを覚えておいてください。このようなケースでは、プロパティ 1 つに対し複数の値を疑いもなく持つでしょう。GetValue と SetValue は `FPropertyAccess::Result` を返して、値へのアクセスが成功したか否かを判断しやすくしています。 `FPropertyAccess::MultipleValues` は共通の戻り値です。
+
+		/**
+		* Potential results from accessing the values of properties                   
+			*/
+		namespace FPropertyAccess
+		{
+				enum Result
+				{
+					/** Multiple values were found so the value could not be read */
+					MultipleValues,
+					/** Failed to set or get the value (Property is no longer available, is not a compatible type, or is edit const are the likely cases) */
+					Fail,
+					/** Successfully set or got the value */
+					Success,
+				};
+		}
+
+	`int` や `float` などローレベル タイプのプロパティをカスタマイズする場合、複数の値のケースで処理しなければなりません。
+
+			INT MyInteger;
+			// Get the value of the property
+			FPropertyAccess::Result MyResult = MyIntHandle->GetValue(MyInteger);
+
+	MyResult が `FPropertyAccess::MultipleValues` の場合、`MyInteger` は設定されません。受け取るとウィジェットはガーベジ値を表示し、これはまだ正しい値ではないので、前もって初期化をしてしまわない方が賢明です。処理の仕方はカスタマイズするユーザーにより異なります。数値タイプの場合は、値の属性にオプションで値を返せなくできる `SNumericEntryBox` の使用をお勧めします。その代わりに提供したラベルが表示されます。`SNumericEntryBox.h` をご覧ください。
+[/REGION]
+
+### スレート レイアウト
+
+スレート レイアウトによりプロパティの外見と調整を完全にカスタマイズすることが可能になります。スレートから任意のウィジェットを受け取る `IDetailCategoryBuilder::AddWidget` によりレイアウトをカテゴリへ戻します。この作業を支援するために利用できるカスタマイズ ウィジェットがあります。
+
+#### SProperty
+
+これは、カスタマイズ ウィジェットです。このウィジェットを使用して、他のスレート宣言記法でプロパティのカスタマイズ、またはプロパティのエンベッドを行います。`SProperty` の作成には `SNew` を使用しますが、何をビルドするのか分かるように、ハンドルもプロパティに提供します。ハンドルは `SNew`:  `SNew( SProperty, HandleToTheProperty )`に対するパラメータで、オプションではありません。
+
+例:  
+
+	// Edit the lighting category (光源カテゴリを編集します)
+	IDetailCategoryBuilder& LightingCategory = DetailBuilder.EditCategory( "Lighting" );
+
+	// Get a handle to the bOverrideLightmapRes property
+	TSharedPtr<IPropertyHandle> OverrideLightmapRes = LightingCategory.GetProperty( "bOverrideLightmapRes" );
+
+	LightingCategory.AddWidget()
+	[
+		SNew( SHorizontalBox )
+		+ SHorizontalBox::Slot()
+		[
+			// Make a new SProperty (SProperty を作成します)
+			SNew( SProperty, EnableOverrideLightmapRes )
+		]
+		+ SHorizontalBox::Slot()
+		.Padding( 4.0f, 0.0f )
+		.MaxWidth( 50 )
+		[
+			SNew( SProperty, LightingCategory.GetProperty("OverriddenLightMapRes") )
+			.NamePlacement( EPropertyNamePlacement::Hidden ) // Hide the name
+		]
+	];
+
+結果：
+                 
+![](sproperty.png)
+
+`SProperty` はデフォルトでプロパティに対するウィジェットを作成します。`SProperty` には、デフォルトの見た目 (名前など) をカスタマイズする基本的なカスタマイズ属性があります。プロパティをカスタマイズしたい場合は、`CustomWidget` スロットを使用します。一度 `CustomWidget` スロットを使用すると、カスタム ウィジェットが作成されているため、 `SProperty` は値の設定方法の情報をもたなくなります。自分のプロパティ ハンドルを使用して、値の取得および設定をする必要があります。
+
+例: 
+
+      // Customizes the OverridenLightMapRes property to display some text and a spinbox 
+      TSharedPtr<IPropertyHandle> LightMapResValue = LightingCategory.GetProperty("OverriddenLightMapRes")
+      SNew( SProperty, LightMapResValue )
+      .CustomWidget()
+      [
+            SNew( SHorizontalBox )
+            + SHorizontalBox::Slot()
+            .VAlign( VAlign_Center )
+            .Padding( 2.0f )
+            [
+                  SNew( STextBlock )
+                  .Text( TEXT("Lightmap Res") )
+            ]
+            + SHorizontalBox::Slot()
+            [
+                  SNew( SSpinBox )
+                  .MinSliderValue( 0 )
+                  .MaxSliderValue( 1024 )
+                  .OnValueCommitted( &SetValueOnProperty )  
+                  .Value( &GetValueFromProperty
+            ]
+      ]
+      ...
+      FLOAT GetValueFromProperty()
+      {
+            // Using the property handle created above, get its value and send it to the spinbox (上記で作成したプロパティ ハンドルを使用して、値を取得しスピンボックスに送ります)
+            INT Value; // note lightmap res is an integer so it must be accessed as such. (lightmap res は整数なので、そのようにアクセスされなければなりません)
+            LightMapResValue.GetValue( Value );
+            // Note HANDLE FAILURE CASES
+            return Value;
+      }
+
+      void SetValueOnProperty( FLOAT NewValue )
+      {
+            // Using the property handle, set its value (プロパティ ハンドルを使用して値を設定します)
+            LightMapResValue.SetValue( NewValue )
+      }
+
+##### SProperty Notes
+
+* カスタム ウィジェットを作成しても、`SProperty` はデフォルトへのリセットを常に表示します。この動作を切り換える引き数が `SProperty` にあります。例えば、プロパティの行がある場合、それぞれに対してデフォルトへのリセットを表示せず、一番最後にまとめたメニューで表示したいと指示したいと仮定します。以下の [SResetToDefaultMenu](#SResetToDefaultMenu) をご覧ください。
+* 無効なハンドルを `SProperty` に渡せば表示されなくなります。
+
+
+`SProperty` の他にも利用できるカスタマイズ ウィジェットがあります。
+
+#### SAssetProperty
+
+`SAssetProperty` は アセット変更を入力するボックスだけでなくアセットのサムネイルも表示する `SProperty` です。サムネイルのサイズも変更することができます。レンダリングが可能な `UObject` プロパティにも使用することができます。他のタイプに使用しても何も表示されません。
+
+![](sassetproperty.png)
+
+#### SFilterableDetail
+
+`SFilterableDetail` は、詳細ビューの検索ボックスにユーザーが入力すると、何も描画せずにコンテンツ スロットにある全てにフィルターをかけるウィジェットです。詳細がプロパティベースではない場合、このウィジェットが便利です。`SProperty` は既にフィルターがかけられているので、フィルタリングをグループ化したい場合を除き、 `SFilterableDetail` を設定する必要はありません。
+
+	// Create a widget which will filter out everything in the content slot when "Create Blocking Volume" is not matched with a users search term (Create Blocking Volume がユーザーの検索用語と一致しない場合、コンテンツ スロットの全てをフィルターをかけるウィジェットを作成します)
+	// Note:2 つ目のパラメータはフィルターに一致するローカライズ化された検索用語、3 つ目のパラメータはこのフィルターが SNew( SFilterableDetail, NSLOCTEXT("StaticMeshDetails", "BlockingVolumeMenu", "Create Blocking Volume").ToString(), &StaticMeshCategory ) に常駐すべきカテゴリです。
+	SNew( SFilterableDetail, NSLOCTEXT("StaticMeshDetails", "BlockingVolumeMenu", "Create Blocking Volume"), &StaticMeshCategory )
+	.Content()
+	[
+		  // Create blocking volume menu ([Blocking volume] メニューを作成します)
+		  SNew( SComboButton )
+		  .ButtonContent()
+		  [
+				SNew( STextBlock )
+				.Text( NSLOCTEXT("StaticMeshDetails", "BlockingVolumeMenu", "Create Blocking Volume") ) 
+				.Font( IDetailLayoutBuilder::GetDetailFont() )
+		  ]
+		  .MenuContent()
+		  [
+				BlockingVolumeBuilder.MakeWidget()
+		  ]
+	]
+
+
+
+#### SResetToDefaultMenu
+
+`SResetToDefaultMenu` は [デフォルトにリセット] の黄色い矢印を表示するメニューです。デフォルトで、`SProperty` は [デフォルトへリセット] メニューを追加しますが、2 つ以上のプロパティを同じメニューにグループ化すると良い場合もあります。そのためには、`SProperty` ウィジェットを `SResetToDefaultMenu` に追加します。`SResetToDefaultMenu` 上に `AddProperty` を呼び出し、宣言記法でメニューを配置するだけです！
+
+#### SArrayProperty
+
+このウィジェットによりプロパティの配列をカスタマイズが可能になります。`SProperty` のようなプロパティを 1 つ作成し、配列エレメントに対するウィジェットが必要な都度呼び出されるデリゲートも連携します。
+
+例: 
+
+	void FMeshComponentDetails::LayoutDetails( IDetailLayoutBuilder& DetailLayout )
+	{
+		  IDetailCategoryBuilder& DetailCategory = DetailLayout.EditCategory("Rendering");
+		  TSharedRef<IPropertyHandle> MaterialProperty = DetailCategory.GetProperty( "Materials" );
+
+		  DetailCategory.AddWidget()
+		  [
+				SNew( SArrayProperty, MaterialProperty )
+				// This delegate is called for each array element to generate a widget for it
+				.OnGenerateArrayElementWidget( this, &FMeshComponentDetails::OnGenerateElementForMaterials )
+		  ];
+	}
+	...
+	/**
+	* マテリアル エレメントに対しウィジェットを作成します。
+	* 
+	 * @param ElementProperty     作成する必要のある配列エレメントんい対するハンドル
+	* @param ElementIndex        作成中のエレメントのインデックス
+	*/
+	TSharedRef<SWidget> FMeshComponentDetails::OnGenerateElementForMaterials( TSharedRef<IPropertyHandle> ElementProperty, INT ElementIndex )
+	{
+		  return 
+				SNew( SAssetProperty, ElementProperty )
+				.ThumbnailSize( FIntPoint(32,32) );
+	}
+
+結果：
+ 
+![](sarrayproperty.png)
+
+### カスタマイズですべきこと / してはいけないこと
+
+* プロパティのカスタマイズおよび値の読み書き時にはエラーケースの確認をしてください。詳細ビューには異なる値をもつ複数のオブジェクトが一度に表示されることを覚えておいてください。カスタマイズ化されたプロパティは一般的なケースであれば複数の値に対処できるはずです。
+* カスタマイズ クラス上で選択したデータは全て格納してください。プロパティ以外の詳細の中には、カスタマイズのためにアクタを選択する必要があるものもあります。アクタは `IDetailLayoutBuilder` から選んで取得することができます。選択対象あるいは選択に応じた全てのものをカスタマイズ クラス上に格納できます。選択が詳細ビューで変わらない間はそこにあることが保証されます。
+* `FActorIterator`、`FSelectedActorIterator`、または `GEditor->GetSelectedActorIterator` は使用しないでください。**[Details (詳細)]**パネルはロックすることができ、ロックされていると、**[Details (詳細)]** パネルで選択されたアクタと異なるアクタのグローバル選択対象またはリスト上で動作することを覚えておいてください。これらを使うと別のデータへアクセスします。選択されたアクタで有効なものは `IDetailLayoutBuilder` から選んで取得することができます。
+* レイアウト クラスやプロパティ ハンドルに対する参照を強力にしないでください (いずれにせよ必要ありません)。詳細ビュー (特にレベル エディタのもの) は、ユーザーの選択に応じていつでも変更が可能なので、レイアウト クラスへの参照もすぐに無効にされてしまうことを覚えておいてください。このようなことが起こらないように、詳細のカスタマイズ際にレイアウト クラスに対するシェアード ポインタは一意性に対してチェックされます。
+
+
+##詳細なヒント
+
+### 複雑なプロパティへのアクセス
+
+複雑なプロパティはプロパティ名では名前解決できないものとして定義されます。複雑なプロパティは通常構造体内にプロパティを含みます。
+
+複雑なプロパティへのアクセス方法は 2 通りあります。
+
+* プロパティ ハンドルを返す、またはプロパティをカテゴリへ追加する関数はプロパティを名前解決するためにオプションのパラメータを受け取ります。 
+
+	例: 
+
+		TSharedPtr<IPropertyHandle> IDetailCategoryBuilder::GetProperty(  FName PropertyPath, UClass* ClassOutermost , FName InstanceName) 
+
+	| パラメータ | 説明 |
+	| --------- | ----------- | 
+	|パス| プロパティへのパスフォーマット `outer.outer.value[optional_index_for_static_arrays]` でのプロパティやパス名で問題ありません。
+	| ClassOutermost | カスタマイズ中の現在のクラス外のプロパティへアクセスする場合のオプションの外部クラスです。 |
+	| InstanceName | 同じタイプのプロパティが複数存在する場合 (2 つ全く同じで、struct 変数名の 1 つである場合、インスタンス名がのオプションのインスタンス名です。 |
+
+	例：
+
+		struct MyStruct
+		{ 
+			INT StaticArray[3];
+			FLOAT FloatVar;
+		}
+
+		class MyActor
+		{ 
+            MyStruct Struct1;
+            MyStruct Struct2;
+            FLOAT MyFloat
+		}
+                                
+	* `MyActor` の `Struct2` から index `2`で `StaticArray` にアクセスするためには、パスは `"MyStruct.StaticArray[2]"`、インスタンス名は `"Struct2"` となります。
+	* カスタマイズ関数 `MyActor` 外の同じ `StaticArray` にアクセスする場合、上記と同じ方法で `ClassOutermost` を `MyActor::StaticClass()` にします。
+	* `MyActor` の `MyFloat` にアクセスする場合、プロパティ名が明確なので `"MyFloat"` を渡します。
+
+* プロパティ ハンドルがある場合、その名前から子プロパティ ハンドルを取得することができます。
+
+		TSharedPtr<IPropertyHandle> IPropertyHandle::GetChildHandle( FName ChildName )
+
+	| パラメータ | 説明 |
+	| --------- | ----------- |
+	| ChildName | 子のプロパティ名です。見つかるまで再帰的に処理します。パスはサポートされておらず、子供の配列はこの方法ではアクセスすることはできません。
+
+
+### Accessing Arrays
+
+`IPropertyHandle::AsArray` により配列へアクセスできます。プロパティ ハンドルが配列の場合、配列の追加、削除、挿入、複製をしたり、配列のエレメント番号を取得する関数をもつ `IPropertyHandleArray` を返します。
+
+### プロパティを隠す
+
+`IDetailLayoutBuilder::HideProperty` を呼び出すことでプロパティをまとめて隠すことができます。名前 / パスあるいはプロパティ ハンドルを受け取ります。

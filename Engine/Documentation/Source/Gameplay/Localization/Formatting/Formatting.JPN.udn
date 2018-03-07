@@ -1,0 +1,102 @@
+﻿INTSourceChangeList:3124629
+Availability:Public
+Title:ユーザーに表示するテキストの書式設定
+Crumbs:%ROOT%, Gameplay, Gameplay/Localization
+Description:Format 関数を使ってローカライズされたテキストをユーザーに表示する
+Parent:Gameplay/Localization
+Order:3
+version:4.13
+Related:Programming/UnrealArchitecture/StringHandling/FText
+
+ユーザーに表示するテキストは FText を使って作成され、ほとんどの場合、ローカライズされます。ゲームプレイの最中に大幅に変更するユーザーインターフェース テキストもまた、様々な言語の文法規則に左右されます。`FText::Format` および対応する **Format Text** ブループリント ノードを使って、 
+再利用可能なフォーマット パターンを作成し、ローカリゼーション プロセスをもっと楽に、エッジケース エラーの発生を抑えることができます。関数は両方とも、順序付き引数、名前付き引数、複数形、性別、 
+ハングルの助詞に合わせた特別な引数をサポートします。
+
+C++ の場合は、`FText` フォーマット パターンを `FTextFormat` にプリコンパイルすれば、コンパイル済みのフォーマット パターンを再利用することができます。フォーマット パターンを頻繁に再利用する場合に便利です。また、カルチャーの変更によってソース フォーマットのパターンも変更されると、自動的に再コンパイルされます。
+
+ブループリントの FText の初期設定は **Format Text** ノードでも可能です。**Format** テキストは、リテラルあるいはピン接続が可能です。リテラルとして使用すると、フォーマットのために引数が自動生成されます。リテラル "There are {number} days until {day}." を入力すると、 
+**Number** ピンと **Day** ピンが自動的にノードに追加されます。これらのピンはリテラルとして、または変数から入力することが可能で、出力テキストは引数をピンに接続している値に置き換えます。
+
+**Format** ピンが変数に接続されると、**Format** はゲームプレイ中は変更する可能性があるので解読はできません。この場合、ピンを自分で追加し、可能性のある引数に因んだ名前を付けます。このように、**Format Text** ノードの使用設定は、複数の可能性に対して行うことができます。引数が Format 変数の引数に一致する場合は常に、 
+与えられた情報を利用します。
+
+ピンの名前は **[Details (詳細)]** パネルで変更、追加、削除することができます。
+
+[REGION:imagetable]
+|![](FormatNode.png)(h:400) | ![](FormatNodeDetails.png)(h:400)|
+| --- | ---- |
+|**Format Text** ノード | **詳細** パネル | 
+[/REGION]
+
+
+[REGION:tip]
+アンリアル エンジンのソース ビルドを使用する場合、`TextTest.cpp` で有効なカルチャを意識したフォーマット、比較、ソートのサンプルが表示されます。
+[/REGION]
+
+## 順序付き引数
+ 
+ 順序付き引数でフォーマット引数を作成する場合、波括弧はフォーマット引数の始まりと終わりと示し、数字はパスされるパラメータを表します。
+ 引数は {0} で始まり、その後 ( {0}, {1}, {2}, など) と続きます。`Format` 関数と **Format Text** ノードは、 
+ 決められた順序で変数をフォーマット引数に組み入れます。 
+
+ 以下の C++ とブループリント スニペットは、プレイヤーの現在のヘルス値と最大ヘルス値を表示するための順序付きフォーマット引数を表示します。
+
+### C++ の例
+
+	FText::Format( LOCTEXT( "HealthFormatStr",  "{0} / {1}" ), FText::AsNumber( CurrentHealth ), FText::AsNumber( MaxHealth )  ) 
+
+### ブループリントの例
+
+![](OrderedArgs.png)
+
+## 名前付き引数 
+
+名前付き引数でフォーマット引数を作成する場合、波括弧はフォーマット引数の始めと終わりを表し、括弧で囲んだテキストは、パスされる引数に入る引数名になります。
+{Name}、{ID}、{Health} などが一般的な例です。
+
+以下の C++ とブループリント スニペットは、プレイヤーの現在のヘルス値を表示するための名前付きフォーマット引数を表します。
+
+### C++ の例
+
+	FFormatNamedArguments Arguments;
+	Arguments.Add(TEXT("CurrentHealth"), FText::AsNumber( CurrentHealth ));
+	EditorErrors.Error(FText::Format(LOCTEXT("ExampleFText", "You currently have {CurrentHealth} health left."), Arguments ) );
+
+### ブループリントの例
+
+![](CurrentHealth.png)
+
+## 特殊な引数
+
+複数形 / 性別の対応に必要な数値 / 性別値をパスするために、関数の `FText::Format(...)` ファミリーのすべてが FText ではなく FFormatArgumentValue として値を受け取るようになりました。すべての numeric 型、ETextGender、あるいは ETextGender からでも作成することができます。 
+
+これらの value 型をブループリントに設定する機能が、**Format Text** ノードのワイルドカード ピンで表示されます。
+
+上記の例に加えて、これらのフォーマット パターンも引数として `FText::Format` もしくは **Format Text** に与えることができます。 
+
+### 複数用フォーム
+
+このフォームは、テキスト フォーマットで使用する数値変数に合わせたテキストの使用を可能にします。複数用フォームには "There is 1 cat"、"There are 4 cats" などの基数、そして "You came 1st!"、"You came 2nd!" などの序数があります。
+
+複数用フォームは key->value pairs として指定します。以下のキーワードはすべてサポートされます ([CLDR data](http://www.unicode.org/cldr/charts/29/supplemental/language_plural_rules.html)): zero、one、two、few、many など。値は、フォーマット マーカーも含むこともある文字列の 
+引用も可能です。
+
+Cardinal Format Example: `"There {NumCats}|plural(one=is,other=are) {NumCats} {NumCats}|plural(one=cat,other=cats)"`
+
+Ordinal Format Example: `"You came {Place}{Place}|ordinal(one=st,two=nd,few=rd,other=th)!"`
+
+
+###性別用フォーム
+
+このフォーマットで、"Le guerrier est fort" や "La guerrière est forte" などテキスト フォーマット中の ETextGender 値に応じたテキストが使えるようになります。
+性別用フォームは、[男性、女性、中性 (中性はオプション)] の順序の値で指定されます。値には、それ自体にもフォーマット マーカーを含む文字列を引用することもできます。
+
+例: `"{Gender}|gender(Le,La) {Gender}|gender(guerrier,guerrière) est {Gender}|gender(fort,forte)"`
+
+### ハングル文字の助詞用フォーム:
+
+このフォームは、韓国語の文法を明確にし、最後の文字が子音か母音かに応じて正しいグリフを挿入します。例) "사람은"、"사자는"
+ハングルの助詞用フォームは、[子音、母音] の順序の値で指定されます。値は文字列を引用することも可能です。
+
+例： `"{Arg}|hpp(은,는)"`
+

@@ -1,0 +1,201 @@
+Availability: Public
+Title:Core Optimization Concepts for Particle Systems
+Crumbs: %ROOT%, Engine, Engine/Rendering/ParticleSystems, Engine/Rendering/ParticleSystems/Optimization
+Description:Identifying trouble areas and problem content in order to optimize effects.
+Version:4.9
+Parent:Engine/Performance
+tags:Particles
+
+
+
+[TOC]
+
+## Identifying GPU, Render Thread, and Game Thread issues
+
+There are several features of UE4 in place which allow effects artists to trouble shoot performance issues.  First off, identifying where your effects are creating bottlenecks will go a long way towards optimizing the correct issue, thereby retaining visual integrity/quality.
+
+One way to monitor for issues while playing through levels is to pull up the STAT UNIT debug overlay.
+
+
+1. Launch the game.
+1. Press the **\`** key and enter `stat unit` into the Console.
+
+    ![statunit.png](statunit.png)
+
+
+The `stat unit` command displays the time spent for the current frame on the Game Thread, the time spent for the Render thread, and the time spent for the GPU. It is possible to monitor the different times updated by stat unit to see areas of the level with performance issues.
+
+Keep an eye on the different thread times.  If your target framerate is 30fps, all threads should remain below 33.3ms.
+
+If any thread goes over the 33ms and your particles are a suspected culprit, you can use the `STAT PARTICLES` command to gauge particle times on the different threads.
+
+[REGION:lightbox]
+[![statparticles.png](statparticles.png)(w:920)](statparticles.png)
+[/REGION]
+
+`STAT PARTICLES` lists out multiple statistics relative to Game Thread and Render Thread.  Pay attention to Draw Calls (Render Thread) and Tick Time (Game Thread).
+
+<!--
+[PUBLISH:Licensee]
+
+
+
+## Targeting GPU Related issues using Pix
+
+The most reliable way to diagnose GPU issues on the Xbox 360 is with PIX.  This document will not go in depth into the process of doing a PIX capture on the Xbox360.  A download for PIX and tutorials on this process can be found here:
+
+
+* [PIX for Artists](http://www.microsoft.com/download/en/confirmation.aspx?id=22904)
+
+
+Once you have the relevant information from PIX and know your offending particle systems, there are several avenues to explore.
+
+
+1. Ensure your emitters are not aligned in a straight row creating inefficient overdraw scenarios
+1. Reduce emission rates in your particle system (increase opacity, reduce rate)
+1. Reduce the number of instructions in your materials (use the shader complexity view to target expensive systems)  Bright Red = 300 instructions, pink = 600 instructions, and white = 900 instructions.  You can press F5 in PIE to see this viewmode as well.
+1. Tighten LOD distances and lower emission counts on near/far LODs so you are drawing fewer sprites further back in the scene and fewer sprites as you get closer to an effect.
+1. Reduce particle scale so they fill less of the scene (this can be done per actor if necessary with particle parameters)
+1. If you are using spawn per unit, increase the Unit Scalar so the spawn distance is greater, or reduce SpawnPerUnit rate (or both)
+1. If effects are teleporting or jumping quickly from point A to point B adjust your maxFrameDistance to further control particle spawn rates (this will prevent spawnPerUnit from dumping large amounts of particles in an area)
+
+
+[/PUBLISH:Licensee]
+-->
+
+
+## Targeting Game Thread related issues
+
+Once you have determined you have a Game Thread issue, use the `STAT PARTICLES` command to verify your findings.
+
+This stat gives quite a bit of information so read over the descriptions on the linked page to help you determine where your costs are highest.  Keep an eye on Particle Tick Time and your Particle Counts.
+
+[REGION:note]
+It is important to remember that a particle system is the sum of the components (emitters/modules) which make up the effect.  The more unique emitters and modules in your system, and the more of those systems in your scene, the higher the Game Thread cost.
+[/REGION]
+
+<!--
+If your tick time is high use the `ParticleTickStats` command to identify which systems are your main offenders.
+
+The `ParticleTickStats` command has 3 arguments:
+
+* **Single** - This argument will capture a single frame and write out a file
+* **Start** - This argument will begin capturing stats
+* **Stop** - This argument will end stats so you can see tick time for a duration
+
+
+The `ParticleTickStats` report is then written out to this directory:
+
+`[UE4 Directory]\\[YourGame]\Profiling\PSTick-[sys time].csv`
+
+The spreadsheet is broken into columns and rows outlining the cost of your effects
+
+![particletickstats.jpg](particletickstats.jpg)(w:630 h:42)
+
+$ **Total Tick ms** : Total time spent ticking all instances that Particle System
+$ **Avg Tick ms** : Avg. time for ticking that Particle System (Total Tick/Ticks)
+$ **Max Tick ms** : The HIGHEST tick time for an instance of that Particle System
+$ **Ticks** : Number of INSTANCES of that Particle System
+$ **Avg Active/Tick** : Avg # of particles active during the Tick of that Particle System (Total Particles/Ticks)
+$ **Max Active/Tick** : Max # of particles active during the Tick of that particle (in a single instance)
+
+Depending on your platform you will need to browse to the directory through the appropriate means.  This file is comma delineated and can be opened in Excel etc. etc.
+-->
+
+Once you have identified Game Thread systems which are offenders, there are several paths to take.
+
+
+* Reduce particle emission counts on the systems being used.
+* Reduce the number of particle systems in the scene.
+* Reduce lifetime (the amount of time particle evaluation is calculated) for some of your emitters.
+* Check expensive calculations such as collision etc. to ensure the settings you are using are optimal, reduce collisions or the amount of particles/meshes colliding.
+* Remove expensive calculations such as collision, dynamic parameters, etc. if necessary.
+* Replace Game Thread calculated particle effects with Static Mesh effects if possible.
+* Set Fixed Bounds on your particle system so you do not calculate them each frame.
+* Increase LodDistanceCheckTime so you are checking LODs less often (for looping effects with LODMethod set to automatic).
+
+
+
+(#LaunchGame)
+
+<!--
+[PUBLISH:Licensee]
+
+## Launching your Build
+
+There are multiple ways to launch a build of your game, this document will outline two which are commonly used and allow for the use of commandline arguments to disable default debugging features.
+
+There are several avenues to launch a build, two of the most approachable as an effects artist are done using a batch file, or Unreal FrontEnd.  To launch a build of the game which is pre-cooked and delivered to your target platform without doing a local cook, a batch file works great.  To deliver a build or a single level you cook locally to your target and launch, Unreal FrontEnd is very intuitive and user friendly.
+
+
+### Using batch files to launch the build on console
+
+If you are unfamiliar with the process of creating a batch file in Windows there are several websites which can explain the process.  This website is an example and there are plenty to choose from http://www.computerhope.com/batch.htm
+
+Make sure your devkit is running, and is properly setup in your Xbox 360 Neighborhood.  If you wish to launch debug commands or gather crash reports open the Unreal Console from Unreal Front End
+
+Here is an example batch file used in the case of Gears of War 3
+   
+    cd\Program Files (x86)\Microsoft Xbox 360 SDK\bin\win32
+    xbreboot /yourIpAddress DEVKIT:\YourGame[Build]\UnrealEngine3\YourGame.xex -novsync -nomovie -noailogging -noverifygc
+    Pause
+    
+
+We need to start the process in the location defined in the first line
+
+Next we point  to the path for the build of the game, in this case Gear_[06-06_05.51].  On the xbox neighborhood you can view the files and edit your batch file to change to the proper build you wish to use.
+
+Followed by commandline arguments which we use to test the build.  The whole point of using a batch file is to allow us to use these commandline arguments to test the build with specific features enabled, or disabled.  In this case we are disabling vertical sync, movies, ailogging, and garbage collection.
+
+"Pause" at the very end leaves the commandline window open, so you can read errors and messages if you edited your batch file incorrectly.
+
+[/PUBLISH:Licensee]
+
+
+### Using Unreal Front End to launch the build on console
+
+Unreal FrontEnd can be found in your projects binaries folder
+
+`[UE4 Directory]\Binaries\UnrealFrontend.exe`
+
+Unreal Front End is a GUI which allows any discipline to quickly cook and deploy a build or a level to see the results of local data on a target platform.  Unreal Front End also can be used as a launching point for your project, with links to the editor and many other tools. 
+
+In relation to effects performance we are going to be focusing on using two parameters when launching the game to get a relatively accurate gauge of how well the game is running.  In the Launch Options box the commands -novsync,  -noverifygc,  and -noailogging.
+
+-novsync disables vertical sync (locking fps @ 30) so we can see how much overhead there is in the scene, -noverifygc disables periodic garbage collection which produces a visible hitch every so often, and -noailogging disables ai logging which slows the game considerably, aiLogging and garbage collection run in the background and slow performance when enabled.  Disabling these will give a closer reproduction of actual frame rate in a final release build, minus disc load time.
+
+![frontend.jpg](frontend.jpg)(w:624 h:415)
+
+When doing any of this testing in a debug build, it is important to remember there is a cost to running the game in debug which will not be visible in a final release build.  Using tools like the stat overlays have a cost and will cause your results to be skewed slightly.
+
+
+
+## Troubleshooting batches of FX
+
+Several Commandlets exist for the purpose of checking batches of effects for common problems, and outputting spreadsheets which list the offenders.
+
+These Commandlets include:
+
+
+### ParticleSystemAudit
+
+This commandlet will perform an audit on all particle systems that are contained in the database resulting from MineCookedPackages.
+
+**NOTE:** This will be changed to use the 'On DVD' tag, as well as simply checking all existing particle systems.
+
+It will generate csv files containing the following to assist in optimizing/fixing content:
+
+$ **All particle systems w/ NO LOD levels** : No LOD levels means the particle system is 'empty'.
+$ **All particle systems w/ a single LOD level** : These systems should be reviewed to ensure they are not environmental (level placed) effects. In those cases, you typically want to utilize LODs to turn off emitters in the distance.
+$ **All particle systems w/out fixed bounds set** : All particle systems that can should leverage the fixed relative bounds.
+$ **All particle systems w/ LOD Method of Automatic & a check time of 0.0** : This indicates a scenario where the particle system will perform its LOD check every frame.
+$ **All particle systems w/ bOrientZAxisTowardCamera enabled** : These systems will cause problems if your game will support split-screen.
+$ **All particle systems w/ missing materials** : These systems will render with the default material.
+$ **All particle systems w/ no emitters** : These systems are 'empty' - should they be deleted?
+$ **All particle systems w/ collision on in at least one emitter** : Current collision methods are a VERY high cost operation for particles.
+
+
+### FindOnDvDPsysDynamicParameter
+
+This Commandlet finds any effects using the dynamic parameter module, referencing a material without a functioning dynamic parameter material expression.  The process is not entirely fool proof, it is good practice to verify the result through the material editor prior to removal of a dynamic parameter module.
+-->

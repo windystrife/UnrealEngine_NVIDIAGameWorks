@@ -1,0 +1,241 @@
+Availability: Docs
+Title: 如何制作命令行开关
+Crumbs:%ROOT%, Programming, Programming/Development, Programming/Development/Tools
+Description:如何创建全新、自定义的命令行开关，用以分析或修改在您游戏中使用的内容。
+
+[REGION:todo]
+	本文从虚幻引擎3中转换而来，目前正在审阅中。有些信息可能过期了。
+[/REGION]
+
+[TOC(start:2)]
+
+
+
+## 概述
+
+命令行开关是在虚幻引擎环境内部运行的命令行程序。它们大多数用于对内容进行批量修改、迭代内容来获得关于它的信息或者作为单元测试机制。
+
+通常有很多初始化引擎的小应用程序，但是它们大多数都受到 Windows 控制台输出的限制。
+
+引擎自动尝试判断您传入到命令行的命令是否是一个命令行开关，如果匹配，它将执行相关代码。
+
+请参阅 UContentCommandlets.cpp 和 UnPackageUtilities 了解有关命令行开关的一些示例。
+
+
+
+## 如何在脚本中制作命令行开关
+
+创建您的命令行开关的脚本类，如下所示：
+
+
+    
+    class HelloWorldCommandlet extends Commandlet;
+    
+    event int Main( string Params )
+    {
+       log( " hello world " );
+    
+       return 0;
+    }
+    
+
+
+
+或者制作native命令行开关：
+
+
+    
+    class HelloWorldCommandlet extends Commandlet
+    native;
+    
+    cpptext
+    {
+    int32 Main(const FString& CmdLine)
+    {
+       warnf(TEXT("hello world"));
+       return 0;
+    }
+    }
+    
+    native event int Main( string Params );
+    
+
+
+
+Main() 函数是您的命令行开关的入口点。对于给定的命令行开关，将会向其中传入一个包含所有参数的字符串。注意：
+
+
+    
+    gamename.exe helloworld param1 param2 param3
+    
+
+
+
+您的命令行开关将会把字符串 `param1 param2 param3` 作为命令行参数。
+
+
+
+##  如何在 Native 代码中制作命令行开关
+
+大多数命令行开关是在native代码中作为内部类实现的。以这种方式创建命令行开关的步骤是非常不同的。您将会在 `EditorCommandlets.h` 中找到大多数命令行开关的声明。
+
+首先，在头文件中声明您的类，比如在 `EditorCommandlets.h` 中：
+
+    
+    BEGIN_COMMANDLET(Name,Package)
+      // 在这里声明其他的方法。
+    END_COMMANDLET
+    
+
+
+命令行开关将会有一个名为 "UNameCommandlet" 的类名，它将会被放置在您指定的包中（例如，Editor）。
+
+然后，在 .cpp 文件（例如， `UContentCommandlets.cpp` ），实现您的命令行开关的 `Main()` 函数。如果需要，您也可以重载 `virtual !CreateCustomEngine()` 函数。请参阅 UCommandlet 源代码了解更多详细信息。
+
+    
+    int32 UNameCommandlet::Main(const FString& Params)
+    {
+        // 进行您想要进行的操作...
+        return 0;
+    }
+    
+
+
+
+但是您还没有完成命令行开关的创建！ 因为这是一个内部类，所以您必须通知脚本系统它的存在。为了完成这个过程，您必须手动地编辑 `UnrealEdClasses.h` 文件，特别是AUTO_INITIALIZE_REGISTRANTS_UNREALED #define。在那个列表中为您的命令行开关添加一个到 `StaticClass()` 的调用:
+
+    
+    #define AUTO_INITIALIZE_REGISTRANTS_UNREALED \
+        UNameCommandlet::StaticClass(); \
+    
+
+
+
+当您下一次重新编译脚本时，编译器将会按照字母顺序使用这个类表中您的 Commandlet(命令行开关)类覆盖这个文件。
+
+
+
+## 给予用户帮助
+
+内置到命令行开关中的一个功能是显示关于该命令行开关的帮助信息，以便用户可以知道它是什么以及它支持的选项。为了是您的命令行开关具有帮助信息，您需要向您的命令行开关所在的本地化文本文件中添加一个元素。如果您的包在Core文件夹中，那么您需要修改Core.int来显示帮助信息。以下是Core中的命令行开关"hello world"的简单设置。
+
+
+    
+    [HelloWorldCommandlet]
+    HelpDescription="This commandlet displays hello world" HelpUsage="gamename.exe helloworld"
+    HelpWebLink="https://udn.epicgames.com/bin/view/Three/MakingACommandlet"
+    HelpParamNames[0]="param1"
+    HelpParamDescriptions[0]="Ignored since helloworld doesn't need params"
+    
+
+
+
+注意，在部分名称中必须包含 _commandlet_ 作为类名称的一部分。如果没有它，则不能找到这个命令行开关。要想查看怎么使用这个命令，请运行以下命令：
+
+
+    
+    game.exe help help
+    game.exe help list
+    game.exe help webhelp help
+    
+
+
+
+
+
+##  如何使用命令行开关
+
+要想执行一名命令行开关，您可以运行您的游戏，后面带上您想运行的命令行开关。比如：
+
+
+    
+    examplegame make -full
+    
+
+
+
+在ExampleGame中启动make命令行开关。注意，您不必为native命令行开关指定包名称。如果make命令行开关仅是一个基于脚本的命令行开关，那么可以使用以下语句进行调用：
+
+
+    
+    examplegame editor.make -full
+    
+
+
+
+因为它不会在启动是进行加载。同时注意不需要名称的 _commandlet_ 部分。当尝试找到指定的命令行开关时，启动代码会自动地附加 _commandlet= 。
+
+
+
+## 常用的命令行开关任务
+
+命令行开关所做的常见任务是迭代所有的包并在它们上面执行一些数据处理。您可以从使用以下代码开始入门（也可以在 `UContentCommandlets.cpp` 顶部的注释中找到它）：
+
+
+    
+    // 以下是一个模板命令行开关，当您想在所有的包上执行一个操作时，您可以使用这个开关。
+    int32 UPerformAnOperationOnEveryPackage::Main(const FString& Params)
+    {
+        // 解析命令行参数。
+        TArray<FString> Tokens;
+        TArray<FString> Switches;
+    
+        const TCHAR* Parms = *Params;
+        ParseCommandLine(Parms, Tokens, Switches);
+    
+        // 构建包文件列表。
+        const TArray<FString> FilesInPath( GPackageFileCache->GetPackageFileList() );
+        if( FilesInPath.Num() == 0 )
+        {
+            warnf( NAME_Warning, TEXT("No packages found") );
+            return 1;
+        }
+    
+        // 遍历所有的包来执行一些操作。
+        for( int32 FileIndex = 0 ; FileIndex < FilesInPath.Num() ; ++FileIndex )
+        {
+            const FString& Filename = FilesInPath(FileIndex);
+            warnf( NAME_Log, TEXT("Loading %s"), *Filename );
+    
+            UPackage* Package = UObject::LoadPackage( NULL, *Filename, LOAD_None );
+            if( Package == NULL )
+            {
+                warnf( NAME_Error, TEXT("Error loading %s!"), *Filename );
+            }
+    
+            /////////////////
+            //
+            // 在这里进行您想要进行的操作
+            //
+            /////////////////
+    
+            TObjectIterator<UStaticMesh> It;...
+    
+            UStaticMesh* StaticMesh = *It;
+            if( StaticMesh->IsIn( Package )
+    
+    
+    
+    
+            UObject::CollectGarbage( RF_Native );
+        }
+    
+        return 0;
+    }
+    
+
+
+
+您或许也想查看 `PackageHelperFunctions.h` 中的 `NormalizePackageNames()` （它出现在版本QA_APPROVED_BUILD_JUNE_2007中）。这个函数可以创建一个包的过滤列表以便对其进行迭代，除此之外的更加精细的迭代需要在 `GPackageFileCache` 上进行(请参照代码获得更多细节)。
+
+
+
+## 命令行开关列表
+
+请参阅[命令行开关列表](Engine/Commandlets/CommandletList)页面。
+
+ 
+
+
+
+

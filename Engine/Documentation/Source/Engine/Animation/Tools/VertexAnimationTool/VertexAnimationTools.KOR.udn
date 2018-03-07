@@ -1,0 +1,195 @@
+﻿INTSourceChangelist:3467293
+Availability:Public
+Title:버텍스 애니메이션 툴
+Crumbs: %ROOT%, Engine, Engine/Animation
+Description: 3D Max 버텍스 애니메이션 툴 세트 사용 안내서입니다.
+Related: Engine\Animation\Tools\VertexAnimationTool\VAT_KF_Meshes
+Related: Engine\Animation\Tools\VertexAnimationTool\VAT_TL_Meshes
+SkillLevel:Advanced
+Version: 4.9
+tags: Tools
+topic-image:VertexAnimationTool_topic.png
+
+[TOC(start:2 end:3)]
+
+
+2D 텍스처나 메시의 UV 에 복잡한 애니메이션 데이터를 저장하면, 애니메이션 부하를 줄이면서도 애니메이션에 필요한 모양과 느낌을 유지시키는 데 좋습니다.
+과거에는 그렇게 하기 위해 [모프 타겟](Engine/Content/FBX/MorphTargets) 을 사용했겠지만, 이 새로운 방법에는 전에 없던 장점이 몇 가지 있습니다.
+그 중 하나는, 기존에 캐스케이드 파티클 에디터에서 모프 타겟을 활용하거나 하지 않으면 불가능했을 복잡한 시스템 내 애니메이션 데이터를 사용할 수 있다는 점입니다.
+여기서는 이 스크립트를 사용해서 UE4 프로젝트에 쓸 콘텐츠를 생성하는 법에 대해 다루도록 하겠습니다.
+
+## 사전 요구사항
+스크립트를 사용하기 전 이 기법을 사용해서 최적의 결과를 얻어내기 위해 알아둬야 하는 것이 몇 가지 있습니다.
+
+### 스크립트 위치
+[region:warning]
+이 스크립트는 언리얼 엔진 4 (UE4) **4.8** 이상 버전에서만 사용가능합니다.
+[/region]
+
+버텍스 애니메이션 스크립트의 이름은 **VertexAnimationTools.ms** 이고, 위치는 다음과 같습니다:
+
+		Engine\Extras\3dsMaxScripts\VertexAnimationTools.ms
+
+3Ds Max 2014 이상 버전에서의 이미지 감마 처리 방식 보정을 위해 버텍스 애니메이션 스크립트 최신 버전이 업데이트되었습니다.
+
+### 툴 주의사항
+이 툴은 복잡한 애니메이션 데이터를 텍스처에 저장하여 애니메이션 부하를 줄이는 데 매우 좋지만, 툴 사용시 생기는 문제점이 몇 가지 있습니다.
+무엇보다 이 툴은 하나의 2D 텍스처 내 최대 **8192 버텍스** 에만 영향을 끼칠 수 있습니다.
+그 이유는, DirectX 11 에서 최대 텍스처 크기는 X 나 Y 어느 한 쪽이 8192 픽셀 이내여야 하기 때문입니다.
+이 툴은 다음 공식을 사용하여 텍스처 내 데이터를 생성합니다.
+
+		최종 텍스처 해상도:  X = 메시의 버텍스 수, Y = 캡처된 프레임 수.
+
+이러한 한계로 인해 이 툴은 비주얼 이펙트나 배경 스태틱 메시처럼 애니메이션이 필요는 하되 복잡한 애니메이션 리깅까지 쓰기에는 조금 무리인 경우에 최적입니다.
+이 툴은 스켈레탈 메시 애니메이션과도 **작동하지 않는데** 본 트랜스폼은 머티리얼 에디터에서 사용할 수 없기 때문입니다.
+즉 스켈레탈 메시의 버텍스에 비슷한 방식으로 영향을 끼치려면, [모프 타겟](Engine/Content/FBX/MorphTargets) 을 사용해야 한다는 뜻입니다.
+
+### 버텍스 애니메이션 툴 분석
+버텍스 애니메이션 툴 안에는 스태틱 메시의 버텍스에 영향을 끼치는 완전히 다른 메소드가 둘 있습니다.
+다음 부분에서는 이 두 메소드에 대해 그 차이점을 포함해서 다루도록 하겠습니다.
+
+* **버텍스 애니메이션 툴:** 버텍스 애니메이션 툴 상단의 Vertex Animation Tools 부분은 모프 타겟 버텍스 위치와 노멀을 저장하는 2D 텍스처 생성용입니다.
+
+	![](VAT_Tool_Breakdown_01.png)
+
+	|프로퍼티 이름| 설명|
+	|-------------|------------|
+	|**Animation Options:** | 애니메이션 옵션 - 3dx Max 의 타임라인을 사용해서 제작된 애니메이션을 사용하거나, 3Ds Max 나 Maya, Blender 같은 다른 3D 패키지에서 제작된 개별 키프레임을 사용하도록 선택한 다음, 그 패키지에서 프레임별로 익스포트하여 3Ds Max 에서 애니메이션을 재구성할 수 있도록 합니다. |
+	|**Process Animated Meshes:** | 애니메이티드 메시 처리 - 이 버튼은 3Ds Max 씬에 있는 애니메이티드 메시를 처리하고, 필요한 텍스처를 생성한 뒤 익스포트합니다. |
+	|**Anim Start:** |애님 시작 - 애니메이션 시작 프레임을 지정하는 옵션입니다. |
+	|**Anim End:** |애님 끝 - 애니메이션 끝 프레임을 지정하는 옵션입니다. |
+	|**Frame Skip:** |프레임 스킵 - 프레임을 건너뛰어 텍스처 공간 절약을 시도해 볼 수 있는 옵션입니다. |
+	|**Process Selected Meshes:** |선택된 메시 처리 - 키 프레임 메시가 활성화된 경우에만 사용할 수 있는 옵션으로, 키 프레임 메시를 선택한 순서대로 처리합니다.|
+
+
+* **Sequence Painter:** 시퀀스 페인터 - 버텍스 애니메이션 툴과 비슷하지만 한 가지 핵심적인 차이점이 있는데, 버텍스 위치 정보가 2D 텍스처가 아닌 메시의 UV 에 저장됩니다.
+
+	![](VAT_Tool_Breakdown_02.png)
+
+	|프로퍼티 이름| 설명 |
+	|-------------|------------|
+	|**Paint Selection Sequence:** |선택 시퀀스 페인트 - 메시 버텍스에 대한 정보를 2D 텍스처가 아닌 메시 UV 안에 저장합니다. |
+
+### 3Ds Max 버전 & 스크립트 설치
+이 툴은 **3Ds Max 2015** 에서만 테스트되었습니다.
+다른 버전에서도 작동이 가능할 수는 있지만, 테스트를 거치진 않았으므로 다른 버전을 사용하는 경우 직접 위험을 감수하셔야 합니다.
+스크립트 설치는 간단히 **4.8\Engine\Extras\3dsMaxScripts** 에서 3Ds Max 뷰포트에 끌어놓으면 스크립트가 저절로 실행됩니다.
+
+[OBJECT:EmbeddedVideo]
+[PARAMLITERAL:width]
+640
+[/PARAMLITERAL]
+[PARAMLITERAL:height]
+360
+[/PARAMLITERAL]
+[PARAMLITERAL:videoid]
+koPxpL0CgA8
+[/PARAMLITERAL]
+[/OBJECT]
+
+[region:tip]
+이 스크립트를 자주 사용하시는 경우, 언제든 툴바나 쿼드 메뉴에 스크립트를 추가하실 수 있습니다. 자세한 방법은 [Autodesk site](http://knowledge.autodesk.com/support/3ds-max/learn-explore/caas/CloudHelp/cloudhelp/2015/ENU/3DSMax/files/GUID-A2CF8BAA-7B52-40A8-8C40-803B1AB5FC05-htm.html) 에 그 방법이 매우 자세히 소개되어 있습니다.
+[/region]
+
+## 3Ds Max 유닛 설정
+툴 사용 시작 전 3Ds Max 에서 사용하는 측정단위가 UE4 에서 사용하는 측정단위와 제대로 맞는지 확인해 줘야 합니다.
+이런 식으로 툴이 3Ds Max 에서 익스포트하는 데이터가 UE4 에서도 동일한 방식으로 작동하도록 만들 수 있습니다.
+UE4 는 센티미터를 기본 측정단위로 사용하므로 3Ds Max 에서도 동일한 단위를 사용하는지 확인해 줘야 하며, 변경하는 방법은 다음과 같습니다.
+
+1. 먼저 3Ds Max 2015 를 열고 로드되면 메인 툴바에서 **Customize** > **Unit Setup** 을 선택합니다.
+1. 다음 **System Unit Setup** 을 클릭한 다음 Inches 에서 **Centimeters** 로 변경한 뒤 **OK** 버튼을 누릅니다.
+1. 마지막으로 **Display Unit Scale** 을 **Generic Units** 으로 변경한 다음 **OK** 버튼을 누릅니다.
+
+	[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:width]
+	640
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	360
+	[/PARAMLITERAL]
+	[PARAMLITERAL:videoid]
+	lZ6d6Q902qw
+	[/PARAMLITERAL]
+	[/OBJECT]
+
+[region:note]
+이 단계는 매우 중요하므로 건너뛰시면 **안됩니다**. 이 단계를 건너뛰면 UE4 와 3Ds Max 의 단위가 달라 콘텐츠 임포트시 렌더링 오류가 생길 수 있습니다.
+[/region]
+
+## 툴 선택
+버텍스 애니메이션 3Ds Max 스크립트는 버텍스 애니메이션 데이터 저장을 위한 메소드를 두 가지 제공합니다.
+하나는 버텍스 위치를 2D 텍스처에 저장하는 반면, 다른 하나는 메시의 UV 에 버텍스 위치 데이터를 저장합니다.
+두 메소드 구성 및 사용법 링크는 아래에서 찾을 수 있습니다.
+
+[**키 프레이밍 메소드**](Engine\Animation\Tools\VertexAnimationTool\VAT_KF_Meshes) - 다른 3D 패키지에서 익스포트한 뒤 3Ds Max 로 임포트할 수 있는 개별 키 프레임을 사용하는 메소드입니다. 그 정보는 메시의 UV 에 저장됩니다.
+
+[**애니메이션 타임라인 메소드**](Engine\Animation\Tools\VertexAnimationTool\VAT_TL_Meshes) - 3Ds Max 애니메이션 타임라인을 사용하여 그 결과를 2D 텍스처에 인코딩하는 메소드입니다.
+
+ 
+## 팁 & 정보
+이 기법을 최대한 활용하기 위한 팁과 정보가 몇 가지 있는데, 아래와 같습니다.
+
+### 애니메이션 재생 속도 높이기
+애니메이션 재생 속도가 너무 느리다면, **TimeWithSpeedVariable** 머티리얼 함수를 사용하여 재생 속도를 높이면 됩니다.
+그 방법은 **TimeWithSpeedVariable** 출력을 **MS_SequencePainter_SequenceFlibook** 머티리얼 함수를 사용하는 경우 **0-1 Animation** 입력에 연결하기만 하면 됩니다.
+**MS_VertexAnimationTools_MorphTargets** 머티리얼 함수를 사용한다면 **TimeWithSpeedVariable** 출력을 **Morph Animations** 입력에 연결하면 됩니다.
+
+![](VAT_SP_Speed_Up_Time.png)
+
+### 다중 애니메이티드 메시
+한 번에 여러 개의 애니메이티드 메시를 선택하면 스크립트는 그 데이터 전부를 하나의 메시와 한 세트의 텍스처로 구워줍니다.
+여러가지 파트로 이루어진 캐릭터 작업시 매우 유용한 기능인데요.
+평소처럼 사용하고자 하는 파트를 선택한 다음 스크립트를 실행해 주기만 하면 됩니다.
+그러면 스크립트가 선택한 조각들을 합쳐 필수 2D 텍스처와 함께 메시를 새로 생성해 줍니다.
+
+### 프레임 스킵
+스크립트의 **Vertex Animation Tools** 섹션 아래 **Frame Skip** 옵션을 사용하면 특정 프레임을 건너뛸 수 있습니다.
+원본 애니메이션의 모양과 느낌을 유지하면서도 최종 텍스처 크기를 줄일 수 있는 매우 유용한 옵션입니다.
+
+![](VAT_Frame_Skip.png)
+
+아래 비디오에서 프레임 스킵 옵션의 실전 적용 예제를 확인할 수 있습니다.
+Original 이라 적힌 처음 차주전자를 보면, 전체 프레임 범위의 애니메이션이 보입니다.
+2 라고 적힌 다음 차주전자를 보면, 짝수 프레임을 건너뛴 애니메이션이 보입니다.
+마지막 예제에서 볼 수 있듯이, 10 프레임을 건너뛴대도 모양과 느낌이 그대로 유지됩니다.
+
+[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:width]
+	640
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	360
+	[/PARAMLITERAL]
+	[PARAMLITERAL:videoid]
+	ZhOdykiJnEs
+	[/PARAMLITERAL]
+[/OBJECT]
+
+|메시 이름 /번호| 텍스처 크기 | 메모리 절약 |
+|-----------------|--------------|---------------|
+|Original        |175 KB          |N/A           |
+|2               |59 KB           |116 KB        |
+|5               |30 KB           |145 KB        |
+|10              |21 KB           |154 KB        |
+
+
+## 기술적 정보
+버텍스 애니메이션 스크립트 작동방식에 대한 기술적인 정보입니다.
+참고로 이 부분은 스크립트를 변경하기 위해 그 작동 원리를 더욱 자세히 알고자 하는 분들을 위한 것입니다.
+
+또한 스크립트의 텍스처는 가장 가까운 메소드를 사용해서 샘플링해야 합니다.
+
+### 한계
+버텍스 위치 모프 타겟 정보는 16 비트 부호화 부동 소수점 파일 포맷으로 저장됩니다.
+32 비트 이미지면 정밀도가 조금 더 높겠지만, 대부분의 FX 작업에는 16 으로 충분할 것입니다.
+말이 나온 김에, 오프셋 버텍스 위치는 원래 놓이는 위치에서 멀리 이동할 수록 정밀도가 떨어질 것입니다.
+
+### 메모리 사용량
+버텍스당 각 프레임에 쓰이는 메모리 양은 다음과 같습니다:
+
+* 버텍스 오프셋 텍스처: 프레임당 버텍스마다 8 바이트 (각 픽셀)
+* 노멀 텍스처: 프레임당 버텍스마다 4 바이트 (각 픽셀)
+
+
+
+

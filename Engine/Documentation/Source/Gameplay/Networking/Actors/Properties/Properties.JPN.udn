@@ -1,0 +1,45 @@
+﻿INTSourceChangelist:2752308
+Availability:Public
+Title:プロパティのレプリケーション
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking, Gameplay/Networking/Actors
+Description:Actor プロパティをレプリケートする方法
+Related:Gameplay/Networking/Actors/Properties/ObjectReferences
+Related:Gameplay/Networking/Actors/Properties/Conditions
+Related:Gameplay/Networking/Actors/RPCs
+Version:4.9
+
+
+
+
+それぞれのアクタはプロパティのリストを保持して、クライアントへレプリケートするプロパティをマーク付けすることができます。変数の値がサーバー側で変更するたびに、サーバーはクライアントに更新値を送信します。変数はクライアント側でも変更されている場合がありますが、その場合は新しい値で上書きされます。プロパティ更新はサーバーのみが送信します。クライアントがプロパティ更新をサーバー側へ送信することは絶対にありません。
+
+いくつかのプロパティはデフォルトでレプリケートします (Location、Rotation、Owner など)これらのプロパティは基本的なマルチプレイヤーゲームを機能させるために、一般的にフレームワークが依存するプロパティです。必要に応じてレプリケートする追加のプロパティをマークすることができます。
+
+アクタのプロパティのレプリケーションはとても安定しています。つまりクライアントバージョンのアクタプロパティは、最終的にサーバー側の値を反映します。しかし個々のプロパティ値の一部の変更はスキップされる可能性もあります。
+
+## レプリケーション用のプロパティを設定
+
+プロパティのレプリケーションにはいくつかの設定が必要です。
+プロパティを定義したアクタクラスのヘッダに、 UPROPERTY 宣言へのパラメータの 1 つとして e `replicated` キーワードがあることを確認してください。
+
+	class ENGINE_API AActor : public UObject
+	{
+		UPROPERTY( replicated )
+		AActor * Owner;
+	};
+
+アクタクラスを実装する際に、 GetLifetimeReplicatedProps 関数を実装しなくてはいけません：
+
+	void AActor::GetLifetimeReplicatedProps( TArray< FLifetimeProperty > & OutLifetimeProps ) const
+	{
+		DOREPLIFETIME( AActor, Owner );
+	}
+
+アクタのコンストラクタで bReplicates フラグを true に設定していることを確認してください：
+
+	AActor::AActor( const class FPostConstructInitializeProperties & PCIP ) :Super( PCIP )
+	{ 
+		bReplicates = true;
+	}
+
+プロパティのレプリケーションは以上です。メンバ変数 `Owner` は、現時点でインスタンス化されているこのアクタ型のすべてのコピーを接続先クライアントすべてに同期します (この場合は基底アクタ クラス)。

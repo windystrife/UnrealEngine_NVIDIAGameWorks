@@ -1,0 +1,82 @@
+﻿INTSourceChangelist:3356804
+Availability: Public
+Title: BuildGraph
+Crumbs: %ROOT%, Programming, Programming/Development
+Description: BuildGraph 스크립트 시스템을 사용하여 Installed Build 를 커스터마이징하는 방법입니다.
+Version: 4.13
+type:landing
+parent:Programming/Development
+tags:Programming
+tags:BuildGraph
+topic-image:buildgraph_topic.png
+related:Programming/UnrealBuildSystem
+
+**BuildGraph** 는 스크립트 기반 빌드 자동화 시스템으로, 언리얼 엔진 4 (UE4) 프로젝트에 공통인 구성 요소 그래프를 특징으로 합니다.
+BuildGraph 는 UnrealBuildTool, AutomationTool, 에디터와 통합되어 있으며, 확장을 통해 프로젝트에 맞게 커스터마이징할 수 있습니다.
+
+BuildGraph 스크립트는 XML 로 작성하며, 사용자 지정 노드 그래프를 그 사이 종속성으로 지정하는 식입니다.
+각 노드는 (이 프로젝트를 컴파일해라, 그 다음 쿠킹하고, 이 테스트 실행하고 등) 어떤 아웃풋을 내기 위해 
+시퀀스로 실행되는 태스크로 이루어집니다. 한 대상 (즉 노드나 네임드 아웃풋) 빌드 요청을 받으면 BuildGraph 는 
+그를 위해 필요한 그래프 내 모든 노드를 실행합니다.
+
+다른 빌드 툴과 달리 BuildGraph 는 makefile 같은 스크립트 언어와 빌드 팜 환경설정 스크립트 중간의 하이브리드로 
+디자인되어 있습니다. 각 단계 실행 대상이 되는 머신 유형에 대한 주석이 가능하여, 한 단계가 실패한 경우 
+실패 알림 수신 목록을 제공할 수 있고, 사용자가 명시적으로 발동한 이후에만 실행시켜야 하는 노드를 그룹으로 
+묶을 수도 있습니다. 태스크 실행에서의 아웃풋 파일 생성을 트래킹하여 그래프 실행이 머신 팜에 고루 분배될 수 있도록 
+(그래서 가급적 노드가 병렬 실행되도록), 그리고 네트워크를 통해 주고 받는 중간 부작용도 자동 공유되도록 
+할 수 있습니다.
+
+에픽에서는 BuildGraph 를 사용하여 UE4 바이너리 릴리즈를 준비하고, 마켓플레이스의 샘플을 패키징하고, (다른 것 보다도) 자체 게임에 
+쓰이는 파이프라인을 구현합니다. `[UE4Root]/Engine/Build/Graph/Examples` 디렉토리에 예제 BuildGraph 스크립트가 
+여럿 제공되어 있으며, UE4 바이너리 배포 버전 제작을 위한 스크립트는 
+`[UE4Root]/Engine/Build/InstalledEngineBuild.xml` 에 있습니다.
+
+Visual Studio 로 스크립트를 열면 `[UE4Root]Engine/Build/Graph/Schema.xsd` 에 위치한 스키마를 사용하여 
+편집 도중 리치 툴팁, 검증(validation), Intellisense 기능을 제공합니다.
+
+## BuildGraph 스크립트 작성
+
+별도의 **BuildGraph** 스크립트 작성 방법을 배우기 위해서는, 그래프 제작에 들어가는 여러 부분을 알아두면 좋습니다.
+그래프 제작은 다음과 같은 엘리먼트로 이루어집니다:
+
+* Tasks: 태스크 - 빌드 프로세스의 일부로 실행되는 동작입니다 (컴파일, 쿠킹 등).
+* Nodes: 노드 - 아웃풋을 만들기 위해 실행되는, 순서대로 실행되는 태스크의 네임드 시퀀스입니다. 다른 노드에서 태스크를 먼저 실행해야 
+이 노드 실행이 가능한 경우도 있습니다.
+* Agents: 에이전트 - (빌드 시스템의 일부로 실행되는 경우) 같은 머신에서 실행되는 노드 그룹입니다. 로컬 빌드시 에이전트는 
+효과가 없습니다.
+* Triggers: 트리거 - 수동 개입 이후에만 실행되어야 하는 그룹에 대한 컨테이너입니다.
+* Aggregates: 어그리게이트 - 하나의 이름으로 레퍼런싱 가능한 노드 및 네임드 아웃풋 그룹입니다.
+
+스크립트는 보통 재사용 가능하거나 조건에 따라 정의되는 값에 대해 프로퍼티를 자주 사용합니다. 프로퍼티는 
+`<Property>` 엘리먼트로 선언되며, 첫 선언 지점까지 영역이 지정됩니다. `$(Property Name)` 기호로 레퍼런싱된 
+프로퍼티는 모든 어트리뷰트 스트링에서 유효하며, 스크립트가 읽힐 때 확장됩니다. 사용자가 명령줄에서 
+제공할 수 있는 프로퍼티는 `<Option>` 엘리먼트로 선언 가능하며, 환경 변수는 `<EnvVar>` 엘리먼트를 사용하여 
+프로퍼티에 임포트할 수 있습니다.
+
+어떤 엘리먼트든 "If" 어트리뷰트를 통해 조건절로 정의할 수 있습니다. 조건 표현식 문법은 아래를 참고하세요.
+
+BuildGraph 는 전형적으로 패키지 게임에 사용되므로, 필터링이나 파일 조작이 자체 지원됩니다. 파일 목록을 
+받는 어트리뷰트는 (어느 위치에서든 "...", "*", "?" 패턴을 몇이든 사용하여 일치시킬 수 있는) 퍼포스 스타일 와일드카드, 
+전체 경로명, 태그를 붙인 파일 콜렉션으로의 레퍼런스 등으로 구성 가능합니다. 어트리뷰트는 `#` 글자를 앞에 붙여서 
+나타냅니다. `<Tag>` 태스크를 사용하면 태그 셋에 파일을 추가시킬 수 있으며, 이를 통해 일치/차이 스타일 연산이 가능하기도 
+합니다. 각 노드는 네임드 태그 목록 형태로 다수의 아웃풋을 선언할 수 있는데, 나중에 다른 노드가 이에 종속될 수 있습니다.
+
+그래프는 빌드 시스템의 일부로 병렬 실행시킬 수 있습니다. 그러기 위하여, `-Export=<Filename>` 인수를 붙여 실행시켜 
+초기 그래프 환경설정을 생성합니다 (실행하려는 노드와 종속성이 나열된 JSON 파일을 만듭니다). 참여하는 
+에이전트 각각은 동일한 ChangeList 에 동기화되어 있으야 하며, AutomationTool (UAT) 은 적합한 `-SingleNode=<Name>` 인수를 붙여 
+다시 실행시켜야 합니다. 여러 노드들의 아웃풋은 (보통 네트워크) 공유 스토리지를 통해 에이전트끼리 전송되며, 
+그 대상 경로는 명령줄에서 `-SharedStorageDir=<Path>` 인수로 지정할 수 있습니다. 참고로 
+머신 할당( 및 다수 머신 사이의 합동)은 외부 시스템에서 관리할 것으로 기대합니다.
+
+BuildGraph 구성을 정의하는 데 사용하는 엘리먼트 문법은 다음 부분에 나열되어 있습니다.
+
+## BuildGraph 스크립트 참고서
+
+[DIR(output:"listbutton" parent:"Programming/Development/BuildGraph" org:"flat" type:"reference")]
+
+## BuildGraph 사용법
+
+[REGION:topics third]
+%Programming/Development/BuildGraph/Usage:topiccompact%
+%Programming/Development/InstalledBuildReference:topiccompact%
+[/REGION]

@@ -1,0 +1,127 @@
+Availability: Public
+Title: IWYU Reference Guide
+Crumbs:
+Description:An overview of the updated codebase for UE4, which uses an Include-What-You-Use (IWYU) dependency model.
+version: 4.15
+parent:Programming/UnrealBuildSystem
+type:Overview
+level:advanced
+tags:Programming
+tags:Unreal Build System
+related:Programming/UnrealBuildSystem
+prereq:Programming/Development
+prereq:Programming
+topic-image:topic_IWYU.png
+
+[TOC(start:1 end:4)]
+
+![](IWYU.png)
+
+Include-What-You-Use (**IWYU**), as the name implies, means that the Engine's source code only includes the dependencies that it needs to compile. The purpose of IWYU is to avoid including 
+monolithic header files, such as `Engine.h` or `UnrealEd.h`, thereby mitigating superfluous dependencies. The following reference guide tells you what it means to IWYU, including a 
+high-level explanation of how to enable IWYU, ensuring that your project adheres to IWYU conventions. Additionally, if you opt into using IWYU mode for your game project(s), you will learn 
+some general tips that will help you get the most out of working in IWYU mode. 
+
+[REGION:note]
+
+IWYU mode is disabled by default for games and game plugins; however, IWYU mode is enabled by default for the Engine and Engine plugins. 
+
+[/REGION]
+
+## What it Means to IWYU
+
+In previous versions of Unreal Engine 4 (UE4), the majority of engine functionality was included via large, module-centric header files, such as `Engine.h` and `UnrealEd.h` and fast compile times 
+were dependent on those files being compiled quickly through Precompiled Header (PCH) files. As the engine grew, this became a bottleneck. 
+
+With IWYU, every file includes only what it needs, and any PCH file we choose to use, purely acts as a layer of optimization on top of the underlying source files. They can be modified to minimize build times, 
+independently of changing the source files themselves, and without affecting whether the code compiles successfully or not. 
+
+When writing IWYU code, there are four specific conventions that we adopt: 
+
+1.	**All header files include their required dependencies.**
+1.	**\*.cpp files include their matching \*.h files first.**
+1.	**PCH files are no longer explicitly included.**
+1.	**Monolithic header files are no longer included.**
+
+###IWYU Conventions
+
+The following descriptions of IWYU conventions should give you a good idea about what it means to IWYU.
+
+1.	**All header files include their required dependencies.**
+	
+	*	There is a **CoreMinimal** header file containing a set of ubiquitous types (including FString, FName, TArray, etc.) from UE4's Core programming environment. 
+	
+	*	The `CoreMinimal` header file (located under the UE4 root directory at `\Engine\Source\Runtime\Core\Public\CoreMinimal.h`) is included first by most of the Engine's header files.
+
+	![](CoreMinimalHeader.png)
+
+	*	Within the `Core` module, most header files include the `CoreTypes.h` header file first. This only includes typedefs for primitive C++ types, UE4 build macros, and directives to configure the compile environment.
+
+	[REGION:tip]
+	The main takeaway is that every header file now includes everything that it needs to compile.
+	[/REGION]
+
+1.	**\*.cpp files include their matching \*.h file first.**
+
+	![](CPPFileIncludingHeader.png)
+
+	*	To verify that all of your source files include all of their required dependencies, compile your game project in non-unity mode with PCH files disabled.
+
+1.	**PCH files are no longer explicitly included.**
+
+	*	Although PCH files are still used, they're force-included on the compiler command line by UnrealBuildTool (UBT).
+
+1.	**Monolithic header files are no longer included.**
+
+	*	The compiler will emit a warning if your Engine code includes monolithic header files (such as `Engine.h` or `UnrealEd.h`).
+
+	[REGION:note]
+	Monolithic header files still exist in UE4 for compatibility with game projects, and (by default) a warning won't be emitted if your game projects include them.
+	[/REGION]
+
+##Enabling IWYU
+
+Prior to establishing IWYU conventions with the release of version 4.15, UE4 code typically included a PCH file at the top of every CPP file, which is contrary to what a developer 
+wants their IWYU compliant code to include. With the newly-established IWYU conventions, PCH files can be thought of as layers of compile-time optizations that are applied separately from 
+how the code was originally authored. So, rather than composing and including PCH files, we leave it to UBT to decide which PCH file to use (if any).
+
+If you want to enable IWYU mode, ensuring that a module complies with IWYU conventions, open the module's \*.build.cs file and set `PCHUsage` to `PCHUsageMode.UseExplicitOrSharedPCHs`. 
+
+![](ExamplePlugin_PCHUsage.png)
+
+Setting `PCHUsage` to `PCHUsageMode.UseExplicitOrSharedPCHs` creates an explicit PCH file for a module only if it has a `PrivatePCHHeaderFile` setting in the  module's \*.build.cs file. 
+Otherwise, the module will share a PCH with another module, saving the tool from generating more PCH files than necessary. Also, keep in mind that when you enable `UseExplicitOrSharedPCHs` 
+mode, the source file must include its matching header file. Alternatively, if you want a module to opt-out of complying with IWYU conventions, you can set `PCHUsage` to `PCHUsageMode.UseSharedPCHs`.
+
+![](ExamplePlugin_UseSharedPCHs.png)
+
+[REGION:note]
+
+After converting the engine's code base to an IWYU model, we've observed significant improvements with UE4 compile times. 
+
+[/REGION]
+
+###Running in IWYU Mode
+
+If you're running your game in IWYU mode, you'll need to ensure that your \*.cpp file(s) include their corresponding \*.h file(s) first. This is a useful practice, because it enables the compiler to 
+ensure that the \*.h file includes all of its required dependencies (when PCH files and unity builds are disabled). Unreal Build Tool (UBT) will emit a warning if you don't include the matching header file first 
+(for its corresponding CPP file). 
+
+If you want to disable the compiler from emitting warnings, you can set `bEnforceIWYU` to `false` in the module's \*.build.cs file.
+
+![](ModuleBuildCS_bEnforceIWYUfalse.png)
+
+[REGION:tip]
+
+If you want to disable the warning for an entire target, you can set `bEnforceIWYU` to false in the \*.target.cs file.
+
+[/REGION]
+
+## General Tips
+
+If you want your game to opt-in to IWYU, there are a few tips to keep in mind:
+
+1.	Include `CoreMinimal.h` at the top of each header file.
+1.	To verify that all of your source files include all of their required dependencies, compile your game project in non-unity mode with PCH files disabled.
+1.	If you need to access **UEngine** or **GEngine**, which are defined in `Runtime\Engine\Classes\Engine\Engine.h`, you can `#include Engine/Engine.h` (distinguishing from the monolithic header file, which is located at `Runtime\Engine\Public\Engine.h`).
+1.	If you use a class that the compiler doesn't recognize, and don't know what you need to include may be missing the header file. This is especially the case if you are converting from non-IWYU code that compiled correctly. You can look up the class in the [API Documentation](API), and find the necessary modules and header files at the bottom of the page.

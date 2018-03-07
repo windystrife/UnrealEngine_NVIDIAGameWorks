@@ -1,0 +1,140 @@
+﻿INTSourceChangelist:3108692
+Availability: Public
+Title:콜리전 개요
+Crumbs: %ROOT%, Engine, Engine/Physics
+Description:언리얼 엔진 4 의 콜리전 및 콜리전 반응 작동법 개요입니다.
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Physics/Collision:title%](physics_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%\rendering_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Physics/Collision:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Physics/Collision:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Physics/Collision]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[TOC(start:2 end:3)]
+
+**Collision Responses** (콜리전 반응) 및 **Trace Responses** (트레이스 반응)은 언리얼 엔진 4 에서 콜리전 (충돌) 및 레이 캐스팅 (광선 투사) 실시간 처리를 위한 바탕을 이룹니다. 충돌 가능한 모든 오브젝트는 **Object Type** (오브젝트 유형)과 일련의 반응들을 통해 다른 모든 오브젝트 유형과 어떻게 상호작용하는지를 정의합니다. 콜리전(충돌) 또는 오버랩(겹침) 이벤트가 발생하면, 그에 관련된 양쪽 (또는 모든) 오브젝트는 서로 막을지, 겹칠지, 아니면 무시할지 영향을 주고받도록 설정할 수 있습니다.
+
+트레이스 반응 작동방식도 기본적으로 같으나, 한 가지 차이라면 트레이스 (레이 캐스트) 자체를 하나의 트레이스 반응 유형으로 설정하여, 액터가 그 트레이스 반응에 따라 트레이스를 막거나 무시하도록 할 수 있습니다.
+
+## 상호작용
+
+콜리전 처리 방식에 있어 유념해야 할 규칙이 몇 가지 있습니다:
+
+* **Blocking** (막음)은 Block (막음)으로 설정된 두 (또는 그 이상의) 액터 사이에 자연적으로 발생합니다. 하지만 **Simulation Generates Hit Events** (시뮬레이션에서 히트 이벤트 생성) 옵션을 켜 줘야 **Event Hit** 를 실행할 수 있는데, 이는 블루프린트, 디스트럭터블 액터, 트리거 등에서 사용됩니다.
+* 액터를 **Overlap** (겹침)으로 설정하면 마치 서로 **Ignore** (무시)하는 것처럼 보이며, 실제로 **Generate Overlap Events** (오버랩 이벤트 생성) 옵션이 없으면 기본적으로 같습니다.
+* 둘 이상의 시뮬레이션 오브젝트가 서로를 막도록 하려면, 그 각각의 유형에 대해 막음 설정되어 있어야 합니다.
+* 둘 이상의 시뮬레이션 오브젝트에 대해, 하나가 오브젝트 겹침 설정되어 있고, 두 번째 오브젝트가 다른 것을 막음 설정되어 있는 경우, 겹침은 발생하나 막음은 발생하지 않습니다.
+* 오버랩 이벤트는 한 오브젝트가 다른 것을 **막는** 경우에도 발생 가능한데, 특히나 고속 이동인 경우 좋습니다.
+	* 한 오브젝트가 충돌 및 겹침 이벤트 둘 다 갖는 것은 좋지 않습니다. 가능은 하지만, 수동 처리가 필요한 부분이 많습니다.
+* 한 오브젝트가 무시 설정되어 있고, 다른 것은 겹침 설정된 경우, 겹침 이벤트는 발생하지 않습니다.
+<!--* The **Object Responses** listed are just the defaults and have no actual bearing on what an object _is_. See below for more information on setting up custom [Object Types and Trace Channels](#customobjectchannelsandtracechannels).-->
+
+레벨 테스트나 월드를 둘러보기 위한 목적으로는:
+
+* 기본 **에디터에서 플레이** 카메라는 폰입니다. 그래서 폰을 막는 것으로 설정된 것이면 막힙니다.
+* **에디터에서 시뮬레이트** 카메라는, 빙의하기 전이면 폰은 **아닙니다**. 자유롭게 모든 것을 뚫고 들어갈 수 있으며, 충돌이나 겹침 이벤트가 생성되지 않습니다.
+
+
+## 흔히 쓰이는 콜리전 상호작용 예제
+
+[REGION:note]
+이 상호작용은 모든 오브젝트에 **Collision Enabled** (충돌 활성화)되어 모든 것에 완전히 충돌하도록 설정되어 있다 가정합니다. 충돌이 비활성화되어 있으면, 모든 **콜리전 반응** 에 **무시** 설정된 것과 같습니다.
+[/REGION]
+
+다음 섹션에서 무슨 일이 벌어지는 지 설명하기 위해 사용된 구성은 다음과 같습니다:
+
+![](COL_setup.png)(w:940 convert:false)
+
+구체는 **PhysicsBody** 이며, 박스는 **WorldDynamic** 이고, 그 콜리전 세팅을 변경함으로써 여러가지 작동방식을 얻을 수 있습니다.
+
+### 콜리전
+
+[VAR:spacer]![](%ROOT%/spacer.png)[/VAR]
+
+두 콜리전 세팅을 서로 막는 것으로 설정하면 콜리전을 얻을 수 있으니, 오브젝트끼리의 상호작용을 위해 좋습니다.
+
+![](COL_collideNoEvent.png)(w:940 convert:false)
+
+| 구체 콜리전 구성 | 벽 콜리전 구성 |
+| --- | ---- |
+| ![](COL_collideNoEvent_Sphere.png)(convert:false) |![](COL_collideNoEvent_Box.png)(convert:false) |
+| 이 경우 구체는 **PhysicsBody** 이며 **WorldDynamic** (, 즉 벽) 'block' (막음) 설정되어 있습니다. | 벽은 **WorldDynamic** 이며, **PhysicsBody** 액터 (, 즉 구체) 'block' (막음) 설정되어 있습니다. |
+
+이 경우 구체와 벽은 단순히 충돌만 할 뿐, 더 이상의 충돌 알림 같은 것은 일어나지 않습니다.
+
+### 콜리전 및 시뮬레이션시 히트 이벤트 생성
+
+콜리전만으로 유용하며 일반적으로 물리 상호작용의 최소 요구조건이기는 하나, 블루프린트나 코드가 발동될 수 있도록 무언가 충돌 사실을 **보고** 하도록 하려면:
+
+![](COL_collideEvent.png)(w:940 convert:false)
+
+| 구체 콜리전 구성 | 벽 콜리전 구성 |
+| --- | ---- |
+| ![](COL_collideEvent_Sphere.png)(convert:false)|![](COL_collideNoEvent_Box.png)(convert:false)|
+| 위 예제에서, 구체는 **PhysicsBody** 이며 **WorldDynamic** (, 즉 벽) 막음 설정되어 있습니다. 하지만 구체에는 **Simulation Generates Hit Events** (시뮬레이션시 히트 이벤트 생성) 옵션도 켜 줘서 무언가와 충돌할 때마다 자체적으로 이벤트를 발동시킬 수 있도록 했습니다. | 벽은 **WorldDynamic** 이며 **PhysicsBody** 액터(, 즉 구체) 막음 설정되어 있습니다. 벽은 **Simulation Generates Hit Events** 설정되어 있지 않으니, 별도로 이벤트를 생성하지 않습니다. |
+
+구체에 **Simulation Generates Hit Events** 가 설정되었으니, 구체는 충돌이 있을 때 자신에게 알립니다. 그러면 구체의 블루프린트에 있는 **ReceiveHit** 나 **OnComponentHit** 같은 이벤트를 발동시킵니다. 벽에는 충돌 이벤트가 있어도 발생 여부를 스스로에게 알리지 않기에 발동되지 않습니다.
+
+나아가 리짓 콜리전을 보고하는 오브젝트는 전부 보고하므로 무언가에 그냥 닿아있으면 스팸이 발생하므로, 블루프린트나 코드에서 충돌 대상 필터링에 주의를 기울이는 것이 좋습니다.
+
+### 겹침, 무시
+
+어떤 의도와 목적이든 간에, **Generate Overlap Events** (오버랩 이벤트 생성) 옵션이 꺼졌다면 **Overlap** (겹침)과 **Ignore** (무시)는 똑같습니다. 이 경우, 구체는 박스를 겹침 또는 무시로 설정되어 있습니다:
+
+![](COL_ignore.png)(w:940 convert:false)
+
+
+
+
+| 구체 콜리전 구성 | 벽 콜리전 구성 |
+| --- | ---- |
+| ![](COL_OverlapNoEvent_Sphere.png)(convert:false) |![](COL_collideNoEvent_Box.png)(convert:false) |
+| 여기서 구체는 **WorldDynamic** 액터(, 즉 벽) 겹침 설정되어 있지만 **Generate Overlap Events** 옵션이 켜져있지는 않습니다. 구체에 한해서라면, 어느 것에도 충돌이나 겹치지 않으니, 사실상 벽을 무시합니다. | 벽은 **WorldDynamic** 이고 **PhysicsBody** 액터(, 즉 구체) 막음 설정되어 있습니다. 위에서 언급했듯이, 두 액터 모두 각자 오브젝트 유형에 대해 막음 설정되어 있어야 합니다. 그렇지 않으면 충돌하지 않습니다. |
+
+또는:
+
+| 구체 콜리전 구성 | 벽 콜리전 구성 |
+| --- | ---- |
+| ![](COL_ignore_sphere.png)(convert:false) |![](COL_collideNoEvent_Box.png)(convert:false) |
+| 여기서 구체는 **WorldDynamic** 액터(, 즉 벽) 무시 설정되어 있어, 벽을 통과해 지나갑니다. | 벽은 **WorldDynamic** 이며, **PhysicsBody** 액터(, 즉 구체) 막음 설정되어 있습니다. 위에서 언급했듯이, 두 액터 모두 각자의 오브젝트 유형을 막음 설정되어 있어야 합니다. 그렇지 않으면 충돌하지 않습니다. |
+
+
+
+### 겹침 및 오버랩 이벤트 생성
+
+매 프레임 발동 가능한 콜리전과는 달리, 오버랩 이벤트는 **ReceiveBeginOverlap** (겹침 시작 수신) **ReceiveEndOverlap** (겹침 끝 수신)으로 나뉘어 있어서, 각각의 경우에만 발동합니다.
+
+[REGION:note]
+오버랩 발생을 위해서는, 양쪽 액터 모두 **Generate Overlap Events** (오버랩 이벤트 생성) 옵션이 켜져있어야 합니다. 이는 퍼포먼스 때문입니다. 구체와 박스 양쪽에 오버랩을 원하는 경우에서 구체나 박스 중 하나를 움직이면, 오버랩 쿼리를 하여 이벤트 발동이 필요한지 알아봅니다.
+
+박스가 오버랩을 원하지 않는 경우 이동시 오버랩 쿼리를 하지 않습니다. 하지만 이제 구체와는 겹칠 수 있으므로, 구체도 틱을 하고 매 프레임 오버랩 검사를 해야 누군가 들어섰는지를 확인할 수 있습니다.
+[/REGION]
+
+![](COL_overlapEvent.png)(w:940 convert:false)
+
+| 구체 콜리전 구성 | 벽 콜리전 구성 |
+| --- | ---- |
+| ![](COL_OverlapEvent_Sphere.png)(convert:false) | ![](COL_collideOverLapEvent_Box.png)(convert:false) |
+| 여기서 구체는 **WorldDynamic** 액터(, 즉 벽) 겹침 설정되어 있어, 무언가에 겹치면 자체적으로 이벤트를 생성합니다. | 벽은 **WorldDynamic** 이며 **PhysicsBody** 액터(, 즉 구체) 막음 설정되어 있습니다. 위에서 언급했듯이, 두 액터 모두 각자의 오브젝트 유형을 막음 설정되어 있어야 합니다. 그렇지 않으면 충돌하지 않습니다. 하지만 여기서는 **Overlap** (겹침)은 발생하며, 구체와 박스에 그 이벤트가 발동됩니다. |
+
+ 
+
+
+
+
+
+

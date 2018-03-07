@@ -1,0 +1,154 @@
+﻿INTSourceChangelist:3413921
+Availability: Public
+Title:입력
+Crumbs:%ROOT%
+Description:Input 오브젝트는 플레이어로부터의 입력을 액터가 이해하고 활용할 수 있는 형태의 데이터로 변환하는 작업을 담당합니다.
+version: 4.15
+skilllevel:Beginner
+Parent:Engine/Gameplay
+order:
+type:overview
+tags:Input
+
+[TOC (start:2 end:4)]
+
+**PlayerInput** 오브젝트는 플레이어로부터 받은 입력을 PlyaerController 나 Pawn 같은 액터가 이해하고 활용할 수 있는 형태의 데이터로 변환하는 작업을 담당합니다. 
+이는 PlayerInput 매핑과 InputComponent 를 가지고 플레이어의 하드웨어 입력을 게임 이벤트와 동작으로 변환하는 입력 프로세스 흐름의 일부입니다.
+
+[REGION:note]
+**입력** 셋업 예제는, [](Gameplay\HowTo\SetUpInput) 문서를 참고하세요.
+[/REGION]
+
+## 하드웨어 입력
+플레이어로부터의 하드웨어 입력은 매우 단순합니다. 가장 흔하게는 키 입력, 마우스 클릭, 마우스 이동, 콘트롤러 버튼 입력이나 조이스틱 이동 등이 포함됩니다. 표준 축 또는 버튼 인덱스가 아니거나 일반적이지 않은 입력 범위를 갖는 특수 입력 디바이스의 경우, [](Gameplay\Input\RawInput) 으로 수동 설정할 수 있습니다.
+
+
+## PlayerInput
+[EXCERPT:PlayerInput]
+PlayerInput 은 PlayerController 클래스 안에서 플레이어 입력을 관리하는 UObject 이며, 클라이언트에서만 스폰됩니다.
+PlayerInput 안에는 구조체가 둘 정의됩니다. 먼저 FInputActionKeyMapping 으로 ActionMapping 을 정의합니다. 다른 하나는 FInputAxisKeyMapping 으로 AxisMapping 을 정의합니다.
+ActionMapping 과 AxisMapping 양쪽에 사용된 하드웨어 입력 정의는 InputCoreTypes 에 설정됩니다.
+
+[EXCERPT:ActionMapping]
+$ ActionMappings : 별개의 버튼이나 키 입력을 나중에 이벤트 주도형 동작에 바인딩되는 "친근한 이름" 으로 매핑시킵니다. 최종적 효과는 키, 마우스 버튼, 키패드 버튼을 누르(거나 떼)면 
+바로 일정한 게임 동작을 발동시키는 것입니다.
+[/EXCERPT:ActionMapping]
+
+[EXCERPT:AxisMapping]
+$ AxisMappings : 키보드, 콘트롤러, 마우스 입력을 나중에 이동과 같은 연속성 게임 동작에 바인딩되는 "친근한 이름"으로 매핑시킵니다. AxisMappings 에 매핑된 입력은 그 입력값이 현재 0 일지라도 
+연속적으로 폴링됩니다. 이로써 ActionMappings 의 입력으로 발동되는 비연속성 게임 이벤트보다는, 이동이나 기타 게임 동작의 부드러운 전환이 가능합니다.
+
+	[REGION:tip]
+	콘트롤러 조이스틱과 같은 하드웨어 축은, 1 (눌림)과 0 (눌리지 않음) 식의 끊어지는 입력 보다는 이어지는 입력을 제공합니다. 즉 조금씩 살살 또는 크게 많이 움직일 수 있으며, 
+	캐릭터의 이동도 그에 따라 달라질 수 있습니다. 이러한 입력 방법이 규모가 다른 이동 입력량을 내는 데 이상적이기는 하지만, AxisMappings 은 WASD 나 상하좌우 처럼 흔히 쓰이는 이동 키를 연속적으로 폴링되는 게임 동작에 매핑시킬 수 있습니다.
+	[/REGION:tip]
+[/EXCERPT:AxisMapping]
+
+### 입력 매핑 설정
+
+입력 매핑은 환경설정 파일에 저장되며, 프로젝트 세팅의 입력(Input) 섹션에서 편집 가능합니다.
+
+1. 레벨 에디터에서 **편집 > 프로젝트 세팅** 을 선택합니다.
+
+	![](ProjectSettingsMenu.png)
+
+1. 나타나는 **프로젝트 세팅** 탭에서 **입력** 을 클릭합니다.
+
+
+이 창에서 다음과 같은 작업이 가능합니다:
+	
+**(하드웨어) 축 입력의 프로퍼티 변경:**
+![](AxisConfig.png)
+
+**ActionMappings 추가 또는 편집:**
+![](ActionMappings.png)
+
+**AxisMappings 추가 또는 편집:**
+![](AxisMappings.png)
+[/EXCERPT:PlayerInput]
+
+## InputComponent
+InputComponent 는 필요에 따라 다른 액터나 레벨 스크립트에서 설정할 수도 있지만, 폰과 콘트롤러에서 가장 많이 볼 수 있습니다. InputComponent 는 프로젝트의 AxisMappings 와 ActionMappings 를 
+보통 C++ 나 블루프린트 그래프로 구성된 게임 액션에 연결시킵니다. 
+
+InputComponent 가 처리하는 입력에 대한 우선권 스택은 다음과 같습니다 (높은 우선권 먼저):
+
+1. "Accepts input" 활성화된 액터, 가장 최근에서부터 나중 활성화된 순.
+	[REGION:tip]
+	입력 처리에 있어 항상 특정 액터를 가장 처음 고려하도록 만들고 싶은 경우, "Accepts input" (입력 받음) 을 재활성화시키면 스택 최상단으로 올라갈 것입니다.
+	[/REGION:tip]
+1. 콘트롤러
+1. 레벨 스크립트
+1. 폰
+
+한 InputComponent 가 입력을 받으면, 이 스택 이하에서는 사용가능하지 않습니다.
+
+## 입력 처리 절차
+
+[REGION:raw]
+![](InputFlow.png)
+[/REGION]
+
+### 예제 - 전방 이동
+
+이 예제는 언리얼 엔진 4 에 제공된 1인칭(First Person) 템플릿에서 따온 것입니다.
+
+1. **플레이어로부터의 하드웨어 입력:** 플레이어가 **W** 키를 누릅니다.
+1. **PlayerInput 매핑:** AxisMapping 이 **W** 를 스케일이 1 인 "MoveForward" 로 변환합니다.
+		
+	![](AxisMappingW.png)
+
+1. **InputComponent 우선권 스택:** InputComponent 우선권 스택을 처리하다 보니, "MoveForward" 입력의 첫 바인딩이 AFirstPersonBaseCodeCharacter 클래스에 있습니다. 이 클래스가 현재 플레이어의 폰이므로, 그 InputComponent 는 마지막으로 검사합니다.
+
+		void AFirstPersonBaseCodeCharacter::SetupPlayerInputComponent(class UInputComponent* InputComponent)
+			{
+				// 게임플레이 키 바인딩 셋업
+				check(InputComponent);
+				...
+				InputComponent->BindAxis("MoveForward", this, &AFirstPersonBaseCodeCharacter::MoveForward);
+				...
+			} 
+
+	이 단계는 캐릭터의 이벤트 그래프에 InputAxis MoveForward 노드를 만드는 식으로 블루프린트를 통해서도 이뤄낼 수 있습니다. **W** 키가 눌리면 이 노드에 연결된 것이 실행될 것입니다.
+
+	![](InputMappingMoveForward.png)
+
+1. 	**게임 로직:** AFirstPersonBaseCodeCharacter 의 MoveForward 함수가 실행됩니다.
+
+		void AFirstPersonBaseCodeCharacter::MoveForward(float Value)
+			{
+				if ( (Controller != NULL) && (Value != 0.0f) )
+				{
+					// 전방 알아내기
+					FRotator Rotation = Controller->GetControlRotation();
+					// 걷기나 낙하시 핏치 제한
+					if ( CharacterMovement->IsMovingOnGround() || CharacterMovement->IsFalling() )
+					{
+						Rotation.Pitch = 0.0f;
+					}
+					// 해당 방향으로 이동 추가
+					const FVector Direction = FRotationMatrix(Rotation).GetScaledAxis(EAxis::X);
+					AddMovementInput(Direction, Value);
+				}
+			}
+	
+	블루프린트 구현: 
+
+	[REGION:fullwidth]
+	![](MoveForward_Blueprint.png)
+	[/REGION:fullwidth]
+
+## 터치 인터페이스
+
+기본적으로 터치 디바이스에서 실행되는 게임에는 (콘솔 콘트롤러와 비슷하게) 두 개의 가상 조이스틱이 있습니다. 이 부분은 **프로젝트 세팅** 의 **입력** 부분에서 바꿀 수 있으며,
+**Default Touch Interface** (디폴트 터치 인터페이스) 프로퍼티로 가능합니다. 이는 '터치 인터페이스 셋업' 애셋을 가리킵니다. 기본인 **DefaultVirtualJoysticks** 의 위치는 공유 엔진 콘텐츠 (`/Engine/MobileResources/HUD/DefaultVirtualJoysticks.DefaultVirtualJoysticks`) 에 있습니다.
+왼쪽 스틱만 있는 버전인 **LeftVirtualJoystickOnly** 도 있어, 카메라 회전이 필요없는 게임에 쓸 수 있습니다.
+
+![](VirtualJoysticksSettings.png)(w:800)
+
+참고로 오브젝트 선택기의 **뷰 옵션** 세팅에서 **엔진 콘텐츠 표시** 박스를 체크해 줘야 이 옵션이 보입니다.
+
+![](showenginecontent.png)
+
+가상 조이스틱이 필요치 않은 경우, 그냥 '디폴트 터치 인터페이스' 프로퍼티를 비우면 됩니다. 추가적으로 실행중인 플랫폼에 관계없이 터치 인터페이스를 강제로 사용하려는 경우, 
+**Always Show Touch Interface** (터치 인터페이스 항상 표시) 옵션을 체크하거나, PC 게임에 -faketouches 옵션을 붙여서 실행하면 됩니다.

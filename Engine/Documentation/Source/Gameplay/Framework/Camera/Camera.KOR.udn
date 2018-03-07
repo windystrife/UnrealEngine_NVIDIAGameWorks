@@ -1,0 +1,74 @@
+﻿INTSourceChangelist:3429254
+Availability:Public
+Title:카메라
+Crumbs:%ROOT%, Gameplay, Gameplay/Framework
+Description:Camera, 카메라는 플레이어의 시점, 플레이어가 월드를 보는 방식을 나타냅니다.
+Version: 4.9
+type:overview
+parent:Gameplay/Framework
+order:5
+tags:Gameplay Framework
+topic-image:Gameplay/Framework/camera_lander.png
+
+**Camera** (카메라)는 플레이어의 시점, 플레이어가 월드를 보는 방식을 나타냅니다. 그 이유로 
+카메라는 사람이 제어하는 플레이어에만 관련이 있습니다. **PlayerController** 는 카메라 클래스를 나타내며, 
+플레이어가 월드를 보는 위치와 방향을 계산하는 데 사용되는 **Camera** 액터를 
+인스턴싱합니다.
+
+[REGION:note]
+**카메라** 작업 방법 관련 기본 예제는 [](Gameplay\HowTo\UsingCameras) 문서를 참고하세요. [카메라 애님 기능](Gameplay/Framework/Camera/Animations) 을 사용하여 카메라에 애니메이션 레이어를 씌울 수도 있습니다.
+[/REGION]
+
+## CameraComponent 와 CameraActor
+
+카메라의 모든 프로퍼티와 작동방식은 CameraComponent 에 설정되어 있으며, CameraActor 클래스는 일차적으로 CameraComponent 를 감싸는(wrapper) 역할을 하여, 카메라를 다른 클래스 안에 놓지 않고도 
+레벨에 바로 놓을 수 있도록 하고 있습니다.
+
+CameraComponent 에서는 카메라의 모드를 원근 또는 직교로 할 것인지 설정 가능합니다. 원근 모드에 대해서는 세로 시야(FOV)를 설정할 수 있으며,
+직교 모드에 대해서는 월드 유닛 단위로 폭을 설정할 수 있습니다. 두 모드 공히 종횡비를 지정할 수 있으며, 흔한 디바이스나 디스플레이 유형에 대해 미리 설정된 종횡비가 제공됩니다.
+카메라에 [](Engine/Rendering\PostProcessEffects) 추가는 물론, 포스트 프로세스 이펙트의 세기에 스케일을 적용하는 것도 가능합니다.
+
+게임플레이 도중 보이지는 않아도 에디터에서의 시각적 배치를 돕기 위해 CameraComponent 에 추가되는 컴포넌트가 둘 있습니다. FrustumComponent 는 카메라 시야를 표시해 줍니다.
+이 부분은 기본적으로 표시되지는 않으며, **뷰포트** 에서 **Show > Advanced > Camera Frustums** (표시 > 고급 > 카메라 프러스텀)을 선택하면 켜집니다. StaticMeshComponent 는 카메라가 레벨의 어디에 놓였는지를 
+나타냅니다.
+
+
+## PlayerCameraManger
+
+PlayerCameraManager 클래스는 카메라 관리자입니다. 기본적으로 자체에 내장된 작동방식은, 대기중인 뷰 타겟과 콘솔 명령으로 트리거되는 디버그 카메라를 블렌딩하는 것입니다. 그 외의 경우 카메라의 시점과 
+기타 모든 카메라 세팅에 대해 무슨 작업을 할 것인지 질의합니다. 보통 PlayerCameraManager 서브클래스를 만들 필요까진 없고, 자동 규칙이 충분치 않아 뷰타겟 설정용 규칙을 추가해 주는 것 이상이 필요하다면 
+PlayerCameraManager 에 약간의 수정을 가할 필요가 있습니다.
+
+PlayerCameraManager 서브클래스를 만들 필요가 있고, 그 작업을 C++ 가 아닌 블루프린트로 하고 있다면, 커스텀 카메라 구현을 위한 함수로 `BlueprintUpdateCamera` 가 존재합니다. 
+이 함수 사용시 _True_ 를 반환하면 반환된 값을 사용하고, _False_ 를 반환하면 무시합니다.
+
+### ViewTarget
+
+PlayerCameraManager 에 정의되는 ViewTarget 구조체는 PlayerCameraManager 에 이상적인 시점(POV) 제공을 담당합니다. ViewTarget 에는 타겟 액터, (로컬에서 제어되지 않는 폰에 대한) 타겟 액터의 콘트롤러, 
+PlayerState 에 대한 정보가 들어있으며, 이는 같은 플레이어의 폰 전환이나 관람시의 다른 변경사항을 따라가는 데 사용됩니다. POV 프로퍼티를 통해 PlayerCameraManager 에 전달된 카메라 정보는 
+`FMinimalViewInfo` 구조체 형태로 되어 있습니다. 이 구조체에는 CameraComponent 에서의 기본적인 카메라 정보가 들어 있으며, 거기에는 위치, 로테이션, 투영 모드 (원근 또는 직교), FOV, 직교 폭, 종횡비, 
+포스트 프로세스 이펙트 등이 포함됩니다. PlayerCameraManager 에 이 값을 접근할 수 있도록 하면 카메라 관리 도중 
+두 카메라 모드의 블렌딩이 가능해 집니다.
+
+
+## 카메라 책임 체인
+
+ALocalPlayer 에 전달되어 렌더링, 씬 뷰, 기타 관련 시스템으로 끝나기 전, 다음의 클래스를 위에서 아래로 흘러가는 카메라 "책임 체인" 흐름 상의 어느 지점에서도 게임 전용 카메라 작동방식을 제공할 수 있습니다:
+
+### CameraComponent 
+
+ViewTarget 이 CameraActor 거나, CameraComponent 가 들어 있으면서 `bFindCameraComponentWhenViewTarget` 가 _True_ 로 설정된 Actor 인 경우, CameraComponent 는 카메라의 프로퍼티에 대한 정보를 제공합니다. 
+어느 폰에 대해서도 설정 가능한 관련 프로퍼티는 `bTakeCameraControlWhenPossessed` 로, 여기서 폰이 PlayerController 에 빙의될 때 자동으로 ViewTarget 이 됩니다.
+
+### Actor 또는 PlayerController
+
+PlayerController 와 Actor 공히 CalcCamera 함수가 들어 있습니다. `bFindCameraComponentWhenViewTarget` 가 _True_ 고 CameraComponent 가 존재하는 경우, Actor 의 CalcCamera 함수가 Actor 의 첫째 CameraComponent 의 카메라 시야를 반환합니다.
+그렇지 않은 경우, Actor 의 위치와 방향을 구합니다. PlayerController 에서 CalcCamera 함수는 이 두 번째 경유와 유사한 동작을 하여, 빙의된 폰이 존재하면 그 위치와 PlayerController 의 
+콘트롤 로테이션을 반환합니다.
+
+
+### PlayerCameraManager
+
+PlayerCameraManager 의 UpdateViewTarget 함수는 ViewTarget 에 질의하여 ViewTarget 의 시점(POV)를 반환합니다. 서브클래싱된 APlayerCameraManager 를 갖고서 CameraComponent 를 통해 보고 있지 않은 경우 
+BlueprintUpdateCamera 를 호출하는 함수이기도 합니다.
+

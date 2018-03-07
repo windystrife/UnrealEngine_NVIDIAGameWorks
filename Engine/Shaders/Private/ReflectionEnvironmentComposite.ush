@@ -1,0 +1,226 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	ReflectionEnvironmentComposite
+=============================================================================*/
+
+#if FEATURE_LEVEL >= FEATURE_LEVEL_SM5
+	/** Prenormalized capture of the scene that's closest to the object being rendered, used for reflection environment on translucency. */
+	TextureCubeArray ReflectionCubemap;
+	SamplerState ReflectionCubemapSampler;
+	int SingleCubemapArrayIndex;	
+#else
+	TextureCube ReflectionCubemap;
+	SamplerState ReflectionCubemapSampler;
+#endif  
+
+float4 SingleCaptureOffsetAndAverageBrightness;
+float4 SingleCapturePositionAndRadius; 
+float SingleCaptureBrightness;
+
+float3 CompositeReflectionCapturesAndSkylight(
+	float CompositeAlpha, 
+	float3 WorldPosition, 
+	float3 RayDirection, 
+	float Roughness, 
+	float IndirectIrradiance, 
+	float IndirectSpecularOcclusion,
+	float3 ExtraIndirectSpecular,
+	uint NumCapturesAffectingTile,
+	uint CaptureDataStartIndex, 
+	uint EyeIndex)
+{
+	float Mip = ComputeReflectionCaptureMipFromRoughness(Roughness, View.ReflectionCubemapMaxMip);
+	float4 ImageBasedReflections = float4(0, 0, 0, CompositeAlpha);
+	float2 CompositedAverageBrightness = float2(0.0f, 1.0f);
+
+#if REFLECTION_COMPOSITE_USE_BLENDED_REFLECTION_CAPTURES
+	// Accumulate reflections from captures affecting this tile, applying largest captures first so that the smallest ones display on top
+	LOOP
+	for (uint TileCaptureIndex = 0; TileCaptureIndex < NumCapturesAffectingTile; TileCaptureIndex++) 
+	{
+		BRANCH
+		if (ImageBasedReflections.a < 0.001)
+		{
+			break;
+		}
+
+		uint CaptureIndex = 0;
+		BRANCH
+		if (EyeIndex == 0)
+		{
+			CaptureIndex = CompositeTileReflectionCaptureIndices[CaptureDataStartIndex + TileCaptureIndex];
+		}
+		else
+		{
+			CaptureIndex = InstancedCompositeTileReflectionCaptureIndices[CaptureDataStartIndex + TileCaptureIndex];
+		}
+			
+		float4 CapturePositionAndRadius = ReflectionCapture.PositionAndRadius[CaptureIndex];
+		float4 CaptureProperties = ReflectionCapture.CaptureProperties[CaptureIndex];
+
+		float3 CaptureVector = WorldPosition - CapturePositionAndRadius.xyz;
+		float CaptureVectorLength = sqrt(dot(CaptureVector, CaptureVector));		
+		float NormalizedDistanceToCapture = saturate(CaptureVectorLength / CapturePositionAndRadius.w);
+
+		BRANCH
+		if (CaptureVectorLength < CapturePositionAndRadius.w)
+		{
+			float3 ProjectedCaptureVector = RayDirection;
+			float4 CaptureOffsetAndAverageBrightness = ReflectionCapture.CaptureOffsetAndAverageBrightness[CaptureIndex];
+
+			// Fade out based on distance to capture
+			float DistanceAlpha = 0;
+			
+			#define PROJECT_ONTO_SHAPE 1
+			#if PROJECT_ONTO_SHAPE
+				#if REFLECTION_COMPOSITE_HAS_BOX_CAPTURES
+					#if REFLECTION_COMPOSITE_HAS_SPHERE_CAPTURES
+					// Box
+					BRANCH if (CaptureProperties.b > 0)
+					#endif
+					{
+						ProjectedCaptureVector = GetLookupVectorForBoxCapture(RayDirection, WorldPosition, CapturePositionAndRadius, ReflectionCapture.BoxTransform[CaptureIndex], ReflectionCapture.BoxScales[CaptureIndex], CaptureOffsetAndAverageBrightness.xyz, DistanceAlpha);
+					}
+				#endif
+
+				#if REFLECTION_COMPOSITE_HAS_SPHERE_CAPTURES
+					// Sphere
+					#if REFLECTION_COMPOSITE_HAS_BOX_CAPTURES
+					else
+					#endif
+					{
+						ProjectedCaptureVector = GetLookupVectorForSphereCapture(RayDirection, WorldPosition, CapturePositionAndRadius, NormalizedDistanceToCapture, CaptureOffsetAndAverageBrightness.xyz, DistanceAlpha);
+					}
+				#endif
+			#else 
+				DistanceAlpha = 1.0;
+			#endif //PROJECT_ONTO_SHAPE
+
+			float CaptureArrayIndex = CaptureProperties.g;
+
+			{
+			#if FEATURE_LEVEL >= FEATURE_LEVEL_SM5
+				float4 Sample = ReflectionCubemap.SampleLevel(ReflectionCubemapSampler, float4(ProjectedCaptureVector, CaptureArrayIndex), Mip);
+			#else
+				float4 Sample = ReflectionCubemap.SampleLevel(ReflectionCubemapSampler, ProjectedCaptureVector, Mip);
+			#endif
+
+				Sample.rgb *= CaptureProperties.r;
+				Sample *= DistanceAlpha;
+
+				// Under operator (back to front)
+				ImageBasedReflections.rgb += Sample.rgb * ImageBasedReflections.a * IndirectSpecularOcclusion;
+				ImageBasedReflections.a *= 1 - Sample.a;
+
+				float AverageBrightness = CaptureOffsetAndAverageBrightness.w;
+				CompositedAverageBrightness.x += AverageBrightness * DistanceAlpha * CompositedAverageBrightness.y;
+				CompositedAverageBrightness.y *= 1 - DistanceAlpha;
+			}
+		}
+	}
+
+#if FEATURE_LEVEL == FEATURE_LEVEL_SM4 && ( REFLECTION_COMPOSITE_HAS_BOX_CAPTURES || REFLECTION_COMPOSITE_HAS_SPHERE_CAPTURES )
+	Roughness = 1;
+	ImageBasedReflections.rgb += ImageBasedReflections.a * IndirectSpecularOcclusion;
+	ImageBasedReflections.a = 0.0;
+	CompositedAverageBrightness = float2(1,0);
+#endif
+
+#else
+
+	float3 ProjectedCaptureVector = RayDirection;
+
+	#define APPROXIMATE_CONTINUOUS_SINGLE_CAPTURE_PARALLAX 0
+	#if APPROXIMATE_CONTINUOUS_SINGLE_CAPTURE_PARALLAX
+		float3 CaptureVector = WorldPosition - SingleCapturePositionAndRadius.xyz;
+		float CaptureVectorLength = sqrt(dot(CaptureVector, CaptureVector));		
+		float NormalizedDistanceToCapture = saturate(CaptureVectorLength / SingleCapturePositionAndRadius.w);
+
+		float UnusedDistanceAlpha = 0;
+		ProjectedCaptureVector = GetLookupVectorForSphereCapture(RayDirection, WorldPosition, SingleCapturePositionAndRadius, NormalizedDistanceToCapture, SingleCaptureOffsetAndAverageBrightness.xyz, UnusedDistanceAlpha);
+		
+		float x = saturate(NormalizedDistanceToCapture);
+		float DistanceAlpha = 1 - x * x * (3 - 2 * x);
+		// Lerp between sphere parallax corrected and infinite based on distance to shape
+		ProjectedCaptureVector = lerp(RayDirection, normalize(ProjectedCaptureVector), DistanceAlpha);
+	#endif
+
+#if FEATURE_LEVEL >= FEATURE_LEVEL_SM5
+	float4 Sample = TextureCubeArraySampleLevel(ReflectionCubemap, ReflectionCubemapSampler, ProjectedCaptureVector, SingleCubemapArrayIndex, Mip);
+#else
+	float4 Sample = TextureCubeSampleLevel(ReflectionCubemap, ReflectionCubemapSampler, ProjectedCaptureVector, Mip);
+#endif
+	Sample.rgb *= SingleCaptureBrightness;
+	ImageBasedReflections = float4(Sample.rgb, 1 - Sample.a);
+
+	float AverageBrightness = SingleCaptureOffsetAndAverageBrightness.w;
+	CompositedAverageBrightness.x += AverageBrightness * CompositedAverageBrightness.y;
+	CompositedAverageBrightness.y = 0;
+#endif
+
+	// Apply indirect lighting scale while we have only accumulated reflection captures
+	ImageBasedReflections.rgb *= View.IndirectLightingColorScale;
+	CompositedAverageBrightness.x *= Luminance( View.IndirectLightingColorScale );
+
+#if ENABLE_SKY_LIGHT
+
+	BRANCH  
+	if (SkyLightParameters.y > 0)
+	{
+		float SkyAverageBrightness = 1.0f;
+
+		#if REFLECTION_COMPOSITE_SUPPORT_SKYLIGHT_BLEND
+			float3 SkyLighting = GetSkyLightReflectionSupportingBlend(RayDirection, Roughness, SkyAverageBrightness);
+		#else
+			float3 SkyLighting = GetSkyLightReflection(RayDirection, Roughness, SkyAverageBrightness);
+		#endif
+
+		// Normalize for static skylight types which mix with lightmaps
+		bool bNormalize = SkyLightParameters.z < 1 && ALLOW_STATIC_LIGHTING;
+
+		FLATTEN
+		if (bNormalize)
+		{
+			ImageBasedReflections.rgb += ImageBasedReflections.a * SkyLighting * IndirectSpecularOcclusion;
+			CompositedAverageBrightness.x += SkyAverageBrightness * CompositedAverageBrightness.y;
+		}
+		else
+		{
+			ExtraIndirectSpecular += SkyLighting * IndirectSpecularOcclusion;
+		}
+	}
+#endif
+
+#if ALLOW_STATIC_LIGHTING
+	ImageBasedReflections.rgb *= ComputeMixingWeight(IndirectIrradiance, CompositedAverageBrightness.x, Roughness);
+#endif
+
+	ImageBasedReflections.rgb += ImageBasedReflections.a * ExtraIndirectSpecular;
+
+	return ImageBasedReflections.rgb;
+}
+
+float3 CompositeReflectionCapturesAndSkylight(
+	float CompositeAlpha, 
+	float3 WorldPosition, 
+	float3 RayDirection, 
+	float Roughness, 
+	float IndirectIrradiance, 
+	float IndirectSpecularOcclusion,
+	float3 ExtraIndirectSpecular,
+	uint NumCapturesAffectingTile,
+	uint CaptureDataStartIndex)
+{
+	return CompositeReflectionCapturesAndSkylight(
+		CompositeAlpha, 
+		WorldPosition, 
+		RayDirection, 
+		Roughness, 
+		IndirectIrradiance, 
+		IndirectSpecularOcclusion, 
+		ExtraIndirectSpecular, 
+		NumCapturesAffectingTile, 
+		CaptureDataStartIndex, 
+		0);
+}

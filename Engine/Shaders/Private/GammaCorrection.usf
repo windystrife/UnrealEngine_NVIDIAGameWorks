@@ -1,0 +1,50 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	GammaCorrection.usf: Gamma correcting the scene color buffer
+=============================================================================*/
+
+#include "Common.ush"
+
+// vertex shader entry point
+void MainVS(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out float2 OutTexCoord : TEXCOORD0,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	DrawRectangle(InPosition, InTexCoord, OutPosition, OutTexCoord);
+}
+
+half3 ColorScale;
+half4 OverlayColor;
+half InverseGamma;
+
+half3 TonemapAndGammaCorrect(half3 LinearColor)
+{
+	half3 GammaColor;
+
+	// no tonemapper
+	{
+		GammaColor = pow(LinearColor, InverseGamma);
+	}
+
+	// in all cases it's good to clamp into the 0..1 range (e.g for LUT color grading)
+	GammaColor = saturate(GammaColor);
+
+	return GammaColor;
+}
+
+// pixel shader entry point
+void MainPS(float2 UV : TEXCOORD0, out float4 OutColor : SV_Target0)
+{
+	half4 LinearColor = Texture2DSample(SceneColorTexture, SceneColorTextureSampler, UV);
+	half3 LDRColor = TonemapAndGammaCorrect(LinearColor.rgb);
+	
+	// blend with custom LDR color, used for Fade track in Matinee
+	LDRColor = lerp(LDRColor * ColorScale, OverlayColor.rgb, OverlayColor.a);
+	
+	// RETURN_COLOR not needed unless writing to SceneColor
+	OutColor = float4(LDRColor, LinearColor.a);
+}

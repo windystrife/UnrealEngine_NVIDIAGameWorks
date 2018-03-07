@@ -1,0 +1,747 @@
+Availability:Public
+Title:Coding Standard
+Crumbs:%ROOT%, Programming, Programming\Development
+Description:Standards and conventions used by Epic Games in the Unreal Engine 4 codebase.
+Version: 4.11
+
+[TOC(start:2)]
+
+
+
+At Epic, we have a few simple coding standards and conventions.  This document is not meant to be a discussion or work in progress, but rather, reflects the state of Epic's current coding standards.
+
+Code conventions are important to programmers for a number of reasons:
+
+* 80% of the lifetime cost of a piece of software goes to maintenance.
+* Hardly any software is maintained for its whole life by the original author.
+* Code conventions improve the readability of the software, allowing engineers to understand new code more quickly and thoroughly.
+* If we decide to expose source code to mod community developers, we want it to be easily understood.
+* Many of these conventions are actually required for cross-compiler compatibility.
+
+The coding standards below are C++-centric, but the spirit of the standards are expected to be followed no matter which language is used.  A section may provide equivalent rules or exceptions for specific languages where it's applicable.
+
+
+## Class Organization
+
+Classes should be organized with the reader in mind rather than the writer.  Since most readers will be using the public interface of the class, that should be declared first, followed by the class's private implementation.
+
+
+## Copyright Notice
+
+Any source file (.h, .cpp, .xaml, etc.) provided by Epic for distribution must contain a copyright notice as the first line in the file. The format of the notice must exactly match that shown below:
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+If this line is missing or not formatted properly, CIS will generate an error and fail.
+
+## Naming Conventions
+
+* The first letter of each word in a name (e.g. type or variable) is capitalized, and there is usually no underscore between words.  For example, Health and UPrimitiveComponent, but not lastMouseCoordinates or delta_coordinates.
+* Type names are prefixed with an additional upper-case letter to distinguish them from variable names.  For example, FSkin is a type name, and Skin is an instance of a FSkin.
+    * Template classes are prefixed by T.
+    * Classes that inherit from UObject are prefixed by U.
+    * Classes that inherit from AActor are prefixed by A.
+    * Classes that inherit from SWidget are prefixed by S.
+    * Classes that are abstract interfaces are prefixed by I.
+    * Enums are prefixed by E.
+    * Boolean variables must be prefixed by b (e.g. "bPendingDestruction", or "bHasFadedIn").
+    * Most other classes are prefixed by F, though some subsystems use other letters.
+    * Typedefs should be prefixed by whatever is appropriate for that type: F if it's a typedef of a struct, U if it's a typedef of a UObject etc.
+        * A typedef of a particular template instantiation is no longer a template and should be prefixed accordingly, e.g.:
+
+                typedef TArray<FMyType> FArrayOfMyTypes;
+    * Prefixes are omitted in C#.
+    * UnrealHeaderTool requires the correct prefixes in most cases, so it's important to provide them.
+* Type and variable names are nouns.
+* Method names are verbs that describe the method's effect, or describe the return value of a method that has no effect.
+
+
+Variable, method, and class names should be clear, unambiguous, and descriptive. The greater the scope of the name, the greater the importance of a good, descriptive name. Avoid over-abbreviation.
+
+All variables should be declared one at a time so that a comment on the meaning of the variable can be provided. Also, the JavaDocs style requires it. You can use multi-line or single line comments before a variable, and the blank line is optional for grouping variables.
+
+All functions that return a bool should ask a true/false question, such as IsVisible() or ShouldClearBuffer().
+
+A procedure (a function with no return value) should use a strong verb followed by an Object. An exception is if the Object of the method is the Object it is in; then the Object is understood from context. Names to avoid include those beginning with "Handle" and "Process"; the verbs are ambiguous.
+
+Though not required, we encourage you to prefix function parameter names with "Out" if they are passed by reference and the function is expected to write to that value.  This makes it obvious that the value passed in this argument will be replaced by the function.
+
+If an In or Out parameter is also a boolean, put the b before the In/Out prefix, e.g. "bOutResult".
+
+Functions that return a value should describe the return value; the name should make clear what value the function will return. This is particularly important for boolean functions. Consider the following two example methods:
+
+		bool CheckTea(FTea Tea) {...} // what does true mean?
+		bool IsTeaFresh(FTea Tea) {...} // name makes it clear true means tea is fresh
+
+
+### Examples
+
+		float TeaWeight;
+
+		int32 TeaCount;
+
+		bool bDoesTeaStink;
+
+		FName TeaName;
+
+		FString TeaFriendlyName;
+
+		UClass* TeaClass;
+
+		USoundCue* TeaSound;
+
+		UTexture* TeaTexture;
+
+
+## Portable Aliases for Basic C++ Types
+
+* bool for boolean values (NEVER assume the size of bool). BOOL will not compile.
+* TCHAR for a character (NEVER assume the size of TCHAR).
+* uint8 for unsigned bytes (1 byte).
+* int8 for signed bytes (1 byte).
+* uint16 for unsigned "shorts" (2 bytes).
+* int16 for signed "shorts" (2 bytes).
+* uint32 for unsigned ints (4 bytes).
+* int32 for signed ints (4 bytes).
+* uint64 for unsigned "quad words" (8 bytes).
+* int64 for signed "quad words" (8 bytes).
+* float for single precision floating point (4 bytes).
+* double for double precision floating point (8 bytes).
+* PTRINT for an integer that may hold a pointer (NEVER assume the size of PTRINT).
+
+
+Use of C+\+'s int and unsigned int types - whose size may vary across platforms - is acceptable in code where the integer width is unimportant.  Explicitly-sized types must still be used in serialized or replicated formats.
+
+
+## Comments
+
+Comments are communication; communication is vital. Some things to keep in mind about comments (from Kernighan & Pike _The Practice of Programming_):
+
+
+### Guidelines
+
+* Write self-documenting code:
+
+		// Bad:
+		t = s + l - b;
+		
+		// Good:
+		TotalLeaves = SmallLeaves + LargeLeaves - SmallAndLargeLeaves;
+
+
+* Write useful comments:
+
+		// Bad:
+		// increment Leaves
+		++Leaves;
+
+		// Good:
+		// we know there is another tea leaf
+		++Leaves;
+
+
+* Do not comment bad code - rewrite it:
+
+		// Bad:
+		// total number of leaves is sum of
+		// small and large leaves less the
+		// number of leaves that are both
+		t = s + l - b;
+		
+		// Good:
+		TotalLeaves = SmallLeaves + LargeLeaves - SmallAndLargeLeaves;
+
+
+* Do not contradict the code:
+
+		// Bad:
+		// never increment Leaves!
+		++Leaves;
+		
+		// Good:
+		// we know there is another tea leaf
+		++Leaves;
+
+
+### Const correctness
+
+const is documentation as much as it is a compiler directive, so all code should strive to be const-correct.
+
+This includes passing function arguments by const pointer or reference if those arguments are not intended to be modified by the function, flagging methods as const if they do not modify the object, and using const iteration over containers if the loop isn't intended to modify the container.
+
+		void SomeMutatingOperation(FThing& OutResult, const TArray<int32>& InArray); // InArray will not be modified by SomeMutatingOperation, but OutResult probably will be
+
+		void FThing::SomeNonMutatingOperation() const
+		{
+			// This code will not modify the FThing it is invoked on
+		}
+
+		TArray<FString> StringArray;
+		for (const FString& : StringArray)
+		{
+			// The body of this loop will not modify StringArray
+		}
+
+Const should also be preferred on by-value function parameters and locals. This tells a reader that the variable will not be modified in the body of the function, which helps understandability. If you do this, ensure that the declaration and the definition match, as this can affect the JavaDoc process:
+
+		void AddSomeThings(const int32 Count);
+
+		void AddSomeThings(const int32 Count)
+		{
+			const int32 CountPlusOne = Count + 1;
+
+			// Neither Count nor CountPlusOne can be changed during the body of the function
+		}
+
+One exception to this is pass-by-value parameters which will ultimately be moved into a container (see "Move semantics"); this should be rare.
+
+		void FBlah::SetMemberArray(TArray<FString> InNewArray)
+		{
+			MemberArray = MoveTemp(InNewArray);
+		}
+
+Put the const keyword on the end when making a pointer itself const (rather than what it points to). References cannot be 'reassigned' anyway, and so cannot be made const in the same way:
+
+		// Const pointer to non-const object - pointer cannot be resassigned, but T can still be modified
+		T* const Ptr = ...;
+
+		// Illegal
+		T& const Ref = ...;
+
+Never use const on a return type, as this inhibits move semantics for complex types and will give compile warnings for built-in types. This rule only applies to the return type itself, not the target type of a pointer or reference being returned:
+
+		// Bad - returning a const array
+		const TArray<FString> GetSomeArray();
+
+		// Fine - returning a reference to a const array
+		const TArray<FString>& GetSomeArray();
+
+		// Fine - returning a pointer to a const array
+		const TArray<FString>* GetSomeArray();
+
+		// Bad - returning a const pointer to a const array
+		const TArray<FString>* const GetSomeArray();
+
+
+### Example Formatting
+
+We use a system based on JavaDoc to automatically extract comments from the code and build documentation, so there are some specific comment formatting rules to follow.
+
+The following example demonstrates the format of class, state, method, and variable comments. Remember that comments should augment the code. The code documents the implementation and the comments document the intent. Make sure to update comments when you change the intent of a piece of code.
+
+Note that two different parameter comment styles are supported, as embodied by the Steep and Sweeten methods.  The @param style used by Steep is the traditional style, but for simple functions it can be clearer to integrate the parameter documentation into the descriptive comment for the function, as in the Sweeten example.
+
+Method comments should only be included once, where the method is publically declared.  The method comments should only contain information relevant to callers of the method, including any information about overrides of the method that may be relevant to the caller.  Details about the implementation of the method and its overrides that are not relevant to callers should be commented within the method implementation.
+
+
+		class IDrinkable
+		{
+		public:
+			/**
+			 * Called when a player drinks this object.
+			 * @param OutFocusMultiplier - Upon return, will contain a multiplier to apply to the drinker's focus.
+			 * @param OutThirstQuenchingFraction - Upon return, will contain the fraction of the drinker's thirst to quench (0-1).
+			 */
+			virtual void Drink(float& OutFocusMultiplier, float& OutThirstQuenchingFraction) = 0;
+		};
+
+		class FTea : public IDrinkable
+		{
+		public:
+			/**
+			 * Calculate a delta-taste value for the tea given the volume and temperature of water used to steep.
+			 * @param VolumeOfWater - Amount of water used to brew in mL
+			 * @param TemperatureOfWater - Water temperature in Kelvins
+			 * @param OutNewPotency - Tea's potency after steeping starts, from 0.97 to 1.04
+			 * @return the change in intensity of the tea in tea taste units (TTU) per minute
+			 */
+			float Steep(
+				const float VolumeOfWater,
+				const float TemperatureOfWater,
+				float& OutNewPotency
+				);
+
+			void Sweeten(const float EquivalentGramsOfSucrose);
+
+			float GetPrice() const
+			{
+				return Price;
+			}
+
+			virtual void Drink(float& OutFocusMultiplier, float& OutThirstQuenchingFraction) override;
+
+		private:
+
+			float Price;
+
+			float Sweetness;
+		};
+
+		float FTea::Steep(const float VolumeOfWater, const float TemperatureOfWater, float& OutNewPotency)
+		{
+			...
+		}
+
+		void FTea::Sweeten(const float EquivalentGramsOfSucrose)
+		{
+			...
+		}
+
+		void FTea::Drink(float& OutFocusMultiplier, float& OutThirstQuenchingFraction)
+		{
+			...
+		}
+
+
+What does a class comment include?
+* A description of the problem this class solves. Why was this class created?
+
+What do all those parts of the method comment mean?
+* The purpose of the function is first; this documents the _problem this function solves._ As has been said above, comments document _intent_ and code documents _implementation_.
+* Then come the parameter comments; each parameter comment should include units of measure, the range of expected values, "impossible" values, and the meaning of status/error codes.
+* Then comes the return comment; it documents the expected return value just as an output variable is documented.
+
+
+## C++11 and Modern Language Syntax
+
+Unreal Engine is built to be massively portable to many C++ compilers, so we are careful to use features that are compatible with the compilers we can imagine supporting.  Sometimes features are so useful that we will wrap them up in macros and use them pervasively, but usually we will wait until all of the compilers we could imagine supporting are up to the latest standard. 
+
+We are utilizing certain C++11 language features that appear to be well-supported across modern compilers, such as range-based-for, move semantics and lambdas.  In some cases, we are able to wrap up usage of these features in preprocessor conditionals (such as rvalue references in containers.)  However, certain language features we may opt to avoid entirely until we are confident we will not be surprised by a new platform appearing that cannot digest the syntax.
+
+Unless specified below as a modern C++ compiler feature we are supporting, you should refrain from using compiler-specific language features unless they are wrapped in preprocessor macros or conditionals and used sparingly.
+
+
+### static_assert
+
+This keyword is valid for use where you need a compile-time assertion.
+
+
+### override and final
+
+These keywords are valid for use, and their use is strongly encouraged.  There will likely be many places where these have been omitted but they will be fixed over time.
+
+
+### nullptr
+
+nullptr should be used instead of the C-style NULL macro in all cases.
+
+One exception to this is that nullptr in C++/CX builds (e.g. Xbox One) is actually the managed null reference type.  It is mostly compatible with nullptr from native C++ except in its type and some template instantiation contexts, and so you should use the TYPE_OF_NULLPTR macro instead of the more usual decltype(nullptr) for compatibility.
+
+
+### The 'auto' Keyword
+
+You should not use auto in C++ code, barring a few exceptions below.  You must always be explicit about the type you're initializing.  This means that the type must be plainly visible to the reader.  This rule also applies to the use of the ‘var’ keyword in C#.
+
+When is it acceptable to use auto?
+
+* When you need to bind a lambda to a variable, as lambda types are not expressible in code.
+* For iterator variables, but only where the iterator's type is very verbose and would impair readability.
+* In template code, where the type of an expression cannot easily be discerned.  This is an advanced case.
+
+It's very important that types are clearly visible to someone who is reading the code.  Even though some IDEs are able to infer the type, this relies on the code being in a compilable state.  It also will not assist users of merge/diff tools, or when viewing individual source files in isolation, such as on GitHub.
+
+If you're sure you are using auto in an acceptable way, always remember to correctly use const, & or * just like you would with the type name.  With auto, this will coerce the inferred type to be what you want.
+
+
+### Range Based For
+
+This is preferred to keep the code easier to understand and more maintainable.  When migrating code that uses old TMap iterators, be aware that the old Key() and Value() functions which were methods of the iterator type are now simply Key and Value fields of the underlying key-value TPair:
+
+		TMap<FString, int32> MyMap;
+
+		// Old style
+		for (auto It = MyMap.CreateIterator(); It; ++It)
+		{
+			UE_LOG(LogCategory, Log, TEXT("Key: %s, Value: %d"), It.Key(), *It.Value());
+		}
+
+		// New style
+		for (TPair<FString, int32>& Kvp : MyMap)
+		{
+			UE_LOG(LogCategory, Log, TEXT("Key: %s, Value: %d"), Kvp.Key, *Kvp.Value);
+		}
+
+We also have range replacements for some standalone iterator types:
+
+		// Old style
+		for (TFieldIterator<UProperty> PropertyIt(InStruct, EFieldIteratorFlags::IncludeSuper); PropertyIt; ++PropertyIt)
+		{
+			UProperty* Property = *PropertyIt;
+			UE_LOG(LogCategory, Log, TEXT("Property name: %s"), *Property->GetName());
+		}
+
+		// New style
+		for (UProperty* Property : TFieldRange<UProperty>(InStruct, EFieldIteratorFlags::IncludeSuper))
+		{
+			UE_LOG(LogCategory, Log, TEXT("Property name: %s"), *Property->GetName());
+		}
+
+
+### Lambdas and Anonymous Functions
+
+Lambdas can now be used on all compilers, but their usage should be considered. The best lambdas should be no more than a couple of statements in length, particularly when used as part of a larger expression or statement, for example as a predicate in a generic algorithm:
+
+		// Find first Thing whose name contains the word "Hello"
+		Thing* HelloThing = ArrayOfThings.FindByPredicate([](const Thing& Th){ return Th.GetName().Contains(TEXT("Hello")); });
+
+		// Sort array in reverse order of name
+		AnotherArray.Sort([](const Thing& Lhs, const Thing& Rhs){ return Lhs.GetName() > Rhs.GetName(); });
+
+Be aware that stateful lambdas cannot be assigned to function pointers, which we tend to use a lot.
+
+Documentation of non-trivial lambdas and anonymous functions should be considered in the same way a regular function is documented. Don't be afraid to split them over a few more lines in order to comment them.
+
+Prefer explicit capture over automatic capture ([&] and [=]), especially for large lambdas and deferred execution. Accidentally capturing a variable with the wrong capture semantics can have negative consequences, and this is more likely to happen as the code is maintained over time:
+
+* By-reference capture and by-value capture of pointers can cause accidental dangling references, if the lambda is executed outside the context of the captured variables:
+
+		void Func()
+		{
+			int32 Value = GetSomeValue();
+
+			// Lots of code
+
+			AsyncTask([&]()
+			{
+				// Value is invalid here
+				for (int Index = 0; Index != Value; ++Index)
+				{
+					// ...
+				}
+			});
+		}
+
+* By-value capture can be a performance concern because of unnecessary copies:
+
+		void Func()
+		{
+			int32 ValueToFind = GetValueToFind();
+
+			// The lambda takes a copy of ArrayOfThings because it is accidentally captured by [=] when it was only meant to capture ValueToFind
+			FThing* Found = ArrayOfThings.FindByPredicate(
+				[=](const FThing& Thing)
+				{
+					return Thing.Value == ValueToFind && Thing.Index < ArrayOfThings.Num();
+				}
+			);
+		}
+
+* Accidentally captured UObject pointers are invisible to the garbage collector:
+
+		void Func(AActor* MyActor)
+		{
+			// Capturing the MyActor pointer will not prevent the object from being collected
+			AsyncTask([=]()
+			{
+				MyActor->DoSlowThing();
+			});
+		}
+
+* Automatic capture always captures 'this' implicitly if any member variables are referenced, even with [=]. [=] gives the impression of the lambda having its own copy of the member when it doesn't:
+
+		void FStruct::Func()
+		{
+			int32 Local = 5;
+			Member = 5;
+
+			auto Lambda = [=]()
+			{
+				UE_LOG(LogTest, Log, TEXT("Local: %d, Member: %d"), Local, Member);
+			};
+
+			Local = 100;
+			Member = 100;
+
+			Lambda(); // Logs "Local: 5, Member: 100"
+		}
+
+Prefer explicit return types for large lambdas or when you are returning the result of another function call. These should be considered in the same way as the 'auto' keyword:
+
+		// Without the return type here, the return type is unclear
+		auto Lambda = []() -> FMyType
+		{
+			return SomeFunc();
+		};
+
+Automatic captures and implicit return types are acceptable for trivial lambdas, e.g. in Sort calls, where the semantics are obvious and being explicit would make it overly verbose - use your best judgment.
+
+
+### Strongly-Typed Enums
+
+Enum classes should always be used as a replacement for old-style namespaced enums, both for regular enums and UENUMs.  For example:
+
+		// Old enum
+		UENUM()
+		namespace EThing
+		{
+			enum Type
+			{
+				Thing1,
+				Thing2
+			};
+		}
+
+		// New enum
+		UENUM()
+		enum class EThing : uint8
+		{
+			Thing1,
+			Thing2
+		};
+
+These are also supported as UPROPERTYs, as long they are based on uint8 - this replaces the old `TEnumAsByte<>` workaround:
+
+		// Old property
+		UPROPERTY()
+		TEnumAsByte<EThing::Type> MyProperty;
+
+		// New property
+		UPROPERTY()
+		EThing MyProperty;
+
+Enum classes used as flags can take advantage of a new ENUM_CLASS_FLAGS(EnumType) macro to automatically define all of the bitwise operators:
+
+		enum class EFlags
+		{
+			None  = 0x00,
+			Flag1 = 0x01,
+			Flag2 = 0x02,
+			Flag3 = 0x04
+		};
+
+		ENUM_CLASS_FLAGS(EFlags)
+
+The one exception to this is the use of flags in a 'truth' context - this is a limitation of the language.  Instead, all flags enums should have an enumerator called 'None' which is set to 0 for comparisons:
+
+		// Old
+		if (Flags & EFlags::Flag1)
+
+		// New
+		if ((Flags & EFlags::Flag1) != EFlags::None)
+
+
+### Move Semantics
+
+All of the main container types - TArray, TMap, TSet, FString - have move constructors and move assignment operators.  These are often used automatically when passing/returning these types by value, but can be explicitly invoked by using MoveTemp, which is UE4's equivalent of std::move.
+
+Returning containers or strings by value can be a win for expressivity without the usual cost of temporary copies.  Rules around pass-by-value and use of MoveTemp are still being established, but can already be found in some optimized areas of the codebase.
+
+
+## Third Party Code
+
+Whenever you modify the code to a library that we use in the engine, be sure to tag your changes with a //@UE4 comment, as well as an explanation of why you made the change. This makes merging the changes into a new version of that library easier, and lets licensees easily find any modifications we have made.
+
+Any third party code included in the engine should be marked with comments formatted to be easily searchable.  For example:
+
+		// @third party code - BEGIN PhysX
+		#include <PhysX.h>
+		// @third party code - END PhysX
+
+		// @third party code - BEGIN MSDN SetThreadName
+		// [http://msdn.microsoft.com/en-us/library/xcb2z8hs.aspx]
+		// Used to set the thread name in the debugger
+		...
+		//@third party code - END MSDN SetThreadName
+
+
+## Code Formatting
+
+
+### Braces { }
+
+Brace wars are foul. Epic has a long standing usage pattern of putting braces on a new line. Please continue to adhere to that.
+
+Always include braces in single-statement blocks, e.g.:
+
+		if (bThing)
+		{
+			return;
+		}
+
+
+### If - Else
+
+Each block of execution in an if-else statement should be in braces. This is to prevent editing mistakes - when braces are not used, someone could unwittingly add another line to an if block. The line would not be controlled by the if expression, which would be bad. Worse yet is when conditionally compiled items cause if/else statements to break. So always use braces.
+
+		if (HaveUnrealLicense)
+		{
+			InsertYourGameHere();
+		}
+		else
+		{
+			CallMarkRein();
+		}
+
+A multi-way if statement should be indented with each else if indented the same amount as the first if; this makes the structure clear to a reader:
+
+		if (TannicAcid < 10)
+		{
+			UE_LOG(LogCategory, Log, TEXT("Low Acid"));
+		}
+		else if (TannicAcid < 100)
+		{
+			UE_LOG(LogCategory, Log, TEXT("Medium Acid"));
+		}
+		else
+		{
+			UE_LOG(LogCategory, Log, TEXT("High Acid"));
+		}
+
+
+### Tabs
+
+* Indent code by execution block.
+
+* Use tabs, not spaces, for whitespace at the beginning of a line.  Set your tab size to 4 characters.  However, spaces are sometimes necessary and allowed for keeping code aligned regardless of the number of spaces in a tab; e.g. when aligning code following non-tab characters.
+
+* If you are writing code in C#, please also use tab characters, not spaces.  The reason for this is that programmers often switch between C# and C++, and most prefer to use a consistent setting for tabs.  Visual Studio defaults to using spaces for C# files, so you will need to remember to change this setting when working on Unreal Engine code.
+
+
+### Switch Statements
+
+Except for empty cases (multiple cases having identical code), switch case statements should explicitly label that a case falls through to the next case. Either include a break or a falls-through comment in each case. Other code control-transfer commands (return, continue, etc.) are fine as well.
+
+Always have a default case, and include a break - just in case someone adds a new case after the default.
+
+		switch (condition)
+		{
+			case 1:
+				...
+				// falls through
+			case 2:
+				...
+				break;
+			case 3:
+				...
+				return;
+			case 4:
+			case 5:
+				...
+				break;
+			default:
+				break;
+		}
+
+
+## Namespaces
+
+You can use namespaces to organize your classes, functions and variables where appropriate, as long as you follow the rules below.
+
+* Unreal code is currently not wrapped in a global namespace. You need to watch out for collisions in the global scope, especially when pulling in third party code.
+* Do not put "using" declarations in the global scope, even in a .cpp file (it will cause problems with our "unity" build system.)
+* It is fine to put "using" declarations within another namespace, or within a function body.
+* Note that if you put "using" within a namespace, it will carry over to other occurrences of that namespace in the same translation unit. As long as you are consistent it will be fine, though.
+* You can only use "using" in header files safely if you follow the above rules.
+* Note that forward-declared types need to be declared within their respective namespace, otherwise you will get link errors.
+* If you declare a lot of classes/types within a namespace, it can make it difficult to use those types in other global-scoped classes. (e.g. function signatures will need to use explicit namespace when appearing in class declarations.)
+* You can use "using" to alias only specific variables within a namespace into your scope (e.g. using Foo::FBar), but we do not usually do that in Unreal code.
+* Namespaces are not supported by UnrealHeaderTool, so should not be used when defining UCLASSes, USTRUCTs etc.
+
+
+## Physical Dependencies
+
+* File names should not be prefixed where possible; for example Scene.cpp instead of UnScene.cpp.  This facilitates using tools like Workspace Whiz or Visual Assist's Open File in Solution by reducing the number of letters needed to disambiguate the file you want.
+* All headers should protect against multiple includes with the #pragma once directive.  Note that all compilers we need to use support #pragma once these days.
+	
+		#pragma once
+
+		<file contents>
+
+* In general, try to minimize physical coupling.
+* If you can use forward declarations instead of including a header, do so.
+* Include as fine grained as possible; do not include Core.h, include the specific headers in Core that you need definitions from.
+* Try to include every header you need directly, to make fine-grained inclusion easier.
+* Do not rely on a header that is included indirectly by another header you include
+* Do not rely on being included through another header; include everything you need.
+* Modules have Private and Public source directories.  Any definitions that are needed by other modules must be in headers in the Public directory, but everything else should be in the Private directory.  Note that in older Unreal modules, these directories may still be called Src and Inc, but those directories are meant to separate private and public code in the same way, and are not meant to separate header files from source files.
+* Do not worry about setting up your headers for precompiled header generation.  UnrealBuildTool can do a better job of this than you can.
+* Split up large functions into logical sub-functions. One area of compilers' optimizations is the elimination of common subexpressions, and the bigger your functions are, the more work the compiler has to do to identity them, leading to greatly inflated build times.
+* Use inline functions judiciously, as they force rebuilds even in files which don't use them. Inlining should only be used for trivial accessors and when profiling shows there is a benefit to doing so.
+* Be even more conservative in the use of FORCEINLINE. All code and local variables will be expanded out into the calling function and will cause the same build time problems caused by large functions.
+
+
+## Encapsulation
+
+Enforce encapsulation with the protection keywords. Class members should almost always be declared private unless they are part of the public/protected interface to the class. Use your best judgement, but always be aware that a lack of accessors makes it hard to refactor later without breaking plugins and existing projects.
+
+If particular fields are only intended to be usable by derived classes, make them private and provide protected accessors.
+
+Use final if your class is not designed to be derived from.
+
+
+## General Style Issues
+
+* Minimize dependency distance. When code depends on a variable having a certain value, try to set that variable's value right before using it. Initializing a variable at the top of an execution block, and not using it for a hundred lines of code, gives lots of space for someone to accidentally change the value without realizing the dependency. Having it on the next line makes it clear why the variable is initialized the way it is and where it is used.
+* Split methods into sub-methods where possible. Humans are better at looking at a big picture, and drilling down to the interesting details than to start with the details and reconstruct the big picture from them.  In the same way, it is easier to understand a simple method that calls a sequence of several well named sub-methods than to understand an equivalent method that simply contains all the code in those sub-methods.
+* In function declarations or function call sites, do not add a space between the function's name and the parentheses that precedes the argument list.
+* Address compiler warnings. Compiler warning messages mean something is not as it should be. Fix what the compiler is complaining about. If you absolutely cannot address it, use #pragma to suppress the warning; this is a remedy of last resort.
+* Leave a blank line at the end of the file. All .cpp and .h files should include a blank line to play nice with gcc.
+* Never allow float to implicit convert to int32. This is a slow operation, and does not compile on all compilers. Instead, always use the appTrunc() function to convert to int32. This will ensure cross-compiler compatibility as well as generate faster code.
+* Interface classes (prefixed with "I") should always be abstract and must not have member variables.  Interfaces are allowed to contain methods that are not pure-virtual, and even methods that are non-virtual or static, as long as they are implemented inline.
+* Debug code should either be generally useful and polished, or not checked in. Debug code intermixed with other code makes the other code much harder to read.
+* Always use the TEXT() macro around string literals. Without it, code which constructs FStrings from literals will cause an undesirable string conversion process.
+* Avoid repeating the same operation redundantly in loops. Hoist common subexpressions out of loops to avoid redundant calculations. Make use of statics in some cases to avoid globally-redundant operations across function calls, e.g. constructing an FName from a string literal.
+* Be mindful of hot reload. Minimize dependencies to cut down on iteration time. Don't use inlining or templates for functions which are likely to change over a reload. Only use statics for things which are expected to remain constant over a reload.
+* Use intermediate variables to simplify complicated expressions. If you have a complicated expression, it can be easier to understand if you split it into sub-expressions that are assigned to intermediate variables with names describing the meaning of the sub-expression within the parent expression.  For example:
+
+		if ((Blah->BlahP->WindowExists->Etc && Stuff) &&
+			!(bPlayerExists && bGameStarted && bPlayerStillHasPawn &&
+			IsTuesday())))
+		{
+			DoSomething();
+		}
+
+	_should be replaced with_
+
+		const bool bIsLegalWindow = Blah->BlahP->WindowExists->Etc && Stuff;
+		const bool bIsPlayerDead = bPlayerExists && bGameStarted && bPlayerStillHasPawn && IsTuesday();
+		if (bIsLegalWindow && !bIsPlayerDead)
+		{
+			DoSomething();
+		}
+
+
+* Use the virtual and override keywords when declaring an overriding method. When declaring a virtual function in a derived class that overrides a virtual function in the parent class, you must use both the virtual and the override keywords. For example:
+		
+		class A
+		{
+		public:
+			virtual void F() {}
+		};
+		class B : public A
+		{
+		public:
+			virtual void F() override;
+		};
+
+
+Note that there is a lot of existing code that does not follow this yet due to the recent addition of the override keyword, and the override keyword should be added to that code when convenient.
+
+* Pointers and references should only have one space, which is to the right of the pointer / reference.  This makes it easy to quickly Find in Files for all pointers or references to a certain type.
+		
+	Use this:
+		
+		FShaderType* Type
+		
+	Not these:
+		
+		FShaderType *Type
+		FShaderType * Type
+
+
+* Shadowed variables are not allowed. C++ allows variables to be shadowed from an outer scope, making usage ambiguous to a reader. For example, there are three usable 'Count' variables in this member function:
+
+		class FSomeClass
+		{
+		public:
+			void Func(const int32 Count)
+			{
+				for (int32 Count = 0; Count != 10; ++Count)
+				{
+					// Use Count
+				}
+			}
+
+		private:
+			int32 Count;
+		};

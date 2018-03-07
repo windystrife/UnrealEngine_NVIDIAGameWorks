@@ -1,0 +1,295 @@
+﻿INTSourceChangelist:3467293
+Availability:Public
+Title:根运动
+Crumbs: %ROOT%, Engine, Engine/Animation
+Description:了解基于根的动画在虚幻引擎 4 中的处理方式。
+Related:Engine/Content/FBX/Animations
+Related:Engine/Content/Types/SkeletalMeshes
+Related:Engine/Animation/PhysicallyDrivenAnimation
+Related:Engine/Content/Tools/MayaRiggingTool
+Related:Engine/Animation/AnimBlueprints
+Related:Engine/Animation/AnimBlueprints/EventGraph
+version:4.9
+
+[TOC(start:2 end:2)]
+
+
+
+通常而言，游戏动画中角色的碰撞胶囊体（或其他形状）由控制器通过场景来驱动。来自此胶囊体的数据则用于驱动动画。举例而言，如胶囊体向前移动，系统则会在角色上播放奔跑或行走动画，形成角色在利用自身能量前进的表象。然而，这类运动并不适用于所有情况。在一些情况下，复杂动画实际驱动碰撞胶囊体合乎逻辑，而且没有其他的方式可选。此时根运动对您的游戏就十分重要了。
+
+举例而言，试想玩家发动特殊攻击，其中网格体已预设置向前冲的动画。如果所有角色动画均基于玩家胶囊体，那么此类动画将导致角色脱离胶囊体，失去实际碰撞。动画播放后，玩家可能会滑回其碰撞位置。这便会导致问题出现，因为胶囊体通常用作所有计算的中心。脱离胶囊体的角色将穿过几何体，无法和环境形成正确交互。此外，在动画的结尾滑回胶囊体也会显得十分不真实。
+ 
+对于刚接收到这个概念的用户而言，只通过阅读说明来理解根运动的重要性并非易事。下方视频中的角色正在执行一次预设动画的攻击——前冲并猛砸大锤。需要注意的是——角色向前移动的动画并非由游戏处理，而是由动画师所设计。
+
+[OBJECT:EmbeddedVideo]
+[PARAMLITERAL:width]
+640
+[/PARAMLITERAL]
+[PARAMLITERAL:height]
+360
+[/PARAMLITERAL]
+[PARAMLITERAL:videoid]
+TKAcNubFOH8
+[/PARAMLITERAL]
+[/OBJECT]
+
+
+[REGION:tip]
+在 [动画内容示例](Resources\ContentExamples\Animation) 页面的第 1.9 部分可查看根运动的另一个实例。
+[/REGION]
+
+
+## 什么是根运动？
+
+简单而言，根运动就是骨架根骨骼基础动画的角色运动。多数游戏内动画均通过循环处理，其中角色的根仍为静止状态。情况并非固定如此，然而上例中便是如此的情况。如要处理这个问题，需要将根的运动从角色上移开，并将其应用到角色的胶囊体。这便是 UE4 中根运动的核心作用。
+
+[REGION:warning]
+为正确使用根运动，必须要注意的是角色的根骨骼应该处于原点（0,0,0 且不带旋转），因为这将使系统从动画运动（角色）中分离出物理运动（胶囊体）。 
+[/REGION]
+
+
+回放中可看到动画的根运动。打开根骨骼运动的动画，在视口中选择 **Show > Bones**。如尚未在动画属性中选择 **Enable Root Motion**，角色的根移动时便会出现一条红线。这条线展示了动画的根运动。
+
+[REGION:fullwidth]
+![](RootMotionBone.png)
+[/REGION]
+
+启用根运动后，这条红线便会消失。而角色便会移动到恰当的位置。这是因为角色的根不再从其原始位置进行移动。此图中，我们已在角色启用根运动。注意我们现在处于和上图中同一帧，但角色的位置并未发生变化。 
+
+[REGION:fullwidth]
+![](RootMotionAppliedBone.png)
+[/REGION]
+
+那这意味着什么呢？系统把角色动画的根运动计算在内后，则可将相同运动重新应用到角色的碰撞胶囊体。这意味着动画师设置的动作将完全得到保留，但同时也会正确地响应游戏中的碰撞和其他物理&游戏进程事件。我们将在下一部分看到实际操作。
+
+
+## 启用根运动
+
+可在 **Animation Editor** 的 **Asset Details** 面板中启用 [动画序列](Engine\Animation\Sequences) 的根运动。 
+
+![](RootMotion.png)
+
+[REGION:warning]
+早期引擎版本（4.5 之前版本）需要使用 [动画蒙太奇](https://docs.unrealengine.com/latest/INT/Engine/Animation/AnimMontage/index.html) 来定义根动画。从 4.6 版本开始，根运动的处理基于每个动画序列，可在 Persona 的动画属性开启/关闭。
+然而对网络游戏而言，根运动仍然需要使用动画蒙太奇，请查阅下方 [Root Motion from Montages Only](#rootmotionfrommontagesonly) 部分。 
+
+[/REGION]
+
+虽然是在动画序列中定义根运动是否启用，但仍然需要确定 [动画蓝图]( Engine/Animation/AnimBlueprints) 中序列的处理方式。在动画蓝图中有处理根运动的多个方式。可通过 **Anim Blueprint Editor** 的 **Details** 面板中的 **Root Motion Mode** 下拉菜单进行定义。 
+
+![](RootMotionMode.png)
+
+这些选项如下： 
+
+| **属性** | **描述** |
+| --- | --- |
+| **No Root Motion Extraction** | 根运动保留不变（应用至根骨骼）。|
+| **Ignore Root Motion** | 根运动已被提取（并从根骨骼移除），但未应用到角色。|
+| **Root Motion from Everything** | 见下文。|
+| **Root Motion from Montages Only** | 见下文。|
+
+### Root Motion from Everything
+
+此选项被设为 Root Motion Mode 后，组成角色最终动作的每个动画资源（AnimSequence、Blendspace、AnimMontage 等）的根运动均会被提取（前提是角色动作已设为包含根运动）。被提取的根运动的每个块基于组成动作的源资源权重进行混合。 
+
+例如：
+
+![](FromEverything.png)
+
+上图中，**Jog_Loop_Fwd_RM** 和 **Jog_Loop_Right_RM** 的根运动将以各 0.5 的权重混合在一起。此设置下的动画效果是角色将斜对角超前奔跑，穿过地图。 
+
+### Root Motion from Montages Only
+
+此方法用于功能更为受限的网络游戏。**Root Motion from Everything** 的理念便是不受限制，因此只建议将其用在动画不通过网络进行复制的游戏中。  
+
+
+
+## 根运动实操
+
+以下详解不处理根运动导致的问题，以及根运动对动画的益处。我们将使用下方所示的前冲动画
+
+### 无根运动
+
+如果没有根运动，动画则会使角色脱离胶囊体，如下方视频所示。可以明显注意到角色弹回胶囊体位置。出现此情况的原因是动画播放完成后，角色控制器将把角色拉回其原点。
+
+[OBJECT:EmbeddedVideo]
+[PARAMLITERAL:width]
+640
+[/PARAMLITERAL]
+[PARAMLITERAL:height]
+360
+[/PARAMLITERAL]
+[PARAMLITERAL:videoid]
+Xu2bVQ4pg8M
+[/PARAMLITERAL]
+[/OBJECT]
+
+
+### 为何胶囊体分离十分糟糕
+
+而此情况下需要解决的还不仅是弹回一个问题。因为角色正在离开碰撞形态，它将穿透世界场景中的物体，并打破整体连贯性。在此例中，我们可看到角色的攻击使他穿过墙壁，然后弹回。
+
+
+[OBJECT:EmbeddedVideo]
+[PARAMLITERAL:width]
+640
+[/PARAMLITERAL]
+[PARAMLITERAL:height]
+360
+[/PARAMLITERAL]
+[PARAMLITERAL:videoid]
+ov9pyx4MAOo
+[/PARAMLITERAL]
+[/OBJECT]
+
+
+### 根运动处理如何解决问题
+
+设置动画使用根运动后，动画师设置的动作将暂时成为胶囊体的驱动力。这使得动画到达终点后继续播放。现在可以看到第二次触发攻击动作后将从新位置开始。当然，需要调转第一个动作，摄像机便不会离开原处。
+
+
+
+[OBJECT:EmbeddedVideo]
+[PARAMLITERAL:width]
+640
+[/PARAMLITERAL]
+[PARAMLITERAL:height]
+360
+[/PARAMLITERAL]
+[PARAMLITERAL:videoid]
+PWB_mqjz3iA
+[/PARAMLITERAL]
+[/OBJECT]
+
+
+### 根运动和物理
+
+胶囊体继续跟随后，就意味着仍然可以使用物理碰撞，角色穿过墙壁的问题已经得到解决，并缓解角色弹回胶囊体位置的问题。下图中的动画使用根运动，将带动胶囊体，使角色和墙壁发生碰撞，而不是从中穿过。 
+
+您会发现这并不完美，因为角色的混合动画将导致其轻微穿过墙壁。然而对墙壁或角色上的碰撞体积域进行调整即可轻松处理此问题。重要的是胶囊体与运动保持一致，防止角色穿过墙壁并弹回。
+
+[OBJECT:EmbeddedVideo]
+[PARAMLITERAL:width]
+640
+[/PARAMLITERAL]
+[PARAMLITERAL:height]
+360
+[/PARAMLITERAL]
+[PARAMLITERAL:videoid]
+YuD29-Xr7Oc
+[/PARAMLITERAL]
+[/OBJECT]
+
+在根运动中，角色的物理状态将纳入计算。举例而言，如果角色物理为行走或倒下，则 Z 轴根运动将被无视，将应用重力。角色将倒下、走下斜坡或走上台阶。如角色物理为飞行，则会应用完整根运动并无视重力。
+
+
+<!-- This should be a HowTo. It's actually a checkbox now instead of using AnimMontages
+## 设置根运动
+
+在 UE4 中进行根运动设置十分简单，然而不同 UE4 版本的设置步骤将稍有不同。4.6 版本之前的流程包括：
+
+1. （UE4 4.6 及更新版本）——打开需要使用的动画，并勾选  **Enable Root Motion** 属性。
+1. 将需要根运动控制的动画指定到 AnimMontage 资源。
+1. 在 AnimMontage 中对包含运动的槽进行命名。
+1. （如使用 4.6 之前的版本）在 AnimMontage 中勾选 **Enable Root Motion Translation** 和 **Enable Root Motion Rotation** 属性。
+1. 在 AnimGraph 中，确保动画通过 **Slot** 节点流动，且为 Slot 节点指定的槽命名和为 AnimMontage 提供的命名相同。
+1. 从动画蓝图的事件图表播放 AnimMontage。 
+
+下方的文档将说明如何设置上方显示的实例使用根运动。
+
+### 设置总览
+
+为便于初学者理解，我们使用的是基础第三人称角色。这实际上是第三人称角色模板的衍生品，在 UE4 的项目模板中即可选用。唯一需要进行的添加是设置一个特殊情形：按下 **R** 键播放猛砸大锤的动画。此处并没有代码使其成为一次攻击，并不会输出伤害。这只是一种方式，用来播放需要根运动的动画。
+
+进行设置的方式有很多中，我们将总览一种方法，专注于根运动设置。
+
+设置以一个自定义 GameMode 蓝图、一个自定义 PlayerController 蓝图、一个自定义 Character 蓝图，和一个自定义 Animation 蓝图作为开始。我们使用蓝图接口将事件从角色发送至动画蓝图中。以下是每种资源的详解：
+
+* **GameMode** - 决定控制器和 Pawn 类，分别是自定义 PlayerController 和 Character 蓝图。
+* **PlayerController** - 对几项属性进行设置。这和 Third Person 模板中包含的内容相同。
+* **Character** - 我们在这里设置静态网格体和摄像机的组件，以及输入控制。
+* **Animation Blueprint** - 处理角色动画的状态。
+* **BlueprintInterface** - 用于将事件从角色蓝图发送到动画蓝图中。这是触发 AnimMontage 的方式。
+
+
+因此首先要在蓝图接口中创建一个函数。在此例中，我们将此函数命名为 **UseHammer**。它不带输入或输出——它的作用就是让事件发生。
+
+![](UseHammerFunction.png)
+
+接下来，我们将在角色蓝图中设置以下特殊网络。注意对第三人称控制的处理已经完成，我们只需要专注于播放锤子动画。此例中我们将设置一个输入事件，按下 **R** 键时在接口上调用 UseHammer 函数。
+
+[REGION:fullwidth]
+![](PressRUseHammer.png)
+[/REGION]
+
+[REGION:note]
+注意要使用 **Get Anim Instance** 节点。这能够确保我们对应的是正确的动画蓝图实例，以便将函数调用发送到正确的对象，这一点十分重要！
+[/REGION]
+
+
+接下来，首先在动画蓝图中确认接口已经实现。
+
+![](ImplementedInterface_AnimBP.png)
+
+
+然后在动画蓝图中在事件图表中为函数调用设置一个简单事件。 
+
+![](UseHammerFunctionCall.png)
+
+现在即可着手设置 AnimMontage。
+
+
+### 建立 AnimMontage
+
+根运动在 AnimMontage 中处理，因此需要创建一个 AnimMontage。执行此操作前需要确定动画已启用根运动。双击动画序列打开 Persona。然后在动画属性（默认位置在左下角）中点击勾选框启用根运动。
+
+![](EnableRootTranslation.png)
+
+完成这些操作后便需要创建 AnimMontage。
+
+最简单的方法是在需要根运动的动画上 **点击右键**（Mac 系统上是 **Ctrl + 左键点击**），然后选择 Create AnimMontage。
+
+ ![](CreateAnimMontage.png)
+
+为 AnimMontage 命名，然后 **双击** 将其在 Persona 中打开。在编辑器中心靠近底部的位置将出现一个 SlotName 下拉菜单。选择其下方的眼睛图表呼出 Anim Slot Manager。按下 **Add Slot** 按钮并为槽命名。如这是一起播放的一套动画中的一部分，则应该选择此命名。常见的槽命名是 FullBody，此例中也将沿用。
+
+之后，从 Montage 中的下拉菜单选择新槽。
+
+[REGION:fullwidth]
+![](SettingUpSlotinMontage.png)
+[/REGION]
+
+接下来返回动画蓝图。然后在 UseHammer 函数事件后创建一个 **Montage Play**。需要确保将其与正确的 AnimMontage 关联。
+
+![](PlayMontage.png)
+
+就快完成啦！最后我们还需要确认槽正在最终的动画中计算。需要前往动画蓝图中的 AnimGraph 标签，创建一个 **Slot** 节点，并将其命名设为和 AnimMontage 中槽一样的命名。在此例中为 FullBody。它将在现有的状态机（或其他动画）和 Final Animation Pose 节点之间进行传递。
+
+![](InsertSlotNode.png)
+
+[REGION:note]
+新的 State Machine 节点上可能出现一条警告。原因是因为它尚未被完整设置。但就此教程而言，该警告并无大碍。
+[/REGION]
+
+大功告成啦！现在您的动画便可通过 AnimMontage 进行播放。Montage 设置为使用根运动后，一切妥当！
+
+
+[OBJECT:EmbeddedVideo]
+[PARAMLITERAL:width]
+640
+[/PARAMLITERAL]
+[PARAMLITERAL:height]
+360
+[/PARAMLITERAL]
+[PARAMLITERAL:videoid]
+PWB_mqjz3iA
+[/PARAMLITERAL]
+[/OBJECT]
+
+-->
+
+
+
+
+
+

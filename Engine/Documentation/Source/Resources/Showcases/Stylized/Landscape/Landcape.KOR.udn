@@ -1,0 +1,132 @@
+﻿INTSourceChangelist:3108692
+Availability: Public
+Title:Stylized Rendering 랜드스케이프
+Crumbs:%ROOT%, Resources, Resources/Showcases/Stylized
+Description:UE4 에 포함된 Stylized Rendering 쇼케이스에 사용된 랜드스케이프 이펙트 개요입니다.
+Related: Engine/Landscape
+Related: Engine/Landscape/Editing/Splines
+Related: Engine/Landscape\Materials
+Version: 4.9
+
+
+
+[REGION:fullwidth]
+![](StylizedTerrain.png)
+[/REGION]
+
+랜드스케이프는 이 예제에서 가장 두드러지는 레벨 요소 중 하나입니다. 그 이유는 두드러진 카툰풍 셰이더가 랜드스케이프 머티리얼을 통해 처리되고 있기 때문입니다. 랜드스케이프 셋업이나 생성 관련 정보는 [랜드스케이프 문서](Engine/Landscape) 를 참고해 주시기 바랍니다.
+
+[REGION:warning]
+이 랜드스케이프에 적용된 머티리얼은 꽤나 기술적으로 심오합니다. 초보자 분들께는 약간 어려울 수 있습니다.
+[/REGION]
+
+[INCLUDE:Resources/Showcases/Stylized#InstanceNote]
+
+
+먼저 머티리얼 에디터에서 머티리얼을 열어 봐야 사용중인 머티리얼 표현식을 살펴볼 수 있습니다. 그 방법은 다음과 같습니다:
+
+1. 콘텐츠 브라우저에서 **M_Terrain_Gound_A** 머티리얼을 검색합니다. 애셋 트리의 **Game** 폴더에서 검색중인지 확인해 주시기 바랍니다. 머티리얼만 검색되도록 필터를 설정하면 도움이 됩니다.
+
+	![](M_Terrain_GroundCB.png)
+
+1. 머티리얼을 더블클릭하여 머티리얼 에디터에서 엽니다.
+
+
+여는 즉시 머티리얼이 코멘트 블록으로 나뉘어 배치되어 있는 것을, 다음과 같이 확인할 수 있습니다:
+
+![](DistanceColorizeComment.png)
+
+머티리얼 표현식 망의 핵심 영역들이 어떤 역할을 하는지 나타내기 위한 것입니다. 분석해 보면 이렇습니다:
+
+* **Rock and Grass Diffuse** 바위와 풀밭 디퓨즈 - 바위와 풀밭 텍스처 사이의 블렌딩, 랜드스케이프 표면에의 배치방식을 처리합니다.
+* **Controls height blend of Rock Diffuse** 바위 디퓨즈의 높이 블렌딩 제어 - 표면에 대한 각도 검사를 하여, 경사면에서 바위 텍스처와 풀밭 영역을 어찌할 것인지를 결정합니다.
+* **Path Diffuse** 길 디퓨즈 - 랜드스케이프 위에 도로 텍스처를 겹쳐 놓습니다.
+* **Beach color and Mask** 해변색과 마스크 - 땅과 물이 만나는 해변 영역 묘사를 담당합니다.
+* **Splotches** 반점 - 마스크 텍스처를 받아 채널별로 타일링을 다시 한 다음, 그것을 사용하여 지형상에 임의의 색 점박이를 만듭니다.
+* **Distance Colorize** 거리 착색 - 멀어져 감에 따라 지형의 색이 어두운 단색 뿌연 색으로 변하는 것을 알 수 있습니다. 이러한 전환 효과를 만들어내는 머티리얼 부분입니다.
+
+
+
+
+### 바위와 풀밭 블렌딩
+
+
+
+조각된 당시의 지형 표면 각에 따라 두 가지 최종적인 모습을 블렌딩하는 머티리얼입니다. 즉 평평한 영역은 그림같은 풀밭 텍스처로 뒤덮이고, 경사가 있는 표면에는 바위 절벽 텍스처가 생긴다는 뜻입니다. 텍스처 결과물은 아래와 같이 표시됩니다.
+
+
+
+
+[REGION:imagetable]
+|![](GrassColor.png)(%GrassSize%)|![](RockCliff.png)(%GrassSize%)|![](GrassBlendResult.png)(%GrassSize%)|
+|:---:|:---:|:---:|
+|풀밭|절벽|결과|
+[/REGION]
+
+
+
+
+<!---
+[EXCERPT:SlopeDiagram]
+[REGION:raw]
+![](LandSlopeDiagram.png)
+[/REGION]
+[/EXCERPT:SlopeDiagram]
+--->
+
+
+[VAR:GrassSize]
+w:300
+[/VAR]
+
+이 블렌딩 메커니즘의 핵심은 _World_Aligned_Blend_ 머티리얼 함수에 있습니다. _Controls height blend_ 코멘트 박스 안의 머티리얼에서 찾을 수 있는데요. 이 함수는 벡터를 받아 월드 공간 표면 노멀과 비교를 합니다. 함수는 0-1 범위 알파값을 출력하는데, 0 은 수직인 벡터를, 1 은 평행인 벡터를 나타냅니다. 다른 말로 하면, _In World Vector_ 값으로 Z-축 (0,0,1) 을 사용하면 흑백 텍스처를 출력하는데, 하양은 평면을 검정은 경사면을 나타냅니다. 이 값을 편향시킨 다음 선명하게 하여 알파값 사이에 똑 떨어지는 선을 구할 수 있습니다.
+
+아래 예제에서는 World Aligned Blend 를 사용하여 빨강과 파랑을 보간하고 있습니다. 머티리얼 망을 살펴보면, 블렌딩이 어찌 일어나는지도 함께 분석해 볼 수 있습니다. 참고로 약간의 선명화를 더해 결과가 더욱 명확해지도록 한 것을 볼 수 있습니다.
+
+
+![](WorldAlignedBlendNetwork.png)(w:700)
+
+
+
+[REGION:imagetable]
+|![](InWorldVector.png)(%VecHeight%)|![](SurfaceComparison.png)(%VecHeight%)|![](Result.png)(%VecHeight%)|
+|:---:|:---:|:---:|
+|In World Vector|월드 표면 노멀 - 노랑색 알파 출력|결과|
+[/REGION]
+
+
+[VAR:VecHeight]
+h:295
+[/VAR]
+
+
+표면 사이의 구분을 돕기 위해 바위와 풀밭 사이에 외곽선이 있는 것을 볼 수 있습니다. 두 개의 World_Aligned_Blend 연산을 통해 이루어진 것으로, 하나는 편향치를 더욱 빡빡하게 준 것입니다. 첫 번째 블렌딩은 외곽선에 사용된 갈색과 돌 텍스처 사이의 블렌딩입니다. 두 번째 블렌딩은 첫 번째 결과와 풀밭 색 사이의 블렌딩입니다.
+
+![](OutlineExample.png)
+
+아래는 빨강, 초록, 파랑을 블렌딩하여 비슷한 외곽선을 만들어내고 있는 유사 예제입니다.
+
+[REGION:imagetable]
+|![](OutlineBlendResult.png)(h:368)|[INCLUDE:#OutlineBlendNetwork]|
+|:---:|:---:|
+|결과|망 (클릭하면 확대)|
+[/REGION]
+
+
+<!--
+[EXCERPT:OutlineBlendNetwork]
+[REGION:lightbox]
+[![](OutlineBlend.png)(w:500)](Resources/Showcases/Stylized/Landscape/OutlineBlend.png)
+[/REGION]
+[/EXCERPT:OutlineBlendNetwork]
+-->
+
+### 랜드스케이프 스플라인
+
+길이나 물 따라 나 있는 해안선은 랜드스케이프 스플라인으로 만든 것입니다. 랜드스케이프 스플라인은 랜드스케이프 위에 길이나 흔적을 물론 랜드스케이프 표면에 합치시킬 필요가 있는 다른 유형의 애셋에도 쓰기 좋은 방식입니다.
+
+[REGION:fullwidth]
+![](Walkway.png)
+[/REGION]
+
+자세한 정보는 [랜드스케이프 스플라인 문서](Engine/Landscape/Editing/Splines) 를 참고해 주시기 바랍니다.

@@ -1,0 +1,129 @@
+Availability: Public
+Title:Traces Overview
+Crumbs:
+Description:Overview of the Unreal Engine 4 tracing system.
+version: 4.14
+type:overview
+Parent:Engine/Physics/Tracing
+order:1
+tags:Physics
+tags:Tracing
+tags:Raycast
+tags:Gameplay
+topic-image:trace_overview_topic.png
+related:Engine/Physics/Tracing/HowTo
+
+[TOC(start:1 end:4)]
+
+<!-- Common Variables -->
+
+[VAR:spacer]![](%ROOT%/spacer.png)(w:150 convert:false)[/VAR]
+
+[VAR:spacer2]![](%ROOT%/spacer.png)(w:40 convert:false)[/VAR]
+
+<!-- Overview -->
+
+[REGION:fullwidth]
+![](traceTitle.png)(convert:false)
+[/REGION]
+
+**Traces** offer a method for reaching out in your levels and getting feedback on what is present along a line segment. You use them by providing two end points (a start and end location) and the physics system "traces" a line segment between those points, reporting any Actors (with collision) that it hits. Traces are essentially the same as **Raycasts** or **Raytraces** in other software packages.
+
+Whether you want to know if one **Actor** can "see" another, or figure out the normal of a specific polygon, or simulate high velocity weaponry, or if you need to know that an **Actor** has entered a space; Traces offer you a reliable and computationally cheap solution. This document covers the basic feature set of Traces in Unreal Engine 4 (UE4).
+
+## Trace by Channel or Object Type
+
+Since Traces use the physics system, you'll be able to define the category of thing you want to trace against. There are two broad categories to choose from: Channels and Object Types. Channels are used for things like visibility and the camera, and almost exclusively have to do with tracing. Object Types are the physics types of Actors with collision in your scene, such as Pawns, Vehicles, Destructible Actors, etc...
+
+You can add more Channels and Object types as you need them. See [](Engine/Physics/Collision/HowTo/AddCustomCollisionType) for more information on how to do this.
+
+## Returning Single or Multiple Hits
+
+When tracing, you can choose to return the first thing that matches the critera hit by the trace, or you can return everything hit by the trace that matches the critera.
+
+Special consideration is given to **Multi Trace by Channel** versus **Multi Trace by Object**. When using **Muli Trace by Channel** the trace will return all **overlaps** up to and including the first **block**. Imagine shooting a bullet through some tall grass that then impacts a wall.
+
+**Multi Trace by Object** will return everything that matches an object type the trace is looking for, assuming the component is set to return trace queries. Making it great for counting the number of objects between the start and end of the trace.
+
+[REGION:fullwidth]
+![](singleVSmulti.png)(convert:false)
+[/REGION]
+
+### Hit Results
+
+When a Trace hits something, it returns a "Hit Result" Struct. Made available in Blueprints (also in C++), this is what the struct looks like:
+
+| --- | --- |
+| ![](BP_HitStruct.png) | [INCLUDE:#ts1] |
+
+<!--
+[EXCERPT:ts1]
+| **Member** || **Definition** |
+| --- | :---: | :--- |
+| **Blocking Hit** || Whether or not the hit was a blocking hit. This is used when **Multi Tracing by Channel**, due to the ability to have traces simply overlap and not stop the trace. |
+| **Initial Overlap** || Whether this is the first overlap in a series of results. |
+| **Time** || This is the "Time" of impact along the trace direction ranging from [0.0 to 1.0]. If there was no hit, this will return 1.0. |
+| **Location** || The world space location of the hit that is modified based on the shape of the trace. |
+| **Impact Point** || The absolute location of the hit. Does not include the shape of the trace, only the point of the hit. |
+| **Normal** || The direction of the trace. |
+| **Impact Normal** || The normal of the hit surface. |
+| **Phys Mat** || The **Physical Material** of the hit surface. |
+| **Hit Actor** || The hit **Actor**. |
+| **Hit Component** || The specfic **Component** hit. |
+| **Hit Bone Name** || If traced against a **Skeletal Mesh**, this is the name of the bone that was hit. |
+| **Hit Item** || Primitive-specific data, recording which item in the primitive was hit. |
+| **Face Index** || If colliding with a trimesh or landscape, this is the index of the face that was hit. |
+| **Trace Start** || The start location of the trace. |
+| **Trace End** || The end location of the trace. |
+[/EXCERPT]
+-->
+
+## Using Shape Traces
+
+[REGION:fullwidth]
+![](shapeTracesEX.png)(convert:false)
+[/REGION]
+
+When a Line Trace is not enough, you may get the results you are after by using a Shape Trace instead. For example, maybe you are creating a "vision cone" for an enemy, and you want to detect players that enter it. A Line Trace may not be enough as players may be able to avoid detection by ducking under the Line Trace. 
+
+In this situation, you could possibly use a Box Trace, Capsule Trace, or Sphere Trace. 
+
+[REGION:fullwidth]
+![](TracesOverview_ShapeTraces.png)
+[/REGION]
+
+Shape Traces function like Line Traces, where you are sweeping and checking for collision from a start point to an end point; however, Shape Traces have an added layer of checking because you are using a shape as a volume (of sorts) in your Raycast. You can use a Shape Trace as a Single Trace, or as a Multi Trace, and each are set up in the same manner as a Line Trace; however, you will need to provide additional details pertaining to the size (or orientation) of the shape you use.
+
+## Getting UV Coordinates from Trace
+
+A trace can return the UV Coordinates of the Actor it hit, assuming trace complex is used. As of 4.14 this only works on **Static Mesh Components**, **Procedural Mesh Components**, and **BSP**. It will **not** work on **Skeletal Mesh Components** because you trace against the **Physics Asset**, which doesn't have UV coordinates (even if you choose to trace complex).
+
+[REGION:note]
+Using this feature will increase CPU memory usage, because UE4 needs to keep an additional copy of vertex positions and UV coordinates in main memory.
+[/REGION]
+
+### Enabling UV Coordinates from Trace
+
+To enable this feature, follow these steps:
+
+1. Access your **Project Settings** from the **Edit Menu**.
+
+	![](accessProj.png)
+
+1. Enable the **Support UV From Hit Results** feature in the **Physics Section** of your **Project Settings**.
+
+	![](ProjectSettings.png)
+
+1. Restart the Editor.
+
+	[REGION:note]
+	You can inspect the Blueprint **Find Collision UV** node using this feature prior to restarting the editor; however, the node will only return [0.0, 0.0] when you inspect it.
+	If you want the node to return the correct UV data, you'll have to restart the editor.
+	[/REGION]
+
+
+## Other Features	
+
+Tracing also has a number of minor features to limit what they return, making them easier to debug. They have the ability to trace against **Complex Collision** (if a Static Mesh or Procedural Mesh has it enabled). If they are called from an **Actor**, they can be told to ignore all attached components by enabling the **Actor** to trace through itself. Finally, they have the option to show a representation of the trace as red and green lines (with larger boxes representing hits).
+
+<!-- Draw Debug Type, Trace Complex, Ignore Self -->

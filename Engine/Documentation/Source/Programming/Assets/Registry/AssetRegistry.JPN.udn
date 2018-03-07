@@ -1,0 +1,170 @@
+﻿INTSourceChangelist:2721304
+Availability:Public
+Title:アセット レジストリ
+Crumbs: %ROOT%, Engine, Engine/UI, Programming
+Description: エディタによるアセットの検出方法およびロード前のアセットタイプ情報の収集方法
+バージョン：4.9
+
+**アセット レジストリ** はエディタがロードされると、アンロードのアセットについての情報を非同期式に収集するエディタのサブシステムです。
+エディタによる情報の読み込みなしにアセットリストが作成出来るように、情報はメモリに格納されています。
+この情報は信頼できるものであり、アセットはメモリ内で変更されたりファイルはディスク上で変更されるため、常に自動更新されています。
+**コンテンツ ブラウザ** がこのシステムを主に使用しますが、エディタ コードのどこかで使用される場合もあります。
+
+## アセット リストの取得
+
+クラス毎にアセットリストを作成するには、単に Asset Registry モジュールをロードして、 `Module.Get().GetAssetsByClass()` を呼び出します。
+
+	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+	TArray<FAssetData> AssetData;
+	const UClass* Class = UStaticMesh::StaticClass();
+	AssetRegistryModule.Get().GetAssetsByClass(Class, AssetData);
+
+`FAssetData` オブジェクトのリストを返します。このリストはロードまたはアンロードされたアセットを説明します。 
+`FAssetData` オブジェクトは、ロード前に確定されるアセット情報を格納します。
+
+オブジェクトのメンバーと各説明は以下となります。
+
+| メンバー | 説明 |
+| ------ | ----------- |
+| `FName ObjectPath` | 「Package.GroupNames.AssetName」形式のアセットのオブジェクトパスです。 |
+| `FName PackageName` | アセットが見つかったパッケージの名前です。 |
+| `FName PackageName` | アセットが見つかったパッケージへのパスです。 |
+| `FName GroupNames` |アセットが見つかったグループ名の「 '.' 」区切りリストです。グループが無い場合は「 NAME_None 」となります。 |
+| `FName PackageName` | パッケージやグループが無いアセット名です。 |
+| `FName AssetClass` | アセットのクラス名です。|
+| `TMap<FName, FString> TagsAndValues` |  `AssetRegistrySearchable` とマークされたプロパティのマップ値です。詳細は [タグと値](#タグと値) を参照してください。|
+
+以下のいずれかの関数を呼ぶことによって、他の基準でリストを生成することも出来ます。
+
+| 関数 | 説明 |
+| -------- | ----------- |
+| `GetAssetsByPackageName()` | ある特定のパッケージからアセットのリストを返します。 |
+| `GetAssetsByPath()` | 指定パスにあるアセットのリストを返します。 |
+| `GetAssetByObjectPath()` | ある特定のコレクションに属するアセットのリストを返します。 |
+| `GetAssetByObjectPath()` | 指定された一連のタグと値を含んだアセットのリストを返します。 |
+| `GetAllAssets()` | 全てのアセットのリストを返します。この関数は処理が遅くなります。 |
+
+
+[REGION:tip]
+	複数の基準でアセットのリストを生成する必要がある場合、 `GetAssets()` を使用して、 
+	[フィルタを作成する](#フィルタを作成する) セクションで説明する `FARFilter` 構造体を定義します。
+[/REGION]
+
+## FAssetData を UObject* へ変換する
+
+`FAssetData` オブジェクトには `GetAsset()` という名前の関数があります。 
+この関数`FAssetData` を意味する `UObject*` を返します。必要に応じてアセットを読み込んで、その後アセットを返します。
+
+アセットがロード済みであることのみをチェックしたい場合、代わりに `IsAssetLoaded()` を使用します。
+
+## フィルタを作成する
+
+複数の基準でフィルタリングされたアセットのリストを作成する `GetAssets()` を呼び出した時に  
+`FARFilter` が提供されます。フィルタは以下の複数のコンポーネントから構成されます。 
+
+* PackageName
+* PackagePath
+* Collection
+* Class
+* Tags/Value pairs
+
+
+コンポーネントは複数の要素で構成される場合があります。**全ての** コンポーネントが満たされた場合、アセットはフィルタを渡します。 
+コンポーネントを満たすには、要素の **いくつか** がアセットと合致しなくてはいけません。
+
+例えば、パスが「/Game/Meshes/BeachBall」であるスタティック メッシュ アセットが存在する場合は以下になります。
+
+* フィルタに PackagePath  `/Game/Meshes` のみが含まれる場合、アセットはパスします。1 つの要素のみを持つコンポーネントは 1 つしかありません。
+* フィルタに PackagePath `/Game/Meshes` と Class の `UParticleSystem` **かつ** `UStaticMesh` が含まれる場合アセットがパスします。最初に 1 つの要素、次に 2 つの要素を持つ 2 つのコンポーネントがあります。
+* フィルタに PackagePath `/Game/Meshes` とクラスの `UParticleSystem`.**のみ** 含まれると、アセットは失敗します。フィルタはそれぞれが 1 つの要素を持つ 2 つのコンポーネントを使用します。
+フィルタに PackagePath の `/Game/NotMeshes` と Class の `UStaticMesh` が含まれる場合アセットは失敗します。このフィルタもそれぞれが 1 つの要素を持つ 2 つのコンポーネントを使用します。
+
+
+2 つコンポーネント、 Class と PackagePath を使用したフィルタの例です。
+
+	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+	TArray<FAssetData> AssetData;
+	FARFilter Filter;
+	Filter.Classes.Add(UStaticMesh::StaticClass());
+	Filter.PackagePaths.Add("/Game/Meshes");
+	TArray<FAssetData> AssetData;
+
+## タグと値
+
+`FAssetData` オブジェクトは、 `TagsAndValues` と呼ばれる名前と値マップの含まれるアセット レジストリから返されます
+これは `FAssetData` が示すアセットのプロパティ名と関連した値のリストです。
+この情報は、アセットを格納する「UAsset」ファイルのヘッダにアセットが保存格納された時に収集されます。
+アセットレジストリはこのヘッダを読み込み、その結果 `TagsAndValues` マップへ書き込みます。
+アセットレジストリは `AssetRegistrySearchable` の `UPROPERTY()` フラグでマークされたプロパティのみを収集します。
+
+例 (`UTexture` から):
+
+	/** The texture filtering mode to use when sampling this texture. */
+	UPROPERTY(Category=Texture, AssetRegistrySearchable)
+	TEnumAsByte<enum TextureFilter> Filter;
+
+このフラグが `UTexture` の 'Filter' プロパティに追加されると、その後保存される全ての UTextures は、 `FAssetData` の `TagsAndValues` マップに入力があります。 `TagsAndValues` マップのキーは `Filter` で、その値は `"TF_Linear"` 等の文字列を示す列挙型変数値です。
+
+[REGION:note]
+	アセットレジストリによってプロパティが検出される前に、アセットを再保存する必要があります。
+[/REGION]
+
+アセットレジストリを使用して、Uproperty に直接関する情報を検索をしたい場合は、 
+アセットのクラスに仮想関数を実装することが出来ます。GetAssetRegistryTags() は手動でキー/値ペアを  
+TagsAndValues マップに追加します。GetAssetRegistryTags は UObject から継承されます。
+
+## 非同期式なデータ収集
+
+アセット レジストリは「UAsset」を非同期に読み込むため、要求時には全アセットが全てそろったリストがない場合があります。 
+ご使用のエディタコードが完全リストを必要とする場合、アセットの検出 / 作成、名前変更または削除時に、 
+アセット レジストリがデリゲートをコールバックします。アセットレジストリによる初回検索の終了時用のデリゲートは、 
+多くのシステムにとって実用的です。
+
+アセットレジストリ モジュールをロードしてこれらのデリゲートに登録し、`IAssetRegistry` に用意された関数を使用することも出来ます。
+
+	/** Register/Unregister a callback for when assets are added to the registry (レジストリへアセット追加時にコールバックを登録/未登録) */
+	virtual FAssetAddedEvent& OnAssetAdded() = 0;
+
+	/** Register/Unregister a callback for when assets are removed from the registry (レジストリからアセット削除時にコールバックを登録/未登録) */
+	virtual FAssetRemovedEvent& OnAssetRemoved() = 0;
+
+	/** Register/Unregister a callback for when assets are renamed in the registry (アセットがレジストリで名前変更された時にコールバックを登録/未登録) */
+	virtual FAssetRenamedEvent& OnAssetRenamed() = 0;
+
+	/** Register/Unregister a callback for when the asset registry is done loading files (アセット レジストリがファイルの読み込み終了時にコールバックを登録/未登録) */
+	virtual FFilesLoadedEvent& OnFilesLoaded() = 0;
+
+	/** Register/Unregister a callback to update the progress of the background file load (バックグラウンドのファイル読み込みの進捗を更新するためコールバックを登録/未登録) */
+	virtual FFileLoadProgressUpdatedEvent& OnFileLoadProgressUpdated() = 0;
+
+	/** Returns true if the asset registry is currently loading files and does not yet know about all assets (アセットレジストリが現在ファイルの読み込み中で全てのアセットについて把握していない時 true を返します) */
+	virtual bool IsLoadingAssets() = 0;
+
+例:
+
+	void FMyClass::FMyClass()
+	{
+		// 更新をリッスンするためアセット レジストリ モジュールを読み込む
+		FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		AssetRegistryModule.Get().OnAssetAdded().AddRaw( this, &FMyClass::OnAssetAdded );
+	}
+
+	FMyClass::~FMyClass()
+	{
+		// デリゲートを未登録にするためアセット レジストリ モジュールを読み込む
+		FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		AssetRegistryModule.Get().OnAssetAdded().RemoveAll( this );
+	}
+
+	void FMyClass::OnAssetAdded(const FAssetData& AssetData)
+	{
+		// アセットがアセットレジストリによって検出されました。
+		// たった今作成された、もしくは直近にディスクで検出されたことを意味します。
+		// この関数のコードが高速であることを確認します。さもなければ収集処理が遅くなります。
+	}
+
+アセットレジストリをコマンドレットで使用することも出来ますが、 
+その場合情報が同期で収集されます。情報収集が終了するまで、 `LoadModule()` コールはブロックされます。
+
+ユーザーのコードが非同期的なアセットの検出を待ったり、 [Slate UI](Programming/Slate) フロントエンドを持つ場合、 
+進捗をユーザーに伝えるため `SAssetDiscoveryIndicator` ウィジットをコードに格納すべきです。

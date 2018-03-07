@@ -1,0 +1,110 @@
+Availability: Public
+Title:Stylized Rendering Post Processing
+Crumbs:%ROOT%, Resources, Resources/Showcases/Stylized
+Description:An overview of the post processing effects used in the Stylized Rendering showcase included with UE4.
+Related: Engine/Rendering/PostProcessEffects
+Related: Engine/Rendering/PostProcessEffects/PostProcessMaterials
+Related: Resources/ContentExamples/PostProcessing
+Version: 4.9
+
+
+[TOC(start:2 end:3)]
+
+[REGION:fullwidth]
+![](PostProcessHeader.png)
+[/REGION]
+
+One of the more prominent features of the showcase is the use of post processing, which is primarily used to create the toon-like outline around objects in the scene. It is also used to provide a paper-like texture overlay across the scene, as well as to create the artist tape effects around the outside of the view. The post process effect is handled entirely within a single Post Process Volume. This Post Process Volume contains the most important part of the post process effect: the post process Material. To make a Material work as a post process effect is a 2-part process, which we will break down over the steps below.
+
+[INCLUDE:Resources/Showcases/Stylized#InstanceNote]
+
+[INCLUDE:Engine/Rendering\PostProcessEffects\PostProcessMaterials#PostMatWarning]
+
+If you are a new user and would like a tutorial on setting up a Post Process Material, please see the [Post Process Material documentation](Engine/Rendering\PostProcessEffects\PostProcessMaterials).
+
+
+## Stylized Post Process Material
+
+[REGION:fullwidth]
+![](PostStylized.png)
+[/REGION]
+
+This Material is broken up into a series of effects. In overview, these are:
+
+* Creating the outline around objects.
+* Selectively drawing that line only in areas where ambient occlusion is not present.
+* Saturating the overall color of the lines around objects in the scene.
+* Saturating colors at the edge of the view.
+* Masking out the edges of the view to create the artist tape effect.
+* Creating a texture overlay that looks like paper.
+
+[REGION:note]
+The post process Material is fairly technical and may prove to be difficult for those new to creating Materials in Unreal Engine 4. Our goal here is to overview the purpose and nature of how the Material works, rather than step-by-step recreation instructions. 
+[/REGION]
+
+**It is recommended that you open the _M_PostProcess_Base_ and _M_PostProcess_Paper_ Materials to see how each section of the effect was created.**
+
+### Toon Outline
+
+![](Outline.png)
+
+[REGION:note]
+**In the above image**, we have extracted the portion of the post network that handles the outline and shown it by itself to make the effect clearer.
+[/REGION]
+
+This effect can be seen within the M_PostProcess_Base Material, primarily in section commented **Line Render**.
+
+[REGION:lightbox fullwidth]
+[![](LineRender.png)](LineRender.png)
+[/REGION]
+
+[REGION:lightbox fullwidth]
+[![](LineRender02.png)](LineRender02.png)
+[/REGION]
+
+**For each of the images above**, it will be best to **right-click** each one and choose Save As if you would like to view them full size (the Material Network can also be found inside the Stylized Showcase).
+
+The outline around the objects in the scene is handled by sampling scene depth via a SceneTexture expression. This is then offset by perturbing the UV coordinates slightly in positive and negative directions, both horizontally and vertically. The results are then combined and used to define the location of the outline. 
+
+However, before the lines are actually rendered, a second SceneTexture is calculated from Ambient Occlusion. This is used to mask out the outline. The purpose is to prevent internal lines that appear on some wireframe edges. You can visualize this below:
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Before AO Masking](PostProcessLines_2.png)(%Dither%)
+	[/PARAM]
+	[PARAM:after]
+	![After AO Masking](PostProcessLines_1.png)(%Dither%)
+	[/PARAM]
+[/OBJECT]
+
+[VAR:Dither]
+w:450
+[/VAR]
+
+### Paper Effect
+
+The outline around the outside of the view is actually a 2-part effect. The farthest edges of the screen are converted to a paper-like texture. The area just inside this has been oversaturated to help give more visual interest to the edges of the screen.
+
+This is primarily achieved by using a special screen-aligned texture. The texture uses the R, G, and B channels to hold masks. Below is the texture, as well as each channel separated.
+
+[REGION:imagetable]
+|![](T_MaskedPaper_Screen_RGB.png)(%foo%) | ![](T_MaskedPaper_Screen_R.png)(%foo%)| ![](T_MaskedPaper_Screen_G.png)(%foo%)| ![](T_MaskedPaper_Screen_B.png)(%foo%)|
+|:---:|:---:|:---:|:---:|
+| RGB | R Only|G Only|B Only|
+[/REGION]
+
+[VAR:foo]
+w:225
+[/VAR]
+
+By masking out the edges of the screen with the Green channel and then overlaying a noisy paper-like texture and color, the effect is given that the scene has been painted onto a piece of paper. 
+
+On top of all of this, the paper texture is multiplied across the entire view, giving a paper grain effect to the whole scene.
+
+![](StylizedPaper.png)
+
+The heart of this system lies within the **Paper Mask** comment area. This network uses the texture shown above, but makes use of a **ScreenAlignedUVs** Material Function. This takes the texture coordinates and applies them to the screen extents, effectively stretching the texture across the screen. When used as part of a Post Process Material, the result is a texture that perfectly fills the view.
+
+[REGION:fullwidth]
+![](PaperMaskNetwork.png)
+[/REGION]

@@ -1,0 +1,53 @@
+Availability: Docs
+Crumbs: %ROOT%
+Title: Cooking and Chunking
+Description: Cooking Content and Building .pak Files for Distribution
+Type: Overview
+SkillLevel: Intermediate
+Version: 4.17
+Parent: Engine/Basics/AssetsAndPackages/AssetManagement
+Order: 0
+Tags: Assets
+Tags: Asset Management
+Tags: Cooking
+Tags: Chunking
+Related: Engine/Basics/AssetsAndPackages/AssetManagement
+
+[TOC (start:2 end:3)]
+
+When you cook your game for release or test on non-editor platforms, **Chunking** can be used to split your data into several .pak files that can then be independently deployed. Chunking is now integrated into the Asset Manager, and it can be set up using **Primary Asset Labels** or **Rules Overrides**. The best example of chunking can be found in the ShooterGame sample project. ShooterGame establishes three chunks: Chunk 1 for the "Sanctuary" map, Chunk 2 for the "Highrise" map, and Chunk 0 for all other data. For [ShooterGame](Resources/SampleGames/ShooterGame), Primary Asset Labels were chosen, but we will discuss both methods.
+
+## Primary Asset Rules
+
+**Primary Asset Rules** are used to determine which Primary Assets have management authority of which Secondary Assets, as well as how to handle Assets during the cooking process. These Rules are defined by the `FPrimaryAssetRules` structure, and are used by the [Asset Manager](Engine\Basics\AssetsAndPackages\AssetManagement) to determine how to handle Assets at cook time. For detailed information on the options available within `FPrimaryAssetRules`, check its [API Page](API:FPrimaryAssetRules). You may also want to look up the Cooking Rules defined on the [`EPrimaryAssetCookRule` API Page](API:EPrimaryAssetCookRule).
+
+## Primary Asset Labels
+
+**Primary Asset Label** is a minimal override of `UPrimaryDataAsset` that is set up to designate other assets for chunking and cooking. While they are not usually loaded during the game, they are used when cooking and chunking and can set up their own rules, lists, and priorities for other project assets. In the case of ShooterGame, labels were created to designate the assets that would be placed into the various chunks.
+
+![](HighriseLabel.png)
+
+[REGION:caption]This Primary Asset Label, named "HighriseLabel", explicitly manages the game's "Highrise" map asset, and indicates that it belongs in Chunk 2.[/REGION]
+
+At this point, the asset for "Highrise" is associated with its own Primary Asset ID, "Map:/Game/Maps/Highrise", as well as the Primary Asset ID of "HighriseLabel", "PrimaryAssetLabel:HighriseLabel". Because the map has no Chunk ID of its own, the chunking process will use the Chunk ID found in "HighriseLabel", which is 2. In addition, all Secondary Assets in the map will be associated with Chunk 2. A similar setup will need to be made for the "Sanctuary" map and Chunk 1. Assets with no Chunk ID (or a negative Chunk ID) will go to Chunk 0, the default .pak file, which is also where this project's startup map, "ShooterEntry", will be stored. Secondary Assets that are referenced by multiple Primary Asset Labels will be associated with the highest-priority among those Labels. In the event that multiple Labels are tied for highest priority, the Asset will be associated with each Label.
+
+![](ReferenceViewer.png)
+
+[REGION:caption]The Reference Viewer shows the management relationship of the Primary Asset Label and the level map.[/REGION]
+
+![](Management.png)
+
+[REGION:caption]Double-clicking on "Map:/Game/Maps/Highrise" reveals that it is managed by "PrimaryAssetLabel:HighriseLabel".[/REGION]
+
+## Rules Overrides
+
+**Rules Overrides** can be used to establish the priority and Chunk settings for a specific Primary Asset. To build our three-chunk setup for ShooterGame using Rules Overrides instead of Primary Asset Labels, the following section should be created in `DefaultGame.ini`:
+
+	[/Script/Engine.AssetManagerSettings]
+	+PrimaryAssetRules=(PrimaryAssetId="Map:/Game/Maps/Sanctuary",Rules=(Priority=-1,ChunkId=1,CookRule=Unknown))
+	+PrimaryAssetRules=(PrimaryAssetId="Map:/Game/Maps/Highrise",Rules=(Priority=-1,ChunkId=2,CookRule=Unknown))
+	+PrimaryAssetRules=(PrimaryAssetId="Map:/Game/Maps/ShooterEntry",Rules=(Priority=-1,ChunkId=0,CookRule=AlwaysCook))
+
+[REGION:caption]Cooking and chunking rules in the `DefaultGame.ini` file. We have added an explicit reference to the startup map, "ShooterEntry", in this example.[/REGION]
+
+This sets our main game maps to be in specific chunks, which will cause all of their references to be added to those chunks as well. The final entry, governing Chunk 0, ensures that anything referenced by the map that loads when the game first starts up will be in Chunk 0, which is also the default Chunk. The priority value of -1 sets priority to the default value, which is 1.

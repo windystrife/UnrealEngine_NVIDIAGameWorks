@@ -1,0 +1,755 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+#pragma once
+
+#include "DeferredShadingCommon.ush"
+#include "BRDF.ush"
+#include "FastMath.ush"
+
+#if 0
+void StandardShadingShared( float3 DiffuseColor, float3 SpecularColor, float Roughness, float3 V, half3 N )
+{
+	float NoV = saturate( abs( dot(N, V) ) + 1e-5 );
+
+	// Diffuse_Lambert
+	Shared.DiffuseMul = DiffuseColor * (1.0 / PI);
+
+	// D_GGX, Vis_SmithJointApprox
+	float m = Roughness * Roughness;
+	Shared.m2 = m * m;
+	Shared.SpecularMul = (0.5 / PI) * Shared.m2;
+	Shared.VisMad = float2( 2 * NoV * ( 1 - m ) + m, NoV * m );
+	
+	// F_Schlick
+	Shared.SpecularMul *= saturate( 50.0 * SpecularColor.g );
+}
+
+void StandardShadingPerLight( Shared, float3 L, float3 V, half3 N )
+{
+	float3 H = normalize(V + L);			// 3 add, 2 mad, 4 mul, 1 rsqrt
+	float NoL = saturate( dot(N, L) );		// 2 mad, 1 mul
+	float NoH = saturate( dot(N, H) );		// 2 mad, 1 mul
+	float VoH = saturate( dot(V, H) );		// 2 mad, 1 mul
+
+	// D_GGX, Vis_SmithJointApprox
+	float d = ( NoH * Shared.m2 - NoH ) * NoH + 1;			// 2 mad
+	float v = NoL * Shared.VisMad.x + Shared.VisMad.y;		// 1 mad
+	float D_Vis = Shared.SpecularMul * rcp( d * d * v );	// 3 mul, 1 rcp
+
+	// F_Schlick
+	float Fc = pow( 1 - VoH, 5 );							// 1 sub, 3 mul
+	float3 F = Fc + (1 - Fc) * SpecularColor;				// 1 sub, 3 mad
+
+	return Shared.DiffuseMul + D_Vis * F;					// 3 mad
+}
+#endif
+
+float3 StandardShading( float3 DiffuseColor, float3 SpecularColor, float3 LobeRoughness, float3 LobeEnergy, float3 L, float3 V, half3 N )
+{
+	float NoL = dot(N, L);
+	float NoV = dot(N, V);
+	float LoV = dot(L, V);
+	float InvLenH = rsqrt( 2 + 2 * LoV );
+	float NoH = saturate( ( NoL + NoV ) * InvLenH );
+	float VoH = saturate( InvLenH + InvLenH * LoV );
+	NoL = saturate(NoL);
+	NoV = saturate(abs(NoV) + 1e-5);
+
+	// Generalized microfacet specular
+	float D = D_GGX( LobeRoughness[1], NoH ) * LobeEnergy[1];
+	float Vis = Vis_SmithJointApprox( LobeRoughness[1], NoV, NoL );
+	float3 F = F_Schlick( SpecularColor, VoH );
+
+	float3 Diffuse = Diffuse_Lambert( DiffuseColor );
+	//float3 Diffuse = Diffuse_Burley( DiffuseColor, LobeRoughness[1], NoV, NoL, VoH );
+	//float3 Diffuse = Diffuse_OrenNayar( DiffuseColor, LobeRoughness[1], NoV, NoL, VoH );
+
+	return Diffuse * LobeEnergy[2] + (D * Vis) * F;
+}
+
+float3 SimpleShading( float3 DiffuseColor, float3 SpecularColor, float Roughness, float3 L, float3 V, half3 N )
+{
+	float3 H = normalize(V + L);
+	float NoH = saturate( dot(N, H) );
+	
+	// Generalized microfacet specular
+	float D = D_GGX( Roughness, NoH );
+	float Vis = Vis_Implicit();
+	float3 F = F_None( SpecularColor );
+
+	return Diffuse_Lambert( DiffuseColor ) + (D * Vis) * F;
+}
+
+float3 ClearCoatShading( FGBufferData GBuffer, float3 LobeRoughness, float3 LobeEnergy, float3 L, float3 V, half3 N )
+{
+	const float ClearCoat			= GBuffer.CustomData.x;
+	const float ClearCoatRoughness	= GBuffer.CustomData.y;
+	const float Film = 1 * ClearCoat;
+	const float MetalSpec = 0.9;
+
+#if 1
+	float3 H = normalize(V + L);
+	float NoL = saturate( dot(N, L) );
+	float NoV = saturate( abs( dot(N, V) ) + 1e-5 );
+	float NoH = saturate( dot(N, H) );
+	float VoH = saturate( dot(V, H) );
+	
+	// Generalized microfacet specular
+	float D = D_GGX( LobeRoughness[0], NoH ) * LobeEnergy[0];
+	float Vis = Vis_Kelemen( VoH );
+	
+	// F_Schlick
+	float F0 = 0.04;
+	float Fc = Pow5( 1 - VoH );
+	float F = Fc + (1 - Fc) * F0;
+	F *= ClearCoat;
+
+	float Fr1 = D * Vis * F;
+
+	float LayerAttenuation = (1 - F);
+
+
+	#if CLEAR_COAT_BOTTOM_NORMAL
+		{
+			//const float3 ClearCoatUnderNormal = OctahedronToUnitVector((float2(GBuffer.CustomData.a, GBuffer.CustomData.z) * 2) - (256.0/255.0));
+			const float2 oct1 = ((float2(GBuffer.CustomData.a, GBuffer.CustomData.z) * 2) - (256.0/255.0)) + UnitVectorToOctahedron(GBuffer.WorldNormal);
+ 			const float3 ClearCoatUnderNormal = OctahedronToUnitVector(oct1);
+			//float CNoL = saturate( dot(ClearCoatUnderNormal, L) );
+			//float CNoV = saturate( dot(ClearCoatUnderNormal, V) );
+			float CNoH = saturate( dot(ClearCoatUnderNormal, H) );
+
+			float D2 = D_GGX(LobeRoughness[1], CNoH ) * LobeEnergy[1];
+			float Vis2 = Vis_SmithJointApprox( LobeRoughness[1], NoV, NoL );
+			//float3 F2 = F_Schlick( GBuffer.SpecularColor, VoH );
+			float3 F2 = saturate( 50.0 * GBuffer.SpecularColor.g ) * Fc + (1 - Fc) * GBuffer.SpecularColor;
+
+			//Optional term taking into account Basic NdotL response of bottom normal. Not important for metallic which is the most common clearcoat case. Not energy conserving.
+			//float3 Fr2 = Diffuse_Lambert( GBuffer.DiffuseColor ) * CNoL + (D2 * Vis2) * F2;
+
+			float3 Fr2 = Diffuse_Lambert( GBuffer.DiffuseColor )  + (D2 * Vis2) * F2;
+
+			return Fr1 + Fr2 * LayerAttenuation;
+			//return float3(2,0,0);
+			//return ClearCoatUnderNormal;
+		}
+	#endif
+
+	// Generalized microfacet specular
+	float D2 = D_GGX( LobeRoughness[1], NoH ) * LobeEnergy[1];
+	float Vis2 = Vis_SmithJointApprox( LobeRoughness[1], NoV, NoL );
+	//float3 F2 = F_Schlick( GBuffer.SpecularColor, VoH );
+	float3 F2 = saturate( 50.0 * GBuffer.SpecularColor.g ) * Fc + (1 - Fc) * GBuffer.SpecularColor;
+
+	//float3 Fr2 = Diffuse_Burley( GBuffer.DiffuseColor, LobeRoughness[1], NoV, NoL, VoH ) * LobeEnergy[2] + (D2 * Vis2) * F2;
+	float3 Fr2 = Diffuse_Lambert( GBuffer.DiffuseColor ) * LobeEnergy[2] + (D2 * Vis2) * F2;
+	
+	return Fr1 + Fr2 * LayerAttenuation;
+#else
+	float3 H = normalize(V + L);
+	float NoL = saturate( dot(N, L) );
+	float NoV = saturate( abs( dot(N, V) ) + 1e-5 );
+	float NoH = saturate( dot(N, H) );
+	float VoH = saturate( dot(V, H) );
+	
+	// Hard coded IOR of 1.5
+
+	// Generalized microfacet specular
+	float D = D_GGX( ClearCoatRoughness, NoH ) * LobeEnergy[0];
+	float Vis = Vis_Kelemen( VoH );
+	
+	// F_Schlick
+	float F0 = 0.04;
+	float Fc = Pow5( 1 - VoH );
+	float F = Fc + (1 - Fc) * F0;
+
+	float Fr1 = D * Vis * F;
+
+	// Refract rays
+	//float3 L2 = refract( -L, -H, 1 / 1.5 );
+	//float3 V2 = refract( -V, -H, 1 / 1.5 );
+
+	// LoH == VoH
+	//float RefractBlend = sqrt( 4 * VoH*VoH + 5 ) / 3 + 2.0 / 3 * VoH;
+	//float3 L2 = RefractBlend * H - L / 1.5;
+	//float3 V2 = RefractBlend * H - V / 1.5;
+	//float NoL2 = saturate( dot(N, L2) );
+	//float NoV2 = saturate( dot(N, V2) );
+	
+	// Approximation
+	float RefractBlend = (0.22 * VoH + 0.7) * VoH + 0.745;	// 2 mad
+	// Dot products distribute. No need for L2 and V2.
+	float RefractNoH = RefractBlend * NoH;					// 1 mul
+	float NoL2 = saturate( RefractNoH - (1 / 1.5) * NoL );	// 1 mad
+	float NoV2 = saturate( RefractNoH - (1 / 1.5) * NoV );	// 1 mad
+	// Should refract H too but unimportant
+
+	NoL2 = max( 0.001, NoL2 );
+	NoV2 = max( 0.001, NoV2 );
+
+	float  AbsorptionDist = rcp(NoV2) + rcp(NoL2);
+	float3 Absorption = pow( AbsorptionColor, 0.5 * AbsorptionDist );
+
+	// Approximation
+	//float  AbsorptionDist = ( NoV2 + NoL2 ) / ( NoV2 * NoL2 );
+	//float3 Absorption = AbsorptionColor * ( AbsorptionColor * (AbsorptionDist * 0.5 - 1) + (2 - 0.5 * AbsorptionDist) );
+	//float3 Absorption = AbsorptionColor + AbsorptionColor * (AbsorptionColor - 1) * (AbsorptionDist * 0.5 - 1);	// use for shared version
+	
+	//float F21 = Fresnel( 1 / 1.5, saturate( dot(V2, H) ) );
+	//float TotalInternalReflection = 1 - F21 * G_Schlick( Roughness, NoV2, NoL2 );
+	//float3 LayerAttenuation = ( (1 - F12) * TotalInternalReflection ) * Absorption;
+
+	// Approximation
+	float3 LayerAttenuation = (1 - F) * Absorption;
+
+	// Approximation for IOR == 1.5
+	//SpecularColor = ChangeBaseMedium( SpecularColor, 1.5 );
+	//SpecularColor = saturate( ( 0.55 * SpecularColor + (0.45 * 1.08) ) * SpecularColor - (0.45 * 0.08) );
+	// Treat SpecularColor as relative to IOR. Artist compensates.
+	
+	// Generalized microfacet specular
+	float D2 = D_GGX( Roughness, NoH ) * LobeEnergy[2];
+	float Vis2 = Vis_SmithJointApprox( Roughness, NoV2, NoL2 );
+	float3 F2 = F_Schlick( GBuffer.SpecularColor, VoH );
+
+	float3 Fr2 = Diffuse_Lambert( GBuffer.DiffuseColor ) * LobeEnergy[2] + (D2 * Vis2) * F2;
+	
+	return Fr1 + Fr2 * LayerAttenuation;
+#endif
+}
+
+float3 ClothShading( FGBufferData GBuffer, float3 LobeRoughness, float3 LobeEnergy, float3 L, float3 V, half3 N )
+{
+	const float3 FuzzColor	= saturate(GBuffer.CustomData.rgb);
+	const float  Cloth		= saturate(GBuffer.CustomData.a);
+
+	float NoL = dot(N, L);
+	float NoV = dot(N, V);
+	float LoV = dot(L, V);
+	float InvLenH = rsqrt( 2 + 2 * LoV );
+	float NoH = saturate( ( NoL + NoV ) * InvLenH );
+	float VoH = saturate( InvLenH + InvLenH * LoV );
+	NoL = saturate(NoL);
+	NoV = saturate(abs(NoV) + 1e-5);
+
+	// Diffuse	
+	float3 Diffuse = Diffuse_Lambert( GBuffer.DiffuseColor );
+	float3 Diff = Diffuse * LobeEnergy[2];
+
+	// Cloth - Asperity Scattering - Inverse Beckmann Layer	
+	float3 F1 = F_Schlick( FuzzColor, VoH );
+	float  D1 = D_InvGGX( LobeRoughness[1], NoH );
+	float  V1 = Vis_Cloth( NoV, NoL );
+
+	float3 Spec1 = D1 * V1 * F1;
+
+	// Generalized microfacet specular
+	float3 F2 = F_Schlick( GBuffer.SpecularColor, VoH );
+	float  D2 = D_GGX( LobeRoughness[1], NoH ) * LobeEnergy[1];
+	float  V2 = Vis_SmithJointApprox( LobeRoughness[1], NoV, NoL );
+
+	float3 Spec2 = D2 * V2 * F2;
+
+	float3 Spec = lerp(Spec2, Spec1, Cloth);
+
+	return Diff + Spec;
+}
+
+float Hair_g( float B, float Theta )
+{
+	return exp( -0.5 * Pow2( Theta ) / (B*B) ) / ( sqrt(2*PI) * B );
+}
+
+float Hair_F( float CosTheta )
+{
+	const float n = 1.55;
+	const float F0 = Pow2( (1 - n) / (1 + n) );
+	return F0 + (1 - F0) * Pow5( 1 - CosTheta );
+}
+
+#define HAIR_REFERENCE	0
+#if HAIR_REFERENCE
+struct FHairTemp
+{
+	float SinThetaL;
+	float SinThetaV;
+	float CosThetaD;
+	float CosThetaT;
+	float CosPhi;
+	float CosHalfPhi;
+	float VoL;
+	float n_prime;
+};
+
+// Modified Bessel function
+float I0( float x )
+{
+	x = abs(x);
+	float a;
+	if( x < 3.75 )
+	{
+		float t = x / 3.75;
+		float t2 = t*t;
+		a =        + 0.0045813;
+		a = a * t2 + 0.0360768;
+		a = a * t2 + 0.2659732;
+		a = a * t2 + 1.2067492;
+		a = a * t2 + 3.0899424;
+		a = a * t2 + 3.5156229;
+		a = a * t2 + 1.0;
+	}
+	else
+	{
+		float t = 3.75 / x;
+		a =       + 0.00392377;
+		a = a * t - 0.01647633;
+		a = a * t + 0.02635537;
+		a = a * t - 0.02057706;
+		a = a * t + 0.00916281;
+		a = a * t - 0.00157565;
+		a = a * t + 0.00225319;
+		a = a * t + 0.01328592;
+		a = a * t + 0.39894228;
+		a *= exp(x) * rsqrt(x);
+	}
+	return a;
+}
+
+float LongitudinalScattering( float B, float SinThetaL, float SinThetaV )
+{
+	float v = B*B;
+	float CosThetaL2 = 1 - SinThetaL * SinThetaL;
+	float CosThetaV2 = 1 - SinThetaV * SinThetaV;
+	float Mp = 0;
+	if( v < 0.1 )
+	{
+		float a = sqrt(CosThetaL2 * CosThetaV2) / v;
+		float b = -SinThetaL * SinThetaV / v;
+		float logI0a = a > 12 ? a + 0.5 * ( -log(2*PI) + log(1/a) + 0.125/a ) : log( I0(a) );
+		Mp = exp( logI0a + b - rcp(v) + 0.6931 + log(0.5 / v) );
+	}
+	else
+	{
+		Mp = rcp( exp(2/v) * v - v ) * exp( ( 1 - SinThetaL * SinThetaV ) / v ) * I0( sqrt(CosThetaL2 * CosThetaV2) / v );
+	}
+	
+	return Mp;
+}
+
+float GaussianDetector( float Bp, float Phi )
+{
+	float Dp = 0;
+	for( int k = -4; k <= 4; k++ )
+	{
+		// TODO use symmetry and detect for both Phi and -Phi
+		Dp += Hair_g( Bp, Phi - (2*PI) * k );
+	}
+	return Dp;
+}
+
+float3 Attenuation( uint p, float h, float3 Color, FHairTemp HairTemp )
+{
+	float3 A;
+	if( p == 0 )
+	{
+		//A = F( cos( 0.5 * acos( HairTemp.VoL ) ) );
+		A = Hair_F( sqrt( 0.5 + 0.5 * HairTemp.VoL ) );
+	}
+	else
+	{
+		// ua is absorption
+		// ua = pe*Sigma_ae + pp*Sigma_ap
+		float3 Sigma_ae = { 0.419, 0.697, 1.37 };
+		float3 Sigma_ap = { 0.187, 0.4, 1.05 };
+		//float3 ua = 0.25 * Sigma_ae + 0.25 * Sigma_ap;
+		float3 ua = -0.25 * log( Color );
+		float3 ua_prime = ua / HairTemp.CosThetaT;
+		//float3 ua_prime = ua / sqrt( 1 - Pow2( HairTemp.CosThetaD ) / 2.4 );
+		
+		float yi = asin(h);
+		float yt = asin(h / HairTemp.n_prime);
+		
+		float f = Hair_F( HairTemp.CosThetaD * sqrt( 1 - h*h ) );		// (14)
+		//float3 T = exp( -2 * ua_prime * ( 1 + cos(2*yt) ) );
+		float3 T = exp( -2 * ua_prime * cos(yt) );
+		if( p == 1 )
+			A = Pow2(1 - f) * T;		// (13)
+		else
+			A = Pow2(1 - f) * f * T*T;	// (13)
+	}
+	return A;
+}
+
+float Omega( uint p, float h, FHairTemp HairTemp )
+{
+	float yi = asin(h);
+	float yt = asin(h / HairTemp.n_prime);
+	return 2*p*yt - 2*yi + p*PI;
+}
+
+float3 AzimuthalScattering( uint p, float Bp, float3 Color, FHairTemp HairTemp, uint2 Random )
+{
+	float Phi = acos( HairTemp.CosPhi );
+	
+	// Np = 0.5 * Integral_-1^1( A(p,h) * Dp( Phi - Omega(p,h) ) * dh )
+
+	float Offset = float( Random.x & 0xffff ) / (1<<16);
+
+	uint Num = 16;
+	float3 Np = 0;
+	for( uint i = 0; i < Num; i++ )
+	{
+		float h = ( (float)( i + Offset ) / Num ) * 2 - 1;
+		Np += Attenuation( p, h, Color, HairTemp ) * GaussianDetector( Bp, Phi - Omega( p, h, HairTemp ) );
+	}
+	Np *= 2.0 / Num;
+
+	return 0.5 * Np;
+}
+
+// [d'Eon et al. 2011, "An Energy-Conserving Hair Reflectance Model"]
+// [d'Eon et al. 2014, "A Fiber Scattering Model with Non-Separable Lobes"]
+float3 HairShadingRef( FGBufferData GBuffer, float3 L, float3 V, half3 N, uint2 Random )
+{
+	// to prevent NaN with decals
+	// OR-18489 HERO: IGGY: RMB on E ability causes blinding hair effect
+	// OR-17578 HERO: HAMMER: E causes blinding light on heroes with hair
+	float ClampedRoughness = clamp(GBuffer.Roughness, 1/255.0f, 1.0f);
+
+	float n = 1.55;
+
+	FHairTemp HairTemp;
+	
+	// N is the vector parallel to hair pointing toward root
+	HairTemp.VoL       = dot(V,L);
+	HairTemp.SinThetaL = dot(N,L);
+	HairTemp.SinThetaV = dot(N,V);
+	// SinThetaT = 1/n * SinThetaL
+	HairTemp.CosThetaT = sqrt( 1 - Pow2( (1/n) * HairTemp.SinThetaL ) );
+	HairTemp.CosThetaD = cos( 0.5 * abs( asin( HairTemp.SinThetaV ) - asin( HairTemp.SinThetaL ) ) );
+
+	float3 Lp = L - HairTemp.SinThetaL * N;
+	float3 Vp = V - HairTemp.SinThetaV * N;
+	HairTemp.CosPhi = dot(Lp,Vp) * rsqrt( dot(Lp,Lp) * dot(Vp,Vp) );
+	HairTemp.CosHalfPhi = sqrt( 0.5 + 0.5 * HairTemp.CosPhi );
+
+	HairTemp.n_prime = sqrt( n*n - 1 + Pow2( HairTemp.CosThetaD ) ) / HairTemp.CosThetaD;
+
+	float Shift = 0.035;
+	float Alpha[] =
+	{
+		-Shift * 2,
+		Shift,
+		Shift * 4,
+	};
+	float B[] =
+	{
+		Pow2( ClampedRoughness ),
+		Pow2( ClampedRoughness ) / 2,
+		Pow2( ClampedRoughness ) * 2,
+	};
+
+	float3 S = 0;
+	UNROLL for( uint p = 0; p < 3; p++ )
+	{
+		float SinThetaV = HairTemp.SinThetaV;
+		float Bp = B[p];
+		if( p == 0 )
+		{
+			Bp *= sqrt(2.0) * HairTemp.CosHalfPhi;
+			float sa, ca;
+			sincos( Alpha[p], sa, ca );
+			SinThetaV -= 2*sa * ( HairTemp.CosHalfPhi * ca * sqrt( 1 - SinThetaV * SinThetaV ) + sa * SinThetaV );
+		}
+		else
+		{
+			SinThetaV = sin( asin(SinThetaV) - Alpha[p] );
+		}
+		float Mp = LongitudinalScattering( Bp, HairTemp.SinThetaL, SinThetaV );
+		float3 Np = AzimuthalScattering( p, B[p], GBuffer.BaseColor, HairTemp, Random );
+
+		float3 Sp = Mp * Np;
+		S += Sp;
+	}
+	return S;
+}
+#endif
+
+// Approximation to HairShadingRef using concepts from the following papers:
+// [Marschner et al. 2003, "Light Scattering from Human Hair Fibers"]
+// [Pekelis et al. 2015, "A Data-Driven Light Scattering Model for Hair"]
+float3 HairShading( FGBufferData GBuffer, float3 L, float3 V, half3 N, float Shadow, float Backlit, float Area, uint2 Random )
+{
+	// to prevent NaN with decals
+	// OR-18489 HERO: IGGY: RMB on E ability causes blinding hair effect
+	// OR-17578 HERO: HAMMER: E causes blinding light on heroes with hair
+	float ClampedRoughness = clamp(GBuffer.Roughness, 1/255.0f, 1.0f);
+
+	//const float3 DiffuseN	= OctahedronToUnitVector( GBuffer.CustomData.xy * 2 - 1 );
+	//const float Backlit	= GBuffer.CustomData.z;
+
+#if HAIR_REFERENCE
+	// todo: ClampedRoughness is missing for this code path
+	float3 S = HairShadingRef( GBuffer, L, V, N, Random );
+	//float3 S = HairShadingMarschner( GBuffer, L, V, N );
+#else
+	// N is the vector parallel to hair pointing toward root
+
+	const float VoL       = dot(V,L);
+	const float SinThetaL = dot(N,L);
+	const float SinThetaV = dot(N,V);
+	float CosThetaD = cos( 0.5 * abs( asinFast( SinThetaV ) - asinFast( SinThetaL ) ) );
+
+	//CosThetaD = abs( CosThetaD ) < 0.01 ? 0.01 : CosThetaD;
+
+	const float3 Lp = L - SinThetaL * N;
+	const float3 Vp = V - SinThetaV * N;
+	const float CosPhi = dot(Lp,Vp) * rsqrt( dot(Lp,Lp) * dot(Vp,Vp) + 1e-4 );
+	const float CosHalfPhi = sqrt( saturate( 0.5 + 0.5 * CosPhi ) );
+	//const float Phi = acosFast( CosPhi );
+
+	float n = 1.55;
+	//float n_prime = sqrt( n*n - 1 + Pow2( CosThetaD ) ) / CosThetaD;
+	float n_prime = 1.19 / CosThetaD + 0.36 * CosThetaD;
+
+	float Shift = 0.035;
+	float Alpha[] =
+	{
+		-Shift * 2,
+		Shift,
+		Shift * 4,
+	};
+	float B[] =
+	{
+		Area + Pow2( ClampedRoughness ),
+		Area + Pow2( ClampedRoughness ) / 2,
+		Area + Pow2( ClampedRoughness ) * 2,
+	};
+
+	float3 S = 0;
+
+	// R
+	if(1)
+	{
+		const float sa = sin( Alpha[0] );
+		const float ca = cos( Alpha[0] );
+		float Shift = 2*sa* ( ca * CosHalfPhi * sqrt( 1 - SinThetaV * SinThetaV ) + sa * SinThetaV );
+
+		float Mp = Hair_g( B[0] * sqrt(2.0) * CosHalfPhi, SinThetaL + SinThetaV - Shift );
+		float Np = 0.25 * CosHalfPhi;
+		float Fp = Hair_F( sqrt( saturate( 0.5 + 0.5 * VoL ) ) );
+		S += Mp * Np * Fp * ( GBuffer.Specular * 2 ) * lerp( 1, Backlit, saturate(-VoL) );
+	}
+
+	// TT
+	if(1)
+	{
+		float Mp = Hair_g( B[1], SinThetaL + SinThetaV - Alpha[1] );
+
+		float a = 1 / n_prime;
+		//float h = CosHalfPhi * rsqrt( 1 + a*a - 2*a * sqrt( 0.5 - 0.5 * CosPhi ) );
+		//float h = CosHalfPhi * ( ( 1 - Pow2( CosHalfPhi ) ) * a + 1 );
+		float h = CosHalfPhi * ( 1 + a * ( 0.6 - 0.8 * CosPhi ) );
+		//float h = 0.4;
+		//float yi = asinFast(h);
+		//float yt = asinFast(h / n_prime);
+		
+		float f = Hair_F( CosThetaD * sqrt( saturate( 1 - h*h ) ) );
+		float Fp = Pow2(1 - f);
+		//float3 Tp = pow( GBuffer.BaseColor, 0.5 * ( 1 + cos(2*yt) ) / CosThetaD );
+		//float3 Tp = pow( GBuffer.BaseColor, 0.5 * cos(yt) / CosThetaD );
+		float3 Tp = pow( GBuffer.BaseColor, 0.5 * sqrt( 1 - Pow2(h * a) ) / CosThetaD );
+
+		//float t = asin( 1 / n_prime );
+		//float d = ( sqrt(2) - t ) / ( 1 - t );
+		//float s = -0.5 * PI * (1 - 1 / n_prime) * log( 2*d - 1 - 2 * sqrt( d * (d - 1) ) );
+		//float s = 0.35;
+		//float Np = exp( (Phi - PI) / s ) / ( s * Pow2( 1 + exp( (Phi - PI) / s ) ) );
+		//float Np = 0.71 * exp( -1.65 * Pow2(Phi - PI) );
+		float Np = exp( -3.65 * CosPhi - 3.98 );
+
+		S += Mp * Np * Fp * Tp * Backlit;
+	}
+
+	// TRT
+	if(1)
+	{
+		float Mp = Hair_g( B[2], SinThetaL + SinThetaV - Alpha[2] );
+		
+		//float h = 0.75;
+		float f = Hair_F( CosThetaD * 0.5 );
+		float Fp = Pow2(1 - f) * f;
+		//float3 Tp = pow( GBuffer.BaseColor, 1.6 / CosThetaD );
+		float3 Tp = pow( GBuffer.BaseColor, 0.8 / CosThetaD );
+
+		//float s = 0.15;
+		//float Np = 0.75 * exp( Phi / s ) / ( s * Pow2( 1 + exp( Phi / s ) ) );
+		float Np = exp( 17 * CosPhi - 16.78 );
+
+		S += Mp * Np * Fp * Tp;
+	}
+#endif
+
+	if(1)
+	{
+		float3 FakeNormal = normalize( V - N * dot(V,N) );
+		//N = normalize( DiffuseN + FakeNormal * 2 );
+		N = FakeNormal;
+
+		// Hack approximation for multiple scattering.
+		float Wrap = 1;
+		float NoL = saturate( ( dot(N, L) + Wrap ) / Square( 1 + Wrap ) );
+		float DiffuseScatter = (1 / PI) * NoL * GBuffer.Metallic;
+		float Luma = Luminance( GBuffer.BaseColor );
+		float3 ScatterTint = pow( GBuffer.BaseColor / Luma, 1 - Shadow );
+		S += sqrt( GBuffer.BaseColor ) * DiffuseScatter * ScatterTint;
+	}
+
+	S = -min(-S, 0.0);
+
+	return S;
+}
+
+float3 SubsurfaceShadingSubsurface( FGBufferData GBuffer, float3 L, float3 V, half3 N )
+{
+	float3 SubsurfaceColor = ExtractSubsurfaceColor(GBuffer);
+	float Opacity = GBuffer.CustomData.a;
+
+	float3 H = normalize(V + L);
+
+	// to get an effect when you see through the material
+	// hard coded pow constant
+	float InScatter = pow(saturate(dot(L, -V)), 12) * lerp(3, .1f, Opacity);
+	// wrap around lighting, /(PI*2) to be energy consistent (hack do get some view dependnt and light dependent effect)
+	// Opacity of 0 gives no normal dependent lighting, Opacity of 1 gives strong normal contribution
+	float NormalContribution = saturate(dot(N, H) * Opacity + 1 - Opacity);
+	float BackScatter = GBuffer.GBufferAO * NormalContribution / (PI * 2);
+
+	// lerp to never exceed 1 (energy conserving)
+	return SubsurfaceColor * lerp(BackScatter, 1, InScatter);
+}
+
+float3 SubsurfaceShadingTwoSided( float3 SubsurfaceColor, float3 L, float3 V, half3 N )
+{
+	// http://blog.stevemcauley.com/2011/12/03/energy-conserving-wrapped-diffuse/
+	float Wrap = 0.5;
+	float NoL = saturate( ( dot(-N, L) + Wrap ) / Square( 1 + Wrap ) );
+
+	// GGX scatter distribution
+	float VoL = saturate( dot(V, -L) );
+	float a = 0.6;
+	float a2 = a * a;
+	float d = ( VoL * a2 - VoL ) * VoL + 1;	// 2 mad
+	float GGX = (a2 / PI) / (d * d);		// 2 mul, 1 rcp
+	return NoL * GGX * SubsurfaceColor;
+}
+
+float3 EyeShading( FGBufferData GBuffer, float3 LobeRoughness, float3 LobeEnergy, float3 L, float3 V, half3 N )
+{
+	float NoL = dot(N, L);
+	float NoV = dot(N, V);
+	float LoV = dot(L, V);
+	float InvLenH = rsqrt( 2 + 2 * LoV );
+	float NoH = saturate( ( NoL + NoV ) * InvLenH );
+	float VoH = saturate( InvLenH + InvLenH * LoV );
+	NoL = saturate(NoL);
+	NoV = saturate(abs(NoV) + 1e-5);
+
+	// Generalized microfacet specular
+	float D = D_GGX( LobeRoughness[1], NoH ) * LobeEnergy[1];
+	float Vis = Vis_SmithJointApprox( LobeRoughness[1], NoV, NoL );
+	float3 F = F_Schlick( GBuffer.SpecularColor, VoH );
+
+	return D * Vis * F;
+}
+
+float3 EyeSubsurfaceShading( FGBufferData GBuffer, float3 L, float3 V, half3 N )
+{
+	float NoL = dot(N, L);
+	float LoV = dot(L, V);
+	float InvLenH = rsqrt( 2 + 2 * LoV );
+	float VoH = saturate( InvLenH + InvLenH * LoV );
+
+	// F_Schlick
+	float F0 = GBuffer.Specular * 0.08;
+	float Fc = Pow5( 1 - VoH );
+	float F = Fc + (1 - Fc) * F0;
+
+	float  IrisDistance = GBuffer.CustomData.w;
+	float  IrisMask = GBuffer.CustomData.z;
+
+	float3 IrisNormal;
+	IrisNormal = OctahedronToUnitVector( GBuffer.CustomData.xy * 2 - 1 );
+
+	// Blend in the negative intersection normal to create some concavity
+	// Not great as it ties the concavity to the convexity of the cornea surface
+	// No good justification for that. On the other hand, if we're just looking to
+	// introduce some concavity, this does the job.
+	float3 CausticNormal = normalize(lerp(IrisNormal, -N, IrisMask*IrisDistance));
+
+	float IrisNoL = saturate( dot( IrisNormal, L ) );
+	float Power = lerp( 12, 1, IrisNoL );
+	float Caustic = 0.6 + 0.2 * ( Power + 1 ) * pow( saturate( dot( CausticNormal, L ) ), Power );
+	float Iris = IrisNoL * Caustic;
+
+	// http://blog.stevemcauley.com/2011/12/03/energy-conserving-wrapped-diffuse/
+	float Wrap = 0.15;
+	float Sclera = saturate( ( NoL + Wrap ) / Square( 1 + Wrap ) );
+	
+	return (1 - F) * lerp( Sclera, Iris, IrisMask ) * GBuffer.DiffuseColor / PI;
+}
+
+Texture2D		PreIntegratedBRDF;
+SamplerState	PreIntegratedBRDFSampler;
+
+float3 SubsurfaceShadingPreintegratedSkin( FGBufferData GBuffer, float3 L, float3 V, half3 N )
+{
+	float3 SubsurfaceColor = ExtractSubsurfaceColor(GBuffer);
+	float Opacity = GBuffer.CustomData.a;
+
+	float3 PreintegratedBRDF = Texture2DSampleLevel(PreIntegratedBRDF, PreIntegratedBRDFSampler, float2(saturate(dot(N, L) * .5 + .5), 1 - Opacity), 0).rgb;
+	return PreintegratedBRDF * SubsurfaceColor;
+}
+
+// @param DiffSpecMask .r: diffuse, .g:specular e.g. float2(1,1) for both, float2(1,0) for diffuse only
+float3 SurfaceShading( FGBufferData GBuffer, float3 LobeRoughness, float3 LobeEnergy, float3 L, float3 V, half3 N, uint2 Random )
+{
+	switch( GBuffer.ShadingModelID )
+	{
+		case SHADINGMODELID_UNLIT:
+		case SHADINGMODELID_DEFAULT_LIT:
+		case SHADINGMODELID_SUBSURFACE:
+		case SHADINGMODELID_PREINTEGRATED_SKIN:
+		case SHADINGMODELID_SUBSURFACE_PROFILE:
+		case SHADINGMODELID_TWOSIDED_FOLIAGE:
+			return StandardShading( GBuffer.DiffuseColor, GBuffer.SpecularColor, LobeRoughness, LobeEnergy, L, V, N );
+		case SHADINGMODELID_CLEAR_COAT:
+			return ClearCoatShading( GBuffer, LobeRoughness, LobeEnergy, L, V, N );
+		case SHADINGMODELID_CLOTH:
+			return ClothShading( GBuffer, LobeRoughness, LobeEnergy, L, V, N );
+		case SHADINGMODELID_EYE:
+			return EyeShading( GBuffer, LobeRoughness, LobeEnergy, L, V, N );
+		default:
+			return 0;
+	}
+}
+
+float3 SubsurfaceShading( FGBufferData GBuffer, float3 L, float3 V, half3 N, float Shadow, uint2 Random )
+{
+	float3 SubsurfaceColor = ExtractSubsurfaceColor(GBuffer);
+
+	switch( GBuffer.ShadingModelID )
+	{
+		case SHADINGMODELID_SUBSURFACE:
+			return SubsurfaceShadingSubsurface( GBuffer, L, V, N );
+		case SHADINGMODELID_PREINTEGRATED_SKIN:
+			return SubsurfaceShadingPreintegratedSkin( GBuffer, L, V, N );
+		case SHADINGMODELID_TWOSIDED_FOLIAGE:
+			return SubsurfaceShadingTwoSided( SubsurfaceColor, L, V, N );
+		case SHADINGMODELID_HAIR:
+			return HairShading( GBuffer, L, V, N, Shadow, 1, 0, Random );
+		case SHADINGMODELID_EYE:
+			return EyeSubsurfaceShading( GBuffer, L, V, N );
+		default:
+			return 0;
+	}
+}

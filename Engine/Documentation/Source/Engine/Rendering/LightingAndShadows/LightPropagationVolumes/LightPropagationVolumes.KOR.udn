@@ -1,0 +1,222 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title:Light Propagation Volumes
+Crumbs:%ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description:글로벌 일루미네이션의 동적인 생성을 위한 시스템입니다.
+Version: 4.9
+SkillLevel: Advanced
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![](lpv_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/LightPropagationVolumes:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/LightPropagationVolumes:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/LightPropagationVolumes]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![](lpv_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/LightPropagationVolumes:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/LightPropagationVolumes:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/LightPropagationVolumes]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:todo]
+Light Propagation Volume (라이트 전파 볼륨)은 개발중인 기능으로, 아직은 제작 단계에서 사용할 준비가 되어있지 않습니다.
+[/REGION]
+
+[TOC]
+
+
+
+[REGION:fullwidth]
+![](lpv_scene.png)
+[/REGION]
+
+## Light Propagation Volume 켜기
+
+이 기능을 켜려면 `ConsoleVariables.ini` 에 다음 줄을 입력하고 엔진을 재시작합니다:
+
+	r.LightPropagationVolume = 1
+
+현재 이 콘솔 변수는 실행시간에 변경할 수 없습니다.
+
+## 기본적인 씬 셋업
+
+* **Mobility** 가 **Movable** 로 설정된 디렉셔널 라이트를 하나 추가합니다.
+* 지오메트리를 추가하고 빛과 그림자를 받는 부분이 생기도록 라이트의 방향을 조절합니다 (밝은 색의 머티리얼이 이상적입니다).
+* 다이내믹 GI 와 혼동되지 않도록 라이트매스 GI 는 꺼 둡니다 (두 기법을 같이 사용하면 간접광이 너무 밝아집니다).
+* 디렉셔널 라이트에 **Affect Dynamic Indirect Lighting** (다이내믹 간접광에 영향) 옵션을 켭니다.
+* 표시 플래그 중 Light Propagation Mode (켜진 라이트 전파 모드) 뷰모드를 켜서 Light Propagation Volume 에 덮인 영역을 시각화시킵니다 ([글로벌 일루미네이션 보기](#글로벌일루미네이션보기) 부분 참고).
+* Post Process Volume 을 추가하고 (unbound 여야 합니다) LightPropagationVolume 세팅의 "Size" 를 조절하여 영역을 필요한 디테일과 거리(감쇠)로 덮도록 합니다.
+* GlobalIllumination 표시 플래그를 사용하여 GI 를 켜고/끕니다.
+                
+
+## Light Propagation Volume 세팅
+
+포스트 프로세스 세팅에서 몇몇 글로벌 세팅을 찾을 수 있습니다 (Post Process Volume 을 추가하고, unbound 로 만들고, 
+우선권이 적절히 설정되었는지 확인합니다):
+
+![](LPV_settings.png)
+
+(마우스 커서를 올리면 뜨는) 툴팁에 세팅 관련 자세한 내용이 뜹니다.
+
+<!-- add setting descriptions -->
+
+볼륨에 이 세팅을 설정하면 카메라 위치에 따라 부드러운 블렌딩이 가능합니다 
+(예: 실내 환경이나 나무 아래 GI 반사광이 덜합니다).
+
+이차 오클루전은 켜야 할 것이고, 이차 바운싱은 비용이 매우 싸기에 역시 켜야 할 것입니다.
+
+### 외형과 퍼포먼스 조절
+
+이 기법은 저해상도 볼륨 그리드에 데이터를 저장합니다. 볼륨보다 작은 지오메트리 사이로 새어나오는 것을 방지하기 
+위해서, 인젝션을 편향시킵니다. 이 부분은 포스트 프로세스 세팅에서 조절 가능합니다:
+
+[REGION:imagetable]
+| [REGION:lightbox][![](LPV_injection_bias_1.png)(w:290)](LPV_injection_bias_1.png)[/REGION] | [REGION:lightbox][![](LPV_injection_bias_2.png)(w:290)](LPV_injection_bias_2.png)[/REGION] | [REGION:lightbox][![](LPV_injection_bias_3.png)(w:290)](LPV_injection_bias_3.png)[/REGION] |
+| --- | --- | --- |
+| 1.0 | 1.3 | 2.0 |
+[/REGION]
+
+이 편향치는 메시별로 "LPV Bias Multiplier" (LPV 편향 배수)를 통해 조절 가능합니다.
+
+![](LPV_bias_multiplier.png)
+
+더 나은 퍼포먼스를 위해 (CPU 비용 없이 약간의 GPU 비용으로 드로 콜 감소) 머티리얼에서 해당 기능을 끌 수 있습니다:
+
+![](LPV_disable_material.png)
+
+## 디렉셔널 라이트 세팅
+
+퍼포먼스 상의 이유로 Light Propagation Volume 은 입사광으로 디렉셔널 라이트만을 사용합니다. 이 방법은 
+소위 카메라 근처의 _Reflective Shadow Map_ 이라 불립니다. 일반적인 섀도 맵(라이트 시점에서의 불투명 
+깊이 2D 텍스처)과 비슷하지만 (머티리얼 컬러, 노멀 등의) 머티리얼 프로퍼티가 추가됩니다. 그 작업을 
+각 포인트 라이트마다 하면 비용이 매우 높겠지요. 디렉셔널 라이트의 세팅이 올바르게 되었는지 확인하세요:
+
+![](LPV_light_settings.png)
+
+"Affect Dynamic Indirect Lighting" 과 "Cast Shadows" 옵션은 켜고, 간접광 세기는 
+1.0 정도로 해 두는 것이 좋을 것입니다.
+
+## 글로벌 일루미네이션 보기
+
+표시 플래그에서 LPV 를 끌 수 있습니다 (참고로 라이트매스로 계산되어 구워진 글로벌 일루미네이션도 
+꺼집니다):
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Global Illumination Disabled](LPV_show_flag.png)(w:460)
+	[/PARAM]
+	[PARAM:after]
+	![Global Illumination Enabled](LPV_show_flag_enabled.png)(w:460)
+	[/PARAM]
+[/OBJECT]
+
+## Light Propagation Volume 시각화
+
+실제 Light Propagation Volume 의 시각화는 표시 플래그를 통해 가능하며, 뷰포트에 표시됩니다:
+ 
+[INCLUDE:#visualizeslider]
+
+## GI 대체 머티리얼 스위치
+[EXCERPT:GIReplaceExample]
+
+두 개의 빨강 박스를 봅시다 - 하나는 빨강이 아닌 초록색으로 튕겨내고 있습니다.
+ 
+![](LPV_bounce_color_override.png)(convert:false)
+
+새로운 머티리얼 표현식을 사용한 것입니다.
+
+![](LPV_gi_replace.png)
+ 
+보통은 완전히 다른 색이 필요하지는 않겠지만, 약간 어둡게 하거나 밝게 하거나 색을 조금 조절하는 것이 
+유용할 수는 있습니다.
+
+[/EXCERPT:GIReplaceExample]
+
+## 다른 노트
+
+현재 LPV 구현에 대한 프로퍼티입니다:
+
+* 매 프레임 다이내믹 머티리얼/라이트/지오메트리를 계산합니다.
+* 디퓨즈와 스페큘러 머티리얼 상호작용을 추정합니다.
+* 거리를 제한합니다 (볼륨이 두 배 정도 커지는 것은 우습지만 메모리 사용량이나 일부 계산량은 8 배가 됩니다).
+* 월드 스페이스에 일정한 디테일을 둡니다 (근처에는 디테일 더하고, 원거리에는 줄이는 것이 좋을 것입니다).
+* 반투명에 영향을 끼치지 않습니다.
+* 빛의 바운스가 데칼에 영향받지 않습니다.
+* 데칼 셰이딩은 그냥 작동합니다 (라이팅을 굽는 경우는 데칼이 적용되기 전인 베이스 패스에 라이팅이 적용되기 때문에, 그와는 다릅니다).
+* 컴퓨트 셰이더 (DirectX 11) 지원이 필요합니다.
+* 라이트 바운스를 위한 디렉셔널 라이트를 하나 이상 지원합니다.
+* 실행시간에 크기를 변경하면 약간의 부작용이 생기지만 서서히 사라집니다.
+* 간단한 에리어 라이트용 이미시브 라이팅 (현재 미구현)
+* 오클루전 (현재 미구현)
+* 오클루전으로 추정되는 포인트 라이트 섀도 (현재 미구현)
+* 약간의 비용으로 꽤 나은 퀄리티를 내는 지오메트리 복셀화를 통한 이차 오클루전 (현재 미구현)
+
+
+<!--
+[EXCERPT:VisualizeSlider]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:id]
+	LPV_visualize
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:max]
+	17
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	**슬라이더를 끌면 시각화된 Light Propagation Volume 을 확인할 수 있습니다.** 
+	[/PARAM]
+	[PARAM:image_list]
+	![](LPV_visualize_1.png)
+	![](LPV_visualize_2.png)
+	![](LPV_visualize_3.png)
+	![](LPV_visualize_4.png)
+	![](LPV_visualize_5.png)
+	![](LPV_visualize_6.png)
+	![](LPV_visualize_7.png)
+	![](LPV_visualize_8.png)
+	![](LPV_visualize_9.png)
+	![](LPV_visualize_10.png)
+	![](LPV_visualize_11.png)
+	![](LPV_visualize_12.png)
+	![](LPV_visualize_13.png)
+	![](LPV_visualize_14.png)
+	![](LPV_visualize_15.png)
+	![](LPV_visualize_16.png)
+	![](LPV_visualize_17.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:VisualizeSlider]
+-->
+
+
+

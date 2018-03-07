@@ -1,0 +1,204 @@
+Availability:Docs
+Title:Setting Up Crash Report
+Crumbs:%ROOT%, Engine
+Description:Setting up the Crash Report Intranet Application for Unreal Engine 4.
+
+[TOC (start:2 end:3)]
+
+
+CrashReport is an intranet application that allows users to review and manage crashes. Crash Report groups these crashes by Callstack in what Crash Report calls Buggs. Buggs are groupings of 2 or more Crashes that help users better identify actual bugs in the code. This document presents detailed instructions in how to set up Crash Report on your Intranet.
+
+Users experience the CrashReport tool a single web application, but the tool has a few different elements that it needs to make it work. When the Engine crashes, it calls the program `AutoReporter.exe` which collects and sends all the crash data to the Web Service http://AutoReportService, which registers the report in the CrashReport Database and then uploads the log and dump files into http://AutoReportFiles, which simply stores and serves them for later review. 
+
+## Requirements
+
+* Visual Studio 2008
+* Internal Web Server 
+    * IIS 7 + with .Net 3.5+ installed
+    * ASP MVC 2.0
+* Internal SQL Server
+* Sql Management Studio
+* Visual Web Developer 2008 or 2010
+
+
+## Installation
+
+* Source Code for this tool can be located in Perforce located at /UnrealEngine3/Development/Tools/CrashReport/
+
+
+### Creating The Database
+
+* Create User for Database (May need to talk to your IT dept.)
+* **Right-click** on Databases -> New Database.
+    * Fill out the Database Name and any other options for your Database in the wizard and click OK.
+* Open `<Project Root>Crashreport/Models/CreateDatabase.sql` from SQL Manager.
+    * Change the Database Name to the name of the database you just created.
+    * Click the "! Execute Script" button.
+* Ensure that the user has access to (or preferably owns) this database. 
+
+
+### Creating the Web Sites
+
+There are 3 websites we will be creating for this service to work
+
+* http://CrashReport.yourdomain.com
+    * The main Intranet application your users will be using
+* http://AutoReportService.yourdomain.com
+    * The Web Service that processes crashes sent by the Engine
+* http://AutoReportFiles.yourdomain.com
+    * A repository that holds the logs and mini-dumps for each crash
+
+
+#### http://CrashReport.yourdomain.com
+
+* Open IIS Manager
+* **Right-click** on Application Pools -> Add Application pool  
+	![](AddApplicationPool.JPG)
+    * Name: CrashReport 
+    * .Net Framework Version: 2.0 or Higher  
+		![](AddApplicationPoolWizard.JPG)
+* **Right-click** on Sites -> Add Web Site
+	![](AddSite.JPG)
+    * Site Name: CrashReport
+    * Application Pool: CrashReport  
+		![](AddSiteWizard.JPG)
+    * Physical Path: Share `<Web Root>/CrashReport`  
+		![](AddSiteCreateDirectory.JPG)
+* Share `<Web Root>/CrashReport` to the local network to allow for simple deployment
+    * From IIS you can simply **Right-click** on the Website name -> Explore
+    * **Right-click** one the Folder and click Properties
+        * Set the Permissions as you see fit, allowing at least the person deploying the site access
+        * Click **OK** and note the file path for later deployment
+
+
+#### http://AutoReportService.yourdomain.com
+
+* Open IIS Manager
+* **Right-click** on Application Pools -> Add Application pool
+    * Name: AutoReportService
+    * .Net Framework Version: 2.0 or Higher
+* **Right-click** on Sites -> Add Web Site
+    * Site Name: AutoReportService
+    * Application Pool: AutoReportService
+    * Physical Path: `<Web Root>/AutoReportService`
+* In the File System, create a Folder for your Log file outside of the web root
+    * e.g. C:\AutoReportLog\
+* Share `<Web Root>/AutoReportService` to the local network to allow for simple deployment
+    * From IIS, you can simply **Right-click** on the Website name -> Explore
+    * **Right-click** on the Folder and click Properties
+        * Set the Permissions as you see fit, allowing at least the person deploying the site access
+        * Click **OK** and note the file path for later deployment
+
+
+#### http://AutoReportFiles.yourdomain.com
+
+* Open IIS Manager
+* **Right-click** on Application Pools -> Add Application pool
+    * Name: AutoReportFiles
+    * .Net Framework Version: 2.0 or Higher
+* **Right-click** on Sites -> Add Web Site
+    * Site Name: AutoReportFiles
+    * Application Pool: AutoReportFiles
+    * Physical Path: `<Web Root>/AutoReportFiles`
+* Create a Directory for your ReportFiles
+* `<Web Root>/AutoReportFiles/ReportFiles/`
+* Add MIME Types for Logs and Dumps
+    * Select AutoReportFiles Site
+    * **Double-Click** MIME Types
+    * Click Add in the upper right hand corner
+        * File Name Extensions: ".log"
+        * MIME type: "application/octet-stream"  
+			![](AddMimeTypes.JPG)
+    * Click Add again
+        * File Name Extensions: ".dmp"
+        * MIME type: "application/octet-stream"
+
+
+## Deploying the Services
+
+Open The CrashReport solution in VS 2008 located at /UnrealEngine3/Development/Tools/CrashReport/
+
+### http://CrashReport.yourdomain.com
+
+* Edit Web.config
+    * Find the line under `<connectionStrings>` starting with `<add name="CrashReportConnectionString"`
+    * Edit Data Source, User ID and Password to your Connection Settings
+* Edit Settings.settings ( or Properties->settings)
+    * Note the url you made for `http://AutoReportFiles.yourdomain.com` and enter that url here.
+* Publish Site
+    * **Right-click** CrashReport Project -> Publish  
+		![](PublishProject.JPG)
+    * Ensure Settings are correct for your setup  
+		![](PublishProjectWizard.JPG)
+    * Click **OK**
+
+
+### http://AutoReportService.yourdomain.com
+
+* Edit Web.Config
+    * Edit the line starting with `<add key="LogFileName" value=`
+        * Set the value to the path of your AutoReportLog  directory on the web server
+    * Edit the line starting with `<add key="SaveFilesPath"`
+        * Set the value to the path of your AutoReportFiles directory on the web server
+        * e.g. `<Web Root>/AutoReportFiles/ReportFiles/`
+    * Copy the Connection String from your Crash Report Web.Config 
+        * Or edit the current one to match the Server and Authentication settings to match
+        * This is necessary because the project uses the Crash Report dll to update the files, but passes its own connection string when it does.  
+* Publish Site
+    * **Right-click** project name-> Publish
+    * Ensure Settings are correct for your setup
+    * Click **OK**
+
+
+### AutoReporter.exe
+
+* Edit Settings.setting 
+    * Ensure that all the urls point to the urls in your production system.
+    * By default they use the urls in this document.
+* Sync Web Service Reference
+    * Expand "Web References"
+    * **Right-click** "ReportService" -> Update Web Reference
+    * This will ensure that the Web Reference matches the instance of your published AutoReportService/RegisterReport.asmx Web Service
+* **Right-click** Project Name -> Build 
+
+
+### http://AutoReportFiles.yourdomain.com
+
+This is a very simple web site that just collects and presents files. To test to make sure this site is up and running properly, simply add a crash, visit the url and make sure the Log and Dump files download when you click on them.
+
+
+## Testing
+
+### http://CrashReport.yourdomain.com
+
+* Visit `http://CrashReport.yourdomain.com` and you should see an empty page
+	[REGION:fullwidth]
+	![](WorkingWebsiteEmptyDatabase.JPG)
+	[/REGION]
+
+
+### AutoReporter.exe
+
+#### Creating a Crash   
+
+* Open up an instance of the Editor
+    * Running ExampleGame.exe is a quick way to do this
+    * Issue a Crash: "~" -> "debug crash"
+* You will see a Dialog Box pop up
+    * Enter a test Summary and Description
+    * Click **OK**
+* If all goes well, you will see another window pop up with the url to your Crash
+    * Click the url and make sure your crash has been entered into CrashReport
+* Click on the Id of your Crash in CrashReport
+    * Click on the Log hyperlink
+        * If all goes well you will be prompted to download 1_Launch.log
+
+
+#### Creating a Bugg
+
+* Create another crash
+    * Repeat the steps above
+* Visit the url `http://CrashReport.yourdomain.com/Buggs`
+    * From here you should see one Bugg 
+        * Clicking on its Id will show a new screen that lists the two test crashes you just created.
+

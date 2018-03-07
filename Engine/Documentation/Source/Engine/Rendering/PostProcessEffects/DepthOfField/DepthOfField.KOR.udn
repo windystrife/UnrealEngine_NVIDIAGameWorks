@@ -1,0 +1,217 @@
+﻿INTSourceChangelist:3599948
+Availability: Public
+Crumbs: %ROOT%
+Title:뎁스 오브 필드
+Description:깊이에 따라 씬을 흐리게 만드는 초점 효과 시뮬레이션입니다.
+Type: Overview
+SkillLevel:Beginner
+Version:4.16
+Parent:Engine/Rendering/PostProcessEffects
+Order:5
+Tags:Post Process
+Topic-image:DoF_topic.png
+
+
+
+
+[REGION:fullwidth]
+![Depth of Field](dof.png)
+[/REGION]
+
+[EXCERPT:DepthOfField_Desc]
+Depth of Field (DoF, 뎁스 오브 필드)는 씬의 포커스 지점 앞이나 뒷부분을 거리에 따라 흐리게 만드는 기법으로, 실제 카메라에서 벌어지는 현상에 대한 시뮬레이션입니다. 이 이펙트는 보는 사람의 관심을 끌고, 
+렌더링이 좀 더 사진이나 영화같아 보이도록 만드는 데 사용할 수 있습니다.
+[/EXCERPT:DepthOfField_Desc]
+
+## 뎁스 오브 필드 유형
+
+언리얼 엔진 4 에서 뎁스 오브 필드 이펙트를 내는 방법은 세 가지, 보케(Bokeh)와 가우시안(Gaussian)과 원형(Circle) 입니다.
+
+[REGION:imagetable]
+| ![Bokeh DoF](bokeh.png)(w:300) | ![Gaussian DoF](gaussian.png)(w:300) | ![Circle DoF](Circle.png)(w:300) |
+| :----: | :----: | :----: |
+| 보케 DoF | 가우시안 DoF | 원형 DoF |
+[/REGION]
+
+
+### 가우시안 뎁스 오브 필드
+
+[EXCERPT:DepthOfField_Gaussian]
+가우시안 DoF 는 표준 가우시안 블러를 사용하여 씬을 흐립니다. 가우시안 방법은 퍼포먼스가 중요한 게임에서 사용하기에 충분히 빠르고 일반적으로 잘 들어맞습니다.
+[/EXCERPT:DepthOfField_Gaussian]
+
+### 보케 뎁스 오브 필드
+
+[EXCERPT:DepthOfField_Bokeh]
+보케(일본어로 물방울)는 영화나 사진에서 초점이 잡히지 않은 상태의 사물에서 볼 수 있는 모양을 말합니다. 보케 DoF 는 카메라 렌즈가 내는 효과를 재현하기 위해 각 픽셀마다 모양을 정의하는 텍스처를 입힌 쿼드로 렌더링하는 기법으로, 씬에 영화같은 느낌을 줄 수 있습니다.
+이렇게 퍼포먼스를 많이 잡아먹는 이펙트는 실제 반해상도로만 구현됩니다. 또한 별로 티나지 않는 곳에서는 렌더링 퍼포먼스 절약 시도를 하기도 합니다. 자세한 정보는 [적응형 DOF](#적응형DOF) 부분을 참고하세요.
+
+보케 기법은 퍼포먼스 측면에서 비용이 훨씬 많이 들기에, 시각적인 면이 퍼포먼스 측면보다 훨씬 중요한 시네마틱이나 쇼케이스 제작시 우선적으로 고려해 볼 수 있는 기법입니다.
+[/EXCERPT:DepthOfField_Bokeh]
+
+### 원형 뎁스 오브 필드
+
+[EXCERPT:DepthOfField_Circle]
+새로 추가된 원형 뎁스 오브 필드는 현실의 카메라에 보다 가까이 일치시키기 위해 추가된 것입니다. 보케와 마찬가지로 선명한 HDR 콘텐츠와 물방울 모양 보케를 볼 수 있습니다. 이 알고리즘의 약점은 매우 큰 보케의 경우인데,
+보케보다 노이즈와 선명도가 떨어져 보이기 때문입니다.
+하지만 특히 전환되는 영역에서 퍼포먼스가 (보케보다 꽤나) 좋고 퀄리티도 나쁘지 않습니다.
+
+원형 DOF 기본은 쾌적함을 위해 의도적으로 약하게 했습니다. 최대한의 효과를 위해서는 트윅 작업이 필요합니다. 커다란 보케에는 작은 Aperture 값을 사용하고, 오브젝트에 가까이 가서 필드 오브 뷰를 낮춥니다.
+초점 거리를 통해, 이상적으로는 초점 면 전후방에 초점이 나간 씬 콘텐츠를 구합니다. VisualizeDepthOfField 표시 플래그로 올바른 세팅을 찾는 데 도움이 될 수 있습니다.
+
+[/EXCERPT:DepthOfField_Circle]
+
+## 구현
+
+뎁스 오브 필드는 Near, Far, Focal Region - 즉 근경, 원경, 초점구역 이렇게 세 가지 레이어로 나뉘며, 이들 각각은 별도로 처리한 다음 나중에 합성하여 최종 효과를 냅니다. 근경과 원경 레이어에 있는, 즉 초점구역에 있지 않은 사물에는 항상 최대 블러링이 적용됩니다. 그런 다음 그 레이어를 블러링이 적용되지 않은 씬과 섞는 것입니다.
+
+* 초점구역 내 사물은 블러링이 적용되지 않은 씬 레이어를 사용합니다.
+* 근경이나 원경 레이어에 있으면서 전환되는 구역에도 있지 않은 사물은, 블러링이 적용된 레이어에 최대로 섞어줍니다.
+* 전환 구역 안에 있는 사물은, 블러링이 적용되지 않은 씬 레이어와 블러링이 적용된 레이어를 구역 내 위치에 따라 연속적으로 섞어줍니다.
+
+
+전환 구역을 포함한 이 레이어들은 ( **표시 > 시각화** 아래) **뎁스 오브 필드 레이어** 표시 옵션으로 시각화시켜 볼 수 있습니다. 근경 레이어는 초록, 원경 레이어는 파랑, 초점구역은 검정색으로 표시됩니다.
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Scene](dof_layers.png)(w:700)
+	[/PARAM]
+	[PARAM:after]
+	![Layer Visualization](dof_layers_visualize.png)(w:700)
+	[/PARAM]
+[/OBJECT]
+
+여러가지 흥미로운 정보 역시 포함하기 위해 시각화를 더욱 개선시켰습니다.
+
+[REGION:imagetable]
+| ![Scene](NewVisualize.png) |
+| :----: |
+| VisualizeDOF |
+[/REGION]
+
+원형 DoF 사용시에는 마우스 커서에 붙은 조준선에 착란의 계산된 원 (BokehSize) 과 아울러 깊이와 픽셀 크기가 수치로 표시되는 것을 볼 수 있습니다.
+참고로 원 크기가 실제 이펙트와 항상 들어맞지는 않는데, 실제 구현은 커다란 보케 모양에 쓰도록 의도되었거나 잘 맞지 않기 때문입니다. 앞으로 개선할 수 있었으면 합니다.
+
+## 프로퍼티
+
+| 프로퍼티 | 설명 |
+| -------- | ---- |
+| **Method** | 메소드 - 보케, 가우시안, 원형 중에서 씬을 흐리게 만드는 방법을 선택합니다. |
+| **Depth Blur km for 50%** | 50% 에 대한 뎁스 블러 km - todo |
+| **Depth Blur Radius** | 뎁스 블러 반경 - 1920 해상도에서 픽셀 단위 뎁스 블러 반경입니다. |
+| **Aperture** | 조리개 - todo |
+| **Focal Distance** | DOF 초점 거리 - 카메라에서 이 언리얼 유닛 거리까지는 씬의 초점이 완벽하게 잡혀 흐려지지 않는 구역의 중심 역할을 합니다. [INCLUDE:#FocalDistance] |
+| **Focal Region** | DOF 초점 구역 - 초점 거리 너머 이 언리얼 유닛 거리까지는 씬의 초점이 완벽하게 잡혀 흐려지지 않습니다. [INCLUDE:#FocalRegion] |
+| **Near Transition Range** | DOF 근경 전환 범위 - 가우시안 기반 DoF 사용시, 초점구역에서 이 언리얼 유닛 거리만큼 카메라에 가까이 있는 부분은 초점이 잡힌 상태에서 흐려지는 상태로 씬 이행이 발생합니다. [INCLUDE:#NearTransitionRange] |
+| **Far Transition Range** | DOF 원경 전환 범위 - 가우시안 기반 DoF 사용시, 초점구역에서 이 언리얼 유닛 거리만큼 카메라와 멀리 떨어져 있는 부분은 초점이 잡힌 상태에서 흐려지는 상태로 씬 이행이 발생합니다.  [INCLUDE:#FarTransitionRange] |
+| **Scale** | DOF 스케일 - 보케 기반 블러링의 전체적인 스케일 인수입니다. [INCLUDE:#Scale] |
+| **Max Bokeh Size** | DOF 최대 보케 크기 - 보케 기반 DoF 블러의 (뷰 폭 기준 백분율) 최대 크기입니다 (**주:** 퍼포먼스 비용은 크기*크기 에 비례합니다). 어느 거리에서든 보케의 크기를 계산하는 데 사용되는 함수 근사치 표현은 아래 나타나 있습니다: [INCLUDE:#MaxBokehSize] |
+| **Near Blur Size** | DOF 근경 블러 크기 - 가우시안 기반 DoF 블러의 (뷰 폭 기준 백분율) 최대 크기입니다 (**주:** 퍼포먼스 비용은 크기에 비례합니다). [INCLUDE:#NearBlurSize] |
+| **Far Blur Size** | DOF 원경 블러 크기 - 가우시안 기반 DoF 블러의 (뷰 폭 기준 백분율) 최대 크기입니다 (**주:** 퍼포먼스 비용은 크기에 비례합니다). [INCLUDE:#FarBlurSize] |
+| **Shape** | DOF 모양 - 초점이 잡히지 않은 사물의 보케 모양을 정의하는 텍스처입니다 (블렌딩 불가). |
+| **Occlusion** | DOF 오클루전 - 블러링이 적용된 지오메트리가 평상시 실루엣 너머로 얼마나 뻗어나가게 할지, 그리고 그 불투명도를 조절합니다. 0.18 정도면 꽤 자연스럽게 나옵니다. 0.4 가 되면 레이어 색이 새는 문제를 잡아줘야 할 수 있습니다. (0.18 미만으로) 값이 매우 작으면 블러 이펙트가 중화되어 버리긴 하지만, 사물이 카메라에 매우 가까이 있을 경우 괜찮아 보일 수도 있습니다. [INCLUDE:#Occlusion] |
+| **Color Threshold** | DOF 색 한계치 - 적응형 DoF 가 최대 해상도로 전환되는 색 한계치을 조절합니다. 값이 작을 수록 씬의 더 많은 부분이 최대 해상도를 사용하여 처리됩니다. |
+| **Size Threshold** | DOF 크기 한계치 - 적응형 DoF 가 최대 해상도로 전환되는 크기 한계치을 조절합니다. 값이 클 수록 씬의 더 많은 부분이 최대 해상도를 사용하여 처리됩니다. |
+| **Sky Distance** | 하늘 거리 - 스카이박스에 초점을 맞출 수 있도록 하기 위한 인공의 거리(예로 200000)이며, 값이 0 이하이면 기능이 꺼지고, GaussianDOF 에만 사용되며, 퍼포먼스 비용이 생길 수 있습니다. |
+
+<!--
+[EXCERPT:FocalDistance]
+[REGION:imagetable]
+| ![DoF Focal Distance - Near](dof_focaldist_0.png)(w:240) | ![DoF Focal Distance - Mid](dof_focaldist_1.png)(w:240) | ![DoF Focal Distance - Far](dof_focaldist_2.png)(w:240) |
+| --- | --- | --- |
+| Focal Distance = 400.0 | Focal Distance = 1000.0 | Focal Distance = 2500.0 |
+[/REGION]
+[/EXCERPT:FocalDistance]
+
+[EXCERPT:FocalRegion]
+[REGION:imagetable]
+![Focal Region](dof_focalregion.png)
+[/REGION]
+[/EXCERPT:FocalRegion]
+
+[EXCERPT:NearTransitionRange]
+[REGION:imagetable]
+![Gaussian Near Layer](dof_gaussian_near.png)
+[/REGION]
+[/EXCERPT:NearTransitionRange]
+
+[EXCERPT:FarTransitionRange]
+[REGION:imagetable]
+![Gaussian Far Layer](dof_gaussian_far.png)
+[/REGION]
+[/EXCERPT:FarTransitionRange]
+
+[EXCERPT:MaxBokehSize]
+[REGION:imagetable]
+![Bokeh CoC](dof_bokeh_coc.png) 
+| ![DoF Bokeh Size - 2.5](dof_size_0.png)(w:240) | ![DoF Bokeh Size - 5.0](dof_size_1.png)(w:240) | ![DoF Bokeh Size - 10.0](dof_size_2.png)(w:240) |
+| --- | --- | --- |
+| Size = 2.5 | Size = 7.5 | Size = 15.0 |
+[/REGION]
+[/EXCERPT:MaxBokehSize]
+
+[EXCERPT:NearBlurSize]
+[REGION:imagetable]
+| ![DoF Near Blur Size - 2.5](dof_nearsize_0.png)(w:240) | ![DoF Near Blur Size - 5.0](dof_nearsize_1.png)(w:240) | ![DoF Near Blur Size - 10.0](dof_nearsize_2.png)(w:240) |
+| --- | --- | --- |
+| Size = 0.0 | Size = 0.25 | Size = 2.5 |
+[/REGION]
+[/EXCERPT:NearBlurSize]
+
+[EXCERPT:FarBlurSize]
+[REGION:imagetable]
+| ![DoF Far Blur Size - 2.5](dof_farsize_0.png)(w:240) | ![DoF Far Blur Size - 5.0](dof_farsize_1.png)(w:240) | ![DoF Far Blur Size - 10.0](dof_farsize_2.png)(w:240) |
+| --- | --- | --- |
+| Size = 0.0 | Size = 0.25 | Size = 2.5 |
+[/REGION]
+[/EXCERPT:FarBlurSize]
+
+[EXCERPT:Occlusion]
+[REGION:imagetable]
+| ![DoF Occlusion - 0.05](dof_occlusion_0.png)(w:240) | ![DoF Occlusion - 0.18](dof_occlusion_1.png)(w:240) | ![DoF Occlusion - 0.4](dof_occlusion_2.png)(w:240)
+| --- | --- | --- |
+| Occlusion = 0.05 | Occlusion = 0.18 | Occlusion = 0.4 |
+[/REGION]
+[/EXCERPT:Occlusion]
+
+[EXCERPT:Scale]
+[REGION:imagetable]
+| ![DoF Scale - 0.0](dof_scale_0.png)(w:240) | ![DoF Scale - 0.375](dof_scale_1.png)(w:240) | ![DoF Scale - 1.0](dof_scale_2.png)(w:240) |
+| --- | --- | --- |
+| Scale = 0.0 | Scale = 0.375 | Scale = 1.0 |
+[/REGION] 
+[/EXCERPT:Scale]
+-->
+
+## 적응형 DoF
+
+보케 뎁스 오브 필드는 퍼포먼스 상의 이유로 인해 기본적으로 (각 방향마다 절반 해상도씩) 1/4 해상도로 렌더링됩니다. 대부분의 경우 이러한 다운샘플링이 문제되는 일 없이 완벽히 수용할 만 하기는 하지만, 부작용이 심해 원치 않는 결과가 나는 상황도 있습니다.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Adaptive Resolution - Off](dof_adaptive_0.png)(w:700)
+	[/PARAM]
+	[PARAM:after]
+	![Adaptive Reoslution - On](dof_adaptive_1.png)(w:700)
+	[/PARAM]
+[/OBJECT]
+
+
+다운샘플링 DoF 기법만 사용할 때, 배경에 블러링이 적용되고 있는 캐릭터를 보면 덩어리진 모습을 확인할 수 있습니다. 게다가 전경의 캐릭터 뿔 주변에 약간의 부작용도 보입니다. 적응형 DoF 를 사용하니 부작용도 사라지고 배경 캐릭터의 모습도 훨씬 부드러워 졌습니다.
+
+적응형 DoF 는 ( **표시 > 시각화** 아래) **적응형 뎁스 오브 필드** 표시 옵션으로 시각화시켜 볼 수 있습니다. 켜면 다운샘플링 이펙트가 사용된 곳은 어디인지 (초록으로), 최대 해상도 이펙트가 사용된 곳은 어디인지 (빨강으로) 보여주는 오버레이가 표시됩니다. 블러링이 적용되지 않은 곳은 원래 씬 색으로 표시됩니다.
+
+[REGION:fullwidth]
+![Adaptive DoF Visualization](dof_adaptive_visualize.png)
+[/REGION]
+
+일반적으로 모두 초록으로 나타나는 것이 좋습니다. 시각화에 빨강으로 나타나는 부분이 많을 수록, 매 프레임마다 씬 렌더링에 드는 비용이 늘어납니다.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Adaptive Resolution - Optimized](dof_adaptive_good.png)(w:700)
+	[/PARAM]
+	[PARAM:after]
+	![Adaptive Resolution - Expensive](dof_adaptive_bad.png)(w:700)
+	[/PARAM]
+[/OBJECT]
+

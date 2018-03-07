@@ -1,0 +1,79 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	StationaryLightOverlapShaders.usf: Shaders for visualizing light overlap
+=============================================================================*/
+
+#include "Common.ush"
+#include "DeferredShadingCommon.ush"
+#include "DynamicLightingCommon.ush"
+
+/** 1 if the light has a valid shadowmap channel. */
+float HasValidChannel;
+
+void OverlapDirectionalPixelMain(
+	float2 InUV : TEXCOORD0,
+	float3 ScreenVector : TEXCOORD1,
+	out float4 OutColor : SV_Target0
+	)
+{
+	OutColor = 0;
+	FGBufferData GBuffer = GetGBufferData(InUV);
+
+	// Only light pixels marked as using deferred shading
+	if( GBuffer.ShadingModelID > 0 )
+	{
+		// Output minor complexity to visualize overlap
+		OutColor.rgb = .04f;
+
+		if (HasValidChannel < 1)
+		{
+			// Output a huge amount of complexity to make it clear that this light is an error
+			OutColor.rgb = .4f;
+		}
+	}
+}
+
+void OverlapRadialPixelMain(
+	float4 InScreenPosition : TEXCOORD0,
+	in float4 SvPosition : SV_Position,		// after all interpolators
+	out float4 OutColor : SV_Target0
+	)
+{
+	OutColor = 0;
+	float2 ScreenUV = SvPositionToBufferUV(SvPosition);
+	SvPosition.z = LookupDeviceZ(ScreenUV);
+	
+	FGBufferData GBuffer = GetGBufferData(ScreenUV); 
+	
+	// Only light pixels marked as using deferred shading
+	BRANCH if( GBuffer.ShadingModelID > 0 )
+	{
+		float3 WorldPosition = SvPositionToWorld(SvPosition);
+
+		float3 ToLight = DeferredLightUniforms.NormalizedLightDirection;
+
+		#if RADIAL_ATTENUATION
+			ToLight = DeferredLightUniforms.LightPosition - WorldPosition;
+		#endif
+
+		float SpotFalloff = 1;
+		#if RADIAL_ATTENUATION
+			SpotFalloff = SpotAttenuation(normalize(ToLight), -DeferredLightUniforms.NormalizedLightDirection, DeferredLightUniforms.SpotAngles);
+		#endif
+
+		float RadialAttenuationRatio = length(WorldPosition - DeferredLightUniforms.LightPosition) * DeferredLightUniforms.LightInvRadius;
+
+		if (RadialAttenuationRatio < 1 && SpotFalloff > .0001f)
+		{
+			// Output minor complexity to visualize overlap
+			OutColor.rgb = .04f;
+
+			if (HasValidChannel < 1)
+			{
+				// Output a huge amount of complexity to make it clear that this light is an error
+				OutColor.rgb = .4f;
+			}
+		}
+	}
+}

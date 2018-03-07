@@ -1,0 +1,121 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	AtmospherePrecompute.usf: Precompute data for Atmospheric fog
+
+	This code contains embedded portions of free sample source code from 
+	http://www-evasion.imag.fr/Membres/Eric.Bruneton/PrecomputedAtmosphericScattering2.zip, Author: Eric Bruneton, 
+	08/16/2011, Copyright (c) 2008 INRIA, All Rights Reserved, which have been altered from their original version.
+
+	Permission is granted to anyone to use this software for any purpose, including commercial applications, and to alter it and redistribute it freely, subject to the following restrictions:
+
+    1. Redistributions of source code must retain the above copyright notice, 
+	   this list of conditions and the following disclaimer.
+    2. Redistributions in binary form must reproduce the above copyright notice, 
+	   this list of conditions and the following disclaimer in the
+       documentation and/or other materials provided with the distribution.
+    3. Neither the name of the copyright holders nor the names of its
+       contributors may be used to endorse or promote products derived from
+       this software without specific prior written permission.
+	
+=============================================================================*/
+
+#include "Common.ush"
+
+// Disable USING_VERTEX_SHADER_LAYER as it would be an error for these shaders as they are intended to render to 2D targets only.
+#if USING_VERTEX_SHADER_LAYER != 0
+	#undef USING_VERTEX_SHADER_LAYER
+	#define USING_VERTEX_SHADER_LAYER 0
+#endif
+
+#include "AtmosphereCommon.ush"
+#include "AtmospherePrecomputeCommon.ush"
+
+float OpticalDepth(float H, float Radius, float Mu) 
+{
+    float Result = 0.0;
+    float Dx = Limit(Radius, Mu) / float(TransmittanceIntegralSamples);
+    float Xi = 0.0;
+    float Yi = exp(-(Radius - RadiusGround) / H);
+    for (int I = 1; I <= TransmittanceIntegralSamples; ++I) 
+	{
+        float Xj = float(I) * Dx;
+        float Yj = exp(-(sqrt(Radius * Radius + Xj * Xj + 2.0 * Xj * Radius * Mu) - RadiusGround) / H);
+        Result += (Yi + Yj) / 2.0 * Dx;
+        Xi = Xj;
+        Yi = Yj;
+    }
+    return Mu < -sqrt(1.0 - (RadiusGround / Radius) * (RadiusGround / Radius)) ? 1e9 : Result;
+}
+
+// vertex shader entry point
+void MainVS(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out FAtmosphereVSOutput Out
+	)
+{
+	DrawRectangle(InPosition, InTexCoord, Out.OutPosition, Out.OutTexCoord );
+    Out.LayerIndex = 0;
+}
+
+// pixel shader entry point
+void TransmittancePS(FAtmosphereVSOutput Input, out float4 OutColor : SV_Target0)
+{
+	// RETURN_COLOR not needed unless writing to SceneColor
+    float Radius, MuS;
+    GetTransmittanceRMuS(Input.OutTexCoord, Radius, MuS);
+    float3 Depth = BetaRayleighScattering * OpticalDepth(View.AtmosphericFogHeightScaleRayleigh, Radius, MuS) + BetaMieExtinction * OpticalDepth(HeightScaleMie, Radius, MuS);
+	OutColor = float4(exp(-Depth), 0.f); // Eq (5)
+}
+
+void Irradiance1PS(FAtmosphereVSOutput Input, out float4 OutColor : SV_Target0)
+{
+	// RETURN_COLOR not needed unless writing to SceneColor
+    float Radius, MuS;
+    GetIrradianceRMuS(Input.OutTexCoord, Radius, MuS);
+    OutColor = float4(Transmittance(Radius, MuS) * max(MuS, 0.0), 0.0);
+}
+
+void IrradianceNPS(FAtmosphereVSOutput Input, out float4 OutColor : SV_Target0)
+{
+    float Radius, MuS;
+    GetIrradianceRMuS(Input.OutTexCoord, Radius, MuS);
+    float3 S = float3(sqrt(max(1.0 - MuS * MuS, 0.0)), 0.0, MuS);
+
+    float3 Result = float3(0.f, 0.f, 0.f);
+    // integral over 2.PI around x with two nested loops over W directions (Theta,Phi) -- Eq (15)
+    for (int IPhi = 0; IPhi < 4 * IrradianceIntegralSamplesHalf; ++IPhi) 
+	{
+        float Phi = (float(IPhi) + 0.5) * DeltaPhi;
+        for (int ITheta = 0; ITheta < IrradianceIntegralSamplesHalf; ++ITheta) 
+		{
+            float Theta = (float(ITheta) + 0.5) * DeltaTheta;
+            float Dw = DeltaTheta * DeltaPhi * sin(Theta);
+            float3 W = float3(cos(Phi) * sin(Theta), sin(Phi) * sin(Theta), cos(Theta));
+            float Nu = dot(S, W);
+            if (FirstOrder == 1.0) 
+			{
+                // first iteration is special because Rayleigh and Mie were stored separately,
+                // without the phase functions factors; they must be reintroduced here
+                float Pr1 = PhaseFunctionR(Nu);
+                float Pm1 = PhaseFunctionM(Nu);
+                float3 Ray1 = Texture4DSample(AtmosphereDeltaSRTexture, AtmosphereDeltaSRTextureSampler, Radius, W.z, MuS, Nu).rgb;
+                float3 Mie1 = Texture4DSample(AtmosphereDeltaSMTexture, AtmosphereDeltaSMTextureSampler, Radius, W.z, MuS, Nu).rgb;
+                Result += (Ray1 * Pr1 + Mie1 * Pm1) * W.z * Dw;
+            } 
+			else 
+			{
+                Result += Texture4DSample(AtmosphereDeltaSRTexture, AtmosphereDeltaSRTextureSampler, Radius, W.z, MuS, Nu).rgb * W.z * Dw;
+            }
+        }
+    }
+
+    OutColor = float4(Result, 0.0);
+}
+
+void CopyIrradiancePS(FAtmosphereVSOutput Input, out float4 OutColor : SV_Target0)
+{
+	OutColor = Texture2DSample(AtmosphereDeltaETexture, AtmosphereDeltaETextureSampler, Input.OutTexCoord);
+}
+

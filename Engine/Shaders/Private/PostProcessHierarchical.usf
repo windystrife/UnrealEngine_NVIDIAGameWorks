@@ -1,0 +1,52 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	PostProcessHierarchical.usf: To generate hierarchical buffers
+=============================================================================*/
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+
+float2 InvSize;
+float4 InputUvFactorAndOffset;
+float4 InputUvBundaries;
+
+Texture2D		ColorMip;
+SamplerState	ColorMipSampler;
+
+// kernel to build hierarchical scene color buffer
+void BuildHCB(float4 RenderTargetUVAndScreenPos : TEXCOORD0, out float4 OutColor : SV_Target0)
+{
+#if STAGE == 0
+	const float2 ViewUV = RenderTargetUVAndScreenPos.zw * float2(0.5f, -0.5f) + 0.5f;
+	const float2 InUV = ViewUV * InputUvFactorAndOffset.xy + InputUvFactorAndOffset.zw;
+	const float2 InUVMinBound = InputUvBundaries.xy;
+	const float2 InUVMaxBound = InputUvBundaries.zw;
+	const Texture2D Texture = PostprocessInput0;
+	const SamplerState TextureSampler = PostprocessInput0Sampler;
+
+#else
+	const float2 InUV = RenderTargetUVAndScreenPos.xy;
+	const float2 InUVMinBound = InputUvBundaries.xy;
+	const float2 InUVMaxBound = InputUvBundaries.zw;
+	const Texture2D Texture = ColorMip;
+	const SamplerState TextureSampler = ColorMipSampler;
+	
+#endif
+	
+	const float Radius = 2.0 * InvSize.x;
+	// sigma = 0.5
+	const float C = 0.468592;
+	const float A = 0.107973;
+	const float B = 0.024879;
+
+	OutColor =  Texture.SampleLevel(TextureSampler, clamp(InUV, InUVMinBound, InUVMaxBound), 0) * C;
+	OutColor += Texture.SampleLevel(TextureSampler, clamp(InUV + float2( 1,  1) * Radius, InUVMinBound, InUVMaxBound), 0) * B;
+	OutColor += Texture.SampleLevel(TextureSampler, clamp(InUV + float2( 0,  1) * Radius, InUVMinBound, InUVMaxBound), 0) * A;
+	OutColor += Texture.SampleLevel(TextureSampler, clamp(InUV + float2(-1,  1) * Radius, InUVMinBound, InUVMaxBound), 0) * B;
+	OutColor += Texture.SampleLevel(TextureSampler, clamp(InUV + float2(-1,  0) * Radius, InUVMinBound, InUVMaxBound), 0) * A;
+	OutColor += Texture.SampleLevel(TextureSampler, clamp(InUV + float2(-1, -1) * Radius, InUVMinBound, InUVMaxBound), 0) * B;
+	OutColor += Texture.SampleLevel(TextureSampler, clamp(InUV + float2( 0, -1) * Radius, InUVMinBound, InUVMaxBound), 0) * A;
+	OutColor += Texture.SampleLevel(TextureSampler, clamp(InUV + float2( 1, -1) * Radius, InUVMinBound, InUVMaxBound), 0) * B;
+	OutColor += Texture.SampleLevel(TextureSampler, clamp(InUV + float2( 1,  0) * Radius, InUVMinBound, InUVMaxBound), 0) * A;
+}

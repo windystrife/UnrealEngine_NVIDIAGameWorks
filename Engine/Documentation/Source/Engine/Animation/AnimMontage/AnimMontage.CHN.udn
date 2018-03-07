@@ -1,0 +1,400 @@
+﻿INTSourceChangelist:2728238
+Availability:Public
+Title:动画蒙太奇
+Crumbs:%ROOT%, Engine, Engine/Animation
+Description:关于动画蒙太奇是什么以及如何在 UE4 的动画系统中使用它们的详细说明。
+Related:Engine/Content/FBX/Animations
+Related:Engine/Content/Types/SkeletalMeshes
+Related:Engine/Animation/PhysicallyDrivenAnimation
+Related:Engine/Animation/StateMachines
+Related:Gameplay/AI
+Related:Engine/Content/Tools/MayaRiggingTool
+Related:Gameplay/Input
+version:4.9
+
+[TOC(start:2 end:2)]
+
+[EXCERPT:Intro]
+**动画蒙太奇**（简称蒙太奇）是一种多功能工具，通过它可以实现多种动画效果，主要与公开代码或 [蓝图可视脚本](Engine/Blueprints) 中的动画控件相关。它也可用于创造各种动画效果，包括动画的智能循环，基于逻辑的动画切换，等等。
+[/EXCERPT:Intro]
+
+蒙太奇是可以创建并存在于 **内容浏览器** 中的动画资产。您可在运行时将这些资产直接插入动画图中，并修改它的任何状态。例如您可以跳转到不同片段，也可以重新链接不同的片段。这主要用于代码驱动的动画或一次性动画（例如近身攻击），让您能够控制触发器，在需要的时候停止，或者变换状态（循环或不循环）。 
+
+如果您的动画启用了 [](Engine\Animation\RootMotion\)，蒙太奇还提供了一种在互联的游戏之间复制根运动的方法。 
+
+
+## 蒙太奇示例
+
+![](Montage_Screen2.png)
+
+上图是一个近身攻击动画，含有 3 个片段 [开始、循环和结束]。当玩家用鼠标 **左键单击** 时，目前情况下就会在您要求播放该蒙太奇的时候触发 _开始（Start）_ 片段。中间的片段名为 _循环（Loop）_（它设置为循环播放），会紧跟着 _开始（Start）_片段播放，并不断循环。如果玩家松开鼠标按键，它就会停止，但您不希望动画立刻停止，因为这样的话动画就会在循环中突兀地停下。您希望将 _循环（Loop）_重新链接到 _结束（End）_片段，这样就会过渡到结束片段，并结束动画。 
+
+蒙太奇的部分其他用途包括：
+* 能够从动画蓝图的 **事件图** 中播放动画。
+* 将复杂的一系列动画串联起来，让它们成为一个动画。
+* 根据代码或蓝图脚本仅循环一个或多个动画中的特定部分。
+* 根据代码或蓝图脚本处理多个动画的基于事件的切换。
+* 能够将复杂的动画序列分配到可在代码或蓝图中切换的指定槽中。
+* 根据代码或蓝图脚本在各种动画序列之间精确切换。
+
+[REGION:note]
+在 [动画内容示例](Resources\ContentExamples\Animation) 页面的第 1.5 节下也可以看到一个应用于角色的蒙太奇。
+[/REGION]
+
+
+## 蒙太奇属性
+
+以下是蒙太奇资产属性的详细列表。在 **Persona** 中查看蒙太奇时就可以看到这些属性，还可以通过在 **内容浏览器** 中 **右键单击** 蒙太奇并从快捷菜单中选择“属性”（Properties）来访问它们。
+
+![](MontageProperties.png)
+
+|蒙太奇属性||
+|---|---|
+|[REGION:tablesection]蒙太奇（Montage）[/REGION]||
+|**混入时间（Blend In Time）**| 蒙太奇开始播放时角色从其当前姿势混入所用的时间。|
+|**混出时间（Blend Out Time）**| 蒙太奇结束播放时角色重新混合到其原始姿势所用的时间。|
+|**混出触发时间（Blend Out Trigger Time）**| 从序列结束到触发混出的时间。< 0 则使用混出时间，即混出在蒙太奇结束时结束。> = 0 则使用序列结束-混出触发时间来触发混出。|
+|[REGION:tablesection]附加设置（Additive Settings）[/REGION]||
+|**预览基本姿势（Preview Base Pose）**|设置一个用于附加混合空间的基本预览姿势。|
+|[REGION:tablesection]动画（Animation）[/REGION]||
+|**速度比例（Rate Scale）**|决定蒙太奇播放速度的乘数值。默认值为 1.0。|
+|**骨架（Skeleton）**|包含与此蒙太奇关联的骨架。不能在编辑器中更改。|
+|[REGION:tablesection]元数据（Meta Data）[/REGION]||
+|**元数据（Meta Data）**| 这是可以随资产保存的元数据。元数据是从 Anim Meta Data 类衍生的 Blueprintable 类。这允许您将定制元数据添加到动画资产（动画序列、动画蒙太奇、动画合成和混合空间都受到支持）。在 C++ 中可以通过调用 `GetMetaData()` 方法或对动画蒙太奇使用 `GetSectionMetaData()` 来查询动画资产中的数据。|
+|[REGION:tablesection]缩略图（Thumbnail）[/REGION]||
+|**轨道俯仰角（Orbit Pitch）**| 摄像机围绕对象的轨道的俯仰角。|
+|**轨道偏航角（Orbit Yaw）**| 摄像机围绕对象的轨道的偏航角。|
+|**轨道缩放（Orbit Zoom）**| 相对于资产的界限球体距离的偏移。|
+
+## 蒙太奇 UI
+
+在 Persona 中观察蒙太奇时，了解每个区域的构成和作用很有用。
+
+[REGION:raw]
+![](MontageUI.png)
+[/REGION]
+
+1. [蒙太奇（Montage）区域](#MontageArea)
+1. [片段（Sections）区域](#SectionsArea)
+1. [元素计时（Element Timing）区域](#elementtimingarea)
+1. [通知（Notifies）区域](#NotifiesArea)
+1. [曲线（Curves）区域](#CurvesArea)
+
+(#MontageArea)
+## 蒙太奇（Montage）区域
+
+蒙太奇（Montage）区域的组成如下：
+
+[REGION:raw]
+![](MontageArea.png)
+[/REGION]
+
+1. **片段轨道** - 显示所有已经为此蒙太奇定义的 [片段](#Sections)。可以用鼠标左键将片段拖动到时间轴上的不同位置。
+1. **槽轨道** - 显示当前的 [槽](#Slots)，并在右侧显示槽名称。可以根据需要在槽中填充任意数量的动画，它们将会按顺序播放。请注意，槽轨道中的多个动画的位置是错开的 - 一个在上，一个在下，以此类推。这可以帮助您区分不同的动画。
+
+[REGION:note]
+在一个蒙太奇中可以有任意数量的槽轨道，每一条都有自身的名称，并包含自身特有的动画。但是，每个蒙太奇只能有一条片段轨道。
+[/REGION]
+
+(#Sections)
+### 片段
+
+蒙太奇片段提供了一种将槽分解为动画的多个不同部分的手段。每个片段都有一个名称，并且在槽的时间轴中有自己的位置。您可以使用名称直接跳转到某个特定片段，或将某个片段安排为接在当前片段结束时播放。在蓝图中，您可以查询当前片段，跳转到某个片段，或设置将要播放的下一个片段。
+
+可以把片段想象成音乐播放列表中的歌曲，而槽就是音乐专辑。就像使用许多现代的媒体播放器时一样，您可以选择要接在当前歌曲结束后播放的歌曲，或者直接跳转到您想立刻听的歌曲。
+
+在片段轨道上 **右键单击** 并选择 **新建蒙太奇片段（New Montage Section）**就可创建片段。 
+
+(#Slots)
+### 槽
+
+[EXCERPT:Slots]
+在蒙太奇中，一个 **槽** 就是一条轨道，其中可容纳任意数量的动画。您可以为槽命名，然后通过调用槽名称混合到特定的动画。这里最好用角色给武器装填弹药的动画来举例。您可以制作不同版本的填弹动画，分别用于角色站立时、蹲伏时和匍匐时。只要这 3 个动画都使用相同的时间设置，您就可以在蒙太奇中将每个动画分别放到一个独立的槽中；可以将这些槽命名为站立、蹲伏和匍匐。在动画蓝图的 **动画图** 中，您可以使用槽节点来决定根据角色的当前状态要播放的动画。当角色站立时，您可以使用站立槽中的动画结果。当角色匍匐时，您可以使用匍匐槽的结果。
+
+有一点需要牢记，虽然许多蒙太奇控制将发生在动画蓝图的 **事件图** 中，但槽实际上是在 **动画图** 中受到处理的。这是通过槽节点来完成的，这类节点会提取槽的名称。将此节点放置在动画图执行的关键点上，就可以设置多个使用同一槽名称的蒙太奇。
+[/EXCERPT:Slots]
+
+<!---------------- Branch moved to Notify page.
+### 分支点
+
+Branch Points allow you to create events that coincide with animation playback.These Branch Point Events can be used in code or Blueprint to cause other things to happen, but specifically, Branch Points are useful for switching to other animation Sections within a Montage. 
+
+If you are already familiar with [Animation Notifies](Engine/Animation/Sequences\Notifies), you may notice a strong similarity between the two systems, as they both expose events that can be leveraged in script.The key difference is that Notifies are asynchronous, while Branch Points are synchronous.What this means to the end user is that Branch Points come with a much higher degree of precision for where they will take place along the animation timeline.
+
+High precision is important when you need to jump to a specific animation at a very precise moment in time.While you could use a Notify to do the same job, the asynchronous nature of Notifies means that the Notify Event could be fired at the incorrect animation frame, which can lead to hitches and jumps in your motion.
+
+[REGION:warning]
+Due to their synchronous nature and the precision resulting from it, Branch Points are more performance expensive than Notifies.You should only use them when an event must be fired at a precise moment along the animation timeline, such as jumping directly to another animation that matches up frame-to-frame.If being off by a frame (or some percentage of one) is not important, you should use Notifies instead.
+[/REGION]
+
+-------------------->
+
+(#SectionsArea)
+## 片段（Sections）区域
+
+在“片段”（Sections）区域中您可以为在“蒙太奇”（Montage）区域中定义的片段建立相互关系。例如，您可能希望动画的某一个片段（或一组片段）按特定顺序播放，甚至循环播放。 
+
+[REGION:raw]
+![](SectionsArea.png)
+[/REGION]
+
+
+1. **“创建默认”（Create Default）和“清除”（Clear）按钮** - **创建默认（Create Default）**在所有片段之间创建默认关联，将它们逐一串联起来。**清除（Clear）**清除所有关联。
+1. **片段按钮** - 在此区域，您将看到您在“蒙太奇”（Montage）区域中定义的每个片段都有一个对应的按钮。选择某个现有片段，然后单击这些按钮之一，就可以将该按钮对应的片段与选定的轨道关联起来。例如，在上图中，我们使 Swing2 与 Swing1 关联。顺序实际上是 Swing1、Swing2，然后又是 Swing1，从而造成循环。请参见下面的 [循环播放](#Looping) 部分了解详细信息。
+1. **片段关联轨道** - 在这里您可以显现并预览动画片段之间的关系。单击各个 **预览（Preview）**按钮可以分别查看每一条轨道的结果，单击 **预览所有片段（Preview All Sections）**按钮可看到所有片段依次播放。
+
+(#Looping)
+### 循环播放
+
+可以将片段设置为无限循环播放，这对于任何需要重复的动作极为有用。在一条片段关联轨道中多次关联同一片段就可以使该关联循环运行。片段将变为蓝色以表示循环。例如，假设一个动画中角色在给散弹枪装弹，一次装一发。您可以提取出角色塞弹入膛的片段，让它循环播放。然后您可以使用通知在蓝图中创建通知事件，每当该动画播放一次就使弹药计数加一。一旦该计数达到设定的数字（装弹已满），您就可以切换到角色关闭装弹口并恢复闲散姿态的动画。
+
+(#elementtimingarea)
+## 元素计时（Element Timing）区域
+
+“元素计时”（Element Timing）区域从“蒙太奇”（Montage）区域和“通知”（Notifies）区域提取信息，以帮助设定不同片段的时间。
+
+![](ElementTiming1.png)
+
+轨道中的每个节点都有一个号码，表示该对象在整个蒙太奇中的触发顺序，并且带有与其描述的内容相符的颜色。默认颜色为：
+* 红色 - 通知、通知状态和通知状态结束标记
+* 浅蓝色 - 分支点通知
+* 绿色 - 蒙太奇片段
+
+[REGION:note]
+可以在 **动画编辑器** 首选项中编辑这些颜色，可在 **编辑器首选项（Editor Preferences）**中找到这些设置。
+[/REGION]
+
+将鼠标悬停在轨道中的任意节点上都会显示工具提示，说明该节点代表什么。
+
+![](ElementTiming2.png)
+
+轨道右侧有一个下拉菜单，可以切换不同元素的可见性。
+
+![](ElementTiming3.png)
+
+(#NotifiesArea)
+## 通知（Notifies）区域
+
+![](NotifiesArea.png)
+
+[INCLUDE:Engine/Animation/Sequences\Notifies#Intro]
+
+[REGION:note]
+请参见 [](Engine/Animation/Sequences\Notifies) 了解更多信息。
+[/REGION]
+
+(#CurvesArea)
+## 曲线（Curves）区域
+
+![](CurvesArea.png)
+
+[INCLUDE:Engine/Animation/Sequences\Curves#Intro]
+
+[REGION:note]
+请参见 [](Engine/Animation/Sequences\Curves) 了解更多信息。
+[/REGION]
+
+
+## 播放蒙太奇
+
+可以通过多种不同方式播放蒙太奇： 
+
+* 您可以将它们指定为 **骨骼网格** 的 **要播放的动画**。  
+* 可以通过 **蓝图** 脚本或 C++ 直接调用它们。 
+* 可以将它们作为 **动画蓝图** 的一部分合并到 **动画图** 中。 
+
+[REGION:note]
+请参见 [](Engine/Animation/AnimHowTo/AdditiveAnimations) 了解如何在动画蓝图中使用蒙太奇的示例。该示例演示了一个角色可以同时执行两个相互独立的动画（在此示例中角色可以同时移动和射击）。
+[/REGION]
+
+## 播放多个蒙太奇
+
+在虚幻引擎 4.6 版之前，您只能一次播放一个蒙太奇。但是从 4.6 版起，可以通过使用 **动画槽** 和 **动画组** 播放任意数量的蒙太奇。 
+
+下面是关于该工作方式的概要介绍： 
+
+* 可将动画编成动画组。可以每组播放一个蒙太奇。如果要同时播放另一个蒙太奇，可以为其创建一个新的动画组。 
+* 在 **Persona** 中，动画组和动画槽都集中在 **动画槽管理器（Anim Slot Manager）**选项卡中（请参见下面的 [动画槽管理器](#animslotmanager)）。 
+* 可以使用下拉 UI 在有效的槽之间选择。 
+* 在创建新的蒙太奇时，槽节点在最初有一条 **默认槽**，这样它们就能立即发挥作用。 
+
+(#animslotmanager)
+### 动画槽管理器
+
+在 **动画槽管理器** 中您可以管理动画槽和动画组名称。它会显示一个层次结构视图，允许您进行更改。您可以在 **Persona** 中的蒙太奇中通过单击放大镜图标（见下图）来打开动画槽管理器。 
+
+![](OpenAnimSlotManger.png)
+
+这将打开动画槽管理器。 
+
+![](AnimSlotManager.png)
+
+组和槽保存在 **骨架** 资产中，以便同一系列的动画蓝图和蒙太奇都能使用相同设置。动画槽管理器中有 **保存（Save）**按钮，因此您每次进行更改时，都可以方便地将更改保存到骨架资产。 
+
+**右键单击** 槽名称时，会显示快捷菜单，通过它也可以将槽移动到需要的不同组。这进一步方便了您管理自己创建的槽，将它们移动到不同的组并按您认为合适的方式整理。 
+
+![](SlotClicking.png)
+
+### 编辑蒙太奇轨道上的槽
+
+下面是 **Persona** 中的 **蒙太奇编辑器** 示例，下拉框（已突出显示）列出可用于该轨道的槽。 
+
+![](SlotExample1.png)
+
+如果您需要创建新的槽或组，单击放大镜图标就可转到 **动画槽管理器**。 
+
+横跨顶部的状态栏会显示蒙太奇所属的组。这是由第一条轨道的槽决定的。 
+
+![](SlotExample2.png)
+
+如果您有多个槽，状态栏还会显示设置是否有问题。例如，如果您将属于不同组的槽混合搭配，将出现一个警告标志，您将鼠标悬停到该标志上就可查看关于问题的更多信息。 
+
+![](SlotExample3.png)
+
+### 编辑动画蓝图中的槽
+
+在动画蓝图的动画图中，可以添加一个 **槽（Slot）**节点，选中该节点就可看到与蒙太奇轨道视图中所示选项相同的选项。 
+
+![](SlotNode.png)
+
+在这里您可以使用下拉框选取现有的槽名称，并用放大镜图标打开动画槽管理器。 
+
+附加提示： 
+
+* 它向后兼容先前的设置。除了现有的槽成为“默认组”的一部分，您不会注意到任何变化。 
+* 已经改进了蒙太奇蓝图和 C++ API，使其能引用蒙太奇资产。您可以通过此方式控制同时播放的不同蒙太奇。例如，请参见 **蒙太奇设置播放速率** 功能。 
+
+
+<!-------------------- Example removed.This should be a HowTo.
+
+## Montage Practical Example
+
+
+In this example, we want to have a character that can freely run in all directions, with an attack animation that only plays on the upper body.This attack will have multiple animations that could take place during its course.This is a perfect way to show the assembly of a Montage, as well as how to control it in the Event Graph and blend into it within the AnimGraph.
+
+However, there are few things we have set up in advance:
+
+* We already have a State Machine defining locomotion.This is just like the one used in the Third Person Project Template.
+* We have several animations provided by an artist that we would like to string together to make the Montage.
+* We have created a [Character Blueprint Class](Engine\Blueprints\UserGuide\Types\ClassBlueprint\Creation) that we can get input information from. 
+ * For this example: an **IsAttacking** Boolean that is set to TRUE when the **Left Mouse Button** is pressed and set to FALSE when it is released. 
+  ![](CharacterBlueprint.png)
+
+### Creating the Montage
+
+Making a Montage is as easy as **Right-clicking** in the **Content Browser** and choosing **Animation > Animation Montage**.You can also **Right-click** on an existing Animation Sequence and choose **Create Montage** from the context menu.This will automatically create a new Montage with the selected AnimSequence already set up in the default Slot.
+
+![](MakeMontage.png)
+
+### Montage Setup
+
+Our first order of business was to name our Slot.We only need one in this Montage, and since we want our attack to only affect the upper body, the name Upper Body seemed perfect.We then drag/dropped the animations we would need into this slot.The animations we have do the following:
+
+* Right-to-left hammer swing
+* Left-to-right hammer swing
+* Go from the end of the right-to-left swing back to Idle
+* Go from the end of the left-to-right swing back to Idle
+
+[REGION:note]
+The two swinging animations both end on the same pose as the other begins.This means that the two animations can play back to back in a loop and the character will seamlessly swing the hammer back and forth.
+[/REGION]
+
+While order is not extremely important, having the first two animations at the beginning and back to back will simplify things later.
+
+![](MontageSetup.png)
+
+
+### Section Creation
+
+Our next step is to section out the animations in our Montage so that we can query them and call them up when needed in our Blueprint code.This is as easy as **Right-clicking** and choosing **Add New Montage Section** while clicking on the Section Track at the top of the Montage Area. 
+
+We used fairly straightforward names for each Section.Note that we replaced the Default section that came along with the Montage (made a new one and deleted the Default by **Right-clicking** and choosing **Delete Montage Section**).You can drag these Sections along the Section Track if you need to, and you will notice that they snap a bit at the boundary between two animation segments when you release the mouse.Use this to your advantage.
+
+![](AddNewSections.png)
+
+
+
+### Defining Section Relationships
+
+
+Now that our Sections are created, we can now define any special relationships between them using the Sections Area.For instance, we can define a relationship between the Swing1 and Swing2 sections so that they play back to back in a loop.This is very useful for us.We start by clicking the **Clear** button to wipe out any default relationships.Then it is just a matter of selecting the track with Swing1 in it, and clicking the green button labeled Swing2 near the top of the Sections Area.This will remove the Swing2 track and add Swing2 to the Swing1 track.
+
+![](Swing2Track.png)
+
+If we repeat the process, clicking the new Swing2 segment and then clicking the Swing1 button, the system detects that you are creating a loop and the track turns blue.This means that the Swing1 and Swing2 segments are considered a looping Section.They will play back to back, repeating indefinitely.
+
+![](LoopingTracks.png)
+
+### Setting Up Branch Points
+
+We will now set up some Branch Points to test whether to continue with the loop or jump to one of two possible endings for our attack animation.All we have to do is **Right-click** in the Branch Point Track and choose **New Branch Point**.We chose the names Swing_1_End and Swing_2_End for our Branch Points.We also zoomed very closely in with the mouse wheel to make sure that each one fires right at the last possible moment of its corresponding section.This means it is placed very slightly to the left of the border between the two.
+
+![](BranchPointsSetUp.png)
+
+
+
+[REGION:note]
+A similar system could be set up in which you use Notifies instead of Branch Points, but they would need to fire a little earlier along the timeline, and your Animation Blueprint Event Graph would be queuing the appropriate ending animation using the **Montage Set Next Section** node, rather than doing a direct switch with the **Montage Jump to Section** node, as we will be doing.Doing it with Notifies would be slightly cheaper on performance, as Notifies are asynchronous.Our example is academic, but we wanted to make sure to mention the other method, as well.
+[/REGION]
+
+
+### Setting Up the AnimGraph
+
+At this point, our Montage is all set up.We now need to establish our AnimGraph so that it can read in the result of our Montage.This is a pretty simple process, but it does cause us to have to think carefully about how we proceed.Our AnimGraph starts off looking something like this, where we are only seeing the result of our State Machine:
+
+![](StateMachineResult.png)
+
+
+We only want the Montage to play back from the Spine_01 bone (the waist) up, so we will be using a **Layered Blend per Bone** node.We add a Blend Pose to it set the weight to 1.We also associate this Blend Pose with Spine_01 in the properties for the node.We then bring in a **Slot** node and set it to UpperBody, the name of our slot.But now we run into a problem:
+
+![](SlotAndBlend.png)
+
+The Slot node needs a Source connection to fall back on once the Montage is done playing.Without it, the character will return to the T-pose from the waist up after the Montage completes.However, we cannot connect the State Machine to both the Base Pose of the **Layered Blend per Bone** as well as the Source for the **Slot** node.The solution?Use a **Cache** node!We can store the result of the State Machine into a Cache node, and then create **Cached Pose** nodes to connect to both our required inputs.This is somewhat similar to storing the result of the State Machine into a variable so you can use it in multiple places.For this example, we named the Cache LocoCache.
+
+![](CachedLocomotion.png)
+
+Our AnimGraph is done.As soon as the UpperBody Slot node receives data from any AnimMontage (you can use any Montage, so long as it has a Slot named UpperBody), it will blend it in. As soon as it is no longer receiving data, it will fall back on the result of the State Machine.
+
+
+### Setting Up the Event Graph
+
+Our Event Graph setup is very basic.Using the **Event Blueprint Update Animation** node and dragging off the out pin of a **Get Player Character** node, we can **Cast To** our **Character Blueprint** (MyCharacter in this example) to access the variables and functions from that Blueprint (see [Blueprint Communications](Engine\Blueprints\UserGuide\BlueprintComms) for more info on communicating between Blueprints). 
+
+_Click for full view_
+[REGION:lightbox]
+[![](PlayMontageEventGraph.png)(w:1020)](PlayMontageEventGraph.png)
+[/REGION]
+
+The first thing we do is check if the **IsAttacking** variable from our Character Blueprint is TRUE and if it is, we then check if the Montage is already playing.If the Montage is playing, we do not want to play it again; however if it is not playing, then we play the Montage.This prevents the system from restarting the animation in the middle of playback, which would look bad. 
+
+Dragging off the **IsAttacking** node which extends from the **Cast To** node, we see if the mouse button is still down, and if not, we jump to the appropriate ending animation, depending on which half of the loop is playing.Creating the Branch Point Events is done by **right-clicking** and choosing the appropriate event under **Add Montage Branching Point Event**.
+
+![](EndLoopEventGraph.png)
+
+And that is it!If we compile, we will now see that the character continues to swing as long as the mouse button is down, and performs an intelligent end animation when the mouse button is released!
+
+
+[OBJECT:EmbeddedVideo]
+[PARAMLITERAL:width]
+640
+[/PARAMLITERAL]
+[PARAMLITERAL:height]
+360
+[/PARAMLITERAL]
+[PARAMLITERAL:videoid]
+6eMxjbkn6hs
+[/PARAMLITERAL]
+[/OBJECT]
+
+-------------------->
+
+
+
+
+
+
+
+
+
+
+

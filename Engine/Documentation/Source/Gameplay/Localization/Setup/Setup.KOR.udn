@@ -1,0 +1,175 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title: 셋업
+Crumbs:%ROOT%, Gameplay, Gameplay/Localization
+Description:프로젝트의 현지화 셋업 방법입니다.
+version: 4.9
+Parent:Gameplay/Localization
+Order:2
+
+[TOC (start:2)]
+
+프로젝트의 현지화 셋업 방법은 다음과 같습니다:
+* 커맨드렛 파이프라인용 현지화 환경설정 스크립트를 작성합니다.
+* 현지화 데이터를 어디서 로드할지 환경설정합니다.
+* 배포시 어떤 현지화 데이터를 패키지에 포함시킬지 지정합니다.
+
+관습적으로 현지화 환경설정 스크립트는 `Config/Localization` 폴더에, 현지화 데이터는 `Content/Localization` 폴더에 있습니다.
+
+[REGION:raw]
+![](SetupFlowchart.png)
+[/REGION:raw]
+
+[REGION:note]
+현지화 셋업 및 반복처리 작업은 현재 수동 프로세스이지만, 현지화 관리를 위한 대시보드 UI 제작중이니 곧 이 작업방식이 크게 간소화될 것입니다.
+[/REGION]
+
+
+
+
+## 현지화 환경설정 스크립트
+현지화 파이프라인은 텍스트 수집, 저장, 번역 관리, 엔진에 사용되는 바이너리 포맷으로의 컴파일 처리를 하는 [다양한 커맨드렛](Gameplay/Localization/Commandlets) 으로 구성되어 있습니다. 
+마스터 커맨드렛이 실행 단계를 나타내는 환경설정 파일을 통해 다른 커맨드렛을 실행합니다.
+
+전형적으로 프로젝트에는 번역할 텍스트가 전부 포함된 타겟 하나만 있으면 됩니다. 그러면 하나의 환경설정으로 현지화 자동화의 반복처리 실행을 위한 단계와 세팅을 전부 지정할 수 있습니다.
+그 자동화는 텍스트 수집, manifest 와 archive 생성, 새로운 번역 임포트, 새로운 소스 익스포트, 어플리케이션에서 사용할 컴파일된 바이너리 형태의 
+현지화 리소스 생성 등입니다.
+
+아래는 관습적인 현지화 프로세스를 구현하는 현지화 환경설정 스크립트 예제입니다.
+
+[REGION:codetitlebar]
+Config/Localization/Game.ini
+[/REGION:codetitlebar]
+	;Common settings to be used for all commandlets as needed.
+	[CommonSettings]
+	SourcePath=./Content/Localization/Game
+	DestinationPath=./Content/Localization/Game
+	ManifestName=Game.manifest
+	ArchiveName=Game.archive
+	ResourceName=Game.locres
+	PortableObjectName=Game.po
+	;English
+	SourceCulture=en
+	;English
+	CulturesToGenerate=en
+	;French - Commented Out
+	;CulturesToGenerate=fr
+	;Italian - Commented Out
+	;CulturesToGenerate=it
+	;German - Commented Out
+	;CulturesToGenerate=de
+	;Spanish - Commented Out
+	;CulturesToGenerate=es
+
+	;Gather text from source code and configuration files.
+	[GatherTextStep0]
+	CommandletClass=GatherTextFromSource
+	IncludePaths=./Source/
+	IncludePaths=./Config/
+	ExcludePaths=*/Config/Localization/*
+	SourceFileSearchFilters=*.h
+	SourceFileSearchFilters=*.cpp
+	SourceFileSearchFilters=*.ini
+
+	;Gather text from assets in content.
+	[GatherTextStep1]
+	CommandletClass=GatherTextFromAssets
+	IncludePaths=./Content/
+	ExcludePaths=*/Content/Localization/*
+	PackageExtensions=*.umap
+	PackageExtensions=*.uasset
+
+	;Create manifest with all gathered source text.
+	[GatherTextStep2]
+	CommandletClass=GenerateGatherManifest
+
+	;Create new archives/update existing archives with new entries from the manifest.
+	[GatherTextStep3]
+	CommandletClass=GenerateGatherArchive
+
+	;Import new translations from PO (portable object) files into existing archives.
+	[GatherTextStep4]
+	CommandletClass=InternationalizationExport
+	bImportLoc=true
+
+	;Export new source from existing archives into PO (portable object) files.
+	[GatherTextStep5]
+	CommandletClass=InternationalizationExport
+	bExportLoc=true
+
+	;Compile source text and translations into binary form for use by the application.
+	[GatherTextStep6]
+	CommandletClass=GenerateTextLocalizationResource
+
+
+### 디렉토리 구조 예제
+"MyProject" 라는 프로젝트에 "Game 과 "DLC" 두 개의 타겟을 사용한 디렉토리 구조 예제입니다.
+* MyProject
+	* Config
+		* Localization
+			* Game.ini
+			* DLC.ini
+
+## 현지화 데이터
+프로젝트는 현지화 데이터를 사용하도록 환경설정해 줘야 합니다. 현지화 데이터를 검색할 경로는 `Internationalization` 섹션 아래 `Config/DefaultGame.ini` 에 `LocalizationPaths` 키에 대한 배열 기호를 사용하여 
+지정됩니다. 기본적으로 현지화 데이터는 `Content/Localization/Game` 에서 검색하지만, 이 항목은 명시적으로 제거 또는 대체 가능합니다.
+
+[REGION:codetitlebar]
+Config/DefaultGame.ini Excerpt
+[/REGION:codetitlebar]
+
+	[Internationalization]
+	;This first entry is inherited from BaseGame.ini by default.
+	;+LocalizationPaths=%GAMEDIR%Content/Localization/Game
+	+LocalizationPaths=%GAMEDIR%Content/Localization/DLC
+
+
+### 디렉토리 구조 예제
+"MyProject" 라는 프로젝트에 "Game" 과 "DLC" 라는 두 개의 타겟이 영어 ("en") 와 브라질 포르투갈어 ("pt-BR") 두 개의 언어로 현지화된 디렉토리 구조 예제입니다.
+
+* MyProject
+	* Content
+		* Localization
+			* Game
+				* Game.manifest
+				* en
+					* Game.archive
+					* Game.locres
+				* pt-BR
+					* Game.archive
+					* Game.locres
+			* DLC
+				* DLC.manifest
+				* en
+					* DLC.archive
+					* DLC.locres
+				* pt-BR
+					* DLC.archive
+					* DLC.locres
+
+## 패키징 세팅
+프로젝트를 제대로 패키징하기 위하여, 지원되는 컬처의 현지화 데이터를 패키징하도록 지정해 줘야 합니다. 에디터 안에서 **파일** 메뉴 아래 **패키지 프로젝트** 서브메뉴를 열고, 
+**패키징 세팅...** 을 선택합니다. **프로젝트 세팅** 창에서 **Packaging** 카테고리 아래 고급 섹션을 펼치면 **Localizations to Package** 세팅이 있습니다. 어느 컬처에 대해 
+현지화 데이터를 패키징할지 말지 체크할 수 있습니다. 영어는 기본으로 체크되어 있습니다.
+
+
+![](SetupEditor.png)
+
+다른 방법으로, 이 세팅은 에디터 UI 를 사용할 필요 없이 `Config/DefaultGame.ini` 파일의 `/Script/UnrealEd.ProjectPackagingSettings` 섹션 아래 `CulturesToStage` 키에 대한 배열 기호를 사용하여 
+직접 변경할 수 있습니다.
+
+[REGION:codetitlebar]
+Config/DefaultGame.ini Excerpt
+[/REGION:codetitlebar]
+	[/Script/UnrealEd.ProjectPackagingSettings]
+	+CulturesToStage=en
+	+CulturesToStage=fr
+	+CulturesToStage=it
+	+CulturesToStage=de
+	+CulturesToStage=es
+
+
+## 반복처리
+현지화 데이터에 대한 반복처리는 GatherText 커맨드렛 실행과 현지화 환경설정 스크립트 제공이 필요합니다. 명령줄은 다음과 같은 형태입니다:
+
+	<ProjectFilePath> -Run=GatherText -Config=<PathToConfigFileRelativeToProjectRoot>

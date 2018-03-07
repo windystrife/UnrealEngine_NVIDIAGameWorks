@@ -1,0 +1,229 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	SurfelTree.usf
+=============================================================================*/
+
+#include "Common.ush"
+#include "DeferredShadingCommon.ush"
+#include "DistanceFieldLightingShared.ush"
+#include "DistanceFieldAOShared.ush"
+#include "MonteCarlo.ush"
+
+uint NumSurfels;
+RWBuffer<float4> RWCopyInterpolatedVertexData;
+RWBuffer<float4> RWCopySurfelData;
+Buffer<float4> InterpolatedVertexData;
+
+[numthreads(UPDATEOBJECTS_THREADGROUP_SIZE, 1, 1)]
+void CopySurfelBufferCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint CopyOperationIndex = DispatchThreadId.x;
+
+	if (CopyOperationIndex < NumSurfels)
+	{
+		uint SourceIndex = CopyOperationIndex;
+		uint DestIndex = CopyOperationIndex;
+
+		UNROLL
+		for (uint VectorIndex = 0; VectorIndex < INTERPOLATED_VERTEX_DATA_STRIDE; VectorIndex++)
+		{
+			RWCopyInterpolatedVertexData[DestIndex * INTERPOLATED_VERTEX_DATA_STRIDE + VectorIndex] = InterpolatedVertexData[SourceIndex * INTERPOLATED_VERTEX_DATA_STRIDE + VectorIndex];
+		}
+
+		UNROLL
+		for (uint VectorIndex = 0; VectorIndex < SURFEL_DATA_STRIDE; VectorIndex++)
+		{
+			RWCopySurfelData[DestIndex * SURFEL_DATA_STRIDE + VectorIndex] = SurfelData[SourceIndex * SURFEL_DATA_STRIDE + VectorIndex];
+		}
+	}
+}
+
+Buffer<float4> VPLFlux;
+RWBuffer<float4> RWCopyVPLFlux;
+
+[numthreads(UPDATEOBJECTS_THREADGROUP_SIZE, 1, 1)]
+void CopyVPLFluxBufferCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint CopyOperationIndex = DispatchThreadId.x;
+
+	if (CopyOperationIndex < NumSurfels)
+	{
+		uint SourceIndex = CopyOperationIndex;
+		uint DestIndex = CopyOperationIndex;
+
+		RWCopyVPLFlux[DestIndex] = VPLFlux[SourceIndex];
+	}
+}
+
+// In float's, must match FConvertToUniformMeshVertex and ComputeUniformVertexStride()
+#define TRIANGLE_VERTEX_DATA_STRIDE 24
+
+uint NumTriangles;
+Buffer<float> TriangleVertexData;
+
+float LoadVertexAttribute(uint TriangleIndex, uint VertexIndex, uint AttributeIndex)
+{
+	return TriangleVertexData[(TriangleIndex * 3 + VertexIndex) * TRIANGLE_VERTEX_DATA_STRIDE + AttributeIndex];
+}
+
+RWBuffer<float> RWTriangleAreas;
+
+[numthreads(THREADGROUP_TOTALSIZE, 1, 1)]
+void ComputeTriangleAreasCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint TriangleIndex = DispatchThreadId.x;
+
+	if (TriangleIndex < NumTriangles)
+	{
+		float3 Position0 = float3(LoadVertexAttribute(TriangleIndex, 0, 0), LoadVertexAttribute(TriangleIndex, 0, 1), LoadVertexAttribute(TriangleIndex, 0, 2));
+		float3 Position1 = float3(LoadVertexAttribute(TriangleIndex, 1, 0), LoadVertexAttribute(TriangleIndex, 1, 1), LoadVertexAttribute(TriangleIndex, 1, 2));
+		float3 Position2 = float3(LoadVertexAttribute(TriangleIndex, 2, 0), LoadVertexAttribute(TriangleIndex, 2, 1), LoadVertexAttribute(TriangleIndex, 2, 2));
+
+		float3 TriangleNormal = cross(Position2 - Position0, Position1 - Position0);
+		float TriangleArea = .5f * length(TriangleNormal);
+		RWTriangleAreas[TriangleIndex] = TriangleArea;
+	}
+}
+
+Buffer<float> TriangleAreas;
+RWBuffer<float> RWTriangleCDFs;
+
+[numthreads(THREADGROUP_TOTALSIZE, 1, 1)]
+void ComputeTriangleCDFsCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint TriangleIndex = DispatchThreadId.x;
+
+	if (TriangleIndex < NumTriangles)
+	{
+		float Integral = 0;
+
+		for (uint i = 0; i <= TriangleIndex; i++)
+		{
+			Integral += TriangleAreas[i];
+		}
+
+		RWTriangleCDFs[TriangleIndex] = Integral;
+	}
+}
+
+float InterpolateAttribute(uint TriangleIndex, float3 BarycentricCoordinates, uint AttributeIndex)
+{
+	float Attribute = BarycentricCoordinates.x * LoadVertexAttribute(TriangleIndex, 0, AttributeIndex) 
+		+ BarycentricCoordinates.y * LoadVertexAttribute(TriangleIndex, 1, AttributeIndex) 
+		+ BarycentricCoordinates.z * LoadVertexAttribute(TriangleIndex, 2, AttributeIndex);
+
+	return Attribute;
+}
+
+float4 InterpolateFloat4Attribute(uint TriangleIndex, float3 BarycentricCoordinates, uint StartAttributeIndex)
+{
+	float4 SampleValues;
+	SampleValues.x = InterpolateAttribute(TriangleIndex, BarycentricCoordinates, StartAttributeIndex + 0);
+	SampleValues.y = InterpolateAttribute(TriangleIndex, BarycentricCoordinates, StartAttributeIndex + 1);
+	SampleValues.z = InterpolateAttribute(TriangleIndex, BarycentricCoordinates, StartAttributeIndex + 2);
+	SampleValues.w = InterpolateAttribute(TriangleIndex, BarycentricCoordinates, StartAttributeIndex + 3);
+	return SampleValues;
+}
+
+float3 InterpolateFloat3Attribute(uint TriangleIndex, float3 BarycentricCoordinates, uint StartAttributeIndex)
+{
+	float3 SampleValues;
+	SampleValues.x = InterpolateAttribute(TriangleIndex, BarycentricCoordinates, StartAttributeIndex + 0);
+	SampleValues.y = InterpolateAttribute(TriangleIndex, BarycentricCoordinates, StartAttributeIndex + 1);
+	SampleValues.z = InterpolateAttribute(TriangleIndex, BarycentricCoordinates, StartAttributeIndex + 2);
+	return SampleValues;
+}
+
+float2 InterpolateFloat2Attribute(uint TriangleIndex, float3 BarycentricCoordinates, uint StartAttributeIndex)
+{
+	float2 SampleValues;
+	SampleValues.x = InterpolateAttribute(TriangleIndex, BarycentricCoordinates, StartAttributeIndex + 0);
+	SampleValues.y = InterpolateAttribute(TriangleIndex, BarycentricCoordinates, StartAttributeIndex + 1);
+	return SampleValues;
+}
+
+Buffer<float> TriangleCDFs;
+
+float SampleTrianglesProportionalToArea(float RandomFraction, float TotalArea)
+{
+	float Sample = .999f;
+
+	// Find the index of where the step function becomes greater or equal to the generated number
+	//@todo - CDFArray is monotonically increasing so we can do better than a linear time search
+	for (uint i = 0; i < NumTriangles; i++)
+	{
+		if (RandomFraction * TotalArea <= TriangleCDFs[i])
+		{
+			Sample = (float)i / (float)NumTriangles;
+			break;
+		}
+	}
+
+	return Sample;
+}
+
+uint SurfelStartIndex;
+uint NumSurfelsToGenerate;
+RWBuffer<float4> RWInterpolatedVertexData;
+
+[numthreads(THREADGROUP_TOTALSIZE, 1, 1)]
+void SampleTrianglesCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint SurfelIndex = DispatchThreadId.x;
+
+	if (SurfelIndex < NumSurfelsToGenerate)
+	{
+		//@todo - 1d uniform
+		float Uniform = SurfelIndex / (float)NumSurfelsToGenerate;
+		float TotalArea = TriangleCDFs[NumTriangles - 1];
+
+		//uint TriangleIndex = (uint)(Uniform * NumTriangles);
+		uint TriangleIndex = (uint)(SampleTrianglesProportionalToArea(Uniform, TotalArea) * NumTriangles);
+
+		float2 Uniforms = frac(Square((SurfelIndex + 15) / (float)NumSurfelsToGenerate + 10) * float2(1361.456345, 2333.578));
+		//float2 Uniforms = Hammersley(SurfelIndex, NumSurfelsToGenerate, uint2(0, 0));
+
+		float SqrtUniform0 = sqrt(Uniforms.x);
+		float3 BarycentricCoordinates = float3(1 - SqrtUniform0, SqrtUniform0 * Uniforms.y, SqrtUniform0 * (1 - Uniforms.y));
+		//BarycentricCoordinates = float3(1, 0, 0);
+
+		float DiskArea = TotalArea / NumSurfelsToGenerate;
+		float DiskRadius = sqrt(DiskArea / PI);
+		//float DiskRadius = 30;
+		float4 PositionAndRadius = float4(InterpolateFloat3Attribute(TriangleIndex, BarycentricCoordinates, 0), DiskRadius);
+		RWInterpolatedVertexData[(SurfelStartIndex + SurfelIndex) * INTERPOLATED_VERTEX_DATA_STRIDE + 0] = PositionAndRadius;
+
+		float3 Tangent0 = InterpolateFloat3Attribute(TriangleIndex, BarycentricCoordinates, 4);
+		float3 Tangent1 = InterpolateFloat3Attribute(TriangleIndex, BarycentricCoordinates, 7);
+		float3 Tangent2 = InterpolateFloat3Attribute(TriangleIndex, BarycentricCoordinates, 10);
+
+		RWInterpolatedVertexData[(SurfelStartIndex + SurfelIndex) * INTERPOLATED_VERTEX_DATA_STRIDE + 1] = float4(Tangent0, 0);
+		RWInterpolatedVertexData[(SurfelStartIndex + SurfelIndex) * INTERPOLATED_VERTEX_DATA_STRIDE + 2] = float4(Tangent1, 0);
+		RWInterpolatedVertexData[(SurfelStartIndex + SurfelIndex) * INTERPOLATED_VERTEX_DATA_STRIDE + 3] = float4(Tangent2, 0);
+
+		float2 UV0 = InterpolateFloat2Attribute(TriangleIndex, BarycentricCoordinates, 13);
+		float2 UV1 = InterpolateFloat2Attribute(TriangleIndex, BarycentricCoordinates, 15);
+
+		RWInterpolatedVertexData[(SurfelStartIndex + SurfelIndex) * INTERPOLATED_VERTEX_DATA_STRIDE + 4] = float4(UV0, UV1);
+
+		float4 VertexColor = InterpolateFloat4Attribute(TriangleIndex, BarycentricCoordinates, 17);
+
+		RWInterpolatedVertexData[(SurfelStartIndex + SurfelIndex) * INTERPOLATED_VERTEX_DATA_STRIDE + 5] = VertexColor;
+	}
+}

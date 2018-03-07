@@ -1,0 +1,60 @@
+﻿INTSourceChangelist:3075225
+Availability:Public
+Title:高级蓝图原生化
+Crumbs: %ROOT%, Programming, Engine/Blueprints/TechnicalGuide
+Description:游戏性程序员将游戏性元素对蓝图公开的技术教程。
+Related:Engine/Blueprints/TechnicalGuide/NativizingBlueprints
+Parent:Engine/Blueprints/TechnicalGuide
+Version:4.12
+type:reference
+
+[TOC(start:2)]
+
+
+## 使用虚幻自动化工具进行构建
+如要在使用虚幻自动化工具进行构建时原生化蓝图，须在 BuildCookRun 命令行中添加 `-nativizeAssets` 开关。
+
+## C++ 协作
+
+原生化蓝图保存在单独的新模块中，意味着游戏性模块的头文件现在模块之外使用。 
+须进行检查，确定所有头文件已将使用的所有类和结构体作为内含头文件或前置声明进行声明。
+
+一些规则/限制有助于使手写代码和原生化代码之间的协作更加高效可靠。 
+
+不支持以下实现： 
+- 带 `BlueprintVisible` 或 `Editable` 标记的私有/受保护变量
+- 标记为 `BlueprintPure` 或 `BlueprintCallable` 的私有/受保护函数
+- `noexport` 结构/类
+- 带 `BlueprintVisible` 或 `Editable` 标记的位域变量
+- 私有位域变量
+- `UBlueprintGeneratedClass`、`UUserDefinedStruct`、`UUserDefinedEnum` 变量，或基于它们的任意类型
+
+## 技术细节
+
+原生化蓝图兼容 Visual Studio 2013 和 Visual Studio 2015，但强烈推荐使用 2015，因为它的大项目处理能力更强。
+如出现奇怪的编译器/连接器错误（如 LNK1000、LNK1248），可尝试将部分类型或特定蓝图排除，削减原生化蓝图的量。
+
+`BlueprintCompilerCppBackend` 模块（此路径中：`Engine\Source\Developer\BlueprintCompilerCppBackend\`）将把蓝图语法树转入 C++。 
+`BlueprintNativeCodeGen` 模块（此路径中：`Engine\Source\Developer\BlueprintNativeCodeGen\`）在烘焙和打包时可大展身手。 
+
+
+[PUBLISH:Licensee]
+## Windows 上的调试转换代码
+
+在包含部分 C++ 代码的项目中，可通过现有的项目解决方案进行调试。
+如果项目原始只包含蓝图，则需要执行 `GenerateProjectFiles.bat`，为项目创建一个解决方案。  
+不要使用此解决方案（或主 UE4 解决方案下的新项目）编译项目或构建项目的编辑器版本。 
+
+构建调试 .exe 文件的步骤：
+
+1. 运行以下命令行：原生化版本打包时可在输出日志中找到这些命令行，直接将它们复制出来便可确认环境使用的开关是否正确。将 `Development` 开关改为 `Debug`。 
+
+		<UE4>\Engine\Binaries\DotNET\UnrealBuildTool.exe" <project name> Win64 Debug -Project=<project path>\<project name>.uproject  <project path>\<project name>.uproject  -PLUGIN "<project path>\Intermediate\<platform>\NativizedAssets\NativizedAssets.uplugin" -remoteini="<project path>" -noxge -generatemanifest -NoHotReloadFromIDE -ignorejunk
+
+		<UE4>\Engine\Binaries\DotNET\UnrealBuildTool.exe" <project name> Win64 Debug -Project=<project path>\<project name>.uproject  <project path>\<project name>.uproject  -PLUGIN "<project path>\Intermediate\<platform>\NativizedAssets\NativizedAssets.uplugin" -remoteini="<project path>" -noxge -NoHotReloadFromIDE -ignorejunk
+
+2. 将 Visual Studio 项目（调试配置）中的工作目录设为 `<Packaged Folder>\<platform>\<project name>\Binaries\Win64\`。
+
+3. 在 Visual Studio 中运行调试，但不要在 Visual Studio 中再次编译项目。
+
+[/PUBLISH:Licensee]

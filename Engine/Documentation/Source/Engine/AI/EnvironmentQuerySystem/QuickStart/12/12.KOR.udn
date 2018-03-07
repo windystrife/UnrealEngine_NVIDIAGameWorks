@@ -1,0 +1,137 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title: 12. FindHidingSpot EQS 생성
+Crumbs:%ROOT%, Engine, Gameplay/AI, Engine/AI/EnvironmentQuerySystem, Engine/AI/EnvironmentQuerySystem/QuickStart
+Description: 플레이어의 TopDownCharacter 로 부터 숨을 최적의 지점을 그리드에서 찾는 EQS 를 만듭니다.
+version: 4.9
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[예전 단계](Engine/AI/EnvironmentQuerySystem/QuickStart/11 "%Engine/AI/EnvironmentQuerySystem/QuickStart/11:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[퀵스타트 홈](Engine/AI/EnvironmentQuerySystem/QuickStart)
+	[/PARAM]
+	[PARAM:next]
+		[다음 단계](Engine/AI/EnvironmentQuerySystem/QuickStart/13 "%Engine/AI/EnvironmentQuerySystem/QuickStart/13:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+이번 단계에서는 훨씬 더 복잡한 인바이언먼트 쿼리를 만들겠습니다. 내비메시에 투영된 그리드 지점을 만든 다음, 어느 지점이 숨기에 가장 좋은지 알아내는 일련의 테스트를 수행합니다. 일부 테스트는 플레이어의 캐릭터(트레이스)에 보이는 등 만족하지 않는 위치는 완전히 제거하고서, 내비메시에서 (길찾기로) 도달 가능한 경우 또는 플레이어의 캐릭터 앞에 지점이 몇 개나 되는지 (Dot Product 를 통해 계산한) 결과에 따라 숨을 수 있는 지점에 가중치를 부여합니다.
+
+잠깐 되짚어 봅시다:
+
+* 제너레이터는 컨텍스트에 관련해서 아이템을 생성합니다.
+* 아이템은 종종 컨텍스트에 관계된 테스트에 사용됩니다 (X 아이템이 Y 컨텍스트에서 얼마나 먼지).
+* 아이템은 테스트 결과에 따라 버리거나(cull) 취합니다(score).
+
+## 단계
+
+1. 우선 **콘텐츠 브라우저** 에서 `FindHidingSpot` 인바이언먼트 쿼리 애셋을 **더블클릭** 합니다.
+
+	![](findHide.png)
+
+1. **Simple Grid** 제너레이터를 생성한 뒤 **루트** 노드에 연결합니다.
+
+	![](simpleGrid.png)
+
+1. **Simple Grid** 제너레이터를 선택하고 **디테일** 패널에서 프로퍼티 설정을 다음과 같이 합니다:
+	
+	 ![](gridProp.png)
+
+	[INCLUDE:#eqsqs121]
+
+	그리드 제너레이터에 대한 이 세팅은 테스트 대상 쿼리에 대해서, 가변적이지만 관리 가능한 수의 아이템을 생성합니다. 특히나 **Project Down**, **Project Up,** **Post Projection Vertical Offset** 프로퍼티는 AI 가 위나 아래 있는 무언가를 찾게 만들 때 좋습니다.
+
+1. [REGION:raw]**Simple Grid** 노드에 **우클릭** 한 다음 **Tests** %arrow% **Distance** 를 선택하여 **Distance** 테스트를 두 개 추가합니다.[/REGION]
+
+	![](addDistance.png)
+
+1. 첫 번째 것을 선택한 다음 **디테일** 패널에서 프로퍼티를 다음과 같이 조정합니다:
+
+	![](distanceProps.png)
+
+	[INCLUDE:#eqsqs122]
+
+	이 거리 테스트는 플레이어에게서 보다 _멀리_ 있는 아이템에 보다 높은 스코어를 주는 것입니다.
+
+1. 두 번째 것을 선택한 다음 **디테일** 패널에서 프로퍼티를 다음과 같이 조정합니다:
+
+	![](distanceProps2.png)
+
+	[INCLUDE:#eqsqs123]
+
+	이 거리 테스트는 AI 에게 _가까운_ 아이템에 보다 높은 스코어를 주는 것으로, 이 테스트는 앞의 **거리 테스트** 보다 높은 가중치를 가져갑니다. 즉 AI 에 가까운 쪽을 선호는 하더라도, 플레이어에게서 먼 쪽에 있는 것을 선택한다는 뜻입니다.
+
+1. [REGION:raw]**Simple Grid** 노드에 **우클릭** 한 다음 **Tests** %arrow% **Trace** 를 선택하여 트레이스를 둘 추가합니다.[/REGION]
+
+	![](addTrace.png)
+
+1. 트레이스 테스트 중 하나를 선택한 다음 **디테일** 패널에서 **Context** 를 (이 퀵스타트 전 단계에서 만든) `PlayerContext` 로 변경합니다:
+
+	![](traceProps.png)	
+
+	여기서 플레이어 폰 또는 AI 폰 시선에 있는 아이템을 제거합니다. 또, 이 테스트는 여러 **거리** 테스트 이후에 오는 것이 걱정될 수도 있겠는데, 괜찮습니다. 인바이언먼트 쿼리는 여기서 순서에 관계 없이 첫 번째 **트레이스** 테스트만 실행하기 때문입니다. 게다가 다른 트레이스에 별다른 부가 구성이 필요치도 않습니다.
+
+1. [REGION:raw]**Simple Grid** 노드에 **우클릭** 한 뒤 **Tests** %arrow% **Dot** 를 선택하여 **Dot** 테스트를 추가합니다.[/REGION]
+
+	![](addDot.png)
+
+1. **Dot** 테스트를 선택하고 **디테일** 패널에서 프로퍼티를 다음과 같이 조정합니다:
+	
+	![](dotProps.png)
+
+	[INCLUDE:#eqsqs125]
+
+	여기서부터 조금 복잡해지는데, 하이 레벨 관점에서 보자면, "플레이어 폰 근처에 있는 아이템을 선호"하는 것이기는 한데, 그 작동방식이 약간 이상합니다. Dot Product 함수는 두 벡터의 유사성을 1.0 (똑같음) 에서 -1.0 (정반대) 스케일로 반환합니다. 즉 플레이어의 로테이션 벡터와 플레이어에서 아이템까지의 벡터 둘을 **Dot Product** 한 **절대값** 을 구하면 플레이어 앞과 뒤의 지점을 선호하게 됩니다. 하지만 **Scoring Factor** 를 -1.0 으로 설정한다면, 플레이어 측면의 지점을 선호하게 되는 것입니다.
+
+1. [REGION:raw]**Simple Grid** 노드에 **우클릭** 한 뒤 **Tests** %arrow% **PathFinding** 을 선택하여 추가합니다.[/REGION]
+
+	![](addPath.png)
+
+1. **PathFinding** 테스트를 선택하고 **디테일** 패널에서 **Test Purpose** 를 `Score Only` 로 조정합니다:
+
+	![](pathProps.png)
+
+	수정은 여기까지! 최종적인 인바이언먼트 쿼리 모습은 이와 같을 것입니다:
+
+	![](final.png)
+
+%Steps%
+
+[VAR:arrow]![](Engine\AI\EnvironmentQuerySystem\QuickStart\arrow_button.png)[/VAR]
+
+<!--
+[EXCERPT:eqsqs125]
+* **Line A - Rotation** = PlayerContext
+* **Line B - Line From** = PlayerContext
+* **Absolute Value** = True
+* **Test Purpose** = Score Only
+* **Scoring Factor** = -1.0
+[/EXCERPT]
+
+[EXCERPT:eqsqs121]
+* **Grid Size** = 2000.0
+* **Space Between** = 150.0
+* **Navigation Filer** = RecastFilter_UseDefaultArea
+* **Project Down** = 2048.0
+* **Post Projection Vertical Offset** = 32.0
+[/EXCERPT]
+
+[EXCERPT:eqsqs122]
+* **Distance To** = Player Context
+* **Test Purpose** = Score Only
+[/EXCERPT]
+
+[EXCERPT:eqsqs123]
+* **Test Purpose** = Score Only
+* **Scoring Equation** = Inverse Linear
+* **Scoring Factor** = 2.0
+[/EXCERPT]
+-->

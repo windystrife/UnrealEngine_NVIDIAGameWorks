@@ -1,0 +1,84 @@
+﻿INTSourceChangelist:2750589
+Availability:Public
+Title:Particle System クラス
+Crumbs: %ROOT%, Engine, Engine/Rendering/ParticleSystems, Engine/Rendering/ParticleSystems/Reference
+Description:基本的な ParticleSystem クラスとそのプロパティの技術ガイド
+Version:4.9
+
+パーティクル システムは、いくつものパーティクル エミッタを格納し完全なパーティクル効果を表現します。システムに複数のエミッタを持つことで、デザイナーは複雑なパーティクル効果を単一システムで作成することができます。パーティクル システムを一度カスケードで作成すると、レベルへ挿入したり、スクリプト内で作成することができます。
+
+ParticleSystem クラスは以下のパブリック変数を格納します。 
+
+| プロパティ | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]パーティクル システム[/REGION] ||
+| **SystemUpdateMode** | システムがエミッタの更新に使用するメソッドを示す列挙型変数です。以下の 2 つのモードが利用可能です。 [INCLUDE:#SystemUpdate] |
+| **UpdateTime_FPS** | EPSUM_FixedTime の実行時に使用するタイムステップです。 |
+| **WarmupTime** | システム起動時のウォーミングアップ時間です。このモードによってエミッタがフルブルーム効果で開始します。パフォーマンスが低下するため、高い値は特に慎重に使用してください。煙柱やアンビエント効果など、レベルの初期起動時に開始するシステムに適しています。
+| **Warmup Tick Rate** | システムをウォーミングアップ中に各ティックのタイムステップを管理します。この値を減らすと正確性は増しますが、値を増やすとパフォーマンスは向上します。値 0 はデフォルトのティック時間です。 |
+| **Orient ZAxis Toward Camera** | _true_ の場合、パーティクル システムのローカル Z 軸は常にカメラの方向に向きます。 |
+| **SecondsBeforeInactive** | パーティクル システムがこの期間 (秒数) レンダリングされないと、非アクティブとなりその後ティックされません。今後システムが強制的に非アクティブ状態になることを防ぐには、この値に 0 を指定します。 |
+| [REGION:tablesection]サムネイル[/REGION] ||
+| **ThumbnailWarmup** | _Use Real-Time Thumbnail_ がチェックされた時、サムネイルのレンダリングをキャッシュする前にシステムがウォーミングアップする時間です。 |
+| **Use Real-Time Thumbnail** | _true_ の場合、**コンテンツ ブラウザ** の ParticleSystem アセットに表示されるサムネイルは、デフォルトのカメラ位置で自動的にキャプチャされ、保存したサムネイルを使用せずに現在の設定と ParticleSystem の外観を反映します。[REGION:note]Real-Time サムネイルレンダリングを使用すると、**コンテンツ ブラウザ** のパフォーマンスが低下します。[/REGION] |
+| [REGION:tablesection]LOD[/REGION] ||
+| **LOD Distance Check Time** | 使用する LOD レベルを決定するためにシステムが距離チェックを実行する間隔 (秒) です(LODMethod が Automatic に設定時のみ使用します)。 |
+| **LOD Method** | システムが適切な LOD レベルの選択に利用するメソッドを示す列挙型変数です。利用可能なメソッドがいくつかあります。 [INCLUDE:#LODMethod] |
+| **LODDistances** | 使用する LOD レベルを決定するための距離の配列です。(LODMethod が Automatic に設定時のみ使用します)。これらの数値は、選択する LOD レベルに推奨する最少距離を示します。例えば 3 つの LOD レベルをもつシステムを想定してみましょう。[INCLUDE:#LODDistance] |
+| **LODSettings** | 各 LOD に使用する具体的な設定を決定する ParticleSystem がライトを受け取ると、常に _Lit_ が制御する唯一の設定です。|
+| [REGION:tablesection]Bounds[/REGION] ||
+| **Use Fixed Relative Bounding Box** | _true_ の場合、パーティクル システムの境界としてコードは FixedRelativeBoundingBox を利用します。 |
+| **Fixed Relative Bounding Box** | パーティクル システムでユーザー設定の境界ボックスを使用できます。エフェクトが可視化されていない時にレンダリングや更新を行う、もしくは逆にエフェクトが表示されている時にレンダリングや更新がされないことと引き換えに、フレーム毎にバウンダリ更新するオーバーヘッドを取り除きます。スケーリングサイズが大幅に変動するエミッタを持たない限り、パフォーマンス上の理由からほぼ必ず固定境界ボックスを使用しなくてはいけません。[REGION:note]カスケード ツールバーの [Toggle Bounds] ボタンを **右クリック** すると、カスケードで現在使用されている動的ボックスの値がこのダイアログボックスに挿入され、そのデータをもとに値を調整することができます。[/REGION] |
+| [REGION:tablesection]Delay[/REGION] ||
+| **Delay** | ActivateSystem() 実行時に、ParticleSystem が有効になる前に待機する時間量 (秒) です。また、この値は、_Use Delay Range_ が _true_ の時、ランダムな遅延時間を選択するために使用する範囲の上限値です。|
+| **Delay Low** | _Use Delay Range_ が _true_ の時、ランダムな遅延時間を選択するために使用する範囲の下限値です。 |
+| **Use Delay Range** | _true_ の場合、_Delay Low_ と _Delay_ の間のランダム値が実際の遅延値に選択されます。 |
+| [REGION:tablesection]MacroUV[/REGION] ||
+| **Macro UV Position** | ParticleMacroUV マテリアル式の UV テクスチャ座標を生成するために、中心点としてパーティクルシステムに相対的なローカル空間の位置が用いられます。 |
+| **Macro UV Radius** | _Macro UV Position_ からの距離を決定するワールド空間半径です。ParticleMacroUV マテリアル式が生成する UV テクスチャ座標がタイル処理を開始する位置です。|
+| [REGION:tablesection]Occlusion[/REGION] ||
+| **Occlusion Bounds Method** | パーティクルシステムのオクルージョンの計算時に使用するメソッドです。 [INCLUDE:#OcclusionBounds] |
+| **Custom Occlusion Bounds** | _EPSOBM_CustomBounds_ _Occlusion Bounds Method_ を使用時に、オクルージョンの計算に使用する範囲です。 |
+
+
+<!-- Begin ParticleSystem Table Includes -->
+<!--
+[EXCERPT:LODDistance]
+[REGION:simpletable]
+| LODDistanceIndex | 値 | 範囲 | 選択される LOD レベル |
+| --- | --- | --- | --- |
+| 0 | 0.0 | 0.0 - 2499.9 | 0 (最高) |
+| 1 | 2500.0 | 2500.0 - 4999.9 | 1 |
+| 2 | 5000.0 | 5000.0 - Infinity | 2 |
+[/REGION]
+[/EXCERPT:LODDistance]
+[EXCERPT:LODMethod]
+[REGION:simpletable]
+| メソッド | 説明 |
+| --- | --- |
+| Automatic | LOD 距離に基づいて LOD レベルを設定し、自動的に時間を確認します。 |
+| DirectSet | システムが使用する LOD レベルをゲームが直接設定します。 |
+| ActivateAutomatic| LOD レベルはアクティベート時に確定します。その後ゲームコードで直接設定されない限り設定はそのままとなります。 |
+[/REGION]
+[/EXCERPT:LODMethod]
+[EXCERPT:OcclusionBounds]
+[REGION:simpletable]
+| メソッド | 説明 |
+| --- | --- |
+| `EPSOBM_None` | Particlesystem に対してオクルージョンは計算されません。 |
+| `EPSOBM_ParticleBounds` | ParticleSystem のオクルージョンの計算に使用する ParticleSystemComponent の範囲です。 |
+| `EPSOBM_CustomBounds` |  _Custom Occlusion Bounds_ 値はParticleSystem のオクルージョンの計算に使用します。 |
+[/REGION]
+[/EXCERPT:OcclusionBounds]
+[EXCERPT:SystemUpdate]
+[REGION:simpletable]
+| モード | 説明 |
+| --- | --- |
+| `EPSUM_RealTime` | エミッタをリアルタイムで更新します。 |
+| `EPSUM_FixedTime` | エミッタを一定のタイムステップで更新します。パーティクル システムをゲームの更新時間に合わせます。更新処理はパフォーマンス依存になります。つまり、フレームレートが低いとシステムの更新時間は遅くなり、フレームレートが高いと更新時間は早くなります。大抵は特別なケースのみに使用されます。|
+[/REGION]
+`EPSUM_FixedTime` は使用しているフレームレートに関係なく、一定の間隔でシステムを更新します。このモードは、エミッタとアニメーションの連携など、エフェクトのタイミングが他のシステムにとって重要でない場合のみ使用してください。
+[/EXCERPT:SystemUpdate]
+-->
+<!-- End ParticleSystem Includes -->
+

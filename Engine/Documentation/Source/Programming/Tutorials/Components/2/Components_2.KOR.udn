@@ -1,0 +1,188 @@
+﻿INTSourceChangelist:3238697
+Availability: Public
+Title:2. 입력 환경설정 및 폰 무브먼트 컴포넌트 생성
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/Components
+Description:입력을 구성하고 커스텀 폰 무브먼트 컴포넌트를 만들어 폰 이동 방식을 정의합니다.
+version:4.9
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[예전 단계](Programming\Tutorials\Components\1 "%Programming\Tutorials\Components\1:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[](Programming\Tutorials\Components\)
+	[/PARAM]
+	[PARAM:next]
+		[다음 단계](Programming\Tutorials\Components\3 "%Programming\Tutorials\Components\3:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+1. **언리얼 에디터** 로 돌아와서, 프로젝트의 입력 세팅을 구성해 줄 차례입니다. 이 세팅은 **편집** 드롭다운 메뉴의 **프로젝트 세팅** 에서 찾을 수 있습니다.
+
+	![](EditProjectSettings.png)
+
+	거기서 왼쪽 패널의 **엔진** 섹션에서 **입력** 을 선택합니다. 파티클 시스템 토글 구성을 위한 **액션 매핑**, **폰** 이동을 위한 **축 매핑** 둘, **폰** 회전을 위한 **축 매핑** 이 하나 더 필요합니다.
+
+	| ----- | ----- | ----- |
+	| 액션 매핑 | | |
+	| ParticleToggle | Space Bar | |
+
+	| ----- | ----- | ----- |
+	| 축 매핑 | | |
+	| MoveForward | W | 1.0 |
+	|  | S | -1.0 |
+	| MoveRight | A | -1.0 |
+	|  | D | 1.0 |
+	| Turn | Mouse X | 1.0 |
+
+	![](InputSettings.png)
+
+1. **Pawn** 클래스에서 모든 이동 처리를 직접 하는 대신, **Movement** 컴포넌트를 만들어 대신 관리를 시키겠습니다. 이 튜토리얼에서는 **Pawn Movement Component** 클래스를 확장하겠습니다. **파일** 드롭다운 메뉴의 **프로젝트에 코드 추가** 명령을 선택하는 것으로 시작합니다.
+
+	![](AddCPPCode.png)
+
+	**Pawn** 클래스와는 달리 **Pawn Movement Component** 는 기본적으로 보이지 않습니다. 찾으려면 **모든 클래스 표시** 옵션을 체크해야 합니다.
+
+	![](ShowAllClasses.png)
+
+	검색창에 "movement" 라 치면 리스트를 빠르게 좁혀볼 수 있습니다.
+
+	![](ChooseParentClass.png)
+
+	[REGION:tip]**Pawn Movement Component** 에는 흔한 물리 함수성에 도움이 되는 강력한 내장 기능이 몇 가지 들어있어, 여러가지 **폰** 유형에 무브먼트 코드를 공유하기가 좋습니다. **컴포넌트** 를 사용하여 함수성을 분리시켜 놓는 것은 매우 좋은 습관인데, 프로젝트의 덩치가 커 지면서 **폰** 도 복잡해 지기 때문입니다.[/REGION]
+
+	**Pawn** 클래스를 "CollidingPawn" 이라 했으니, 얘 이름은 "CollidingPawnMovementComponent" 라 합시다.
+
+	![](NameComponent.png)
+
+----
+
+입력 환경설정에 대한 정의와 커스텀 **Pawn Movement Component** 생성을 마쳤습니다. 이제 **Visual Studio** 로 돌아가 **Pawn Movement Component** 가 사용중일 때 **Pawn** 이동 방식 정의를 위한 코드를 작성하면 됩니다.
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    code
+    [/PARAMLITERAL]
+    [PARAM:heading]
+	    작업중 코드
+    [/PARAM]
+    [PARAM:content]
+		**CollidingPawn.h**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "GameFramework/Pawn.h"
+			#include "CollidingPawn.generated.h"
+
+			UCLASS()
+			class HOWTO_COMPONENTS_API ACollidingPawn : public APawn
+			{
+				GENERATED_BODY()
+
+			public:
+				// Sets default values for this pawn's properties
+				ACollidingPawn();
+
+			protected:
+				// Called when the game starts or when spawned
+				virtual void BeginPlay() override;
+	
+			public:
+				// Called every frame
+				virtual void Tick( float DeltaSeconds ) override;
+
+				// Called to bind functionality to input
+				virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override;
+
+				UParticleSystemComponent* OurParticleSystem;
+			};
+
+		**CollidingPawn.cpp**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_Components.h"
+			#include "CollidingPawn.h"
+
+			// Sets default values
+			ACollidingPawn::ACollidingPawn()
+			{
+ 				// Set this pawn to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
+				PrimaryActorTick.bCanEverTick = true;
+
+				// Our root component will be a sphere that reacts to physics
+				USphereComponent* SphereComponent = CreateDefaultSubobject<USphereComponent>(TEXT("RootComponent"));
+				RootComponent = SphereComponent;
+				SphereComponent->InitSphereRadius(40.0f);
+				SphereComponent->SetCollisionProfileName(TEXT("Pawn"));
+
+				// Create and position a mesh component so we can see where our sphere is
+				UStaticMeshComponent* SphereVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualRepresentation"));
+				SphereVisual->SetupAttachment(RootComponent);
+				static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereVisualAsset(TEXT("/Game/StarterContent/Shapes/Shape_Sphere.Shape_Sphere"));
+				if (SphereVisualAsset.Succeeded())
+				{
+					SphereVisual->SetStaticMesh(SphereVisualAsset.Object);
+					SphereVisual->SetRelativeLocation(FVector(0.0f, 0.0f, -40.0f));
+					SphereVisual->SetWorldScale3D(FVector(0.8f));
+				}
+
+				// Create a particle system that we can activate or deactivate
+				OurParticleSystem = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("MovementParticles"));
+				OurParticleSystem->SetupAttachment(SphereVisual);
+				OurParticleSystem->bAutoActivate = false;
+				OurParticleSystem->SetRelativeLocation(FVector(-20.0f, 0.0f, 20.0f));
+				static ConstructorHelpers::FObjectFinder<UParticleSystem> ParticleAsset(TEXT("/Game/StarterContent/Particles/P_Fire.P_Fire"));
+				if (ParticleAsset.Succeeded())
+				{
+					OurParticleSystem->SetTemplate(ParticleAsset.Object);
+				}
+
+				// Use a spring arm to give the camera smooth, natural-feeling motion.
+				USpringArmComponent* SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraAttachmentArm"));
+				SpringArm->SetupAttachment(RootComponent);
+				SpringArm->RelativeRotation = FRotator(-45.f, 0.f, 0.f);
+				SpringArm->TargetArmLength = 400.0f;
+				SpringArm->bEnableCameraLag = true;
+				SpringArm->CameraLagSpeed = 3.0f;
+
+				// Create a camera and attach to our spring arm
+				UCameraComponent* Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("ActualCamera"));
+				Camera->SetupAttachment(SpringArm, USpringArmComponent::SocketName);
+
+				// Take control of the default player
+				AutoPossessPlayer = EAutoReceiveInput::Player0;
+			}
+
+			// Called when the game starts or when spawned
+			void ACollidingPawn::BeginPlay()
+			{
+				Super::BeginPlay();
+	
+			}
+
+			// Called every frame
+			void ACollidingPawn::Tick( float DeltaTime )
+			{
+				Super::Tick( DeltaTime );
+
+			}
+
+			// Called to bind functionality to input
+			void ACollidingPawn::SetupPlayerInputComponent(class UInputComponent* InputComponent)
+			{
+				Super::SetupPlayerInputComponent(InputComponent);
+
+			}
+
+
+    [/PARAM]
+[/OBJECT]
+
+%Steps%

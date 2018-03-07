@@ -1,0 +1,55 @@
+Availability:Public
+Title: Actor Role and RemoteRole
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking, Gameplay/Networking/Actors
+Description:The various aspects of replicating Actor objects.
+Related: Gameplay/Networking/Actors
+Related: Gameplay/Networking/Server
+Version: 4.9
+
+[TOC (start:2 end:3)]
+
+
+
+There are two properties on actor that are important when it comes to replication. `Role` and `RemoteRole`. 
+
+These two properties tell you:
+* Who has authority over the actor
+* Whether the actor is replicated or not
+* The mode of replication
+
+The first important thing to determine, is who has authority over a particular actor. To determine if the current running instance of the engine has authority, check that the Role property is `ROLE_Authority`. If it is, then this running instance of the engine is in charge of this actor (whether it's replicated or not).
+
+If Role is `ROLE_Authority`, and RemoteRole is either `ROLE_SimulatedProxy` or `ROLE_AutonomousProxy`, then this instance of the engine is in charge re replicating this actor to remote connections.
+
+[REGION:note]
+Currently, only the server replicates actors to connected clients (clients will never replicate actors to the server). With this in mind, *ONLY* the server should see `Role == ROLE_Authority` and  `RemoteRole == ROLE_SimulatedProxy` or `ROLE_AutonomousProxy`.
+[/REGION]
+
+## Role/RemoteRole Reversal
+
+Role and RemoteRole could be reversed depending on who is inspecting these values. For example, if on the server you have this configuration:
+* `Role == ROLE_Authority`
+* `RemoteRole == ROLE_SimulatedProxy`
+
+Then the client would see it as this:
+* `Role == ROLE_SimulatedProxy`
+* `RemoteRole == ROLE_Authority`
+
+This makes sense, since the server is in charge of the actor, and replicating this actor to clients. The clients are just supposed to receive updates, and simulate the actor between updates.
+
+## Mode of Replication
+
+The server doesn't replicate actors every update. This would take way too much bandwidth and CPU resources. Instead, the server will replicate actors at a frequency specified on the `AActor::NetUpdateFrequency` property.
+
+This means that some time will pass on the client between actor updates. This could result in actors looking sporadic or choppy in their movement. To compensate for this, the client will simulate the actor between updates.
+
+There are currently two types of simulation that occur.
+
+### `ROLE_SimulatedProxy`
+This is the standard simulation path, and is generally based on extrapolating movement based on the last known velocity. When the server sends an update for a particular actor, the client will adjust its position towards the new location, and then in between updates, the client will continue to move the actor based on the most recent velocity sent from the server. 
+
+Simulating using last known velocity is just one example of how general simulation works. There is nothing stopping you from writing custom code to use some other information to extrapolate between server updates.
+
+### `ROLE_AutonomousProxy`
+This is generally only used on actors that are possessed by PlayerControllers. This just means that this actor is receiving inputs from a human controller, so when we extrapolate, we have a bit more information, and can use actual human inputs to fill in the missing info (rather than extrapolating based on the last known velocity).
+

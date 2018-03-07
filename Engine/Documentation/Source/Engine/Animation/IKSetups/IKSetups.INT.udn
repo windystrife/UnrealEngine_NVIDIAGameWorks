@@ -1,0 +1,190 @@
+Availability:Public
+Title: IK Setups
+Crumbs: %ROOT%, Engine, Engine/Animation
+Description:Inverse Kinematic systems allow for reactive animation, such as foot placement on non-planar terrain.
+Related: Engine/Content/FBX/Animations
+Related: Engine/Content/Types/SkeletalMeshes
+Related: Engine/Animation/PhysicallyDrivenAnimation
+Related: Engine/Content/Tools/MayaRiggingTool
+Related: Engine/Animation/AnimBlueprints
+Related: Engine/Animation/AnimBlueprints/EventGraph
+version: 4.9
+topic-image:IKSetups_topic.png
+
+[REGION:fullwidth]
+![](IKWithWithout.png)
+[/REGION]
+
+[REGION:caption]
+On the left, the character is not using IK setups. In the middle, IK is used to keep the feet planted on the small colliding objects. On the right, IK is used to make the character's punch animation stop when it hits the moving block.
+[/REGION]
+
+
+
+
+**Inverse Kinematics** (**IK**) provide a way to handle joint rotation from the location of an end-effector rather than via direct joint rotation. In practice, you provide an effector location and the IK solution then solves the rotation so that the final joint coincides with that location as best it can. This can be used to keep a character's feet planted on uneven ground, and in other ways to produce believable interactions with the world.
+
+Unreal Engine uses a 2-bone IK system that is ideal for things such as arms and legs.
+
+[REGION:tip]
+For examples of Hand and Foot IK, you can also reference the [Animation Content Examples](Resources\ContentExamples\Animation) page under section 1.8.
+[/REGION]
+
+
+## IK vs. FK
+
+If you are already familiar with what IK is and how it works, you can skip this section!
+
+Most animated skeletons in Unreal are driven by direct rotational data fed straight into the bones of the character or Skeletal Mesh. This can be thought of as forward kinematics, or direct application of rotation to joints or bones. Below is a diagram illustrating the concept:
+
+[REGION:raw]
+![](diagram_FK.png)(w:600)
+[/REGION]
+
+As its name implies, inverse kinematics works in the other direction. Instead of applying rotation to bones, we instead give the bone chain a target (also known as an end effector), providing a position that the end of the chain should try to achieve. The user or animator moves the effector and the IK solver (the algorithm that drives rotation in an IK system) rotates the bones such that the final bone in the chain ends at the location of the target. In the image below, the end effector is designated by the red cross. 
+
+[REGION:raw]
+![](diagramIK.png)(w:600)
+[/REGION]
+
+In UE4, IK can be used to override and augment existing animations to make the motions of a character or Skeletal Mesh appear to be more reactive to their environment.
+
+## Setting Up IK
+
+There are many ways to utilize IK for your characters, from keeping feet or paws planted on the ground to having a character appear to grip and hold onto moving objects. For the purposes of this documentation, we will cover the most common setup: planting feet on uneven ground or stairs.
+
+One of the more important considerations for IK use is that it generally requires setup in a few different locations. At a high level, these are:
+
+
+1. Some setup for handling the location of the effector. This is often done within the Pawn or Character Blueprint.
+1. Setup in the Animation Blueprint Event Graph to take in the effector location from the Pawn or Character. This will be used for the IK solver.
+1. Setup of the 2-Bone IK node within the character's Animation Blueprint Anim Graph.
+
+
+### Planning
+
+As with all things, a little bit of planning goes a long way. Make sure you have an idea if what you need your IK setup to do. Is it for a character's feet? Their hands? What will they be doing where they will need to react? The more of these questions you can answer early, the easier the setup will be. Fortunately, with the power of UE4's Blueprint visual scripting, it will be easy enough to add functionality later.
+
+
+## Foot Placement IK Setup
+
+For the first example, we will give an overview of setting up simple IK on a character to help their feet remain planted on uneven ground.
+
+[REGION:note]
+This example can be found in the Content Examples project. Just open the map named Animation.umap and look at example 1.8.
+[/REGION]
+
+### Pawn or Character Blueprint Setup
+
+The first step will be to set up the Pawn or Character Blueprint to properly handle the necessary data. This essentially means that we need to perform some traces from the feet so that we can keep track of when there is some sort of obstacle in place that they should step on. 
+
+[REGION:note]
+Be aware that in the following examples, a few variables were added just to simplify wire connections within the Blueprint, to make them a little less visually confusing for documentation. These variables will not exist in the actual Content Example project.
+[/REGION]
+
+#### Construction Script
+
+The Construction Script of the Character Blueprint really just sets up two critical pieces of data:
+
+1. A Scale variable to account for the Z-height of the character. 
+1. An IKTraceDistance variable, which uses the half-height of the physics capsule multiplied by the Scale.
+
+[REGION:lightbox]
+[REGION:fullwidth]
+[![Foot_IK_Character_CS.png](Foot_IK_Character_CS.png)](Foot_IK_Character_CS.png)
+[/REGION]
+[/REGION]
+
+[REGION:caption]
+Click the image for a larger view or **Right-click** and Save As.
+[/REGION]
+#### Event Graph
+
+For this setup, the Event Graph is essentially responsible for handling the trace operation, which simply casts down through the foot of the character, looking for some sort of obstacle. If it finds something, it stores the distance so that it can be used later in the Animation Blueprint to move the effector for the IK.
+
+One of the important points about this graph is the use of a custom function called IKFoottrace. This function takes in a distance and Socket name, using those as the basis for the trace operation. It then returns an offset value based on those results that will be later used to offset the location of the IK effector.
+
+
+[REGION:fullwidth]
+[REGION:lightbox]
+[![](Foot_IK_IKFoottrace_Function.png)](Foot_IK_IKFoottrace_Function.png)
+[/REGION]
+[/REGION]
+
+[REGION:caption]
+In this image, you can see the IKFoottrace function. Click the image for a larger view or **Right-click** and Save As.
+[/REGION]
+
+
+And here is the event graph. With the help of the above function, you can see that its main job in this instance is just to perform traces for the right and left feet.
+
+
+[REGION:fullwidth]
+[REGION:lightbox]
+[![](Foot_IK_Character_EG.png)](Foot_IK_Character_EG.png)
+[/REGION]
+[/REGION]
+
+[REGION:caption]
+Here is the base level of the Event Graph. Click the image for a larger view or **Right-click** and Save As.
+[/REGION]
+
+The result of this is that during each tick of the game, there is a downward trace taking place, looking for an impact point which would designate some uneven piece of ground to be accounted for. When found, the distance to that point is stored as an IK offset to be used later on in the Animation Blueprint.
+
+![](IKTrace.png)
+[REGION:caption]
+In the image above, the green diamond represents the location of the Socket used as the trace starting point. The red arrow represents the trace itself.
+[/REGION]
+
+
+### Animation Blueprint Setup
+
+
+
+
+The first part of the Animation Blueprint we will look at is the Event Graph. Generally speaking, the main purpose of the Event Graph in an Animation Blueprint is to take in data from other sources - such as the Character or Pawn Blueprint - and then translating those into variable updates that can be used in the AnimGraph.
+
+#### Event Graph
+
+In this case, the first thing we do is get the current Pawn and then make sure to cast that to the specific Pawn-based class in which we did all of our setup. This allows us to communicate directly that specific instance of the Pawn Blueprint and read the data stored in its variables. 
+
+With the IK offset data that was stored in the Pawn Blueprint, we can generate location vectors to later be used by the IK effectors.
+
+
+[REGION:fullwidth]
+[REGION:lightbox]
+[![](Foot_IK_AnimBP_EventGraph.png)](Foot_IK_AnimBP_EventGraph.png)
+[/REGION]
+[/REGION]
+
+[REGION:caption]
+Click the image for a larger view or **Right-click** and Save As.
+[/REGION]
+
+
+#### AnimGraph
+
+The AnimGraph culminates our setup by applying the information assembled thus far and using it to update the existing animation created for the character. For this example, the AnimGraph is very simple in that it is really only playing a single animation. In most cases, the Play JumpingJacks node would be replaced by any number of other nodes to produce the desired motion. 
+
+The important part is where we switch our current space from Local to Component. All animations that are played on the character are done in Local space. That is the fastest way to calculate it, since local transformations are relative to each bone's parent in the hierarchy. However, bone manipulations, such as applying 2-bone IK, must be done in Component Space, which is relative to the Root bone. 
+
+Because of this, we have to switch the data from Local to Component just long enough to perform our IK calculations. At the same time, the Final Animation Pose node can only take in Local Space data, so we have to convert back once the IK is applied. 
+
+For more information on coordinate spaces for animation, please see [](Engine/Basics/CoordinateSpace).
+
+
+[REGION:fullwidth]
+[REGION:lightbox]
+[![](AnimGraph.png)](AnimGraph.png)
+[/REGION]
+[/REGION]
+
+[REGION:caption]
+Click the image for a larger view or **Right-click** and Save As.
+[/REGION]
+
+
+
+
+
+

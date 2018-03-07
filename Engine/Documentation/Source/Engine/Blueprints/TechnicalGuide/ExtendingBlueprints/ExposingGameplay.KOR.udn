@@ -1,0 +1,110 @@
+﻿INTSourceChangelist:3244370
+Availability:Public
+Title:블루프린트에 게임플레이 요소 노출시키기
+Crumbs: %ROOT%, Programming, Engine/Blueprints/TechnicalGuide
+Description:게임플레이 요소를 블루프린트에 노출시키는 게임플레이 프로그래머를 위한 기술 안내서입니다.
+Related: Engine/Blueprints/TechnicalGuide/Guidelines
+tags:Blueprints
+
+[TOC(start:2)]
+
+프로그래머로써 블루프린트 작업을 하면 코드가 엄청 유연해지는 여러가지 장점이 있습니다.
+예를 들어 게임플레이 디자이너가 게임에 새로운 유형의 무기를 구현하고 싶을 수가 있습니다.
+그러면 프로그래머는 예전처럼 무기를 코딩하되, 발사 속도라던가 Fire() 함수 등 중요한 함수성 몇을 노출시킵니다.
+플레이테스트 이후 디자이너가 총 발사속도를 바꿔야 겠다 결정하고 커브 작업을 합니다.
+총 발사속도를 다시 코딩하고 게임을 컴파일하기 보다, 디자이너가 그냥 블루프린트로 들어가서 
+직접 발사속도를 변경하면 되니, 디자이너에게도 프로그래머에게도 
+시간 절약입니다.
+
+프로젝트의 C++/블루프린트 배포 최적화 관련 상세 정보, 또는 블루프린트에 노출되는 API 제작시 
+유념할 팁에 대해서는 [](Engine/Blueprints/TechnicalGuide/Guidelines) 문서를 참고하세요.
+
+## Blueprintable 클래스 만들기
+
+어느 한 클래스를 확장하여 블루프린트를 만들기 위해서는, 해당 클래스는 **Blueprintable** 키워드로 정의해야 합니다.
+그러기 위해서는 클래스 정의부에 선행하는 **UCLASS()** 매크로 안에 해당 키워드를 추가해 줘야 합니다. 이 키워드는 
+해당 클래스를 블루프린트 시스템에 인식시켜 **새 블루프린트** 대화창의 클래스 목록에 표시되도록 하며, 
+블루프린트 생성시 부모로 선택할 수 있도록 만듭니다.
+
+Blueprintable 클래스에 대한 가장 단순한 형태의 선언은 다음과 이렇습니다:
+
+	UCLASS(Blueprintable)
+	class AMyBlueprintableClass : AActor
+	{
+		GENERATED_BODY()
+	}
+
+
+| 키워드 | 설명 |
+| -- | -- |
+| **Blueprintable** | 블루프린트 가능 - 이 클래스 가지고 블루프린트를 만들 수 있는 클래스로 노출시킵니다. 기본값은 별도로 상속하지 않는 한 NotBlueprintable 입니다. 이 키워드는 서브클래스에 상속됩니다. |
+| **BlueprintType** | 블루프린트 유형 - 이 클래스를 블루프린트에서 변수로 사용 가능한 유형으로 노출시킵니다. |
+| **NotBlueprintable** | 블루프린트 불가능 - 이 클래스를 가지고 블루프린트를 만들 수 없다고 지정합니다. 부모 클래스에 Blueprintable 키워드가 지정된 것을 무효화시킵니다. |
+
+
+## 읽기가능 및 쓰기가능 프로퍼티
+
+C++ 클래스에서 정의된 변수를 해당 클래스에서 확장된 블루프린트에 노출시키기 위해서는, 변수 정의부 앞 
+**UPROPERTY()** 매크로 안에서 아래 나열된 키워드 중 하나를 사용해서 변수를 정의해 줘야 합니다.
+이 키워드는 블루프린트 시스템에 변수를 알려 **내 블루프린트** 패널에 표시되도록 하여 그 값을 
+설정하고 접근할 수 있습니다.
+
+	//Character's Health
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Character")
+	float health;
+
+| 키워드 | 설명 |
+| -- | -- |
+| **BlueprintReadOnly** | 블루프린트 읽기전용 - 이 프로퍼티는 블루프린트에서 읽기만 가능하고 변경은 불가능합니다. |
+| **BlueprintReadWrite** | 블루프린트 읽기 쓰기 - 이 프로퍼티는 블루프린트에서 읽고 쓸 수 있습니다. |
+| [REGION:tablesection]멀티캐스트 델리게이트 키워드[/REGION] ||
+| **BlueprintAssignable** | 블루프린트 할당가능 - 이 프로퍼티는 블루프린트에서 할당 가능하도록 노출됩니다. |
+| **BlueprintCallable** | 블루프린트 호출가능 - 이 프로퍼티는 블루프린트 그래프에서 호출 가능하도록 노출됩니다. |
+
+## 실행가능 및 덮어쓰기가능 함수
+
+블루프린트에서 네이티브 함수를 호출하기 위해서는, 함수 정의부 앞에 오는 **UFUNCTION()** 매크로 안애서 아래 나열된 키워드 중 
+하나를 사용하여 함수를 정의해 줘야 합니다. 이 키워드는 블루프린트 시스템에 함수를 인식시켜 맥락 메뉴나 팔레트에 
+나타나도록 함으로써 그래프에 추가하여 실행되도록 할 수도 있고,
+이벤트의 경우 덮어쓰거나 실행되도록 할 수도 있습니다.
+
+BlueprintCallable 함수의 가장 단순한 형태의 선언은 다음과 같습니다:
+
+	//무기 발사
+	UFUNCTION(BlueprintCallable, Category="Weapon")
+	void Fire();
+
+참고로 함수의 시그너처를 만들 때, 파라미터를 레퍼런스 전달하도록 만들면 블루프린트에서 출력 핀이 됩니다. 파라미터를 레퍼런스 전달하도록 하면서 동시에 입력으로 표시하려면, 
+`UPARAM()` 매크로를 사용하세요.
+
+![](UParam.png)
+	
+	UFUNCTION(BlueprintCallable, Category = "Example Nodes")
+	static void HandleTargets(UPARAM(ref) TArray<FVector>& InputLocations, TArray<FVector>& OutputLocations);
+
+또한 `UPARAM()` 을 사용하여 핀 표시면을 변경할 수도 있습니다. 예를 들어 KismetMathLibrary 의 MakeRotator 함수는 `UPARAM()` 과 `DisplayName` 키워드를 사용하여 블루프린트에 Roll, Pitch, Yaw 파라미터가 나타나는 방식을 변경합니다.
+
+![](UParam2.png)
+
+	/** Makes a rotator {Roll, Pitch, Yaw} from rotation values supplied in degrees */
+	UFUNCTION(BlueprintPure, Category="Math|Rotator", meta=(Keywords="construct build rotation rotate rotator makerotator", NativeMakeFunc))
+	static FRotator MakeRotator(
+	UPARAM(DisplayName="X (Roll)") float Roll,	
+	UPARAM(DisplayName="Y (Pitch)") float Pitch,
+	UPARAM(DisplayName="Z (Yaw)") float Yaw);
+
+
+
+| 키워드 | 설명 |
+| -- | -- |
+| [REGION:tablesection]블루프린트에서 네이티브로 통신[/REGION] ||
+| **BlueprintCallable** | 블루프린트 호출가능 - 블루프린트에서 호출할 수 있는 네이티브 함수로, 호출중인 오브젝트에 관해서나 다른 글로벌한 상태를 바꾸는 네이티브 코드를 호출합니다. 즉 "스케쥴" 등록하거나, 다른 노드와 비교한 실행 순서를 명시적으로 알려줘야 한다는 뜻입니다. 여기서는 하양 실행 선으로 결정합니다. 모든 블루프린트 호출가능 함수는 하양 실행 선 상에 나타나는 순서대로 호출됩니다. |
+| **BlueprintPure** | 블루프린트 순수 - 블루프린트에서 호출할 수 있는 네이티브 함수로, 호출중인 오브젝트에 관해서나 다른 글로벌한 상태를 바꾸지 않는 네이티브 코드를 호출합니다. 즉 이 노드를 호출해서 무언가 바뀌는 것은 없으며, 그저 입력을 받고 출력을 알려주는 함수라는 뜻입니다. 여기에는 수학 (+, - , *, 등) 노드, 변수 getter, 아무 것도 영원히 바꾸지 않는 것이 속합니다. 이들은 스케율 등록할 필요가 없으며, 하양 실행 선으로 연결해 줄 필요도 없습니다. 이 노드의 결과 데이터를 필요로 하는 BlueprintCallable 노드에 따라 컴파일러가 자동으로 알아서 해 줍니다. |
+| [REGION:tablesection]네이티브에서 블루프린트로 통신[/REGION] ||
+| **BlueprintImplementableEvent** | 블루프린트 구현가능 이벤트(BIE) - 네이티브 함수가 블루프린트로 통신을 보낼 수 있도록 하는 주요한 방법입니다. 블루프린트 자체 내에 구현하는 가상 함수같은 것입니다. 다른 구현이 없으면, 함수 호출은 무시됩니다. 중요한 점 한가지는, 이 BIE 에 반환값이나 출력 파라미터가 없는 경우, 블루프린트의 이벤트 그래프에 우클릭하고 선택하여 사용할 수 있는 이벤트로 나타난다는 점입니다. 반환값이나 출력 파라미터가 있는 경우, "내 블루프린트" 탭에 나열되며, 우클릭 후 함수 "구현" 을 선택하는 것으로 덮어쓸 수 있습니다. 참고로 BIE 에는 함수의 네이티브 구현이 없습니다. |
+| **BlueprintNativeEvent** | 블루프린트 네이티브 이벤트(BNE) - 위와 같지만, 블루프린트가 함수를 덮어쓰지 않는 경우 호출되는 함수의 기본 네이티브 구현이 있다는 점이 다릅니다. 블루프린트에 구현이 없는 경우 일정한 기본 동작이 있었으면 하면서도, 원하는 경우 블루프린트가 함수성을 덮어쓸 수 있었으면 하는 경우에 좋습니다. 비용이 더 들기에, 함수성이 필요한 경우에만 넣습니다. BNE 를 덮어쓸 때 필요한 경우, 이벤트나 함수 입구 노드에 우클릭한 다음 "Add call to parent" (부모로의 호출 추가)를 선택하여 네이티브 구현을 호출하는 것도 여전히 가능합니다. |
+
+
+
+
+

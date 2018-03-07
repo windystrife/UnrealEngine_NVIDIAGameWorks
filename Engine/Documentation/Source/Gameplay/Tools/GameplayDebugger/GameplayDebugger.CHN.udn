@@ -1,0 +1,294 @@
+﻿INTSourceChangelist:2610380
+Title:游戏性的调试
+Availability:Public
+Crumbs:
+Description: 该工具可在运行时分析实时游戏数据。
+
+游戏调试工具对于在运行时（甚至在使用复制的联网游戏中的客户端上）查看实时数据，都非常有用。在编辑器中进行游戏、在编辑器中进行模拟以及在单独的游戏会话中，都可使用游戏调试工具，且所有数据都重叠显示在游戏视区中。该系统提供了一个框架，该框架可扩展，以便对游戏特定数据进行调试。
+
+引擎实现了以下这些可显示的功能：
+
+* Pawn 的基本数据
+* AIController 的基本数据
+* 行为树和黑板数据的相关信息
+* 执行环境查询 (EQS) 的相关信息
+* 感知系统的信息
+* 玩家周围的导航网格或带有所有细节（如链接或区域）的选定 Pawn
+
+通常数据量较大，因此 GDT 使用类别来限制屏幕上的信息量。系统只会复制已启用类别的数据，该数据可保存复制通道的带宽。共有以下 5 种默认类别和 5 种项目中使用的类别：
+
+![image alt text](image_1.png)
+
+* 导航网格
+* 基本数据
+* 行为树
+* EQS
+* 感知
+* 以及 5 种项目中使用的类别
+
+
+也可对现有类别进行扩展，以显示更多游戏特定数据。
+
+以下是我们在客户端上获取的屏幕截屏，该客户端上只启用了几个类别：基本数据、EQS、导航网格和行为树：
+
+![image alt text](image_2.png)
+
+使用 '（单引号）键（默认设置）或 *EnableGDT* 作弊工具可启用游戏调试工具。键盘按键设置在文件中设置，可方便地更改该设置。
+若要选定要调试的敌人，请在屏幕上正对着该敌人时按 ' 键。数字键盘用于在可见类别之间进行切换。
+必须将游戏调试模块添加到项目的依赖关系模块，才能启用和使用游戏调试模块。 
+
+## 编辑器-与游戏调试工具组合使用 
+
+在编辑器中工作时，可在 PIE 或模拟模式中使用 GDT。已设置的键或 *EnableGDT* 作弊工具可用于在 PIE 模式中启用 GDT。
+模拟模式与 PIE 模式稍有不同，所以启用本调试工具需要启用 “Debug AI” 显示标志。软件还提供了一个选项，可在模拟模式中更改可见的类别。
+*GameplayDebuggingReplicator* actor 就用于该选项。该 actor 位于场景大纲视图中，其属性可用于控制 GDT：
+
+![image alt text](image_3.jpg)
+
+
+## 基本扩展
+
+游戏调试工具只能使用 C++ 代码进行扩展。在蓝图项目中，游戏调试程序只能按原样使用，即显示当前的基本调试信息。对游戏调试程序进行扩展是一件容易的事情，
+收集并显示游戏特定数据即可。为此，需要使用继承自 *UGameplayDebuggingComponent* 类和 *AGameplayDebuggingHUDComponent* 类的定制类。
+第一个类用于收集数据，并最终复制数据，而第二个类用于在屏幕上显示所有已收集的数据。
+
+以下是一种用于收集游戏特定数据的简单类：
+
+
+GDTComponent.h
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+	#pragma once
+	#include "GameplayDebuggingComponent.h"
+	#include "GDTComponent.generated.h"
+
+	UCLASS()
+	class UGDTComponent : public UGameplayDebuggingComponent
+	{
+	public:
+		GENERATED_UCLASS_BODY()
+		virtual void CollectBasicData() override;
+
+		UPROPERTY(Replicated)
+		float TestData; //custom data replicated to clients
+	};
+
+GDTComponent.cpp
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+	#include "MyGameProject.h"
+	#include "GameplayDebuggingComponent.h"
+	#include "GDTComponent.h"
+
+	UGDTComponent::UGDTComponent(const class FPostConstructInitializeProperties& PCIP) :Super(PCIP) { }
+
+	void UGDTComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const
+	{
+		Super::GetLifetimeReplicatedProps( OutLifetimeProps );
+	#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+		DOREPLIFETIME( UGDTComponent, TestData);
+	#endif
+	}
+
+	void UGDTComponent::CollectBasicData()
+	{
+		Super::CollectBasicData();
+	#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+		TestData= FMath::RandRange(2.75, 8.25); //collect data and store it
+	#endif
+	}
+
+下个类用于在屏幕上显示新数据：
+
+
+GDTHUDComponent.h
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+	#pragma once
+
+	#include "GameplayDebuggingHUDComponent.h"
+	#include "GDTHUDComponent.generated.h"
+
+	UCLASS(notplaceable)
+	class AGDTHUDComponent: public AGameplayDebuggingHUDComponent
+	{
+		GENERATED_UCLASS_BODY()
+	protected:
+		virtual void DrawBasicData(APlayerController* PC, class UGameplayDebuggingComponent *DebugComponent) override;
+	};
+
+GDTHUDComponent.cpp
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+	#include "MyGameProject.h"
+	#include "GDTComponent.h"
+	#include "GDTHUDComponent.h"
+
+	AGDTHUDComponent::AGDTHUDComponent(const class FPostConstructInitializeProperties& PCIP)
+		:Super(PCIP)
+	{
+	}
+	void AGDTHUDComponent::DrawBasicData(APlayerController* PC, class UGameplayDebuggingComponent *DebugComponent)
+	{
+		Super::DrawBasicData(PC, DebugComponent);
+	#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+		const UGDTComponent* MyComp = Cast<UGDTComponent>(DebugComponent);
+		if (MyComp)
+		{
+			PrintString(DefaultContext, FString::Printf(TEXT("{white}Test data: {red}%f\n"), MyComp->TestData));
+		}
+	#endif
+	}
+
+游戏调试工具需要理解新的类，且该信息可在 DefaultEngine.ini 配置文件中设置：
+
+
+DefaultEngine.ini
+
+	[/Script/GameplayDebugger.GameplayDebuggingReplicator]
+	DebugComponentClassName="/Script/MyGameProject.GDTComponent"
+	DebugComponentHUDClassName="/Script/MyGameProject.GDTHUDComponent" |
+
+## 定制类别
+
+需几步即可在游戏调试程序中添加项目特定类别。 
+
+让我们扩展 GDTComponent 类：
+
+
+GDTComponent.h
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+	#pragma once
+	#include "GameplayDebuggingComponent.h"
+	#include "GDTComponent.generated.h"
+
+	UCLASS()
+	class UGDTComponent : public UGameplayDebuggingComponent
+	{
+	public:
+		GENERATED_UCLASS_BODY()
+	protected:
+		virtual void CollectDataToReplicate(bool bCollectExtendedData) override;
+		void CollectCustomData();
+	public:
+		UPROPERTY(Replicated)
+		float TestData; //custom data replicated to clients
+	};
+
+GDTComponent.cpp
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+	#include "MyGameProject.h"
+	#include "GameplayDebuggingComponent.h"
+	#include "GDTComponent.h"
+
+	UGDTComponent::UGDTComponent(const class FPostConstructInitializeProperties& PCIP) :Super(PCIP) { }
+
+	void UGDTComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &OutLifetimeProps) const
+	{
+		Super::GetLifetimeReplicatedProps( OutLifetimeProps );
+	#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+		DOREPLIFETIME( UGDTComponent, TestData);
+	#endif
+	}
+
+	void UGDTComponent::CollectCustomData()
+	{
+		Super::CollectBasicData();
+	#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+		TestData= FMath::RandRange(2.75, 8.25); //collect data and store it
+	#endif
+	}
+
+	void UGDTComponent::CollectDataToReplicate(bool bCollectExtendedData)
+	{
+		Super::CollectDataToReplicate(bCollectExtendedData);
+	#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+		if (ShouldReplicateData(EAIDebugDrawDataView::GameView1))
+		{ 
+			CollectCustomData();
+			if (bCollectExtendedData)
+			{
+				// collect additional data for selected Pawn/AIController 
+			}
+		}
+	#endif
+	}
+
+HUD 组件已被扩展，以便在新视图中显示数据：
+
+
+GDTHUDComponent.h
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+	#pragma once
+
+	#include "GameplayDebuggingHUDComponent.h"
+	#include "GDTHUDComponent.generated.h"
+
+	UCLASS(notplaceable)
+	class AGDTHUDComponent: public AGameplayDebuggingHUDComponent
+	{
+		GENERATED_UCLASS_BODY()
+	protected:
+		virtual void DrawGameSpecificView(APlayerController* PC, class UGameplayDebuggingComponent *DebugComponent) override;
+		virtual void GetKeyboardDesc(TArray<FDebugCategoryView>& Categories) override;
+		void DrawCustomData(APlayerController* PC, class UGameplayDebuggingComponent *DebugComponent);
+	};
+
+GDTHUDComponent.cpp
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+	#include "MyGameProject.h"
+	#include "GDTComponent.h"
+	#include "GDTHUDComponent.h"
+
+	AGDTHUDComponent::AGDTHUDComponent(const class FPostConstructInitializeProperties& PCIP)
+		:Super(PCIP)
+	{
+	}
+	void AGDTHUDComponent::DrawCustomData(APlayerController* PC, class UGameplayDebuggingComponent *DebugComponent)
+	{
+	#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+		const UGDTComponent* MyComp = Cast<UGDTComponent>(DebugComponent);
+		if (MyComp)
+		{
+			PrintString(DefaultContext, FString::Printf(TEXT("{white}Test data: {red}%f\n"), MyComp->TestData));
+		}
+	#endif
+	}
+	void AGDTHUDComponent::GetKeyboardDesc(TArray<FDebugCategoryView>& Categories)
+	{
+		Super::GetKeyboardDesc(Categories);
+	#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+		Categories.Add(FDebugCategoryView(EAIDebugDrawDataView::GameView1, TEXT("MyData")));
+	#endif
+	}
+	void AGDTHUDComponent::DrawGameSpecificView(APlayerController* PC, class UGameplayDebuggingComponent *InDebugComponent)
+	{
+		 Super::DrawGameSpecificView(PC, InDebugComponent);
+	#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+		if (InDebugComponent && GameplayDebuggerSettings(GetDebuggingReplicator()).CheckFlag(EAIDebugDrawDataView::GameView1))
+		{
+			PrintString(DefaultContext, FColor::Green, TEXT("\nMY GAME DATA\n"));
+			 DrawCustomData(PC, InDebugComponent);
+		}
+	#endif
+	}
+
+新类别已准备就绪，可用于对项目特定数据进行调试：
+
+![image alt text](image_4.jpg)
+
+若要用颜色标出调试信息，*PrintString* 函数可在字符串中使用标记来改变当前使用的颜色。使用不同颜色描绘字符串变得更加方便：
+
+	void PrintString(FPrintContext& Context, const FString& InString );
+	void PrintString(FPrintContext& Context, const FColor& InColor, const FString& InString );
+	PrintString(DefaultContext, FColor::Green, TEXT("Whole text in green"));
+	PrintString(DefaultContext, TEXT("String {green}in green, {red}in red {white}or {R=0,G=0,B=255,A=255}in blue"));
+
+最后的 PrintString 函数可生成具有 4 种不同颜色的字符串：
+
+![image alt text](image_5.jpg)
+

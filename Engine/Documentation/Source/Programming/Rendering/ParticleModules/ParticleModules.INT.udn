@@ -1,0 +1,157 @@
+Availability:Docs
+Title:Particle Module Technical Guide
+Crumbs:%ROOT%, Programming, Programming/Rendering
+Description:Programmer's guide to adding new particle modules for customizing the behavior of particle systems.
+Version: 4.9
+tags:Rendering
+
+[TOC (start:2 end:3)]
+
+
+
+
+
+A particle system in Unreal Editor 4 (UE4) consists of any number of particle emitters, each of which contains modules that effect how its particles behave. Extending the system with custom modules and emitter types is quite simple and this doc will give examples of how to do so.
+
+## The ParticleModule base class 
+
+All particle modules derive from the same base class, `ParticleModule` (defined in UE4/Engine/Source/Runtime/Engine/Classes/Particles/Modules/ParticleModule.h). 
+
+
+### Member Variables
+
+The `ParticleModule` class contains the following member variables:
+
+| Variable | Overview |
+| -------- | -------- |
+| `bSpawnModule` | Boolean indicating if the module requires spawning particles be piped through it (i.e., the `Spawn()`/`SpawnEditor()` functions do something). The default value is `false`. |
+| `bUpdateModule` | Boolean indicating if the module requires updating particles be piped through it (i.e., the `Update()`/`UpdateEditor()` functions do something). The default value is `false`. |
+| `bCurvesAsColor` | Boolean indicating if the distribution (curve) properties in the module contain color data. When `true`, curves drawn in the curve editor will display their current color rather than the assigned `ModuleEditorColor`. The default value is `false`. |
+| `b3DDrawMode` | Boolean indicating that the module should render its 3D visualization helper. The default value is `false`. |
+| `bSupported3DDrawMode` | Boolean indicating the module supports rendering a 3D visualization helper (i.e., the `Render3DPreview()` function does something). The default value is `false`. |
+| `bEnabled` | Boolean indicating if the module is enabled or not. The default value is `true`. |
+| `bEditable` | Boolean indicating the module was enabled by the designer. Used in LOD levels to determine if lower LOD levels were modified. The default value is `true`. |
+| `ModuleEditorColor` | The color associated with the module. Curves from the module drawn in the curve editor will display using this color. [REGION:note]When `bCurvesAsColor` is enabled, the curves will be drawn with the actual color value they represent.[/REGION] |
+
+A `ModuleType` enumeration is also defined in this class. This type indicates what types of emitters can use the module. The following table gives a description of the available types:
+
+| Type (EPMT) | Description |
+| ------------ | ----------- |
+| General | A general module that is usable by all emitter types. |
+| TypeData | The module is a TypeData module - dictating the emitter class that gets instanced. |
+| Beam | The module is only usable by beam emitters. |
+| Trail | The module is only usable by trail emitters. |
+
+
+### Member Functions
+
+The `ParticleModule` class contains several virtual member functions that provide the points of interest when writing your own modules. (There are numerous other member functions, but they are not relevant to the topic of custom modules and so will not be discussed.) These are listed below:
+
+| Function | Overview |
+| -------- | -------- |
+| `void Spawn(FParticleEmitterInstance* Owner, int32 Offset, float SpawnTime)` | Called on a particle that is freshly spawned by the emitter. This is where the module can set/modify initial values for each particle as they are created. |
+| `void Update(FParticleEmitterInstance* Owner, int32 Offset, float DeltaTime)` | Called on a particle that is being updated by its emitter. This is where the module can perform operations on particles that are being updated, such as altering its color or velocity. |
+| `uint32 RequiredBytes(UParticleModuleTypeDataBase* TypeData)` | Returns the number of bytes that the module requires in the particle payload block. This allows for the module to store some data it requires per-particle. |
+| `uint32 RequiredBytesPerInstance()` | Returns the number of bytes the module requires in the emitters _per-instance_ data block. This allows for the module to store some data it requires per-emitter instance. |
+| `virtual void CompileModule( struct FParticleEmitterBuildInfo& EmitterInfo )` | `CompileModule()` must be implemented for modules that can be used with GPU particle emitters. The module should modify the emitter info struct to apply the effects of the module to the simulation. |
+
+## Creating a Custom Module
+
+Writing a custom module simply involves overriding the functions mentioned above to implement the desired effect. As an example, a module that implements setting the particle color to the base color times the velocity scaled by some distribution-generated factor will be created.
+
+The base class of the module defines the heading it will go under in the **Right-click** module menu of Cascade. So, in our example, we will want to derive from the `ParticleModuleColorBase` class to ensure that the module shows up in the **Color** sub-menu.
+
+### Module Declaration
+
+	UCLASS(editinlinenew,collapsecategories,hidecategories=Object)
+	public class UParticleModuleColorByVelocity : public UParticleModuleColorBase
+	{
+		/**
+
+		 *   This is the value to scale each corresponding velocity element by prior
+		 *   to setting it as the color. The value is retrieved using the 
+		 *   Particle.RelativeTime.
+		 *
+		 *   For example, if the ScaleVelocity was (0.25,0.5,1.0) and the velocity
+		 *   was (2.0,2.0,0.0), then the particle color would be set to (0.5,1.0,0.0);
+		 */
+
+		var(Color)   rawdistributionvector   ScaleVelocity;
+
+		cpptext
+		{
+		   virtual void   Spawn(FParticleEmitterInstance* Owner, int32 Offset, float SpawnTime);
+		   virtual void   Update(FParticleEmitterInstance* Owner, int32 Offset, float DeltaTime);
+		}
+	}
+
+Things to note:
+
+1. The module is marked to operate on particles in both the spawning and updating phases (`bSpawnModule` and `bUpdateModule` are both set to `true`).
+1. Our module does not require per-particle or per-instance data, so we do not have the `RequiredBytes*()` functions overridden.
+
+[REGION:warning]
+This example requires that the emitter has an **InitialColor** module before the **ColorByVelocity** module in the emitter module stack.
+It also requires the particle emitter uses a material that utilizes the **VertexColor** expression in order to show the particle color being manipulated.
+[/REGION]
+
+#### Module Implementation
+
+The constructor creates a `DistributionVectorConstant` to assign to `ScaleVelocity` and tells the engine that it should handle both spawning and updating particles.
+
+	UParticleModuleColorByVelocity::UParticleModuleColorByVelocity(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+	{
+		bSpawnModule = true;
+		bUpdateModule = true;
+						
+		UDistributionVectorConstant* DistributionScaleVelocity = ConstructorHelpers::CreateDefaultSubobject<UDistributionVectorConstant>(this, TEXT("DistributionScaleVelocity"));
+		DistributionScaleVelocity->Constant = FVector(1.0f, 1.0f, 1.0f);
+		ScaleVelocity.Distribution = DistributionScaleVelocity;
+	}
+
+In the **Spawn()** function, the code will be setting up any initial effect it has on particles. Not every module will require a `Spawn()` call, but this one does.
+
+	void UParticleModuleColorByVelocity::Spawn(FParticleEmitterInstance* Owner, int32 Offset, float SpawnTime)
+	{
+	   SPAWN_INIT;
+	   {
+		  FVector ColorScale    = ScaleVelocity.GetValue(Particle.RelativeTime, Owner->Component);
+		  Particle.Color        = FLinearColor(
+												Particle.BaseColor.R * Particle.Velocity.X * ColorScale.X,
+												Particle.BaseColor.G * Particle.Velocity.Y * ColorScale.Y,
+												Particle.BaseColor.B * Particle.Velocity.Z * ColorScale.Z);
+	   }
+	}
+
+The `Spawn()` function retrieves the `ScaleVelocity` value from the distribution using the `Particle.RelativeTime`. This value is multiplied by the velocity to give the scaled velocity value. The `Particle.Color` is then set to the `BaseColor` multiplied by the result of the scaled velocity calculation. 
+
+`SPAWN_INIT` is a macro which sets up a `FBaseParticle` reference to the particle being spawned, as well as some other commonly used values when accessing particle data, such as offset tracking into the particle payload, etc. For full details, please refer to `//depot/UE4/Engine/Source/Runtime/Engine/Public/ParticleHelper.h`.
+
+[REGION:note]
+	This is a destructive module in that it sets the `Particle.Color` directly. Any module that came before it that only modified the `Particle.Color` would be pointless. However, if it modified the `BaseColor` as well, such as the **InitialColor** module, then it would still have an impact.
+[/REGION]
+
+The **Update()** function in this particular module is more or less identical to the `Spawn()`. The difference is that each active particle is updated in a single loop. 
+
+	void UParticleModuleColorByVelocity::Update(FParticleEmitterInstance* Owner, int32 Offset, float DeltaTime)
+	{
+	   BEGIN_UPDATE_LOOP;
+	   {
+		  FVector ColorScale    = ScaleVelocity.GetValue(Particle.RelativeTime, Owner->Component);
+		  Particle.Color        = FLinearColor(
+												 Particle.BaseColor.R * Particle.Velocity.X * ColorScale.X,
+												 Particle.BaseColor.G * Particle.Velocity.Y * ColorScale.Y,
+												 Particle.BaseColor.B * Particle.Velocity.Z * ColorScale.Z);
+	   }
+	   END_UPDATE_LOOP;
+	}
+
+`BEGIN_UPDATE_LOOP`/`END_UPDATE_LOOP` are macros that set up a code block that loops through all active particles and executes the code contained between them on each particle. See `UnParticleHelper.h` for full details.
+
+The following screen shot shows the **ColorByVelocity** module in action. The **InitialVelocity** of the particles is randomly set to **[(0,0,0),(200,200,0)]**. The **InitialColor** of each particle is set to white. The **VelocityScale** value of the ColorByVelocity is set to a constant of **(0.005, 0.005, 0)**. This results in each particle having its color set to:   
+    
+	Velocity * VelocityScale
+
+![ColorByVelocity.JPG](ColorByVelocity.JPG)
+

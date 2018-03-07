@@ -1,0 +1,238 @@
+﻿INTSourceChangelist:3108692
+Availability: Docs
+Title: 커맨드렛 만드는 법
+Crumbs:%ROOT%, Programming, Programming/Development, Programming/Development/Tools
+Description:게임에 사용되는 콘텐츠를 분석하고 수정하는 커스텀 커맨드렛을 완전히 새로 만드는 방법입니다.
+
+[REGION:todo]
+	언리얼 엔진 3 에서 이식해 온 문서로 현재 검토중에 있습니다. 정보가 맞지 않을 수 있습니다.
+[/REGION]
+
+[TOC(start:2)]
+
+커맨드렛은 언리얼 엔진 환경 내부에서 실행되는 명령줄 프로그램입니다. 이는 주로 많은 콘텐츠를 한꺼번에 변경할 때, 콘텐츠 정보의 검색을 위해 콘텐츠를 반복처리할 때, 또는 단위별 테스트 메커니즘으로서 사용됩니다.  
+
+커맨드렛은 엔진에서 초기화되어 있으나 대개는 윈도우의 콘솔 출력장치에 제한되어 있는 작은 애플릿입니다. 
+
+엔진은 여러분이 전달한 명령줄이 커맨드렛인지 아닌지 자동적으로 확인하여, 만약 일치하면 관련 코드를 실행합니다.
+
+UContentCommandlets.cpp와 UnPackageUtilities에 커맨드렛의 몇 가지 예가 있습니다.
+
+
+
+## 스크립트에서 커맨드렛 작성하기
+
+아래와 같이 커맨드렛을 위한 스크립트 클래스를 만듭니다:
+
+
+    
+    class HelloWorldCommandlet extends Commandlet;
+    
+    event int Main( string Params )
+    {
+       log( " hello world " );
+    
+       return 0;
+    }
+    
+
+
+
+또는 다음과 같이 native 커맨드렛을 만듭니다:
+
+
+    
+    class HelloWorldCommandlet extends Commandlet
+    native;
+    
+    cpptext
+    {
+    int32 Main(const FString& CmdLine)
+    {
+       warnf(TEXT("hello world"));
+       return 0;
+    }
+    }
+    
+    native event int Main( string Params );
+    
+
+
+
+Main() 함수는 커맨드렛의 진입점입니다. 커맨드렛에는 실행에 필요한 모든 매개변수가 함유된 문자열이 전달됩니다. 아래의 행을 주목하십시오.
+
+
+    
+    gamename.exe helloworld param1 param2 param3
+    
+
+
+
+커맨드렛은 문자열 `param1 param2 param3` 을 명령줄의 매개변수로 간주합니다.
+
+
+
+## 네이티브 코드에서 커맨드렛 작성하기
+
+Native 코드에서는 대부분의 커맨드렛이 본질적인 클래스로서 구현되어 있습니다. 이런 식으로 커맨드렛을 작성하는 과정은 위와는 전혀 다릅니다. 대부분의 커맨드렛 선언은 `EditorCommandlets.h` 에 있습니다.
+
+먼저 `EditorCommandlets.h` 같은 헤더 파일에서 커맨드렛을 선언합니다:
+
+    
+    BEGIN_COMMANDLET(Name,Package)
+      // 추가 메소드 선언.
+    END_COMMANDLET
+    
+
+
+이 커맨드렛은 "UNameCommandlet" 이라는 클래스 이름을 가지게 되며 (Editor 등의) 지정하는 패키지에 넣어집니다.   
+
+그 다음 .cpp 파일에서 (`UContentCommandlets.cpp` 등), 커맨드렛의 `Main()` 함수를 구현합니다. 필요하다면 `virtual !CreateCustomEngine()` 함수를 오버라이드해도 됩니다. 자세한 내용은 UCommandlet 소스를 참고하십시오.
+
+    
+    int32 UNameCommandlet::Main(const FString& Params)
+    {
+        // 처리해야 할 일들을 처리함...
+        return 0;
+    }
+    
+
+
+
+그렇지만 아직 끝난 것은 아닙니다! 이것은 본질적인 클래스이기 때문에, 스크립트 시스템에 이의 존재를 알려야 합니다. 이를 위해서는 `PackageClasses.h` 파일, 구체적으로는 AUTO_INITIALIZE_REGISTRANTS_EDITOR #define을 수동으로 편집해야 합니다. 이곳의 목록에 다음과 같이 커맨드렛을 위한 `StaticClass()` 함수 호출을 추가합니다:
+
+    
+    #define AUTO_INITIALIZE_REGISTRANTS_UNREALED \
+        UNameCommandlet::StaticClass(); \
+    
+
+
+
+다음 번에 스크립트를 재빌드할 때, 컴파일러는 이 파일을 알파벳 순으로 이 목록에 있는 커맨드렛 클래스로 덮어 씁니다.
+
+
+
+## 사용자를 위한 도움말
+
+커맨드렛에는 도움말 정보가 내장되어 있습니다. 그러므로 사용자는 커맨드렛이 무엇인지, 또 지원되는 옵션에는 어떤 것들이 있는지 알아볼 수 있습니다. 커맨드렛에 대한 도움말 정보를 이용할 수 있으려면 그 커맨드렛이 들어있는 현지화 텍스트 파일에 엔트리를 추가해야 합니다. 패키지가 Core에 들어 있다면 Core.int를 변경해야 커맨드렛 도움말 정보가 나타납니다. 다음은 Core에 들어 있는 "hello world" 커맨드렛에 대한 설정의 예입니다. 
+
+
+    
+    [HelloWorldCommandlet]
+    HelpDescription="This commandlet displays hello world" HelpUsage="gamename.exe helloworld"
+    HelpWebLink="https://udn.epicgames.com/bin/view/Three/MakingACommandlet"
+    HelpParamNames[0]="param1"
+    HelpParamDescriptions[0]="Ignored since helloworld doesn't need params"
+    
+
+
+
+섹션의 이름에는 _commandlet_ 이 클래스 이름의 일부로서 포함되어야 한다는 점을 유의하십시오. 이것이 없으면 커맨드렛을 찾을 수 없습니다. 이 정보를 이용하는 방법을 알려면 다음 명령어를 실행하십시오:
+
+
+    
+    game.exe help help
+    game.exe help list
+    game.exe help webhelp help
+    
+
+
+
+
+
+## 커맨드렛의 사용법
+
+커맨드렛을 실행하려면, 실행하고자 하는 커맨드렛의 이름으로 게임을 실행합니다. 예를 들면:
+
+
+    
+    examplegame make -full
+    
+
+
+
+위의 명령은 ExampleGame 내의 make 커맨드렛을 시작합니다. native 커맨드렛에 대해서는 패키지 이름을 지정해 주지 않아도 됩니다. Make 커맨드렛이 스크립트 전용 커맨드렛이라면 처음 시작 때 로드되지 않으므로 아래의 코드를 사용해서 실시합니다:
+
+
+    
+    examplegame editor.make -full
+    
+
+
+
+또한, 이름에 _commandlet_ 부분이 필요하지 않은 점을 눈여겨 보십시오. 시작 코드는 지정된 커맨드렛을 찾을 때 _commandlet_을 자동으로 뒤에 이어 붙입니다.
+
+
+
+## 커맨드렛의 일반적 태스크
+
+일반적으로는 패키지를 반복처리하여 약간의 데이터 가공을 수행하는 겁니다. 다음과 같은 코드부터 시작해 볼 수 있습니다: (이 코드는 `UContentCommandlets.cpp` 의 맨 위에 코멘트로서 들어 있습니다):
+
+
+    
+    // 다음은 모든 패키지에서 연산을 수행하고자 할 때 사용할 수 있는 템플릿 커맨드렛입니다.
+    int32 UPerformAnOperationOnEveryPackage::Main(const FString& Params)
+    {
+        // 명령줄의 인수들을 분석.
+        TArray<FString> Tokens;
+        TArray<FString> Switches;
+    
+        const TCHAR* Parms = *Params;
+        ParseCommandLine(Parms, Tokens, Switches);
+    
+        // 패키지 파일 목록 구축.
+        const TArray<FString> FilesInPath( GPackageFileCache->GetPackageFileList() );
+        if( FilesInPath.Num() == 0 )
+        {
+            warnf( NAME_Warning, TEXT("No packages found") );
+            return 1;
+        }
+    
+        // 모든 파일을 반복하여 일을 처리.
+        for( int32 FileIndex = 0 ; FileIndex < FilesInPath.Num() ; ++FileIndex )
+        {
+            const FString& Filename = FilesInPath(FileIndex);
+            warnf( NAME_Log, TEXT("Loading %s"), *Filename );
+    
+            UPackage* Package = UObject::LoadPackage( NULL, *Filename, LOAD_None );
+            if( Package == NULL )
+            {
+                warnf( NAME_Error, TEXT("Error loading %s!"), *Filename );
+            }
+    
+            /////////////////
+            //
+            // 할 일이 있으면 여기서 처리.
+            //
+            /////////////////
+    
+            TObjectIterator<UStaticMesh> It;...
+    
+            UStaticMesh* StaticMesh = *It;
+            if( StaticMesh->IsIn( Package )
+    
+    
+    
+    
+            UObject::CollectGarbage( RF_Native );
+        }
+    
+        return 0;
+    }
+    
+
+
+
+(QA_APPROVED_BUILD_JUNE_2007에 등장한) `PackageHelperFunctions.h` 의 `NormalizePackageNames()` 도 참고하면 도움이 될 겁니다. 이 함수는 단순히 `GPackageFileCache` 를 반복처리하는 것 이상으로 미묘한 반복처리가 필요한 것만을 추려낸 패키지 목록을 만들 수 있습니다. (자세한 것은 코드 참조).
+
+
+
+## 커맨드렛 목록
+
+ [커맨드렛 목록](Engine/Commandlets/CommandletList) 페이지를 참고하시기 바랍니다.
+
+ 
+
+
+
+

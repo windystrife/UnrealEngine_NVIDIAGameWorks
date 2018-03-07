@@ -1,0 +1,228 @@
+﻿INTSourceChangelist:2677173
+Availability:Public
+Title:タンジェント空間外のバンプマッピング
+Crumbs: %ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description:標準的なタンジェント空間が機能しない 3D プロシージャルシェーダーからバンプマッピングを作成する方法
+Version:4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+	![%Engine/Rendering/LightingAndShadows/BumpMappingWithoutTangentSpace:title%](%ROOT%/Engine/Rendering/LightingAndShadows/BumpMappingWithoutTangentSpace/bump_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+	![](%ROOT%/tech_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+	%Engine/Rendering/LightingAndShadows/BumpMappingWithoutTangentSpace:title%
+	[/PARAM]
+	[PARAM:description]
+	%Engine/Rendering/LightingAndShadows/BumpMappingWithoutTangentSpace:description%
+	[/PARAM]
+	[PARAM:path]
+	[RELATIVE:Engine/Rendering/LightingAndShadows/BumpMappingWithoutTangentSpace]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+**バンプマッピング** とは、ジオメトリを追加せずに調整したシェーディング計算で疑似的な凹凸表面を作成する 
+グラフィック プログラマー (1978年 James Blinn) が考案したありふれた手法です。サーフェス法線を使用する代わりに 
+シェーディングに新規の法線を使用します。新規の法線は 1D 関数で調整することができます 
+ (例えば Perlin ノイズやグレースケールテクスチャ)。この手法は、細かな欠点があるディスプレースメント (変位) マッピングよりも迅速に作業を行えます  
+(例えばシルエット、オクル―ジョン、シャドウ)。
+
+[REGION:imagetable]
+| ![](bump_none.png)(w:235) | ![](bump_only.png)(w:235) | ![](bump_withnormal.png)(w:235) |
+| ------ | ------ | ------ |
+| バンプマッピングなし | バンプマッピングあり | バンプとノーマルマッピングあり |
+[/REGION]
+
+リアルタイムレンダリングは、通常 **ノーマルマッピング** と呼ばれるバンプマップのバリアントを使用します (青みがかったテクスチャ)。 
+ノーマルマップはテクスチャの各ピクセルに色を格納します。実際には 1 の長さの 3D ベクターを格納します。
+
+ノーマルマップの作成方法は 2 通りあります。
+
+*	グレースケール画像から法線マップを作成する －  
+縦横に近接する各ピクセルの差を事前計算します。計算結果の 2 つの数値 (微分係数) を法線単位に変換して、色として格納します。
+*	ハイポリゴンな 3D モデルから下方へ法線をベイク処理します － ハイポリなオブジェクト上の 3D サーフェス位置とテクスチャの各ピクセルを関連付けて、 
+符号化した法線を色として格納します。 
+
+
+最終結果のテクスチャをあらゆる回転で再利用するには、格納した法線ベクターは **タンジェント空間** になくてはいけません。 
+通常は法線、タンジェント、従法線と呼ばれる 3 つのベクターから構成されます。サーフェスの正しい配置方法を定義します。 
+法線全てをタンジェント空間に変換することにより、 
+現状のサーフェスに対して相対的に定義された状態でこれらを再利用することができます。テクスチャの X と Y 方向はタンジェント空間の 2 つのベクター (タンジェントと従法線) を定義するため、 
+タンジェント空間マッピングはオブジェクトの UV マッピングに依存します。タンジェント空間にアーティファクトが無い完全な UV マッピングの作成は 
+困難で時間を要する作業です。 
+
+Perlin ノイズのように 3D グレースケール機能を使用するとどうなるでしょう？この機能は UV マッピングを必要とせずに、 
+バンプサーフェスの近接するレンダリングのディテールを向上させることができます。タンジェント空間外にバンプマッピングを実装すると、 
+これが可能となります。
+
+##ddx と ddy
+
+タンジェント空間外にバンプマッピングを実装するために、マテリアルエディタへ新しいマテリアル式を 2 つ追加しました。 
+** ddx と ddyそれぞれのマテリアル式は入力された微分係数の近似値を返します。 
+グラフィックハードウェアは、2 つのピクセルにシェーディング処理を行い、結果を減算することによって近似値を計算します 
+(`ddx = right - left`, `ddy = bottom - top`)。 
+
+この関数はピクセルシェーダーのみに使用することが可能で、 
+通常はより大きなエフェクトを実するためにマテリアル関数のみで有益です。
+
+| アイテム | 説明 |
+| ---- | ----------- |
+| [REGION:tablesection]入力値[/REGION] ||
+| Value | 微分係数を計算するための値です。 |
+| [REGION:tablesection]出力値[/REGION] ||
+| Out | 入力値のおおよその微分係数です。タイプは入力値のタイプと一致します。例えば、スカラーは結果としてスカラー出力値となり、2D は 2D 出力値、などです。
+
+[REGION:warning]
+ddx と ddy は 2x2 のブロックで計算されるため、結果として高頻度の入力値との使用時は、ブロック状のアーティファクトが表示されます。
+[/REGION]
+
+## Bump Mapping Material 関数
+
+タンジェント空間の法線マップに依存せずに、マテリアル内でバンプ マッピングを実装するための
+ [**マテリアル関数**](Engine/Rendering/Materials/Functions) がいくつかあります。
+
+### ComputeFilterWidth
+
+![FilterWidth.png](FilterWidth.png)(convert:false)
+
+この関数は [ddx と ddy](#ddxとddy) を利用して、値がスクリーン上で変化する速度を計算します。これにより遠方のプロシージャル シェーダーの 
+フェードアウトを有効にします。フェードアウトの結果として、動作中はより顕著に現れるチラつき感が軽減されます。 
+凹凸のあるサーフェス上のスペキュラリティ (鏡面反射性) は極端なエイリアシング・アーティファクトを引き起こすため、 
+これは大変重要です。
+
+以下のイメージは、プロシージャルなバンプマップ関数が遠方でフェードアウトする様子を表示しています。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Not Using FilterWidth](DetailSize0.png)(convert:false)
+	[/PARAM]
+	[PARAM:after]
+	![Using FilterWidth](DetailSizeNot0.png)(convert:false)
+	[/PARAM]
+[/OBJECT]
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]入力値[/REGION] ||
+| **In** | フィルタ幅を計算する値です。|
+| [REGION:tablesection]出力値[/REGION] ||
+| **Result** | 入力値がピクセル間を変化する速度です。|
+
+### PerturbNormalLQ
+
+**PerturbNormalLQ** 関数は、グレースケールのバンプマップ入力値をワールド空間ノーマルへ変換します。 
+この関数は前述の 2x2 ブロックのアーティファクトが発生する [ddx と ddy](#ddxとddy) を使用するため、 
+出力するワールド空間ノーマルは低品質となります。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Low Quality](bump_lq.png)(convert:false)
+	[/PARAM]
+	[PARAM:after]
+	![High Quality](bump_hq.png)(convert:false)
+	[/PARAM]
+[/OBJECT]
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]入力値[/REGION] ||
+| **Bump** | ワールド空間ノーマルを計算するスカラーバンプ値 (グレースケール) です。|
+| [REGION:tablesection]出力値[/REGION] ||
+| **WS Normal** | 計算したワールド空間ノーマルです。|
+
+[REGION:note]
+	この関数が出力するワールド空間ノーマルを使用するためには、 
+	Materia lノードの **tangent-space normal** 設定が _false_ でなくてはいけません。
+[/REGION]
+
+[REGION:warning]
+	この関数はリファレンスのみとして存在し、Material Funtion Library には公開されません。 
+	代わりに [**PerturbNormalHQ**](#PerturbNormalHQ) 関数を使用します。
+[/REGION]
+
+### PerturbNormalHQ
+
+**PerturbNormalHQ** 関数は、ddx や ddy が提供する微分係数よりもより正確な値を計算するため、 
+高品質な結果となります。3 つのサンプル位置を利用してスカラー関数を複数回計算してこの処理を行います。 
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]入力値[/REGION] ||
+| **Bump one pixel right** | 現在位置から 1 つ右側のピクセルのスカラーバンプ値 (グレースケール) です。 |
+| **Bump center** | 現在の位置のスカラーバンプ値 (グレースケール) です。 |
+| **Bump one pixel down** | 現在位置から 1 つ下のピクセルのスカラーバンプ値 (グレースケール) です。 |
+|**WS Normal** | オプションです。バンプマップと結合するワールド空間ノーマルです。タンジェント空間ノーマルは [Vector Transform][Vector Transform](Engine/Rendering/Materials/ExpressionReference/VectorOps#Transform) 式でワールド空間ノーマルへ変換することができます。 |
+| [REGION:tablesection]出力値[/REGION] ||
+| **WS Normal** | 結合されたワールド空間ノーマルです。|
+
+[REGION:note]
+	この関数が出力するワールド空間ノーマルを使用するためには、Materia lノードの **tangent-space normal** 設定が _false_ でなくてはいけません。
+[/REGION]
+
+### PreparePerturbNormalHQ
+
+**PreparePerturbNormalHQ** 関数は、 
+**PerturbNormalHQ** 関数がワールド空間ノーマルの計算に必要な 3 つのサンプル位置を計算します。
+
+[REGION:lightbox]
+	[![UsingPerturbHQ.png](UsingPerturbHQ.png)(w:720)](UsingPerturbHQ.png)  
+[/REGION]
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]入力値[/REGION] ||
+| **Value** | 現在位置のスカラーバンプ値 (グレースケール) です。 |
+| [REGION:tablesection]出力値[/REGION] ||
+| **Value one pixel right** | 現在位置から 1 つ 右側のピクセルのスカラーバンプ値 (グレースケール) です。 |
+| **Value** | 現在位置のスカラーバンプ値 (グレースケール) です。 |
+| **Bump one pixel down** | 現在位置から 1 つ下のピクセルのスカラーバンプ値 (グレースケール) です。 |
+| **FilterWidth** | 遠方の詳細をフェードアウトさせるのに実用的なフィルターも計算します。 |
+
+## 3 つの関数の代わりに使用する単一関数
+
+バンプマッピング関数をカプセル化する Material 関数を作成して、 
+別の関数でこれを 3 回評価させることができます。この関数を使用することで、複雑性をある程度非表示にすることができます。 
+
+## テクスチャの使用
+
+よりよいパフォーマンスのために、テクスチャをバンプマッピングの Material 関数と使用することも出来ますが、 
+グラフィックカードがテクスチャをフィルタリングテクスチャを処理する方法が原因でアーティファクトが生じるかもしれません。通常にフィルタリングされた色は線形補間で補間されます。 
+その微分係数が定数です。つまりグレースケールテクスチャの使用は、 
+サーフェスが滑らかに補間されていないノーマルをもたらします。
+
+## 注記
+
+前述の手法は Morten S. Mikkelsen 氏の業績に基づいています (リファレンス参照)。
+
+### パフォーマンス
+
+プロシージャルシェーダーはかなりのパフォーマンスコストが発生し、エイリアシングを発生させずに実装することは困難です  
+(テクスチャマッピングと比較して)。現時点では Perlin ノイズを提供しています。このマテリアル式を最適化することも出来ますが、 
+常に負荷の高い操作となります。「_n_」レベルに対してレベル機能を使用するには、大部分の演算処理 
+が「_n_」回行われることが必須となります。バンプマッピングのために関数を 3 回評価するとさらに負荷がかかります。負荷はピクセル数に応じて増減することに 
+留意してください。これらすべての機能を利用できますが、プロトタイプ作成や管理された状況における使用を推奨します。
+
+### 問題
+
+*	フリップした/鏡面仕上げの UV がまだ正しく処理できません。
+
+
+### 今後の作業
+
+この手法は明示的に格納したタンジェント空間との交換に使用することも出来ます。このような手法を活用するには、経験がもっと必要になってきます。
+現時点の実装方法は、アーティストがバンプマッピングに使用出来るだけでなく、調査の手段も提供します。
+
+###リファレンス
+
+*	Bump Mapping Unparametrized Surfaces on the GPU (Morten S. Mikkelsen)
+
+	[Bump Mapping Unparametrized Surfaces on the GPU](mm_sfgrad_bump.pdf)
+
+*	Derivative Maps (Mikkelsen and 3D Graphics blog)
+
+	[](http://mmikkelsen3d.blogspot.com/2011/07/derivative-maps.html)
+

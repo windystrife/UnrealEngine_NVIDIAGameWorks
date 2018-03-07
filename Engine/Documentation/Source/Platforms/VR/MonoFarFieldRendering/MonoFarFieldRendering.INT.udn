@@ -1,0 +1,288 @@
+Availability: Public
+Crumbs: %ROOT%
+Title: Monoscopic Far Field Rendering
+Description: Learn about Monoscopic Far Field Rendering, an advanced rendering feature for VR Mobile applications in Unreal Engine 4.
+Type: Overview
+SkillLevel: Advanced
+Version: 4.16
+Parent: Platforms/VR
+Order:
+Tags: Rendering
+Tags: Performance and Profiling
+Topic-Image:hybMonRend_topicImage.png
+related: Engine/Performance
+related: Engine/Performance/GPU
+related: Engine/Rendering
+related: Engine/Performance/StatCommands
+related: Platforms/VR/Profiling
+related: Platforms/VR/Profiling/Considerations
+related: Platforms/VR/Profiling/Overview
+Contributor: Oculus
+
+[TOC(start:2 end:3)]
+
+**Monoscopic Far Field** Rendering (or, more accurately, Hybrid Monoscopic Rendering) is an advanced rendering feature for VR Mobile applications being built in Unreal Engine 4 (UE4). Generally, Monoscopic Far Field Rendering improves 
+the performance of levels containing a significant amount of distant content. The reason that Monoscopic Far Field Rendering improves the performance of levels having a lot of distant content is that distant objects are rendered only 
+once for both eyes. At Epic, we've observed that rendering distant objects this way yields significant performance improvements for VR Mobile applications.
+
+[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:videoid]
+	bAyqVgv-MqA
+	[/PARAMLITERAL]
+	[PARAMLITERAL:width]
+	100
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	56.25
+	[/PARAMLITERAL]
+	[PARAMLITERAL:units]
+	%
+	[/PARAMLITERAL]
+	[PARAMLITERAL:type]
+	simple
+	[/PARAMLITERAL]
+[/OBJECT]
+
+With the release of UE4, Version 4.16, Monoscopic Far Field Rendering is enabled with Multiview on GearVR devices, thereby ensuring that the stereoscopic near field rendering portion of your scene is optimized.
+
+## Enabling Far Field Monoscopic Rendering
+
+[REGION:note]
+Make sure that Mobile HDR is disabled before enabling the Monoscopic Far Field Rendering setting in UE4.
+[/REGION]
+
+When you create a new project, Monoscopic Far Field Rendering is disabled by default. To access the Monoscopic Far Field Rendering setting, open the **Project Settings** menu from Unreal Editor, and select **Rendering** from the side bar.
+You should be able to see the **VR** dropdown menu from inside of the **Project-Description** menu.
+
+[REGION:lightbox]
+	[![](uncheckedUI.png)(w:600)](uncheckedUI.png)
+[/REGION]
+
+[REGION:caption]
+	Click for full image.
+[/REGION]
+
+To enable Monoscopic Far Field Rendering, select the checkbox next to the **Monoscopic Far Field** rendering label.
+
+![](checkedUI.png)
+
+After enabling the **Monoscopic Far Field** setting, you'll be prompted to restart UE4. When you're ready, go ahead and restart UE4 to apply the **Monoscopic Far Field** rendering settings to your project.
+
+![](restartWarning.png)  
+
+### Adding a Monoscopic Camera
+
+When Monoscopic Far Field Rendering is disabled, your project has two existing stereoscopic cameras, one for each eye.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Disabled](Disabled.png)
+	[/PARAM]
+	[PARAM:after]
+	![Enabled](Enabled.png)
+	[/PARAM]
+[/OBJECT]
+
+When you enable Monoscopic Far Field Rendering, UE4 adds a third camera between the existing stereoscopic cameras. The new camera is a Monoscopic camera, which enables the hybrid monoscopic (and stereoscopic) rendering pipeline.
+
+### Stereoscopic Camera Frusta Symmetries
+
+Depending on your device's platform, plane geometry of the stereoscopic camera frusta may vary. For GearVR devices, the stereoscopic and monoscopic camera frusta are symmetric; however, for Rift devices, the stereoscopic and monoscopic camera frusta are asymmetric. 
+Please refer to the following diagrams to see how the camera frusta differ between GearVR and Rift devices.
+
+[REGION:imagetable]
+| ![FrustaGeometryGear.png](FrustaGeometryGear.png)(w:542) | ![FrustaGeometryRift.png](FrustaGeometryRift.png)(w:542) |
+| --- | --- |
+| GearVR (Symmetric Frusta) | Rift (Asymmetric Frusta) |
+[/REGION]
+
+As shown on the left, GearVR stereoscopic cameras have symmetric frusta, which means that the monoscopic camera shares the same projection matrix as the stereoscopic cameras.
+On Rift devices, however, the stereoscopic cameras are asymmetric (the inward angle towards the nose is less than the outward angle), which means that the monoscopic camera's 
+frustum is the union of both the left and right frusta, which makes the monoscopic render target marginally bigger than the stereoscopic render targets.
+
+### Split Plane Properties
+
+When UE4 constructs a monoscopic camera, the renderer adds a split (culling) plane. 
+
+![](AddingSplitPlane.png)
+
+[REGION:caption]
+The green split plane acts as the monoscopic cameras near plane.
+[/REGION]
+
+The following properties apply to the split plane being added to your project:
+
+*	The split plane is parallel to the project's z-axis.
+*	The split plane's default **Mono Culling Distance** is set to `750.0` centimeters (7.5 meters).
+*	Objects on the far side of the plane are rendered with the monoscopic camera.
+*	Objects straddling the culling plane are rendered with both camera types (monoscopic and stereoscopic).
+
+In the following image, the shaded (green) area represents the far side of the split plane, objects in this area are rendered in the monoscopic camera's depth buffer. 
+Objects falling on the near side of the split plane are rendered in the stereoscopic camera's depth buffer.
+
+![](MonoRenderArea.png)
+
+The following image comparison demonstrates the split plane in action:
+
+[REGION:imagetable]
+| ![StereoBuffer_banner.png](StereoBuffer_banner.png)(w:542) | ![MonoBuffer_banner.png](MonoBuffer_banner.png)(w:542) |
+| --- | --- |
+| Stereoscopic Depth Buffer | Monoscopic Depth Buffer |
+[/REGION]
+
+## Performance Consideration
+
+Thus far, you've learned that UE4 utilizes a depth buffer rendering technique to separate content being drawn by either stereoscopic or monoscopic cameras. From a high level, the UE4 mobile 
+forward renderer was [modified](#Bookmark1) to use depth buffers, determining if stereoscopic pixels have less depth than monoscopic pixels. When compared to an object-based rendering technique, 
+utilizing a pixel-based split (culling) plane can yield performance advantages, however, when objects go through the split plane, they have to be drawn monoscopically and stereoscopically 
+(even if the object's pixels are far enough to be drawn monoscopically). These extra draw calls typically generate unnecessary bandwidth, increasing GPU and CPU vertex costs.
+
+A good example of this performance hit can be seen in the following image: where the cliff's bounding sphere collides with the split plane, thereby causing the stereoscopic near field cameras to 
+render the cliff (even though the cliff's pixels should only be rendered by the monoscopic far-field camera).
+
+![](StereoNoCull.png)
+
+## Optimizing Performance
+
+To assess your project's performance, refer to the statistical output being generated by the **Rendering Hardware Interface (RHI)**. To view statistics being generated by RHI, perform the following steps:
+
+1.	From the Editor, click the **Viewport Options** button.
+
+	[REGION:lightbox]
+	[![](RHIStat_Step1.png)(w:600)](RHIStat_Step1.png)
+	[/REGION]
+	
+	[REGION:caption]
+		Click for full image.
+	[/REGION]
+
+1.	Hover your mouse cursor over the **Stat** option to open the Statistics menu.
+
+	[REGION:lightbox]
+	[![](RHIStat_Step2.png)(w:600)](RHIStat_Step2.png)
+	[/REGION]
+	
+	[REGION:caption]
+		Click for full image.
+	[/REGION]
+
+1.	Navigate to **Stat > Advanced**.
+
+	[REGION:lightbox]
+	[![](RHIStat_Step3.png)(w:600)](RHIStat_Step3.png)
+	[/REGION]
+	
+	[REGION:caption]
+		Click for full image.
+	[/REGION]
+
+1.	Finally, select the **RHI** option to display your project's RHI [Statistics](Engine/Performance/StatCommands).
+
+	[REGION:lightbox]
+	[![](RHIStat_Step4.png)(w:600)](RHIStat_Step4.png)
+	[/REGION]
+	
+	[REGION:caption]
+		Click for full image.
+	[/REGION]
+
+#### End Result
+
+At this point, you should see your project's RHI [Statistics](Engine/Performance/StatCommands).
+
+[REGION:lightbox]
+[![](RHIStat_Profiling.png)(w:600)](RHIStat_Profiling.png)
+[/REGION]
+
+[REGION:caption]
+	Click for full image.
+[/REGION]
+
+If you determine that your project's RHI profile is unacceptable, there are a few strategies you can take to optimize your project's performance, including:
+
+*	**Updating the Split Plane Distance**. There may be scenes where you have to modify the split plane distance to accommodate large (or small) rendering areas.
+*	**Updating Monoscopic Rendering Modes**. Changing Monoscopic Rendering Modes allows you to determine if certain objects need to be forced to render in mono.
+*	**Forcing Far Objects to Render in Mono**. Inevitably, there will be use cases to force certain objects (such as skyboxes or background meshes) to render in mono.
+
+### Updating the Split Plane Distance
+
+If you'd like to update the split plane's distance, open your project's **World Settings** in the Editor, locate the **VR** menu, and update the **Mono Culling Distance** to your desired distance.
+
+![](MonoCullingDistance.png)
+
+### Updating Monoscopic Rendering Modes
+
+After enabling monoscopic rendering, you may want to update your project's monoscopic rendering mode. Rendering a scene in different modes can help you debug potential performance issues with your project. 
+To update your application's monoscopic rendering mode, go ahead and enter `vr.MonoscopicFarFieldMode [0-4]` into the Editor's Command Console.
+
+![](UpdateMonoMode_console.png)
+
+By default, `vr.MonoscopicFarFieldMode` is set to `1`, however, if you want to change the default value, please refer to the following table.
+
+|Value|Mode|
+|-----|---|
+|**0**| Disable (Hybrid) Monoscopic Far Field Rendering. |
+|**1**| Enable (Hybrid) Monoscopic Far Field Rendering. This mode is set by default when Monoscopic Far Field Rendering is enabled. |
+|**2**| Only enable Stereoscopic Near Field rendering. |
+|**3**| Enable Stereoscopic Near Field rendering while also disabling the Far Field Pixel Depth Test. Basically, this option disables the split (culling) plane. |
+|**4**| Only enable Monoscopic Far Field Rendering. |
+
+### Forcing Far Objects to Render in Mono
+
+Let's say that you're working on the following scene.
+
+![](DebugScene.png)
+
+Now, you input the `vr.MonoscopicFarFieldMode 3` console command, enabling stereoscopic far field rendering while also disabling the split plane.
+
+![](StereoNoCull.png)
+
+[REGION:caption]
+Although you expect the cliff to be culled, you notice that the cliff mesh is still being rendered by the stereoscopic cameras, which can negatively affect performance.
+[/REGION]
+
+If (after observing your scene) you decide that want to force the cliff's mesh to render in Monoscopic Far Field mode, open your mesh using the **Blueprint Editor** and select the **Render in Mono** option under the **Rendering** menu in the **Details** panel.
+
+[REGION:lightbox]
+	[![](ForceRenderMono.png)(w:600)](ForceRenderMono.png)
+[/REGION]
+
+[REGION:caption]
+	Click for full image.
+[/REGION]
+
+[REGION:tip]
+When you set **Render in Mono** to true, the cliff component will only be rendered with the Monoscopic Near Field camera if a Head Mounted Device (HMD) is connected and **Monoscopic Far Field** rendering is enabled for the project.
+[/REGION]
+
+## Stereopsis
+
+The inspiration behind Hybrid Monoscopic Rendering is the ocular process of stereopsis. According to the [American Academy of Ophthalmology](https://www.aao.org/eye-health/ask-ophthalmologist-q/stereopsis), stereopsis is synonymous with depth perception. 
+When you look at an object, each eye looks at the object from a slightly different angle, with each eye sending images back to the brain, where the images are "composited" into a single image. The different images being sent back from each eye form a 
+binocular disparity, which the brain uses to extract depth information. 
+
+[REGION:note]
+The further an object is, the harder it is for the brain to extract the object's depth information.
+[/REGION]
+
+(#Bookmark1)
+###Leveraging Binocular Disparity
+
+Leveraging the fact that the brain has a hard time extracting depth information from far away objects, the UE4 mobile forward renderer was modified to perform the following (in order):
+
+1.	Render opaque objects with stereoscopic cameras.
+
+	![](Stereo.png)
+
+1.	Shift and combine the output to create a monoscopic occlusion mask, pre-populating the monoscopic depth buffer.
+
+1.	Render opaque objects with the monoscopic camera.
+
+	![](MonoOnly.png)
+
+1.	Composite the monoscopic camera's result into the stereo depth buffers.
+
+	![](MonoStereo.png)
+
+1.	Render all transparent content and perform all post-processing with stereoscopic cameras.
+

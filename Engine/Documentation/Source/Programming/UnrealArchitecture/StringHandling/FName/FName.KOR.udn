@@ -1,0 +1,78 @@
+﻿INTSourceChangelist:3599948
+Availability: Public
+Title:FName
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture/Reference, Programming/UnrealArchitecture/Reference/Properties, Programming/UnrealArchitecture/StringHandling
+Description: %doxygen:FName%
+Version: 4.9
+
+[TOC (start:2 end:3)]
+
+
+
+
+[EXCERPT:Overview]
+콘텐츠 브라우저에서 새 애셋 이름을 지을 때, 다이내믹 머티리얼 인스턴스의 파라미터를 변경할 때, 스켈레탈 메시에서 본에 접근할 때, 모두 FName 을 사용합니다. FName 은 문자열 사용에 있어서 초경량 
+시스템을 제공하는데, 주어진 문자열이 재사용된다 해도 데이터 테이블에 한 번만 저장되는 것입니다. FName 은 대소문자를 구분하지 않습니다. 변경도 불가능하여, 조작할 수 없습니다. 이처럼 FName 의 정적인 속성과 저장 시스템 덕에 
+찾기나 키로 FName 에 접근하는 속도가 빠릅니다. FName 서브시스템의 또다른 특징은 스트링에서 FName 변환이 해시 테이블을 사용해서 빠르다는 점입니다.
+[/EXCERPT:Overview]
+
+FName 은 대소문자를 구분하지 않으며, 소유 스트링 테이블에 대한 인덱스와 인스턴스 번호의 조합으로 저장됩니다.
+
+## FName 생성하기
+
+	FName TestHUDName = FName(TEXT("ThisIsMyTestFName"));
+
+
+## 변환
+
+FName 은 FString 과 FText 로만, 그리고 FString 에서만 변환 가능합니다.
+
+### FName 에서
+
+|에서 | 으로 | 예제 |
+|---|------|---------|
+%Programming/UnrealArchitecture/StringHandling:fnametofstring%
+%Programming/UnrealArchitecture/StringHandling:fnametoftext%
+
+### FName 으로
+
+|에서 | 으로 | 예제 |
+|---|------|---------|
+%Programming/UnrealArchitecture/StringHandling:fstringtofname%
+%Programming/UnrealArchitecture/StringHandling:ftexttofname%
+ 
+[REGION:note]
+이러한 변환을 할 때 유념할 점이 있는데, 생성하려는 FName 유형에서 사용할 수 없는 글자가 들어있을 수도 있다는 점입니다.
+`NameTypes.h` 의 `INVALID_NAME_CHARACTERS` 매크로가 FName 에서 사용할 수 없는 글자를 정의하며, `FName` 안의 여러 함수로 
+(이를테면 `IsValidObjectName()` 로) 특정 용례에서의 FName 유효성을 검사할 수 있습니다.
+[/REGION]
+
+## 비교
+
+`==` 연산자는 두 FName 을 비교하는데 사용할 수 있으며, `true` 또는 `false` 를 반환합니다. 실제 문자열 비교라기 보다는 `Index` 안의 값을 비교하므로, CPU 가 크게 절약됩니다.
+
+`FName::Compare` 을 사용해서 두 FName 을 비교할 수도 있는데, 이 값이 다른 값보다 작으면 음수, 같으면 0, 크면 양수를 반환합니다.
+
+	CompareFloat = TestFName.Compare(OtherFName); 
+
+## FName 사용하기
+
+FName 은 꽤나 단순합니다. 어느 한 액터의 스켈레탈 메시 컴포넌트에서 "pelvis" 라는 이름의 본을 구하고 싶다 칩시다. 아래 C++ 코드는 FName 사용처가 GetBoneRotation() 에 전달됨과 동시에 
+바로 구성되는 것을 볼 수 있습니다.
+
+	FRotator rotPelvis = Mesh->MeshGetInstance(this))->GetBoneRotation(FName(TEXT("pelvis")));
+
+이렇게 하면 FName 이 생성되어 `GetBoneRotation()` 에 전달되는데, 이는 해당 본에 대한 FRotator 를 반환하는 것입니다. 패키지 로드시 본 이름이 FName 테이블에 로드되어, 
+할당 없이도 FName 에 대한 생성자가 해시 테이블에서 본의 이름을 찾을 수 있는 것입니다.
+
+
+## 네임 테이블 검색하기
+
+FName 이 네임 테이블 안에 있는지 알아내고는 싶은데 자동으로 추가되도록 하고 싶지는 않은 경우, FName 생성자에 다른 검색 유형을 대주면 됩니다:
+
+	if( FName(TEXT("pelvis"), FNAME_Find) != NAME_None )
+	{
+		// Do something
+	}
+
+네임 테이블에 이름이 존재하지 않는 경우, FName 의 Index 가 `NAME_None` 으로 설정됩니다. 참고로 일반 스트링에 하듯이 NULL 포인터 검사를 하지는 않습니다.

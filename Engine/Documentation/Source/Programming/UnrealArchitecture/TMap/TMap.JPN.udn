@@ -1,0 +1,553 @@
+﻿INTSourceChangelist:3599948
+Title:TMap
+Crumbs:
+Description:TMap は主に key 型と value 型の 2 つの型によって定義され、それが連想ペアとしてマップ内に格納されます。 
+Availability:Public
+Version:4.14
+Related:Engine/UI/LevelEditor/Details/Properties/Map
+
+[TOC]
+
+TArray の次に **Unreal Engine 4** (UE4) でよく使われるコンテナは **TMap** です。このコンテナは連想コンテナです。つまり、すべてのキーに関連した値があり、このキーで効率的に値オブジェクトを参照することができます。
+
+マップは 2 種類あります。TMap と **TMultiMap** です。TMap のキーは一意なので、キーが既に存在する場合に新規のキー / 値のペアを挿入すると、存在しているペアが置き換えられてしまいます。TMultiMap のキーは一意ではないので、新規ペアが追加されても既存するペアは置き換えられません。
+
+## TMap
+
+TMap は主に key 型と value 型の 2 つの型によって定義され、それが連想ペアとしてマップ内に格納されます。これらのペアを個々のオブジェクトのようにマップの element 型と呼ぶと便利です。このページでは、個々のコンポーネントはエレメントのキーまたはエレメントの値と読んでいますが、エレメントはキー / 値のペアを意味します。element 型は実際は `TPair< KeyType, ElementType >` です。 TPair 型を直接参照する必要は滅多にありません。
+
+TSet は TMap と同じ、均一なコンテナです。つまり、すべてのエレメントが完全に同じ型です。TMap も value 型で、通常のコピー、アサイメント、デストラクタ操作をサポートします。エレメントの強力なオーナーシップを持つのでマップが破棄されると破棄されます。Key 型と value 型が value 型である必要もあります。
+
+TMap はハッシュ コンテナです。つまり、デフォルトで key 型が `GetTypeHash` 関数をサポートし、キーの等価比較のために `演算子==` が与えられていなければなりません。ハッシングについては後ほど説明します。
+
+TMap は、メモリの割り当て動作を制御するオプションのアロケータを受け取ります。標準の UE4 のアロケータ (`FHeapAllocator`、`TInlineAllocator` など) は TMap のアロケータとしては使用できません。代わりに、マップが使用すべきハッシュ バケット数や、ハッシュおよびエレメント格納に使う標準 UE4 アロケータを定義します。詳細は `TSetAllocator` をご覧ください。
+
+最後の TMap テンプレート パラメータは **KeyFuncs** です。element 型からのキーの取り出し方、2 つのキーの等価の比較方法、キーのハッシュ方法をマップに伝えます。これらには、演算子 == を等価比較に、ハッシングには非メンバ関数を使って、リファレンスをキーに戻すデフォルトがついています。Key 型がこれらの関数をサポートしている場合、カスタム仕様の KeyFuncs を与えなくてもマップキーとして使用できます。
+
+TArray とは異なり、メモリ内の TMap エレメントの相対順序を信頼することはできず、エレメントをイタレートすると追加時とは異なる順序で返される可能性が高くなります。エレメントもメモリ内にぴったり並ばなくなります。マップの補助データ構造は疎配列、つまり配列に穴があります。マップからエレメントが削除されると、疎配列内に穴があき、その穴は後から追加されたエレメントによって埋められます。TMap は穴を埋めるためにエレメントをシャッフルすることはありませんが、一杯になったストレージに新たにエレメントが追加されると、ストレージ全体を再割り当てすることができるため、マップ エレメントへのポインタは無効にされます。
+
+## マップの作成と追加
+
+TMap の作成は以下の手順で行います。
+
+	TMap<int32, FString> FruitMap;
+
+これにより、整数が文字列にマップされる設定の空の TMap が作成されます。アロケータも KeyFuncs も指定していないので、マップは標準のヒープ アロケーションを行い、 == でキー (int32) を比較し、 GetTypeHash を使ってハッシュ値を算出します。この時点ではメモリはアロケートされていません。
+
+マップをエントリする標準的な方法は、**Add** 関数でキーと値を与えます。
+
+	FruitMap.Add(5, TEXT("Banana"));
+	FruitMap.Add(2, TEXT("Grapefruit"));
+	FruitMap.Add(7, TEXT("Pineapple"));
+	// FruitMap == [
+	// 	{ Key:5, Value:"Banana"     },
+	// 	{ Key:2, Value:"Grapefruit" },
+	// 	{ Key:7, Value:"Pineapple"  }
+	// ]
+
+ここには挿入された順序でエレメントがリスト化されていますが、これらのエレメントの順序は保証されません。新規マップの場合は挿入順序が維持される可能性が高いですが、挿入と削除を繰り返すうちに、新規エレメントが末尾に現れなくなってきます。
+
+これは TMultiMap ではないので、キーが一意であることが保証されます。複製キーを追加しようとすると何が起こるか分かります。
+
+	FruitMap.Add(2, TEXT("Pear"));
+	// FruitMap == [
+	// 	{ Key:5, Value:"Banana"    },
+	// 	{ Key:2, Value:"Pear"      },
+	// 	{ Key:7, Value:"Pineapple" }
+	// ]
+
+マップにはまだエレメントが 3 つありますが、"Grapefruit" だった Key 2 の値が "Pear" に置き換えられています。
+
+Add 関数は、値のないキーを受け取るとオーバーロードされます。キーだけが提供されると、値はデフォルトで構成されます。
+
+	FruitMap.Add(4);
+	// FruitMap == [
+	// 	{ Key:5, Value:"Banana"    },
+	// 	{ Key:2, Value:"Pear"      },
+	// 	{ Key:7, Value:"Pineapple" },
+	// 	{ Key:4, Value: ""          }
+	// ]
+
+TArray と同様に、マップへ挿入する時にはエレメントが一時作成されてしまわないように Add ではなく **Emplace** を使います。
+
+	FruitMap.Emplace(3, TEXT("Orange"));
+	// FruitMap == [
+	// 	{ Key:5, Value:"Banana"    },
+	// 	{ Key:2, Value:"Pear"      },
+	// 	{ Key:7, Value:"Pineapple" },
+	// 	{ Key:4, Value: ""          },
+	// 	{ Key:3, Value:"Orange"    }
+	// ]
+
+ここでは 2 つの引数がそれぞれ key 型と value 型のコンストラクタに直接渡されています。ここでは int32 は実際に何も影響は受けませんが、一時的な Fstring が作成されないようにしています。TArray とは異なり、単一の引数付きコンストラクタでのみエレメントをマップに配置可能です。
+
+Append 関数を使って、別のマップからすべてのエレメントを挿入してマージすることも可能です。
+
+	TMap<int32, FString> FruitMap2;
+	FruitMap2.Emplace(4, TEXT("Kiwi"));
+	FruitMap2.Emplace(9, TEXT("Melon"));
+	FruitMap2.Emplace(5, TEXT("Mango"));
+	FruitMap.Append(FruitMap2);
+	// FruitMap == [
+	// 	{ Key:5, Value:"Mango"     },
+	// 	{ Key:2, Value:"Pear"      },
+	// 	{ Key:7, Value:"Pineapple" },
+	// 	{ Key:4, Value:"Kiwi"      },
+	// 	{ Key:3, Value:"Orange"    },
+	// 	{ Key:9, Value:"Melon"     }
+	// ]
+
+上の例では、マップは、個々に追加するために Add/Emplace を使う場合と同等となり、ソースマップから複製したキーはターゲット内のものと置き換わります。
+
+
+TMap を `UPROPERTY()` マクロと編集可能なキーワード (`EditAnywhere`、`EditDefaultsOnly`、`EditInstanceOnly`) のいずれかでマークすると、 [アンリアル エディタでエレメントの追加および編集](Engine/UI/LevelEditor/Details/Properties/Map) が可能になります。
+
+	UPROPERTY(Category = MapsAndSets, EditAnywhere)
+	TMap<int32, FString> FruitMap;
+
+## イタレーション
+
+TMaps のイタレーションは TArrays と似ています。element 型が TPair であることを覚えていれば、C++ の ranged-for 機能を使うことができます。
+
+	for (auto& Elem :FruitMap)
+	{
+		FPlatformMisc::LocalPrint(
+			*FString::Printf(
+				TEXT("(%d, \"%s\")\n"),
+				Elem.Key,
+				*Elem.Value
+			)
+		);
+	}
+	// Output:
+	// (5, "Mango")
+	// (2, "Pear")
+	// (7, "Pineapple")
+	// (4, "Kiwi")
+	// (3, "Orange")
+	// (9, "Melon")
+
+マップには、イタレーションの制御を強める独自の iterator 型も含まれます。**CreateIterator** 関数は読み書きが可能ですが、**CreateConstIterator** 関数は読み取り専用です。イテレータ オブジェクトそのものはキーと値のアクセスに対して **Key()** 関数と **Value()** 関数を提供します。いずれかの形式がコード内で使用されているのが分かります。
+
+	for (auto It = FruitMap.CreateConstIterator(); It; ++It)
+	{
+		FPlatformMisc::LocalPrint(
+			*FString::Printf(
+				TEXT("(%d, \"%s\")\n"),
+				It.Key(),   // same as It->Key
+				*It.Value() // same as *It->Value
+			)
+		);
+	}
+
+## クエリ
+
+**Num** 関数を使って、維持しているエレメント数をマップに問い合わせることができます。
+
+	int32 Count = FruitMap.Num();
+	// Count == 6
+
+インデックス演算子 [] をキーと使って、所定のキーと関連する値のリファレンスを取得します。non-const マップで演算子[] を呼び出すと non-const リファレンスが返され、const マップ上で呼び出すと const リファレンスを返します。キーが存在しなければ、アサートが発行されます。
+
+	FString Val7 = FruitMap[7];
+	// Val7 == "Pineapple"
+	FString Val8 = FruitMap[8]; // assert!
+
+特定のキーがマップ内に存在するかどうかを **Contains** 関数で確認することができます。
+
+	bool bHas7 = FruitMap.Contains(7);
+	bool bHas8 = FruitMap.Contains(8);
+	// bHas7 == true
+	// bHas8 == false
+
+たいていの場合、キーが存在するかどうかは分からないけれども、エレメントを参照する必要があります。演算子[] の後に Contains を使用するとキーのダブル参照ができますが、これはやらないようにしてください。**Find** 関数で 1 回の検索ができます。リファレンスではなく見つかったエレメントの値へポイントを返し、キーが存在しなければ null を返します。
+
+	FString* Ptr7 = FruitMap.Find(7);
+	FString* Ptr8 = FruitMap.Find(8);
+	// *Ptr7 == "Pineapple"
+	//  Ptr8 == nullptr
+
+Const マップ上で呼ばれると、返されるポインタも const になります。
+
+**FindOrAdd** 関数は所定のキーを検索し、関連する値へリファレンスを返します。キーが存在しなければ、リファレンスを返す前にデフォルトで設定された値でそれを追加します。追加が必要な場合もあるので、この関数は const マップ上で呼び出すことはできません。
+
+	FString& Ref7 = FruitMap.FindOrAdd(7);
+	// Ref7     == "Pineapple"
+	// FruitMap == [
+	// 	{ Key:5, Value:"Mango"     },
+	// 	{ Key:2, Value:"Pear"      },
+	// 	{ Key:7, Value:"Pineapple" },
+	// 	{ Key:4, Value:"Kiwi"      },
+	// 	{ Key:3, Value:"Orange"    },
+	// 	{ Key:9, Value:"Melon"     }
+	// ]
+	FString& Ref8 = FruitMap.FindOrAdd(8);
+	// Ref8     == ""
+	// FruitMap == [
+	// 	{ Key:5, Value:"Mango"     },
+	// 	{ Key:2, Value:"Pear"      },
+	// 	{ Key:7, Value:"Pineapple" },
+	// 	{ Key:4, Value:"Kiwi"      },
+	// 	{ Key:3, Value:"Orange"    },
+	// 	{ Key:9, Value:"Melon"     },
+	// 	{ Key:8, Value: ""          }
+	// ]
+
+[REGION:note]
+ここで、再割り当てが行われた場合には、Ref7 reference は FruitMap.FindOrAdd(8) の呼び出しにより無効になっている可能性があります。ご注意ください。
+[/REGION]
+
+**FindRef** 関数は、その名とは違って、キーを検索したらリファレンスではなく値を返します。キーが検出されたら、関連する値のコピーが返されます。そうでない場合は、デフォルトで構成された value 型が返されます。この結果、FindOrAdd と同じビヘイビアになりますが、FindRef 関数はリファレンスではなく値を返すので、マップは修正されず、const オブジェクト上で呼び出すことができます。
+
+	FString Val7 = FruitMap.FindRef(7);
+	FString Val6 = FruitMap.FindRef(6);
+	// Val7     == "Pineapple"
+	// Val6     == ""
+	// FruitMap == [
+	// 	{ Key:5, Value:"Mango"     },
+	// 	{ Key:2, Value:"Pear"      },
+	// 	{ Key:7, Value:"Pineapple" },
+	// 	{ Key:4, Value:"Kiwi"      },
+	// 	{ Key:3, Value:"Orange"    },
+	// 	{ Key:9, Value:"Melon"     },
+	// 	{ Key:8, Value: ""          }
+	// ]
+
+**FindKey** 関数は、リバース ルックアップ (値を与えてキーを検索) を行います。この関数を使用する場合は気をつけてください。キーと違って値はハッシュ化されないので、キーのリファレンスは線形処理になります。さらに、値が一意である保証はないので、マップに重複した値が含まれていると特定の値に対して返されたキーは任意となります。
+
+	const int32* KeyMangoPtr   = FruitMap.FindKey(TEXT("Mango"));
+	const int32* KeyKumquatPtr = FruitMap.FindKey(TEXT("Kumquat"));
+	// *KeyMangoPtr   == 5
+	//  KeyKumquatPtr == nullptr
+
+**GenerateKeyArray** 関数および **GenerateValueArray** 関数は、すべてのキーと値のそれぞれのコピーを TArray に入力します。どちらの関数の場合も、渡された配列は設定前は空の状態なので、エレメント数は常にマップ内のエレメント数と等しい結果になります。
+
+	TArray<int32>   FruitKeys;
+	TArray<FString> FruitValues;
+	FruitKeys.Add(999);
+	FruitKeys.Add(123);
+	FruitMap.GenerateKeyArray  (FruitKeys);
+	FruitMap.GenerateValueArray(FruitValues);
+	// FruitKeys   == [ 5,2,7,4,3,9,8 ]
+	// FruitValues == [ "Mango","Pear","Pineapple","Kiwi","Orange",
+	//                  "Melon","" ]
+
+## Removal
+
+**Remove** 関数を使って、削除するエレメントのキーを与えることで、マップからエレメントを削除することができます。
+
+	FruitMap.Remove(8);
+	// FruitMap == [
+	// 	{ Key:5, Value:"Mango"     },
+	// 	{ Key:2, Value:"Pear"      },
+	// 	{ Key:7, Value:"Pineapple" },
+	// 	{ Key:4, Value:"Kiwi"      },
+	// 	{ Key:3, Value:"Orange"    },
+	// 	{ Key:9, Value:"Melon"     }
+	// ]
+
+[REGION:note]
+Visual Studio の [Watch] ウィンドウでマップを視覚化すると分かりますが、エレメントを削除するとデータ構造中に「穴」があいたままになってしまいます。今ここでは分かりやすいように穴をなくしています。
+[/REGION]
+
+**FindAndRemoveChecked** 関数は、エレメントを削除し、値を返します。関数名の「Checked」という部分は、キーの存在を確認し、存在していなければアサートするという意味です。
+
+	FString Removed7 = FruitMap.FindAndRemoveChecked(7);
+	// Removed7 == "Pineapple"
+	// FruitMap == [
+	// 	{ Key:5, Value:"Mango"  },
+	// 	{ Key:2, Value:"Pear"   },
+	// 	{ Key:4, Value:"Kiwi"   },
+	// 	{ Key:3, Value:"Orange" },
+	// 	{ Key:9, Value:"Melon"  }
+	// ]
+
+	FString Removed8 = FruitMap.FindAndRemoveChecked(8); // assert!
+
+**RemoveAndCopyValue** 関数も同じように機能します。渡される value 型への参照を受け取り、キーが存在するかどうかを伝えるために bool を返します。これにより、存在しないキーがあってもランタイム エラーを起こさずに使うことができます。キーが存在しない場合、false が返され、渡されたオブジェクトとマップはそのまま変更されません。
+
+	FString Removed;
+	bool bFound2 = FruitMap.RemoveAndCopyValue(2, Removed);
+	// bFound2  == true
+	// Removed  == "Pear"
+	// FruitMap == [
+	// 	{ Key:5, Value:"Mango"  },
+	// 	{ Key:4, Value:"Kiwi"   },
+	// 	{ Key:3, Value:"Orange" },
+	// 	{ Key:9, Value:"Melon"  }
+	// ]
+	bool bFound8 = FruitMap.RemoveAndCopyValue(8, Removed);
+	// bFound8  == false
+	// Removed  == "Pear", i.e. unchanged
+	// FruitMap == [
+	// 	{ Key:5, Value:"Mango"  },
+	// 	{ Key:4, Value:"Kiwi"   },
+	// 	{ Key:3, Value:"Orange" },
+	// 	{ Key:9, Value:"Melon"  }
+	// ]
+
+最後にすべてのエレメントを **Empty** 関数で削除することができます。
+
+	TMap<int32, FString> FruitMapCopy = FruitMap;
+	// FruitMapCopy == [
+	// 	{ Key:5, Value:"Mango"  },
+	// 	{ Key:4, Value:"Kiwi"   },
+	// 	{ Key:3, Value:"Orange" },
+	// 	{ Key:9, Value:"Melon"  }
+	// ]
+	FruitMapCopy.Empty();
+
+	// FruitMapCopy == []
+
+TArray と同様に、Empty はマップに一定のエレメント数を再追加する時の最適化をするスラック値をオプションで受け取ります。
+
+## Sorting
+
+TMaps は一時的にソートすることができます。さらに修正を加えるとソート順ではなくなりますが、次回マップをイタレーションする時にマップがソート順序でエレメントを表示します。ソートは不安定なので、同等のエレメントがどんな順序でも表示される可能性があります。
+
+**KeySort** 関数および **ValueSort** 関数は、それぞれキーと値の順にソートします。そして両方ともソート順序を指定するバイナリ述語を受け取ります。
+
+	FruitMap.KeySort([](int32 A, int32 B) {
+		return A > B; // sort keys in reverse
+	});
+	// FruitMap == [
+	// 	{ Key:9, Value:"Melon"  },
+	// 	{ Key:5, Value:"Mango"  },
+	// 	{ Key:4, Value:"Kiwi"   },
+	// 	{ Key:3, Value:"Orange" }
+	// ]
+	FruitMap.ValueSort([](const FString& A, const FString& B) {
+
+		return A.Len() < B.Len(); // sort strings by length
+	});
+	// FruitMap == [
+	// 	{ Key:4, Value:"Kiwi"   },
+	// 	{ Key:5, Value:"Mango"  },
+	// 	{ Key:9, Value:"Melon"  },
+	// 	{ Key:3, Value:"Orange" }
+	// ]
+
+## 演算子
+
+TArray と同様に、TMap は一般的な value 型です。標準のコピー コンストラクタもしくは代入演算子でコピーすることができます。マップは必ずエレメントを所有しているため、マップは「深いコピー」が行われ、新規のマップにはそのエレメントの個々のコピーが作られます。
+
+	TMap<int32, FString> NewMap = FruitMap;
+	NewMap[5] = "Apple";
+	NewMap.Remove(3);
+	// FruitMap == [
+	// 	{ Key:4, Value:"Kiwi"   },
+	// 	{ Key:5, Value:"Mango"  },
+	// 	{ Key:9, Value:"Melon"  },
+	// 	{ Key:3, Value:"Orange" }
+	// ]
+	// NewMap == [
+	// 	{ Key:4, Value:"Kiwi"  },
+	// 	{ Key:5, Value:"Apple" },
+	// 	{ Key:9, Value:"Melon" }
+	// ]
+
+TMap は、**MoveTemp** 関数で呼び出し可能な移動の動作もサポートしています。移動後、もとのマップが空になることが保証されます。
+
+	FruitMap = MoveTemp(NewMap);
+	// FruitMap == [
+	// 	{ Key:4, Value:"Kiwi"  },
+	// 	{ Key:5, Value:"Apple" },
+	// 	{ Key:9, Value:"Melon" }
+	// ]
+	// NewMap == []
+
+## Slack
+
+TMaps にも **スラック** の概念があり、マップの入力の最適化に使用できます。**Reset** 関数は Empty() の呼び出しと似ていますが、エレメントによって既に使用されたメモリは解放しません。
+
+	FruitMap.Reset();
+	// FruitMap == [<invalid>, <invalid>, <invalid>]
+
+Empty と同じ方法でマップが空にされますが、ストレージに使用しているメモリは解放されずスラックのままです。
+
+TMap は TArray::Max() のように事前割り当てされているエレメント数を確認する方法は提供していませんが、スラックの事前割り当てはサポートしています。Reserve 関数は、追加前に指定したエレメント数に対してスラックを事前割り当てします。
+
+	FruitMap.Reserve(10);
+	for (int32 i = 0; i < 10; ++i)
+	{
+		FruitMap.Add(i, FString::Printf(TEXT("Fruit%d"), i));
+	}
+	// FruitMap == [
+	// 	{ Key:9, Value:"Fruit9" },
+	// 	{ Key:8, Value:"Fruit8" },
+	// 	...
+	// 	{ Key:1, Value:"Fruit1" },
+	// 	{ Key:0, Value:"Fruit0" }
+	// ]
+
+[REGION:note]
+スラックは、新規エレメントを逆の順序で追加してしまうことがあることに注意してください。マップにおけるエレメントの順序を信用すべきでない例です。
+[/REGION]
+
+**Shrink** 関数は、コンテナの終わりから必要のないスラックを削除する点で TArray と同じです。ただし、TMap はデータ構造に穴を持つことができるので、構造の終わりに残された穴からスラックのみを削除します。
+
+	for (int32 i = 0; i < 10; i += 2)
+	{
+		FruitMap.Remove(i);
+	}
+	// FruitMap == [
+	// 	{ Key:9, Value:"Fruit9" },
+	// 	<invalid>,
+	// 	{ Key:7, Value:"Fruit7" },
+	// 	<invalid>,
+	// 	{ Key:5, Value:"Fruit5" },
+	// 	<invalid>,
+	// 	{ Key:3, Value:"Fruit3" },
+	// 	<invalid>,
+	// 	{ Key:1, Value:"Fruit1" },
+	// 	<invalid>
+	// ]
+	FruitMap.Shrink();
+	// FruitMap == [
+	// 	{ Key:9, Value:"Fruit9" },
+	// 	<invalid>,
+	// 	{ Key:7, Value:"Fruit7" },
+	// 	<invalid>,
+	// 	{ Key:5, Value:"Fruit5" },
+	// 	<invalid>,
+	// 	{ Key:3, Value:"Fruit3" },
+	// 	<invalid>,
+	// 	{ Key:1, Value:"Fruit1" }
+	// ]
+
+終わりには穴が 1 つしかないので、Shrink の呼び出しにより削除されるのは、有効なエレメントが 1 つだけであることに注意してください。**Compact** 関数は Shrink の前にすべての穴を削除します。
+
+	FruitMap.Compact();
+	// FruitMap == [
+	// 	{ Key:9, Value:"Fruit9" },
+	// 	{ Key:7, Value:"Fruit7" },
+	// 	{ Key:5, Value:"Fruit5" },
+	// 	{ Key:3, Value:"Fruit3" },
+	// 	{ Key:1, Value:"Fruit1" },
+	// 	<invalid>,
+	// 	<invalid>,
+	// 	<invalid>,
+	// 	<invalid>
+	// ]
+	FruitMap.Shrink();
+	// FruitMap == [
+	// 	{ Key:9, Value:"Fruit9" },
+	// 	{ Key:7, Value:"Fruit7" },
+	// 	{ Key:5, Value:"Fruit5" },
+	// 	{ Key:3, Value:"Fruit3" },
+	// 	{ Key:1, Value:"Fruit1" }
+	// ]
+
+## KeyFuncs
+
+型に演算子 == があって非メンバ GetTypeHash がオーバーロードする限り、何も変更せずに TMap 用の KeyType として使用できます。ただし、これらの関数をオーバーロードしたくない場合は型をキーとして使うと便利かもしれません。このようなケースでは、**KeyFuncs** を自分でカスタム化することができます。
+
+KeyFuncs には、2 つの typedef と 3 つの静的関数が必要です。
+
+* **KeyInitType** - キーを渡すために使います。
+* **ElementInitType** - エレメントを渡すために使います。
+* **KeyInitType GetSetKey(ElementInitType Element)** - エレメントのキーを返します。
+* **bool Matches(KeyInitType A, KeyInitType B)** - A と B が等しい場合に返します。
+* **uint32 GetKeyHash(KeyInitType Key)** - キーのハッシュ値を返します。
+
+KeyInitType と ElementInitType は key 型と element 型の通常の渡し方の規則に対する typedef です。通常これらは、trivial 型の値と non-trivial 型の const 参照になります。マップの element 型は TPair であることを覚えておいてください。
+
+カスタム仕様にした KeyFuncs はこのような感じです。
+
+	struct FMyStruct
+	{
+		// String which identifies our key (キーを特定する文字列) 
+		FString UniqueID;
+	// Some state which doesn't affect struct identity (構造体の恒等式に影響を及ぼさない一部のステート) 
+
+		float SomeFloat;
+	explicit FMyStruct(float InFloat)
+
+			:UniqueID (FGuid::NewGuid().ToString())
+			, SomeFloat(InFloat)
+		{
+		}
+	};
+	template <typename ValueType>
+	struct TMyStructMapKeyFuncs :
+		BaseKeyFuncs<
+			TPair<FMyStruct, ValueType>,
+			FString
+		>
+	{
+	private:
+		typedef BaseKeyFuncs<
+			TPair<FMyStruct, ValueType>,
+			FString
+		> Super;
+	public:
+
+		typedef typename Super::ElementInitType ElementInitType;
+		typedef typename Super::KeyInitType     KeyInitType;
+
+		static KeyInitType GetSetKey(ElementInitType Element)
+		{
+			return Element.Key.UniqueID;
+		}
+	static bool Matches(KeyInitType A, KeyInitType B)
+
+		{
+			return A.Compare(B, ESearchCase::CaseSensitive) == 0;
+		}
+	static uint32 GetKeyHash(KeyInitType Key)
+
+		{
+			return FCrc::StrCrc32(*Key);
+		}
+	};
+
+ステートの一部に一意の識別子を持つ型がありますが、恒等式に影響しないステートも他にあります。GetTypeHash と 演算子 == はここでは適切ではありません。ステートの一部を無視することは演算子 == に嘘をつくことになりますし、GetTypeHash は演算子 == と一致する必要がありますが、演算子 == を正しく定義すると一致しません。ただ、マップ内でこの型を認識するためには、ステートの UniqueID の部分だけが使えれば良いのです。
+
+1. まず、KeyInitType と ElementInitType を含むいくつかの型を定義するために **BaseKeyFuncs** を継承します。他のすべてのインプリメンテーションで使用できるように、これらを直接 Super から派生クラスに引き継ぎます。
+
+	BaseKeyFuncs は 2 つのテンプレート パラメータを受け取ります。 GetSetKey から返されるオブジェクトであるマップの element 型および key 型です。すべてのマップと同様で、element 型は TPair です。KeyType として FMyStruct を、そして ValueTypeとして TMyStructMapKeyFuncs のテンプレート パラメータを受け取ります。差し替えの KeyFuncs をテンプレートにして、 ValueType がマップごとに指定されるようにします。FMyStruct 上にキーをつけた TMap を作成するたびに新規に KeyFuncs を定義する必要がなくなります。2 つ目の BaseKeyFuncs 引数はキーの型です。エレメントのキーフィールドに格納されているTPair の 'KeyType' と混乱しないようにしてください。FMyStruct::UniqueID をキーとして使いたいので、ここで FString を指定します。
+
+1. 次に、必要とされる 3 つの KeyFuncs 静的関数を定義します。1 つ目は GetSetKey です。Element 型を与えるとキーを返します。Element 型は TPair でキーは UniqueID なので、それをそのまま単純に返します。
+
+	2 つ目の静的関数は Matches で、GetSetKey を使って Element 型から既に取得されている 2 つのエレメントのキーを受け取って、比較して等しいかどうかを確認します。FString の演算子 == は大文字・小文字を区別しません。区別した検索をしたいので、適切なオプションが含まれる FString::Compare 関数を使います。
+
+1. 最後に、GetKeyHash 静的関数が得られたキーを受け取り、そのハッシュ値を返します。ここでも、FString に対する GetTypeHash のビヘイビアにより大文字小文字が無視されるので、大文字小文字を区別する FCrc 関数を使ってハッシュ値を計算します。
+
+1. 新しい KeyFuncs を使って TMap が作成できるようになりました。KeyFuncs パラメータは最後なのでアロケータも設定する必要がありますが、デフォルトを代用します。
+
+		TMap<
+			FMyStruct,
+			int32,
+			FDefaultSetAllocator,
+			TMyStructMapKeyFuncs<int32>
+		> MyMapToInt32;
+	// Add some elements
+
+		MyMapToInt32.Add(FMyStruct(3.14f), 5);
+		MyMapToInt32.Add(FMyStruct(1.23f), 2);
+	// MyMapToInt32 == [
+
+		// 	{
+		// 		Key: {
+		// 			UniqueID:"D06AABBA466CAA4EB62D2F97936274E4",
+		// 			SomeFloat:3.14f
+		// 		},
+		// 		Value:5
+		//	},
+		// 	{
+		// 		Key: {
+		// 			UniqueID:"0661218447650259FD4E33AD6C9C5DCB",
+		// 			SomeFloat:1.23f
+		// 		},
+		// 		Value:5
+		//	}
+		// ]
+
+KeyFuncs を自分で設定する際に注意する点は、 TMap は、KeyFuncs::Matches を使って等価を比較する 2 つのアイテムが KeyFuncs::GetKeyHash から同じ値を返すことを前提としていることです。さらに、これにより TMap の内部ハッシュが無効になるので、これらの関数のいずれかの結果が変更されるように既存マップ エレメントのキーを修正すると未定義の動作とみなされます。これらの規則は、デフォルトの KeyFuncs を使うと、演算子 == と GetKeyHash のオーバーロードにも適用されます。
+
+## その他
+
+**CountBytes** 関数と **GetAllocatedSize** 関数は、内部配列の使用メモリを概算します。CountBytes は FArchive を受け取り、GetAllocatedSize を直接呼び出すことが可能です。これらは一般的には統計情報の報告に使用されます。
+
+**Dump** 関数は、FOutputDevice を受け取り、マップのコンテンツに関するインプリメンテーションの情報を書き出します。通常はデバッグ作業に使用します。
+

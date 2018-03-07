@@ -1,0 +1,53 @@
+﻿Availability:Public
+Title: 多播代理
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture, Programming/UnrealArchitecture/Delegates
+Description: 可以绑定到多个函数上并可以一次性执行它们的代理。
+
+多播代理的功能和单播代理几乎一样。区别是它们对目标为弱引用，可以和结构体一起使用，可以很方便地进行拷贝，等等。
+和普通代理一样，多播代理可被载入/保存，并远程触发；但是，多播代理的函数无法使用返回值。最好将它们用于方便地传递代理集合。
+
+[](Programming/UnrealArchitecture/Delegates\Events) 是特定类型的多播代理，同时具有对`Broadcast()`, `IsBound()`, 和 `Clear()`函数的受限访问。
+
+(#DeclaringMulti-castDelegates)
+## 声明多播代理
+
+多播代理的声明方式和[声明标准代理](Programming/UnrealArchitecture/Delegates#声明代理)一样，只是它们使用针对多播代理的宏变种。
+
+| 声明宏 | 描述|
+| --- | --- |
+| `DECLARE_MULTICAST_DELEGATE[_Const, _RetVal, etc.]( DelegateName )` | 创建一个多播的多播代理。|
+| `DECLARE_DYNAMIC_MULTICAST_DELEGATE[_Const, _RetVal, etc.]( DelegateName )` | 创建一个动态的多播代理。|
+| `DECLARE_DYNAMIC_MULTICAST_DELEGATE[_Const, _RetVal, etc.]( DelegateName )` |  创建一个封装的动态多播代理。|
+
+(#BindingMulti-CastDelegates)
+## 绑定多播代理
+
+多播代理在代理触发时可能会调用多个函数绑定。因此，绑定函数在语句中看起来更为像是数组。
+
+| 函数| 描述|
+| --- | --- |
+| `Add()` | 添加函数代理到此多播代理的调用列表。|
+| `AddStatic()` | 添加一个原始的C++指针全局函数代理。|
+| `AddRaw()` | 添加一个原始的C++指针代理。原始指针不使用任何引用，所以如果从代理的底层删除了该对象，那么调用它可能是不安全的。因此，当调用Execute()时一定要小心!|
+| `AddSP()` | 添加一个基于共享指针（快速，非线程安全）的成员函数代理。共享指针代理保持到您的对象的弱引用。|
+| `AddUObject()` | 添加一个基于UObject的成员函数代理。UObject 代理保持到您的对象的弱引用。|
+| `Remove()` | 将函数从这个多播代理的调用列表中移除(性能为O(N))。请注意代理的顺序可能不会被保留！ |
+| `RemoveAll()` | 将所有函数从与特定UserObject绑定的多播代理的调用列表中移除。请注意代理的顺序可能不会被保留！|
+
+[REGION:tip]
+`RemoveAll()`将会移除所有与提供的指针绑定的注册代理！ 不与对象指针绑定的原始代理将不会被此函数移除！
+[/REGION]
+
+请参照 `DelegateSignatureImpl.inl` (located in `..\UE4\Engine\Source\Runtime\Core\Public\Templates\`) 文件获得关于这些函数的变种、参数及实现相关的信息。
+
+## 多播代理执行
+
+多播代理允许您附加多个函数代理，然后通过调用多播代理的  `Broadcast()` 函数一次性执行所有函数代理。多播代理的签名不能使用返回值。
+
+任何时候在多播代理上调用 `Broadcast()` 函数都是安全的，即时它没有绑定任何函数也可以。唯一需要注意的时候是您使用代理初始化输出变量时，这样做一般是非常不好的。
+
+当调用 `Broadcast()` 函数时，绑定函数的执行顺序是不确定的。可能并不按照函数的添加顺序执行。
+
+| 函数| 描述|
+| --- | --- |
+| `Broadcast()` | 广播该代理到所有绑定对象，可能过期的对象除外。|

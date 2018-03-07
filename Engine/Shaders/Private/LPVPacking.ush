@@ -1,0 +1,112 @@
+//-----------------------------------------------------------------------------
+// File:		LPVPacking.usf
+//
+// Summary:		Common functionality for LPV compute shaders
+//
+// Created:		2015-04-15
+//
+// Author:		Ben Woodhouse - mailto:benwood@microsoft.com
+//
+//				Copyright (C) Microsoft. All rights reserved.
+//-----------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+
+struct LPVCellPacked
+{
+	uint packedCoeffs[14];
+};
+
+//-------------------------------------------------------------------------------------------------
+
+//-------------------------------------------------------------------------------------------------
+
+LPVCellPacked PackLPVCell( LPVCell cellIn )
+{
+	LPVCellPacked cellOut;
+	uint3 compressedCoeffs[9]; 
+	[unroll]
+	for ( int i=0; i<9; i++ )
+	{
+		compressedCoeffs[i] = f32tof16( cellIn.coeffs[i] );
+	}
+	uint compressedAO = f32tof16( cellIn.AO );
+	
+	cellOut.packedCoeffs[0] = compressedCoeffs[0].x | ( compressedCoeffs[0].y << 16 );
+	cellOut.packedCoeffs[1] = compressedCoeffs[0].z | ( compressedCoeffs[1].x << 16 );
+	cellOut.packedCoeffs[2] = compressedCoeffs[1].y | ( compressedCoeffs[1].z << 16 );
+
+	cellOut.packedCoeffs[3] = compressedCoeffs[2].x | ( compressedCoeffs[2].y << 16 );
+	cellOut.packedCoeffs[4] = compressedCoeffs[2].z | ( compressedCoeffs[3].x << 16 );
+	cellOut.packedCoeffs[5] = compressedCoeffs[3].y | ( compressedCoeffs[3].z << 16 );
+
+	cellOut.packedCoeffs[6] = compressedCoeffs[4].x | ( compressedCoeffs[4].y << 16 );
+	cellOut.packedCoeffs[7] = compressedCoeffs[4].z | ( compressedCoeffs[5].x << 16 );
+	cellOut.packedCoeffs[8] = compressedCoeffs[5].y | ( compressedCoeffs[5].z << 16 );
+
+	cellOut.packedCoeffs[9] = compressedCoeffs[6].x | ( compressedCoeffs[6].y << 16 );
+	cellOut.packedCoeffs[10] = compressedCoeffs[6].z | ( compressedCoeffs[7].x << 16 );
+	cellOut.packedCoeffs[11] = compressedCoeffs[7].y | ( compressedCoeffs[7].z << 16 );
+
+	cellOut.packedCoeffs[12] = compressedCoeffs[8].x | ( compressedCoeffs[8].y << 16 );
+	cellOut.packedCoeffs[13] = compressedCoeffs[8].z | ( compressedAO << 16 );
+
+
+	return cellOut;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+LPVCell UnpackLPVCell( LPVCellPacked cellPacked )
+{
+	LPVCell cellOut;
+	uint3 compressedCoeffs;
+	compressedCoeffs.x = cellPacked.packedCoeffs[0];
+	compressedCoeffs.y = cellPacked.packedCoeffs[0] >> 16;
+	compressedCoeffs.z = cellPacked.packedCoeffs[1];
+	cellOut.coeffs[0] = f16tof32( compressedCoeffs );
+
+	compressedCoeffs.x = cellPacked.packedCoeffs[1] >> 16;
+	compressedCoeffs.y = cellPacked.packedCoeffs[2];
+	compressedCoeffs.z = cellPacked.packedCoeffs[2] >> 16;
+	cellOut.coeffs[1] = f16tof32( compressedCoeffs );
+
+	compressedCoeffs.x = cellPacked.packedCoeffs[3];
+	compressedCoeffs.y = cellPacked.packedCoeffs[3] >> 16;
+	compressedCoeffs.z = cellPacked.packedCoeffs[4];
+	cellOut.coeffs[2] = f16tof32( compressedCoeffs );
+
+	compressedCoeffs.x = cellPacked.packedCoeffs[4] >> 16;
+	compressedCoeffs.y = cellPacked.packedCoeffs[5];
+	compressedCoeffs.z = cellPacked.packedCoeffs[5] >> 16;
+	cellOut.coeffs[3] = f16tof32( compressedCoeffs );
+
+	compressedCoeffs.x = cellPacked.packedCoeffs[6];
+	compressedCoeffs.y = cellPacked.packedCoeffs[6] >> 16;
+	compressedCoeffs.z = cellPacked.packedCoeffs[7];
+	cellOut.coeffs[4] = f16tof32( compressedCoeffs );
+
+	compressedCoeffs.x = cellPacked.packedCoeffs[7] >> 16;
+	compressedCoeffs.y = cellPacked.packedCoeffs[8];
+	compressedCoeffs.z = cellPacked.packedCoeffs[8] >> 16;
+	cellOut.coeffs[5] = f16tof32( compressedCoeffs );
+
+	compressedCoeffs.x = cellPacked.packedCoeffs[9];
+	compressedCoeffs.y = cellPacked.packedCoeffs[9] >> 16;
+	compressedCoeffs.z = cellPacked.packedCoeffs[10];
+	cellOut.coeffs[6] = f16tof32( compressedCoeffs );
+
+	compressedCoeffs.x = cellPacked.packedCoeffs[10] >> 16;
+	compressedCoeffs.y = cellPacked.packedCoeffs[11];
+	compressedCoeffs.z = cellPacked.packedCoeffs[11] >> 16;
+	cellOut.coeffs[7] = f16tof32( compressedCoeffs );
+
+	compressedCoeffs.x = cellPacked.packedCoeffs[12];
+	compressedCoeffs.y = cellPacked.packedCoeffs[12] >> 16;
+	compressedCoeffs.z = cellPacked.packedCoeffs[13];
+	cellOut.coeffs[8] = f16tof32( compressedCoeffs );
+
+	cellOut.AO = f16tof32( cellPacked.packedCoeffs[13] >> 16 );
+
+	return cellOut;
+}

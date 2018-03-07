@@ -1,0 +1,103 @@
+// NvFlow begin
+
+Texture3D<float4> NvFlowExportData0;
+Texture3D<uint> NvFlowExportBlockTable0;
+
+Texture3D<float4> NvFlowExportData1;
+Texture3D<uint> NvFlowExportBlockTable1;
+
+Texture3D<float4> NvFlowExportData2;
+Texture3D<uint> NvFlowExportBlockTable2;
+
+Texture3D<float4> NvFlowExportData3;
+Texture3D<uint> NvFlowExportBlockTable3;
+
+SamplerState NvFlowExportDataSampler0;
+SamplerState NvFlowExportDataSampler1;
+SamplerState NvFlowExportDataSampler2;
+SamplerState NvFlowExportDataSampler3;
+
+float4 NvFlowFetchExportData(int Index, float3 TexCoord)
+{
+	if (Index == 0) return Texture3DSampleLevel(NvFlowExportData0, NvFlowExportDataSampler0, TexCoord, 0);
+	if (Index == 1) return Texture3DSampleLevel(NvFlowExportData1, NvFlowExportDataSampler1, TexCoord, 0);
+	if (Index == 2) return Texture3DSampleLevel(NvFlowExportData2, NvFlowExportDataSampler2, TexCoord, 0);
+	return Texture3DSampleLevel(NvFlowExportData3, NvFlowExportDataSampler3, TexCoord, 0);
+}
+
+uint NvFlowFetchExportDataTable(int Index, int3 BlockCoord)
+{
+	if (Index == 0) return NvFlowExportBlockTable0[BlockCoord];
+	if (Index == 1) return NvFlowExportBlockTable1[BlockCoord];
+	if (Index == 2) return NvFlowExportBlockTable2[BlockCoord];
+	return NvFlowExportBlockTable3[BlockCoord];
+}
+
+int3 NvFlowTableValToCoord(uint val)
+{
+	uint valInv = ~val;
+	return int3(
+		(valInv >> 0) & 0x3FF,
+		(valInv >> 10) & 0x3FF,
+		(valInv >> 20) & 0x3FF);
+}
+
+float4 NvFlowSampleGridVelocity(int Index, float3 WorldPos)
+{
+	float3 VolumePos = mul(float4(WorldPos, 1), NvFlowParams.WorldToVolume[Index]).xyz;
+	float3 SampleCoord = NvFlowParams.VDim[Index].xyz * VolumePos;
+	if (NvFlowParams.IsVTR[Index] == 0)
+	{
+		float3 VBlockCoord = NvFlowParams.BlockDimInv[Index].xyz * SampleCoord;
+		int3 VBlockCoordInt = int3(floor(VBlockCoord));
+		int3 RBlockCoordInt = NvFlowTableValToCoord(NvFlowFetchExportDataTable(Index, VBlockCoordInt));
+		SampleCoord = float3(NvFlowParams.LinearBlockDim[Index].xyz * RBlockCoordInt) + float3(NvFlowParams.BlockDim[Index].xyz) * (VBlockCoord - float3(VBlockCoordInt)) + float3(NvFlowParams.LinearBlockOffset[Index].xyz);
+	}
+	return NvFlowFetchExportData(Index, NvFlowParams.DimInv[Index].xyz * SampleCoord);
+}
+
+float3 NvFlowCoupleGridToParticle(int Index, float3 partVel, float4 uvwa)
+{
+	float3 error3 = uvwa.xyz - partVel.xyz;
+
+	float rate = 0.f;
+	float uvwaLen2 = uvwa.x*uvwa.x + uvwa.y*uvwa.y + uvwa.z*uvwa.z;
+	float partVelLen2 = partVel.x*partVel.x + partVel.y*partVel.y + partVel.z*partVel.z;
+	if( partVelLen2 < uvwaLen2 )
+	{
+		rate = NvFlowParams.GridToParticleAccelRate[Index];
+	}
+	else if( partVelLen2 > uvwaLen2 )
+	{
+		rate = NvFlowParams.GridToParticleDecelRate[Index];
+	}
+
+	if(rate > 0.f)
+	{
+		float x = log2(uvwaLen2/partVelLen2) / log2(NvFlowParams.GridToParticleThreshold[Index]);
+		x = abs(x) - 0.5f;
+		x = max(x,0.f);
+		x = min(x,1.f);
+		rate *= (-2.f*x*x*x + 3*x*x);
+	}
+	rate = min(rate,1.f);
+
+	return (partVel + error3 * rate) * uvwa.w;
+}
+
+void NvFlowEvaluateGrids(float3 Position, float3 Velocity, in out float3 TotalForce, in out float3 WeightedVelocity, in out float TotalWeight, in out float FinalWeight)
+{
+	[unroll]
+	for (int Index = 0; Index < NvFlowParams.Count; ++Index)
+	{
+		float4 GridVelocity = NvFlowSampleGridVelocity(Index, Position);
+		GridVelocity.xyz *= NvFlowParams.VelocityScale[Index];
+
+		WeightedVelocity += NvFlowCoupleGridToParticle(Index, Velocity, GridVelocity);
+		//WeightedVelocity += GridVelocity.xyz;// * GridVelocity.w;
+		TotalWeight += GridVelocity.w;
+		FinalWeight = max(FinalWeight, GridVelocity.w);
+	}
+}
+
+// NvFlow end

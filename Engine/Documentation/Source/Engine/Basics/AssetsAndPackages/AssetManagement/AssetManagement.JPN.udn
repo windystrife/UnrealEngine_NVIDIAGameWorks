@@ -1,0 +1,144 @@
+﻿INTSourceChangelist:3588288
+Availability:Docs
+Crumbs: %ROOT%
+Title:Asset Management
+Description:Asset Loading and Unloading
+Type:Overview
+SkillLevel:Intermediate
+Version:4.17
+Parent:Engine/Basics/AssetsAndPackages
+Order:0
+Tags:Assets
+Tags:Asset Management
+Related:Engine/Basics/AssetsAndPackages
+Related:Engine/Basics/AssetsAndPackages/AssetManagement/CookingAndChunking
+
+
+[TOC (start:2 end:3)]
+
+UE4 では [アセット](Engine/Basics/AssetsAndPackages/) のロード、アンロードを自動的に処理します。これにより、コーディング システムがエンジンに対していつどのアセットが必要になるかを正確に指示するデベロッパーの負担が軽減します。しかし、いつどのようにアセットを見つけ、ロードし、監査するかについて一段と正確に制御する必要があるかもしれません。こうした場合には、**Asset Manager (アセット マネージャ)** が役立ちます。アセット マネージャはエディタおよびパッケージ化したゲームに存在するユニークでグローバルなオブジェクトであり、どのプロジェクトに対してもオーバーライドおよびカスタマイズが可能です。アセット マネージャはコンテンツを、UE4 の [loose package architecture](Engine/Basics/AssetsAndPackages/) のメリットを失うことなくプロジェクトのコンテキストに応じたチャンクに分けることが可能なアセット管理のためのフレームワークを提供します。アセット マネージャには、ディスクとメモリの使用についての監査に役立つツール一式もあります。ゲームのデプロイ時に [クックとチャンク](Engine/Basics/AssetsAndPackages/AssetManagement/CookingAndChunking) のためのアセットの構成を最適化するために必要な情報を示します。
+
+
+## プライマリ アセット、セカンダリ アセット、およびプライマリ アセット ラベル
+
+概念上、UE4 のアセット管理システムは、すべてのアセットを **Primary Assets (プライマリ アセット)** と **Secondary Assets (セカンダリ アセット)** の 2 種類に分けます。プライマリ アセットは、`GetPrimaryAssetId` を呼び出して取得される[**Primary Asset ID**](API:FPrimaryAssetId) を介して直接アセット マネージャによって操作することができます。特定の `UObject` クラスから作られるアセットをプライマリ アセットとして指定するためには、`GetPrimaryAssetId` をオーバーライドして、有効な `FPrimaryAssetId` 構造体を戻すようにします。セカンダリ アセットは直接アセット マネージャによって操作されませんが、代わりにプライマリ アセットによって参照されるか使用されることに反応してエンジンによって自動的にロードされます。デフォルトで、`UWorld` アセット (レベル) のみがプライマリであり、他のすべてのアセットはセカンダリです。セカンダリ アセットをプライマリ アセットにするためには、そのクラスに対して `GetPrimaryAssetId` 関数が必ずオーバーライドされて有効な `FPrimaryAssetId` 構造体を戻すようにします。
+
+
+## アセット マネージャとストリーム可能なマネージャ
+
+[Asset Manager](API:UAssetManager) オブジェクトは、プライマリ アセットの発見とロードを管理するシングルトンです。エンジンにあるベース Asset Manager マネージャ クラスには、基本的な管理機能がありますが、プロジェクト固有のニーズに合わせて拡張することができます。アセット マネージャ内にある [**Streamable Manager**](API:FStreamableManager) 構造体は、オブジェクトの非同期ロードの作業を実際に行うとともに、**Streamable Handles** の使用を介してメモリにオブジェクトを不要になるまで保持し、アンロードすることができます。シングルトンのアセット マネージャとは異なり、複数の Streamable Managers が様々なユース ケース用にエンジンの様々な部分にあります。
+
+
+## アセット バンドル
+
+**Asset Bundle (アセット バンドル)** は、プライマリ アセットに関連付けされた特定アセットの名前付けしたリストです。アセット バンドルは `UObject` の `TAssetPtr` または `FStringAssetReference` メンバの `UPROPERTY` セクションに "AssetBundles" メタタグでタグ付けして作成されます。このタグの値は、セカンダリ アセットが保存されるバンドルの名前を示します。例えば以下の Static Mesh アセットは `MeshPtr` というメンバー変数に格納し、 UObject が保存されるときに "TestBundle" というアセット バンドルに追加されます。
+
+	/** Mesh */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = Display, AssetRegistrySearchable, meta = (AssetBundles = "TestBundle"))
+	TAssetPtr<UStaticMesh> MeshPtr;
+
+アセット バンドルを使用する 2 つめの方法は、プロジェクトのAsset Manager クラスでランタイムに登録するものです。この場合、プログラマーは `FAssetBudleData` 構造体を満たすコードを書いて、その構造体をアセット マネージャの `AddDynamicAsset` 関数に、バンドルのセカンダリ アセットに関連付ける Primary Asset ID と共に渡す必要があります。
+
+
+### プライマリ アセットを登録しディスクからロードする
+
+ほとんどのプライマリ アセットはアーティストやデザイナーが編集できるように **コンテンツ ブラウザ** にあり、ディスク上に保存されるアセット ファイルとして存在します。この方法で使用できるクラスをプログラマーが作成する最も簡単な方法は、`UPrimaryDataAsset` から継承することです。`UPrimaryDataAsset` は、`UDataAsset` のひとつのバージョンであり、ビルトインされてるアセット バンドル データをロードし、保存する機能を持っています。`APawn` など他の基本クラスが必要な場合、クラスに対して機能するアセット バンドルを取得するために追加しなければならない最小限の機能例として `UPrimaryDataAsset` が便利です。以下のクラスは Fortnite の Zone Theme データを格納し、ゲームのマップ選択モードでエリアの視覚表現をビルドするときにどのアート アセットを使うかをゲームに指示します。
+
+	/** A zone that can be selected by the user from the map screen (マップ画面からユーザーによって選択可能なゾーン) */
+	UCLASS(Blueprintable)
+	class FORTNITEGAME_API UFortZoneTheme : public UPrimaryDataAsset
+	{
+		GENERATED_UCLASS_BODY()
+
+		/** Name of the zone (ゾーン内) */
+		UPROPERTY(EditDefaultsOnly, Category=Zone)
+		FText ZoneName;
+
+		/** The map that will be loaded when entering this zone (このゾーンに入る場合にロードされるマップ) */
+		UPROPERTY(EditDefaultsOnly, Category=Zone)
+		TAssetPtr<UWorld> ZoneToUse;
+
+		/** The blueprint class used to represent this zone on the map (このゾーンをマップ上に表現するために使うブループリント クラスです) */
+		UPROPERTY(EditDefaultsOnly, Category=Visual, meta=(AssetBundles = "Menu"))
+		TAssetSubclassOf<class AFortTheaterMapTile> TheaterMapTileClass;
+	};
+
+
+このクラスは `UPrimaryDataAsset` から継承するため、アセットの短い名前とネイティブ クラスを使用する `GetPrimaryAssetId` の有効なバージョンを持ちます。例えば、"Forest" という名前で保存された `UFortZoneTheme` は、"FortZoneTheme:Forest" というプライマリ アセット ID を持ちます。`UFortZoneTheme` アセットがエディタに保存されるたびに、`PrimaryDataAsset` の `AssetBundleData` メンバが更新されてそれをセカンダリ アセットとして含めるようにします。
+
+プライマリ アセットの登録とロードには以下の操作が必要です。
+
+1. **プロジェクトのカスタム Asset Manager クラスがあれば、エンジンに認識させます。** これは、プロジェクトの `DefaultEngine.ini` ファイルを修正し、`[/Script/Engine.Engine]` セクションに `AssetManagerClassName` 変数を設定することで行います。最終値は、以下の形式になります。
+	[/Script/Engine.Engine]
+	AssetManagerClassName=/Script/Module.UClassName
+ この場合、 "Module" はプロジェクトのモジュール名であり、"UClassName" は使用したい `UClass` の名前になります。Fortnite の例ではプロジェクトのモジュール名は、"FortniteGame" であり、使用したいクラスは`UFortAssetManager` (その `UClass` 名は`FortAssetManager` であることを意味します) と呼ばれます。従って 2 行目は次のようになります。
+	AssetManagerClassName=/Script/FortniteGame.FortAssetManager
+[REGION:note]デフォルトの Asset Manager クラスは、特別な機能が必要でない限り、オーバーライドされる必要はありません。デフォルトの Engine クラス、 `UAssetManager` を使用することができます。この場合、このステップをスキップすることができます。[/REGION]
+
+1. **プライマリ アセットをアセット マネージャで登録する** これは次の 3 種類の方法で行うことができます。すなわち、**Project Settings** メニューで設定する、アセットの配列のパスを手動で追加して `DefaultGame.ini` でスキャンする、または Asset Manager クラスがスタートアップ中にそれを行うようにプログラミングします。
+	* **Project Settings** (**Game / Asset Manager** セクションの下) による設定は以下のようになります。:
+
+	![](ProjectSettingsAssetManager.png)
+	[REGION:caption]プライマリ アセットのスキャンのパスを設定することができます。[/REGION]
+	[REGION:note]
+	| 設定 | エフェクト |
+	| --- | --- |
+	| Primary Asset Types to Scan | 見つけて登録する Primary アセットのタイプを、どこを探したら良いか、それを使って何をするかと合わせてリスト化します。 |
+	| Directories to Exclude | Primary アセットに対して明示的にスキャンされないディレクトリです。これはテスト アセットを除外する場合に便利です。 |
+	| Primary Asset Rules | アセットの処理方法を決める特定のルールのオーバーライドをリスト化します。詳細は [](Engine/Basics/AssetsAndPackages/AssetManagement/CookingAndChunking) をご覧ください。 |
+	| Only Cook Production Assets | DevelopmentCook として指定されるアセットは、これにチェックが入っているとクック プロセス中にエラーが生じます。これは最終的なシッピング ビルドにテスト アセットが含まれないようにするのに適しています。 |
+	| Primary Asset ID Redirects | Asset Manager がリストに ID が表示されている Primary アセットのデータをルックアップする場合、ID は代わりに与えられる ID で置き換えられます。 |
+	| Primary Asset Type Redirects | Asset Manager が、Primary アセットについてのデータをルックアップする場合、このリストにあるタイプ名がネイティブ タイプの変わりに使われます。 |
+	| Primary Asset Name Redirects | Asset Manager が、Primary アセットについてのデータをルックアップする場合、このリストにあるアセット名がネイティブ名の 代わりに使われます。 |
+	[/REGION]
+	* `DefaultGame.ini` を編集するには、`/Script/Engine.AssetManagerSettings` というセクションを見つけ (または作成)し、Primary Asset クラスを手動で追加します。以下のような形式になります。
+
+			[/Script/Engine.AssetManagerSettings]
+			!PrimaryAssetTypesToScan=ClearArray
+			+PrimaryAssetTypesToScan=(PrimaryAssetType="Map",AssetBaseClass=/Script/Engine.World,bHasBlueprintClasses=False,bIsEditorOnly=True,Directories=((Path="/Game/Maps")),SpecificAssets=,Rules=(Priority=-1,bApplyRecursively=True,ChunkId=-1,CookRule=Unknown))
+			+PrimaryAssetTypesToScan=(PrimaryAssetType="PrimaryAssetLabel",AssetBaseClass=/Script/Engine.PrimaryAssetLabel,bHasBlueprintClasses=False,bIsEditorOnly=True,Directories=((Path="/Game")),SpecificAssets=,Rules=(Priority=-1,bApplyRecursively=True,ChunkId=-1,CookRule=Unknown))
+
+	* プライマリ アセットを直接コードで登録する場合、Asset Manager クラスで `StartInitialLoading` 関数をオーバーライドし、そこから `ScanPathsForPrimaryAssets` を呼び出します。この場合、同じタイプのすべてのプライマリ アセットを同じサブフォルダに入れることをお勧めします。これによりアセットの発見と登録が速くなります。
+	1. **アセットのロード** アセット マネージャの関数、`LoadPrimaryAssets`、 `LoadPrimaryAsset`、および `LoadPrimaryAssetsWithType` を使って、適時にプライマリ アセットのロードを開始することができます。アセットは、`UnloadPrimaryAssets`、`UnloadPrimaryAsset`、および `UnloadPrimaryAssetsWithType` を使って後でアンロードすることができます。こうしたロード関数を使用する場合、 Asset Bundle のリストを指定することができます。このやり方でロードすると、上記のように Asset Bundle によって参照される Secondary アセットの参照を Asset Manager がロードします。
+
+
+
+### 動的に作成されたプライマリ アセットを登録しロードする
+
+プライマリ アセット バンドルはランタイムに動的に登録しロードすることもできます。これを行うために理解すると便利な 2 種類のアセット マネージャ関数があります。
+* `ExtractStringAssetReferences` は与えられる `UScriptStruct`のすべての `UPROPERTY` メンバを調べて、アセットの参照を特定します。続いてこれらがアセット名の配列に格納されます。アセット バンドル作成時にこの配列を使用することができます。
+`ExtractStringAssetReferences` パラメータ:
+| パラメータ | 目的 |
+| --- | --- |
+| `Struct` | アセットの参照を検索するための UStruct |
+| `StructValue` | 構造体に対する `void pointer` |
+| `FoundAssetReferences` | 構造体で見つかったアセットの参照を戻すために使われる配列。 |
+| `PropertiesToSkip` | 戻す配列から除外するプロパティ名の配列。 |
+
+* `RecursivelyExpandBundleData` はプライマリ アセットへのすべての参照を見つけて再帰的に展開し、そのアセット バンドルに従属するすべてのものを見つけます。この場合、上の ZoneTheme によって参照される TheaterMapTileClass は AssetBundleData に追加されます。
+次に、名前付けした動的アセットを登録し、そのロードを開始します。
+`RecursivelyExpandBundleData` パラメータ:
+| パラメータ | 目的 |
+| --- | --- |
+| `BundleData` | アセット参照を含むバンドル データ。再帰的に拡張されます。関連アセット一式をロードする際に役立ちます。 |
+
+例えば、Fortnite では以下のコードをそのカスタムのAsset Manager クラスで使って、ゲーム中にダウンロードされた "theater" データに基づきアセットを構築しロードします。
+
+	// Construct the name from the theater ID (theater ID から名前を構築) 
+	UFortAssetManager& AssetManager = UFortAssetManager::Get();
+	FPrimaryAssetId TheaterAssetId = FPrimaryAssetId(UFortAssetManager::FortTheaterInfoType, FName(*TheaterData.UniqueId));
+				TArray<FStringAssetReference> AssetReferences;
+
+	AssetManager.ExtractStringAssetReferences(FFortTheaterMapData::StaticStruct(), &TheaterData, AssetReferences);
+
+	FAssetBundleData GameDataBundles;
+	GameDataBundles.AddBundleAssets(UFortAssetManager::LoadStateMenu, AssetReferences);
+
+	// Recursively expand references to pick up tile blueprints in Zone (参照を再帰的に展開し、Zone 内のブループリントを選ぶ)
+	AssetManager.RecursivelyExpandBundleData(GameDataBundles);
+
+	// Register a dynamic asset (動的アセットを登録する) 
+	AssetManager.AddDynamicAsset(TheaterAssetId, FStringAssetReference(), GameDataBundles);
+
+	// Start preloading (プリロードを開始する)
+	AssetManager.LoadPrimaryAsset(TheaterAssetId, AssetManager.GetDefaultBundleState());

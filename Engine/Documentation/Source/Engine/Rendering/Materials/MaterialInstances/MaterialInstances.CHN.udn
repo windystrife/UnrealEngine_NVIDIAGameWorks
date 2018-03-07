@@ -1,0 +1,163 @@
+﻿INTSourceChangelist:2741553
+Availability:Public
+Title:实例化材质
+Crumbs:%ROOT%, Engine, Engine/Rendering/Materials
+Description:分层材质关系，这些关系允许修改属性，以改变子材质的行为和外观，而不必重新编译着色器。
+Version:4.9
+
+
+![](MICEditor.png)
+
+[TOC(start:2)]
+
+
+
+
+在虚幻引擎 4 中，材质实例化用来更改材质的外观，而不会引起成本高昂的材质重新编译。鉴于典型的材质在进行编辑或更改后必须执行重新编译（在游戏前 _必须_ 执行的操作），可以建立实例化材质来进行更改，而不必执行这样的重新编译。某些类型的实例化材质甚至可以在游戏期间更改，从而对游戏中的事件作出反应（例如，树木燃烧时其材质变暗并烧焦）。这样，美工元素就可实现极大的视觉灵活性。
+
+
+## 实例和参数
+
+尽管材质实例的用途是添加一种成本不高的方法来编辑材质的外观，但记住下面这一点十分重要：默认情况下，您并非能够编辑材质的每一项特性。在材质实例真正可编辑之前，您必须先选择您 _希望_ 能够在实例中编辑原始材质（即，_主_ 材质）的哪些属性，并将其指定为 **参数**。这称为材质 _参数化_。
+
+在材质编辑器中，将参数视为数据节点。在技术上，它是用作管道的已命名值，用于将数据值发送到材质实例中。这些参数在材质实例编辑器或脚本（蓝图或代码）中 _公开_，因此可编辑。例如，假定您想创建颜色可以迅速更改的材质。您可以将一个 _矢量参数_ 赋予材质的 _底色（Base Color）_属性，以代替直接将一个值赋予颜色（例如红色）。您将为该参数提供名称。在创建此材质的实例时，您会发现您命名的矢量参数将在该实例的属性中列出，通过该参数可将颜色设置为您希望使用的任意颜色，且不必执行重新编译。
+
+在这里，您可查看材质中设置的参数。
+
+![](Material_Parameters.png)
+
+并且，在这里，我们可查看在材质实例中产生的公开参数。
+
+![](Instance_Parameters.png)
+
+## 常量实例和动态实例
+
+在虚幻引擎 4 中，共有两类材质实例：
+
+* **常量材质实例** - 仅在运行时之前计算。
+* **动态材质实例** - 可以在运行时计算和编辑。
+
+
+
+### 常量材质实例
+
+**常量材质实例** 是仅在运行时之前计算一次的实例化材质。这意味着，它在游戏期间不可更改。但是，尽管它们在游戏过程中保持 _不变_，但因为不需要编译，所以仍具有性能方面的优点。例如，如果游戏中有各种车辆，每种车辆各有喷漆作业，但这些车辆的颜色在游戏期间 _不会_ 发生变化，那么最好的做法是创建一个主材质以代表一般车辆喷漆的基本方面，然后创建常量材质实例以代表不同车辆类型的变异，例如不同的颜色、不同级别的金属性以及光泽度，等等。
+
+常量材质实例是在 [内容浏览器](Engine/Content/Browser) 中创建的，并可通过 [材质实例编辑器](Engine/Rendering/Materials/MaterialInstances/Editor) 进行编辑。
+
+
+
+
+### 动态材质实例
+
+**动态材质实例** (MID) 是可以在游戏期间（在运行时）进行计算的实例化材质。这表示在游戏期间，您可使用脚本（经过编译的代码或蓝图可视脚本）来更改材质的参数，从而在游戏中改变该材质。这种材质的可能应用场合数不胜数，既可显示不同程度的损坏，也可更改绘图作业以混入不同皮肤纹理来回应面部表情。
+
+MID 是在脚本中根据参数化材质或常量材质实例来创建的。在蓝图中，您可使用具有参数化属性的给定材质，并通过 _Create Dynamic Material Instance（创建动态材质实例）_节点向其馈送数据。然后，该节点的结果通过 _Set Material（设置材质）_节点应用于相关对象，从而产生可在游戏期间更改的新材质。
+
+[REGION:fullwidth]
+![](ConstructionScriptForMID.png)
+[/REGION]
+
+
+
+## 技术应用
+
+
+为了将非实例化材质应用于基本类型，使用了抽象基类 _MaterialInterface_。这个类是所应用材质的表达式及参数值的接口。Material 类是 MaterialInterface 的子类，后者定义表达式及默认参数值。这些类型都从其父代继承其表达式及参数值，并可选择性地覆盖部分参数值或使这些参数值动画化。
+
+[REGION:tip]
+顺便说明，这意味着如果您希望蓝图变量能够接受材质 _或_ 常量材质实例，那么您将需要确保它是类型为 _MaterialInterface_ 的变量！
+[/REGION]
+
+
+## 在编辑器中将材质实例化
+
+[EXCERPT:MakingAnInstance]
+在编辑器中，可使用两种主要方法来创建材质实例。 
+
+在 [内容浏览器](Engine/Content/Browser) 中单击 **新增（Add New）**按钮，并选择 **材质实例（Material Instance）**。
+
+![](NewMIC.png)
+
+对新的材质实例指定名称。
+
+![](NameMIC.png)
+
+**双击** 新材质实例。这将打开 [材质实例编辑器](Engine/Rendering/Materials/MaterialInstances/Editor)。使用 **内容浏览器** 来选择要实例化的材质，并将其指派给新材质实例的 **父代（Parent）**属性。
+
+![](MatInstEditorOpen.png)
+
+如果您已知道要创建实例的材质，那么也可在 **内容浏览器** 中 **右键单击** 该材质，并选择 **创建材质实例（Create Material Instance）**。
+
+![](CreateMaterialInstance.png)
+[/EXCERPT:MakingAnInstance]
+
+
+(#ParameterGroups)
+## 参数组
+
+参数表达式具有 **组（Group）**属性，这使您在材质实例编辑器中查看这些表达式时可对其进行组织。相关的参数可添加到同一个组中，这样您就可以快速方便地找到并修改所有用于控制父材质的特定效果或方面的参数。默认情况下不属于任何组的参数将显示在 _无（None）_组中。
+
+![](ParameterGroups.png)(w:600)
+
+
+(#CreatingParameterizedMaterials)
+## 创建参数化材质
+
+要向材质添加参数，请使用材质编辑器中的其中一种参数表达式类型。存在多种可使用的参数类型，其中包括“标量参数”（ScalarParameter）、“矢量参数”（VectorParameter）、各种纹理参数以及静态参数。
+
+对该参数指定唯一的名称，将其指派到一个 [组](#ParameterGroups)，并对其指定默认值。
+
+![](Material_Parameters.png)
+
+
+
+## 标量参数
+
+**标量参数** 是包含单个浮点值的参数。这些参数可用来根据单个的值驱动效果，例如高光强度、线性插值的阿尔法以及不透明度，等等。
+
+请参阅[](Engine/Rendering/Materials/ExpressionReference)，以获取所有表达式的完整列表及说明。
+
+
+
+## 矢量参数
+
+**矢量参数** 是包含四通道矢量值（即，4 个浮点值）的参数。这些参数通常用来提供可配置的颜色，但也可用来表示位置型数据或者驱动任何需要多个值的效果。
+
+请参阅[](Engine/Rendering/Materials/ExpressionReference)，以获取所有表达式的完整列表及说明。
+
+
+
+## 纹理参数
+
+存在多个可用的纹理参数。每个参数都特定于它所接受的纹理类型或者它的使用方式。因为生成的着色器代码随纹理类型不同而不同，所以每种特定的纹理类型都需要单独的表达式。
+
+
+* TextureSampleParameter2D（2D 纹理样本参数）接受基本的 Texture2D（2D 纹理）。
+* TextureSampleParameterCube（立方体纹理样本参数）接受 TextureCube（立方体纹理）或立方体贴图。
+* TextureSampleParameterFlipbook（图像序列视图纹理样本参数）接受 FlipbookTexture（图像序列视图纹理）。
+* TextureSampleParameterMeshSubUV（网格子 UV 纹理样本参数）接受 Texture2D（2D 纹理），后者用于具有网格发射器的子 UV 效果 。
+* TextureSampleParameterMeshSubUV（网格子 UV 纹理样本参数）接受 Texture2D（2D 纹理），后者用于具有网格发射器的子 UV 混合效果。
+* TextureSampleParameterMovie（电影纹理样本参数）接受 MovieTexture（电影纹理）（空白电影）。
+* TextureSampleParameterNormal（法线纹理样本参数）接受用作法线贴图的 Texture2D（2D 纹理）。
+* TextureSampleParameterSubUV（子 UV 纹理样本参数）接受 Texture2D（2D 纹理），后者用于具有精灵发射器的子 UV 效果。
+
+
+请参阅[](Engine/Rendering/Materials/ExpressionReference)，以获取所有表达式的完整列表及说明。
+
+
+
+## 静态参数
+
+**静态** 参数在编译时应用，因此它们会生成更加优化的代码，由静态参数屏蔽的整个材质分支在编译后将消除，而不会在运行时执行。由于它们是在编译时应用的，只能从 [材质实例编辑器](Engine/Rendering/Materials/MaterialInstances/Editor) 中更改，而不能从脚本中更改。
+[Region:note]
+*警告：对于基本材质中每种由实例使用的静态参数组合，都将通过编译产生一个新材质！
+
+这可能会导致编译大量着色器。请尽量减少材质中的静态参数数目以及实际使用的静态参数排列数。  
+[/Region]
+
+
+请参阅 [静态开关参数](Engine/Rendering/Materials/ExpressionReference/Parameters#StaticSwitchParameter) 和 [静态组件蒙版参数](Engine/Rendering/Materials/ExpressionReference/Parameters#StaticComponentMaskParameter)，以获取有关特定静态参数类型的信息。
+
+请参阅[](Engine/Rendering/Materials/ExpressionReference)，以获取所有表达式的完整列表及说明。
+

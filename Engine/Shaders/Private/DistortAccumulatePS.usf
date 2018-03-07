@@ -1,0 +1,103 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	DistortionAccumulatePixelShader.usf: Pixel shader for accumulating distortion offsets
+=============================================================================*/
+
+#include "Common.ush"
+#include "/Engine/Generated/Material.ush"
+#include "/Engine/Generated/VertexFactory.ush"
+
+//A fudge factor scale to bring values close to what they would have been under usual circumstances prior to this change.
+static const float OffsetFudgeFactor = 0.00023;
+
+static const half DistortionScaleBias = 4.0f;
+float4 DistortionParams;
+
+/** output distortion offsets as color so they can be accumulated (via blending) */
+void Main(
+	FVertexFactoryInterpolantsVSToPS Interpolants,
+	float4	PixelPosition	: TEXCOORD6,
+	in float4 SvPosition	: SV_Position
+	OPTIONAL_IsFrontFace,
+	out float4 OutColor		: SV_Target0
+	)
+{
+	ResolvedView = ResolveView();
+
+	// material parameter inputs
+	FMaterialPixelParameters MaterialParameters = GetMaterialPixelParameters(Interpolants, SvPosition);
+	FPixelMaterialInputs PixelMaterialInputs;
+	CalcMaterialParameters(MaterialParameters, PixelMaterialInputs, SvPosition, bIsFrontFace);
+	
+	// material distortion offset
+	half3 Normal = GetMaterialNormal(MaterialParameters, PixelMaterialInputs);
+
+#if MATERIAL_TANGENTSPACENORMAL
+	half3 ViewNormal = normalize(TransformTangentVectorToView(MaterialParameters, Normal));
+#else
+	half3 ViewNormal = normalize(TransformWorldVectorToView(Normal));
+#endif
+
+	// X = IOR, Y = Refraction Bias
+	float2 Refraction = GetMaterialRefraction(PixelMaterialInputs);
+	 	
+#if REFRACTION_USE_PIXEL_NORMAL_OFFSET
+	half3 ViewVertexNormal = TransformTangentVectorToView(MaterialParameters, float3(0, 0, 1));
+	// Treat Refraction of 1 as no refraction, to be consistent with IOR mode
+	float2 Distortion = (ViewVertexNormal.xy - ViewNormal.xy) * (Refraction.x - 1);
+#else
+	// we assume the camera is in air
+	float AirIOR = 1.0f;
+	float2 Distortion = ViewNormal.xy * (Refraction.x - AirIOR);
+#endif
+
+	//clip if the distortion distance (squared) is too small to be noticed
+	//this will result in a less expensive apply pass since the clipped pixels won't set stencil to pass
+	clip(dot(Distortion, Distortion) - .00001);
+
+	// Prevent silhouettes from geometry that is in front of distortion from being seen in the distortion 
+	float2 NDC = (MaterialParameters.ScreenPosition.xy / MaterialParameters.ScreenPosition.w);
+	float2 ScreenUV = NDC * ResolvedView.ScreenPositionScaleBias.xy + ResolvedView.ScreenPositionScaleBias.wz;
+
+	//Fix for Fov and aspect.
+	float InvTanHalfFov = DistortionParams.x;
+    float Ratio = DistortionParams.y;
+ 	float2 FovFix = float2(InvTanHalfFov,Ratio*InvTanHalfFov);
+	Distortion *= DistortionParams.zw * float2(OffsetFudgeFactor,-OffsetFudgeFactor) * FovFix;
+
+	// Sample depth at distortion offset
+	float2 DistortScreenUV = ScreenUV + Distortion;
+
+#if (ES2_PROFILE || ES3_1_PROFILE) && (!WEBGL)
+	float DistortSceneDepth = ConvertFromDeviceZ(Texture2DSampleLevel(SceneDepthTexture, SceneDepthTextureSampler, DistortScreenUV, 0).r);
+#else
+	float DistortSceneDepth = CalcSceneDepth(DistortScreenUV);
+#endif // (ES2_PROFILE || ES3_1_PROFILE) 
+	
+	// Soft thresholding 
+	float Bias = -Refraction.y;
+	float Range = clamp(abs(Bias * 0.5f), 0, 50);
+	float Z = DistortSceneDepth;
+	float ZCompare = MaterialParameters.ScreenPosition.w;
+	float InvWidth = 1.0f / max(1.0f, Range );
+	Distortion *= saturate((Z - ZCompare) * InvWidth + Bias);
+
+#if (ES2_PROFILE || ES3_1_PROFILE)
+	// mobile path direclty outputs distorted colors
+	DistortScreenUV = ScreenUV + Distortion;
+	OutColor = CalcFullSceneColor(DistortScreenUV);
+#else
+	//Scale up for better precision in low/subtle refractions at the expense of artefacts at higher refraction.
+	Distortion*= DistortionScaleBias;
+
+	// store positive and negative offsets separately
+	float2 PosOffset = max(Distortion,0);
+	float2 NegOffset = abs(min(Distortion,0));
+
+	// output positives in R|G channels and negatives in B|A channels
+	OutColor = float4(PosOffset.x,PosOffset.y,NegOffset.x,NegOffset.y);
+#endif // (ES2_PROFILE || ES3_1_PROFILE) 
+}
+
+

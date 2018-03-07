@@ -1,0 +1,391 @@
+﻿Availability:Public
+Title:地形材质
+Crumbs: %ROOT%, Engine, Engine/Landscape
+Description:设置结合地形地貌使用的材质。
+version:4.9
+
+[VAR:Topic]
+[OBJECT:Topiccompact]
+	[PARAM:image]
+		![%Engine/Landscape/Materials:title%](Engine/Landscape/Materials/landscape_materials_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/landscape_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Landscape/Materials:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Landscape/Materials:description%
+	[/PARAM]
+	[PARAMLITERAL:path]
+		[RELATIVE:Engine/Landscape/Materials]
+	[/PARAMLITERAL]
+[/OBJECT]
+[/VAR]
+
+[TOC(start:2 end:3)]
+
+虽然任何随机 **材质** 均可与 **地形** Actor 使用，但虚幻引擎 4（UE4）中的材质系统拥有一些特殊的特定地形材质节点，可使地形的纹理效果更上一层楼。在以下文档中，我们将深入了解这些节点、其功能、以及其在地形材质中的使用方法。 
+
+[REGION:note]
+地形中使用材质的修改方法与在 [材质编辑器](Engine/Rendering/Materials\Editor) 中修改其他材质的方法相同。
+[/REGION]
+
+## 图层权重与排序
+
+地形使用权重混合而非透明度混合，因此所有图层在任意位置的混合因子总计达 1.0。优点是不存在次序相依性，可随意对任何图层进行绘制，其权重将增加，其他图层的权重将减少。缺点是将一个图层完全绘制到 100% 后，其他图层的权重值将为 0%。在使用 [绘制](Engine\Landscape\Editing\PaintMode\#Paint) 工具移除一个已为 100% 的图层时尤为明显。工具并不能确定以哪张图层替换被移除的图层，因此看上去工具并未执行任何操作。
+
+## 特定地形材质节点
+
+在材质编辑器中，地形系统使用 6 种特殊节点。所有节点在 Landscape 类目下的 **Context** 菜单或 **Palette** 菜单中。 
+
+**Context 菜单**
+
+![Material Editor Context Menu](Landscape_Mat_Context.png)
+
+**Palette 菜单**
+
+![](Landscape_Mat_Palette.png)
+
+
+### 地形图层混合节点
+[EXCERPT:LandscapeLayerBlend]
+
+**LandscapeLayerBlend** 节点可将多个纹理和材质网络混合在一起，以便作为地形图层使用。LandscapeLayerBlend 使用阵列存储地形图层的相关信息。点击“0 elements”旁的加号图标即可为此阵列添加图层。
+
+![](Landscape_Add_To_Array.png)
+
+为 **LandscapeLayerBlend** 节点添加多个图层后，得到的效果如下图所示。
+
+![LandscapeLayerBlend Node](Landscape_LayerBlend.png)
+
+可在 **材质编辑器** **Details** 面板中设置 **LandscapeLayerBlend** 节点的属性。 
+
+
+|数字| 属性 | 描述 |
+|------------| -------- | ----------- |
+|1:| **Layers** | 节点包含的图层列表。点击加号图标即可添加图层 (![Plus Sign](icon_Landscape_PlusSign.png))。|
+|2:| **Layer Name** | 为图层赋予的单独命名。**Layer Name** 对应地形工具窗口中 [绘制模式](Engine\Landscape\Editing\PaintMode\#Layers) 使用的图层名。|
+|3:| **Blend Type** | 为 **LB_AlphaBlend**、**LB_HeightBlend**、或 **LB_WeightBlend**。本页后部有详细说明。|
+|4:| **Preview Weight** | 作为图层的权重值，用于预览材质编辑器中的混合。|
+|5:| **Const Layer Input** | 如不使用纹理，该属性可提供作为颜色使用的数字值。主要用于图层出现问题时的调试。
+|6:| **Const Height Input** | 如不使用纹理，该属性可提供作为高度的数字值。|
+|7:| **Additional Layers** | 图层重叠时额外图层的外观。
+
+![](Landscape_LayerBlend_Node.png)
+
+下表详细说明 **Layer Blend 节点** 的输入和输出。
+
+| 数字 | 项目 | 描述 |
+|--------| -------- | ----------- |
+|1:| **Layer _LayerName_** | 每个图层均为添加输入，以便图层混合。图层被加入 **Details** 面板前，这些输入均不可用。|
+|2:| **Height _LayerName_** | 在此提供用于混合的高度图。请注意：该输入只在 **Blend Type** 属性设为 **LB_HeightBlend** 的图层上可见。|
+|3:| **Unlabeled Output** | 图层混合的结果。|
+
+
+
+使用图层混合模式的特定组合时，地形上图层交界处可能出现黑块。为多个地形图层使用 LB_HeightBlend 模式时该问题尤为普遍。LB_HeightBlend 为使用特定高度值的图层调制混合因子和权重。在一个区域上绘制多个设为 LB_HeightBlend 的图层时，在特定区域进行绘制的全部图层可能同时获得为 0 的高度值，因此每个图层所需的混合因子为 0。因不存在隐式或显式的排序，结果将为黑块（因为没有图层为该区域贡献内容）。进行法线贴图的混合时情况会更糟糕，因其将产生（0,0,0）的无效法线值，并引起灯光的渲染问题。此问题的解决方法是为其中一个图层使用 **LB_AlphaBlend**，如下例所示。 
+![LB_HeightBlend Problem](HeightBlendProblem.jpg)(w:800 h:238)
+
+在左图中，所有的图层均为 LB_HeightBlend，引起了黑块问题。在右图中，红色的“1”图层改用 LB_AlphaBlend，问题即得到解决。
+
+
+下图是 **Landscape Layer Blend** 节点（将数个图层混合的节点）属性的范例。注意：**Soil** 图层的混合模式设为 LB_AlphaBlend，而其他图层设为 LB_HeightBlend。此操作可防止以上问题（图层交界处出现黑块）的发生。 
+
+![Layer Blend Properties](LayerBlendProperties.png)
+
+
+删除图层的方法为：点击图层元素数量右边的下拉箭头打开快捷菜单，然后点击 **Delete**。
+
+![Delete Layer](Landscape_DeleteBlendLayer2.png)
+
+
+[/EXCERPT:LandscapeLayerBlend]
+
+### 地形图层坐标节点
+[EXCERPT:TerrainLayerCoords]
+**LandscapeLayerCoords** 节点生成 UV 坐标，该坐标可将材质网络映射到地形地貌上。
+
+![LandscapeLayerCoords Node](Landscape_Material_CoordsExp.png)
+
+可在 **Details** 面板中设置 LandscapeLayerCoords 节点的属性。
+
+| 数字 | 属性 | 描述 |
+|--------| -------- | ----------- |
+|1:| **Mapping Type** | **ELandscapeCoordMappingType** 指定将材质（或网络）映射到地形所使用的朝向。|
+|2:| **Custom UVType** | 地形上使用的映射位置。**CustomUVType** 基于特定的属性值输出 UV 坐标，将材质映射到地形上。|
+|3:| **Mapping Scale** | 应用到 UV 坐标的均匀缩放。|
+|4:| **Mapping Rotation** | 应用到 UV 坐标的旋转（以度为单位）。
+|5:| **Mapping Pan [U]** | 应用到 UV 坐标的 [U] 方向偏移。
+|6:| **Mapping Pan [V]** | 应用到 UV 坐标的 [V] 方向偏移。
+|7:| **Unlabeled Output**| 基于特定的属性值输出 UV 坐标，将材质映射到地形上。|
+
+[/EXCERPT:TerrainLayerCoords]
+
+### 地形图层切换节点
+
+[EXCERPT:TerrainLayerSwitch]
+
+特定图层对地形中的一个区域不起作用时，**LandscapeLayerSwitch** 节点可将部分材质操作排除。特定图层权重为零时此节点可将不必要的计算移除，实现对材质的优化。
+
+![LandscapeLayerSwitch Node](LayerSwitchNode.png)
+
+可在 **Details** 面板中设置 LandscapeLayerSwitch 节点的属性。
+
+| 数字 | 属性 | 描述 |
+|--------| -------- | ----------- |
+|1:| **Parameter Name** | 为参数赋予的单独命名。|
+|2:| **Preview Used**   | 勾选后将使用预览。|
+|3:| **LayerUsed**      | 地形当前区域调用节点属性中指定图层时所使用的结果。|
+|4:| **LayerNotUsed**   | 地形当前区域不调用图层且权重为零时所使用的结果。|
+|5:| ** Unlabeled Output**        | **LayerUsed** 或 **LayerNotUsed** 输入，取决于图层是否对地形的特定区域产生作用。|  
+
+[/EXCERPT:TerrainLayerSwitch]
+
+### 地形图层权重节点
+[EXCERPT:TerrainLayerWeight]
+**LandscapeLayerWeight** 表现允许材质网络进行混合。混合的基础是从材质应用的地形上所获取的相关图层权重。
+
+![LandscapeLayerWeight Node](Landscape_Mat_LayerWeightNode.png)
+
+可在 **Details** 面板中设置 LandscapeLayerWeight 节点的属性。
+
+|数字| 属性 | 描述 |
+|------| -------- | ----------- |
+|1:|**Parameter Name** | 与该表现相关的地形的图层名。此图层的权重用作混合两个输入网络的透明度数值。|
+|2:|**Preview Weight** | 在材质编辑器中用于预览的权重。|
+|3:|***Const Base**|可在此为地形指定一个基础颜色。|
+|4:|***Base**|与此图层进行混合的网络。它是之前图层混合的结果。如为首个图层，则可为空。|
+|5:|***Layer**|进行混合而创建此图层的网络。|
+|6:|***Unlabeled Output**|基于相关图层的权重在 **Base** 和 **Layer** 输入之间输出混合结果。
+
+[/EXCERPT:TerrainLayerWeight]
+
+
+### 地形可见性遮罩节点
+
+[EXCERPT:LandscapeVisibilityMask]
+
+**LandscapeVisibilityMask** 节点用于移除部分地形的可见性，以便创建类似洞窟的洞穴地形。 
+
+![LandscapeVisibilityMask Node](Landscape_VisibilityMask.png)
+
+可在 **Details** 面板中设置 LandscapeVisibilityMask 节点的属性。
+
+| 数字 | 属性 | 描述 |
+|-------| -------- | ----------- |
+| 1:| **Unlabeled Output** | 输出可见性遮罩属性。|
+
+使此节点正常工作的方法为：将其输出连接至材质的 **Opacity Mask** 槽，并将 **Materials Blend Mode** 设为 **Masked**。 
+
+![](Landscape_VisibilityMaskSetup.png)
+
+[/EXCERPT:LandscapeVisibilityMask]
+
+
+## 图层混合
+
+为地形地貌赋予纹理的基础是将多个纹理和材质网络混合为可进行绘制的地形图层。为混合图层，可使用多个 **LandscapeLayerWeight** 节点或一到两个 **LandscapeLayerBlend** 节点，取决于是否使用法线贴图。
+
+### 使用地形图层权重节点
+
+**LandscapeLayerWeight** 节点的设置和使用相当简单，以下将进行概述。 
+
+[REGION:note]
+因图层名必须独一无二，最好为每个图层设置描述性命名。
+[/REGION]
+
+
+1. 在 **材质编辑器** 中，添加一个 **LandscapeLayerWeight** 节点到材质图表。其默认 **Parameter Name** 为“None”。
+	[REGION:fullwidth]
+	![](Landscape_Layer_Weight_Base.png)
+	[/REGION]
+
+1. 在 **Details** 面板中将 **Parameter Name** 改为图层的描述性命名，如“Rock”。
+
+	![Layer Name](Landscape_Mat_ParamName.png)<br/>
+	输入 **Parameter Name** 后其便会更新到节点上。<br/>
+	![](Landscape_Layer_Weight_Named_Layer.png)
+
+1. 添加额外的 **LandscapeLayerWeight** 节点，确保材质需要的每个图层均拥有此节点。在此例中，我们只需要使用两个 **LandscapeLayerWeight** 节点。
+
+1. 添加并连接 **Texture Samples** （或其他材质网络表现）到 **LandscapeLayerWeight** 节点上。
+
+1. 添加一个 **LandscapeLayerCoords** 节点，任意设置其 UV 标题，然后将其与 **Texture Sample** 节点连接起来。
+
+1. 从每个 **Layer** 节点的输出引脚拖动至下个 layer 节点的 **Base** 引脚，使他们连接起来（不连接第一个 layer 节点的 **Base** 引脚）。
+
+1. 从最后 **Layer** 节点的输出引脚拖动至材质 **Base** 节点的 **Base Color** 输入引脚。
+
+
+完成后的效果与下图中使用 **LandscapeLayerWeight** 节点的范例相似。
+
+![Landscape Layer Nodes](Landscape_MaterialLayers.png)
+
+[REGION:note]
+改变 **LandscapeLayerWeight** 节点的 **Preview Weight** 属性即可预览不同权重在材质上的效果。 
+[/REGION]
+
+### 使用地形图层混合节点
+
+**LandscapeLayerBlend** 节点通过透明度混合或带高度偏移的透明度混合将多个图层混合在一起，是手动混合图层和 **LandscapeLayerWeight** 节点的备选方法。高度偏移使图层基于高度图输入与其他图层进行混合。 
+
+**LandscapeLayerBlend 节点的使用方法：**
+
+1. 在材质编辑器中添加一个 LandscapeLayerBlend 节点。
+	![](Landscape_LayerBlend_Material_Example_00.png)
+
+1. 在 **Details** 面板中，点击  **Layers** 旁边的加号图标 (![Plus Sign](Shared/Icons/icon_PlusSymbol_12x.png)) 添加一个图层。
+	![](Landscape_LayerBlend_Material_Example_01.png)
+
+1. 展开图层查看其属性。
+
+	![Layer Properties](Landscape_Mat_LayerBlendDetails.png)
+
+1. 将 **Layer Name** 改为图层的描述性命名，如“Rock”。
+
+	![Layer Name](Landscape_Mat_LayerName.png)
+
+1. 确定图层进行透明度混合或高度混合，并相应地设置 **Blend Type**。
+
+	![Blend Type](Landscape_Mat_BlendType.png)
+
+1. 为地形材质添加任意数量的额外图层。对其重命名并设置适当的 **Blend Types**。
+
+1. 将 LandscapeLayerBlend 节点的输出和材质 base 节点的 **Base Color** 输入连接起来。
+
+1. 添加 Texture Sample 节点，将其主输出与 **LandscapeLayerBlend** 节点的 **Layer** 输入连接起来。（或者，您可创建一个更复杂的材质网络并将其和 LandscapeLayerBlend 节点的 **Layer** 输入连接起来。）对于高度混合图层，将 Texture Sample 的透明度输出和 LandscapeLayerBlend 节点的 **Height** 输出连接起来。 
+
+
+操作完成后，地形材质网络的外观与下图类似。
+
+![Landscape Blend Node](Landscape_MaterialBlend.png)
+
+[REGION:note]
+改变 **LandscapeLayerBlend** 节点的 **Preview Weight** 属性即可预览不同权重在材质上的效果。 
+[/REGION]
+
+### 地形图层混合类型
+
+地形 **Layer Blend** 材质节点拥有三种可选混合模式。 
+尝试达到不同结果时将使用每个 **Layer Blend** 类型。 
+
+| 混合类型 | 功能 |
+|------------|----------|
+| **LB Weight Blend** | 图层来自其他外部程序（如 World Machine），或需要无视图层排序对图层进行独立绘制时，此模式十分实用。|
+| **LB Alpha  Blend** | 进行细节绘制或需要明确图层排序（在岩石和草地层上绘制的雪地层将对这两者形成遮挡，移除雪地层将显示下方的岩石和草地层）时，此模式十分实用。|
+| **LB Height Blend** | 此类型与 LB_WeightBlend 相同，此外还基于高度图为图层之间的过渡添加细节。例如，它将使图层过渡点之间的岩石间隙中出现尘土，而不仅只在岩石和尘土之间进行平顺的混合。|
+
+以下是 **LB Height Blend** 的操作范例。如图所示，图层过渡点之间的岩石间隙中出现尘土。在图层交界处便拥有自然的过渡。
+
+![](LB_HeightBlend.png)
+
+
+### 地形图层混合技术信息
+
+在后台中，这些图层节点的工作方式和 [静态切换参数](Engine/Rendering/Materials\ExpressionReference\Parameters\#StaticSwitchParameter) 节点相似，可切换材质部分的使用。 
+地形的每个组件拥有从主地形材质（此材质只应用至该组件）创建的单独 MaterialInstanceConstant。 
+如未使用特定地形组件上的特定图层，连接至图层的节点分支树将被遗弃。 
+整体材质复杂度将降低，使应用到地形的材质包含任意数量的纹理样本，应用至单独组件的样本数量不能超过选色器模型规范设定的最大值（在 SM 3.0 中为 16）。 
+意味着可以设置一个主材质，它包含用于地形上任意位置的纹理或网络。地形包含诸多网络后则可能呈现出一个非常复杂的结构，同时继续将应用至地形组件的最终材质保持在硬件所允许的参数之内。
+
+[REGION:note]
+材质表现的任意网络均可连接至 **Layer** 输入，代替简单的 **TextureSample**。利用它可实现更复杂的效果，如基于查看图层的距离将细节纹理过渡到较大的宏观构造。 
+[/region]
+
+(#LandscapeHoleMaterials)
+## 地形洞穴材质
+
+在 [管理模式](Engine/Landscape/Editing/ManageMode) 中可创建洞穴，但每次必须将整个地形组件删除。为避免这种情况，可使用地形洞穴材质遮蔽地形上特定位置的可见性和碰撞。如需在山峰的侧面创建一个洞窟入口，利用它便可轻松实现。 
+
+[Region:tip]
+可在地形材质和地形洞穴材质上使用相同的材质，但需要注意 - 使用不透明遮罩的材质的性能消耗比普通材质大。因此可以选择创建一个单独的地形洞穴材质。
+[/region]
+
+**创建地形洞穴材质的步骤：**
+
+1. 在材质编辑器中打开或新建一个材质。打开材质后，在 **Details** 面板中将 **Blend Mode** 设为 **Masked**。
+
+	![](Landscape_BaseNodeOpacity.png)
+
+	<!--
+	[REGION:tip]
+	如地形洞穴使用单独的材质，则必须将纹理插入 Base Color 槽中，否则将地形部分变为不可见时会出现黑块。
+	[/REGION]
+	-->
+
+1. 接下来搜索并将 **LandscapeVisibilityMask** 节点添加到材质图表，然后将其输出和 **Opacity Mask** 的输入连接起来。
+
+	![](Landscape_VisibilityMaskNode.png)
+
+1. 现在即可以常规方法设置其他的地形材质，完成后的效果与下图类似。  
+
+	![](Landscape_VisibilityMaskSetup_In_Material.png)
+
+1. 完成材质的编译后，即可将其指定到地形，以便使用。此操作可在 **Details** 面板的 **Landscape Hole Material** 部分中完成。
+
+	![](Landscape_Hole_Materail_Assign.png)
+
+1. 一切设置妥当之后，即可按下方视频中的方式对地形可视性设置和取消遮罩。 
+	[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:width]
+	640
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	360
+	[/PARAMLITERAL]
+	[PARAMLITERAL:videoid]
+	6NxNppmZRss
+	[/PARAMLITERAL]
+	[/OBJECT]
+
+[REGION:note]
+如需了解利用绘制工具创建地形洞穴的内容，请查阅 [利用不透明遮罩创建洞穴](Engine\Landscape\Editing\SculptMode\#UsingOpacityMaskingtoCreateaHole)。
+[/REGION]
+
+
+## 将材质指定到地形
+
+
+完成地形材质的创建后，必须将其指定到关卡中的地形 Actor，便于使用和查看。将材质指定到 地形 Actors 的方法如下。
+
+
+**将材质指定到地形的步骤：**
+
+1. 在 **Content Browser** 中选择需要使用的地形材质。
+1. 在视口或 **World Outliner** 中选择地形。
+1. 前往关卡编辑器的地形 **Details** 面板，在 **Landscape** 部分中点击 **Landscape Material** 旁边的箭头图标 (![Assign arrow](Shared/Icons/icon_assign_left_16x.png)) 指定所选材质。
+
+	![Assigned Material](Landscape_Material_Assigned.png)
+
+可指定一个不同的材质作为 **地形洞穴材质** 使用。此材质可将特定的不透明度设置应用于地形分段，以将其移除，创建出类似于洞窟的地貌。
+
+**将地形洞穴材质指定到地形的步骤：**
+
+1. 在 **Content Browser** 中选择需要使用的地形洞穴材质。
+1. 在视口或 **World Outliner** 中选择地形。
+1. 前往关卡编辑器的地形 **Details** 面板，在 **Landscape** 部分中点击 **Landscape Hole Material** 旁边的箭头图标 (![Assign arrow](Shared/Icons/icon_assign_left_16x.png)) 指定所选材质。
+
+	![](Landscape_HoleSettings.png)
+
+
+[REGION:note]
+如需了解地形洞穴材质的使用方法，请查阅 [利用不透明遮罩创建洞穴](Engine\Landscape\Editing\SculptMode\#UsingOpacityMaskingtoCreateaHole)。
+[/REGION]
+
+<!--
+![Landscape_Material_Default.png](Landscape_Material_Default.png)(w:900 h:327)
+
+![Landscape_Material_Viewport.png](Landscape_Material_Viewport.png)(w:900 h:327)
+-->
+
+## 曲面细分和置换
+
+材质的 **Tessellation Multipliers** 和 **World Displacement** 通道可结合地形地貌使用，获得更多的细节和变形。它们和其他标准材质的工作方式相同，图层混合可以结合其 **Base Color**、**Normal** 或其他通道使用。
+
+[REGION:note]
+这些功能在启用 DirectX 11 后方可使用。除非特别针对 DirectX 11 硬件，它们将用于次要优化效果。
+[/REGION]
+
+

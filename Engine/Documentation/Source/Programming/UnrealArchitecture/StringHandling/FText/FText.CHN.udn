@@ -1,0 +1,160 @@
+﻿INTSourceChangelist:2730197
+Availability:Public
+Title:FText
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture/Reference, Programming/UnrealArchitecture/Reference/Properties, Programming/UnrealArchitecture/StringHandling
+Description:
+Version:4.9
+
+
+
+[EXCERPT:Overview]
+**FText** 代表一个显示字符串。为用户显示的文本都需要由 FText 进行处理。FText 类拥有本地化的内置支持，可处理已本地化并存储在查找表中的文本内容，以及在运行时被本地化的文本，如数字、日期、时间和格式化文本。甚至可用 FText 处理无需进行本地化的文本。包括用户输入内容，如玩家名和 Slate 显示的文本。FText 不提供任何变异函数，因为对显示字符串进行修改是非常不安全的操作。
+[/EXCERPT:Overview]
+
+### Slate 和 FText
+
+整体而言，Slate 弃用了 FString 的公开钩，转而支持 FText。因为 FText 可在其接口后处理所有本地化问题，Slate 未来将支持诸如实时语言勾选之类的功能。使用 FString 将无法实现。使用 FText 还可增强文本渲染的性能。使用 FText 时，字符串被假定为不可变，因此字符串的内存地址可用作快速缓存查找的键。与检查字符串更新或对其重新测量进行显示相比较，这种方法的开销较小。最后，在 Slate 中使用 FText 意味着本地化支持将与 UI 系统自然整合，形成本地化最佳方案的坚实框架。 
+  
+
+## 创建 FText
+
+因为 FText 的本地化应用，每个 FText 必须以键和文本进行设置。使用 LOCTEXT 和 NSLOCTEXT 宏可对 FText 进行正确设置。
+LOCTEXT 将键和文本视为参数。所有参数必须为字符串文字。所有文字量将通过本地化系统进行传递。
+
+[REGION:tip]
+必须首先将全局 LOCTEXT_NAMESPACE 宏设为字符串文字，以指定该本地化键的命名空间。
+[/REGION]
+
+使用 LOCTEXT 宏从字符串创建 FText：
+  
+	/* Top of File */ 
+	#define LOCTEXT_NAMESPACE "Your Namespace" 
+	... 
+	FText TestHUDText = LOCTEXT( "Your Key", "Your Text" ) 
+	... 
+	#undef LOCTEXT_NAMESPACE 
+	/* Bottom of File */ 
+  
+除键和文本外，NSLOCTEXT 还将命名空间作为参数。所有参数必须为字符串文字。所有文字量将通过本地化系统进行传递。
+
+	FText TestHUDText = NSLOCTEXT( "Your Namespace", "Your Key", "Your Text" ) 
+
+也可使用以下任意一个语法创建空白 FText：
+  
+* `FText TestHUDText = FText::GetEmpty(); `
+* `FText TestHUDText = FText(); `
+
+
+## 转换
+
+### 字符串变量
+
+#### 从 FText
+
+|从 | 到 | 范例 |
+|---|------|---------|
+%Programming/UnrealArchitecture/StringHandling:ftexttofstring%
+%Programming/UnrealArchitecture/StringHandling:ftexttofname%
+
+  
+FText 字符串为不可变，因此必须将其复制，否则无法对返回的字符串进行修改。 
+
+#### 到 FText
+
+|从 | 到 | 范例 |
+|---|------|---------|
+%Programming/UnrealArchitecture/StringHandling:fnametoftext%
+%Programming/UnrealArchitecture/StringHandling:fstringtoftext%
+  
+
+### 数字变量
+
+从 FName 字符串到数字变量不存在转换。
+
+#### 到 FText
+
+可使用 **FText::AsNumber()** 将浮点和 int 变量转换为 FText。此函数生成一个 FText，代表当前文化中传递的数字。
+
+范例：
+
+	FText::AsNumber( CurrentHealth )
+
+额外的数字转换包括：
+	
+* `FText::AsPercent()` 
+* `FText::AsCurrency()`
+* `FText::AsDate()`
+* `FText::AsTime()`
+
+  
+## 对比
+
+可使用 **FText::EqualTo()** 或 **FText::EqualToCaseIgnored()** 对两个 FText 字符串进行对比，接收 true 或 false 作为结果。使用 **FText::CompareTo()** 或者 **FText::CompareToCaseIgnored()** 对比字符串将返回一个整数值。   
+  
+FText 当前不对这些对比操作公开运算符，因为这些操作不是 FString 一类的简单序号比较。我们不使用常规运算符表达操作的开销。 
+
+## 格式化 FText
+  
+可使用 **FText::Format()** 函数将不同的 FText 串联起来。如有需要，可将其保存到 FText 变量。 
+  
+	FText::Format( LOCTEXT( "HelloMessageFormat",  "Hello {0}," ), PlayerName ) 
+  
+当前，格式化函数只将 FText 视为参数。
+
+FText::Format 支持两种不同类型的格式参数：排序和命名。
+
+### 排序参数
+ 
+* 参数 = {0}、{1}、{2} 等... 
+* 大括号表示格式参数的开头和结尾，数值说明已传递的参数。
+
+		FText::Format( LOCTEXT( "HealthFormatStr",  "{0} / {1}" ), FText::AsNumber( CurrentHealth ), FText::AsNumber( MaxHealth )  ) 
+
+### 命名参数 
+
+* 参数 = {Name}、{ID}、{Health} 等... 
+* 大括号表示格式参数的开头和结尾，大括号之间的文本是在传入的 FFormatNamedArgs 集合中找到的参数名称。
+
+		FFormatNamedArguments Arguments;
+		Arguments.Add(TEXT("CurrentHealth"), FText::AsNumber( CurrentHealth ));
+		EditorErrors.Error(FText::Format(LOCTEXT("ExampleFText", "You currently have {CurrentHealth} health left."), Arguments ) );
+			
+
+[PUBLISH:Licensee]
+TextTest.cpp 展示如何进行有效文化敏感的格式化、对比和排序。
+[/PUBLISH:Licensee]
+
+## HUD 中的 FText
+
+### Canvas
+
+如需使用 [Canvas](Gameplay/Framework\UIAndHUD#canvas) 在 HUD 中显示 FText，必须新建一个 **FCanvasTextItem**。
+
+	FCanvasTextItem TextItem( FVector2D::ZeroVector, TestHUDText, BigFont, FLinearColor::Black);
+	
+设置文本变量即可更改 FCanvasTextItem 的文本：
+
+	FFormatNamedArguments Arguments;
+	Arguments.Add(TEXT("CurrentHealth"), FText::AsNumber( CurrentHealth ));
+	TextItem.Text = FText::Format(LOCTEXT("ExampleFText", "You currently have {CurrentHealth} health left."), Arguments ) ;
+
+调用 **FCanvas::DrawItem()** 函数即可将 FText 实际显示到屏幕上：
+	
+	Canvas->DrawItem(TextItem,10.0f,10.0f);
+
+[REGION:note] 
+必须在 HUD 类的 **DrawHUD()** 函数中调用 DrawItem() 函数，或在以 DrawHUD() 开始的函数链中调用。
+[/REGION]
+
+
+## 蓝图中的 FText
+
+蓝图支持文本文字。文本数值的任意输入引脚将支持在节点中被指派一个数值，这些字符串将被收集用作本地化。
+
+**FText::Format** 在蓝图中也为可用。格式文本可为文字或连接到引脚。作为文本使用时，它将为格式化自动生成参数。因此，输入文字“There are {number} days until {day}.”后，一个 **Number** 引脚和一个 **Day** 引脚将被自动添加到节点。这些引脚可作为文字被填充或从变量被填充，输出文本将以钩住引脚的数值替代参数。 
+
+格式引脚被连接时，格式无法被解密，因为它是可变的。因此，您可自行添加引脚并以可能的参数对它们进行命名。这样您便能将 Format Text 节点设置好，以应对多种可能。Format 变量中出现参数匹配时，它将应用提供的信息。
+
+在 **Details** 中可对引脚名进行变更、添加和移除。
+
+ 

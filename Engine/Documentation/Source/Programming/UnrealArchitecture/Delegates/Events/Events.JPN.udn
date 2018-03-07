@@ -1,0 +1,103 @@
+﻿INTSourceChangelist:2728743
+Availability:Public
+Title:イベント
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture, Programming/UnrealArchitecture/Delegates
+Description:複数の関数と結合してすべての関数を一度に実行するデリゲート
+Version:4.9
+
+イベントは [マルチキャスト デリゲート](Programming/UnrealArchitecture/Delegates\Multicast) と非常によく似ています。ただし、どのクラスもイベントを結合できる一方で、 
+イベントをデリゲートするクラスのみがそのイベントの `Broadcast`、`IsBound`、`Clear` 関数を呼び出すことができます。つまり、イベント オブジェクトは、これらのセンシティブ関数のアクセスを外部関数に与えることを心配せずにパブリック インターフェースにエクスポーズすることができます。 
+イベントのユースケースは、純粋な抽象クラスにコールバックを含み、外部クラスが `Broadcast`、`IsBound`、`Clear` 関数を呼び出さないようにしています。
+
+## イベントをデリゲートする
+
+イベントは、イベント固有のマクロ変数を使う場合を除けば [マルチキャスト デリゲートを宣言する](Programming/UnrealArchitecture/Delegates/Multicast#マルチキャストデリゲートの宣言) 場合とほとんど同じ方法で宣言します。
+
+| マクロ宣言 | 説明 |
+| --- | --- |
+| `DECLARE_EVENT( OwningType, EventName )` | イベントを作成します。 |
+| `DECLARE_EVENT_OneParam( OwningType, EventName, Param1Type )` | パラメータが 1 つのイベントを作成します。 |
+| `DECLARE_EVENT_TwoParams( OwningType, EventName, Param1Type, Param2Type )` | パラメータが 2 つのイベントを作成します。 |
+| `DECLARE_EVENT_<Num>Params( OwningType, EventName, Param1Type, Param2Type, ... )` | パラメータが N 個のイベントを作成します。 |
+
+[REGION:tip]	
+DECLARE_EVENT マクロの最初のパラメータは、このイベントを「所有する」クラスなので、`Broadcast()` 機能を呼び出すことが可能です。
+[/REGION]
+
+## イベントを結合する
+
+イベントの結合は [マルチキャスト デリゲートを結合する](Programming/UnrealArchitecture/Delegates/Multicast#マルチキャストデリゲートの結合) 場合とほぼ同じ方法で実行します。
+
+## イベントの実行
+
+イベントにより、複数の関数を登録したデリゲートをアタッチし、イベントの Broadcast() 関数を呼ぶことでこれらの関数を一度に実行することが可能になります。イベントのシグネチャは戻り値を使用することはできません。イベントに対して、 
+`Broadcast()` はそのイベントを定義しているクラスによってのみ呼び出されます。
+
+何も結合されていない場合も、イベントで `Broadcast()` を常に安全に呼ぶことができます。出力変数の初期化にイベントを使用する場合だけは気をつけてください。これは絶対にしてはいけません。
+
+`Broadcast()` 関数を呼び出す際の Bound 関数の実行順序は定義されていません。関数が追加された順序とは異なる場合もあります。
+
+| 関数 | 説明 |
+| --- | --- |
+| `Broadcast()` | 失効しているオブジェクトを除いて、イベントを全バウンド オブジェクトへ通達します。 |
+
+
+
+##実行例
+
+### シンプルなイベント
+
+	public:
+	/** Broadcasts whenever the layer changes */
+	DECLARE_EVENT( FLayerViewModel, FChangedEvent )
+	FChangedEvent& OnChanged() { return ChangedEvent; }
+
+
+	private:
+	/** Broadcasts whenever the layer changes */
+	FChangedEvent ChangedEvent;
+
+[REGION:tip]
+イベントのアクセサは、通常の GetXXX パターンでなく OnXXX パターンに続きます。
+[/REGION]
+
+### 継承された abstract イベント
+
+**基本クラスの実装**
+
+	/** Register/Unregister a callback for when assets are renamed in the registry (アセットがレジストリで名前変更された時にコールバックを登録/未登録) */
+	DECLARE_EVENT_OneParam( IAssetRegistry, FAssetAddedEvent, const FAssetData&);
+	virtual FAseetAddedEvent& OnAssetAdded() = 0;
+
+**派生クラスの実装**
+
+	DECLARE_DERIVED_EVENT( FAssetRegistry, IAssetRegistry::FAssetAddedEvent, FAssetAddedEvent);
+	virtual FassetAddedEvent& OnAssetAdded() override { return AssetAddedEvent; }
+
+[REGION:tip]
+派生クラスの派生イベントを宣言する場合、`DECLARE_DERIVED_EVENT` マクロで関数シグネチャを繰り返す必要はありません。さらに、 `DECLARE_DERIVED_EVENT` マクロの最後のパラメータは 
+そのイベントの新規名称で、一般的にはベースタイプと同じになります。
+[/REGION]
+
+### 継承イベント
+
+派生クラスは基本クラスのセンシティブなイベント メンバーへのアクセスを継承しません。その代わりに、派生クラスがイベントを送信するための基本クラスが 
+保護された Broadcast 関数をそのイベントに対して公開する必要があります。
+
+**基本クラス**
+
+	public:
+	/** Broadcasts whenever the layer changes */
+	DECLARE_EVENT( FLayerViewModel, FChangedEvent )
+	FChangedEvent& OnChanged() { return ChangedEvent; }
+
+	protected:
+	void BroadcastChanged()
+	{
+		ChangedEvent.Broadcast();
+	}
+
+	private:
+	/** Broadcasts whenever the layer changes */
+	FChangedEvent ChangedEvent;
+

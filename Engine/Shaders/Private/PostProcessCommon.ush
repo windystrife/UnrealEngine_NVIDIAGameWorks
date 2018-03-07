@@ -1,0 +1,209 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	PostProcessCommon.usf: PostProcessing shared functions and structures.
+=============================================================================*/
+
+#ifndef __POST_PROCESS_COMMON__
+#define __POST_PROCESS_COMMON__
+
+/// e.g.
+//   PostprocessInput0.SampleLevel(PostprocessInput0Sampler, float2 UV, 0)
+//   Texture2DSample(PostprocessInput0, PostprocessInput0Sampler, float2 UV)
+//   PostprocessInput0.Load(Texel.xyz)
+//   PostprocessInput0.GetDimensions(uint, out uint width, out uint height, out uint levels)
+//   PostprocessInput0.GetDimensions(uint, out float width, out float height, out float levels)
+//   PostprocessInput0.GetDimensions(out uint width, out uint height)
+//   PostprocessInput0.GetDimensions(out float width, out float height)
+Texture2D PostprocessInput0;
+SamplerState PostprocessInput0Sampler;
+Texture2D PostprocessInput1;
+SamplerState PostprocessInput1Sampler;
+Texture2D PostprocessInput2;
+SamplerState PostprocessInput2Sampler;
+Texture2D PostprocessInput3;
+SamplerState PostprocessInput3Sampler;
+Texture2D PostprocessInput4;
+SamplerState PostprocessInput4Sampler;
+Texture2D PostprocessInput5;
+SamplerState PostprocessInput5Sampler;
+Texture2D PostprocessInput6;
+SamplerState PostprocessInput6Sampler;
+
+// width, height, 1/width, 1/height
+float4 PostprocessInput0Size;
+float4 PostprocessInput1Size;
+float4 PostprocessInput2Size;
+float4 PostprocessInput3Size;
+float4 PostprocessInput4Size;
+float4 PostprocessInput5Size;
+float4 PostprocessInput6Size;
+
+// xy = min valid UV in PostprocessInput%d, zw = max valid UV.
+float4 PostprocessInput0MinMax;
+float4 PostprocessInput1MinMax;
+float4 PostprocessInput2MinMax;
+float4 PostprocessInput3MinMax;
+float4 PostprocessInput4MinMax;
+float4 PostprocessInput5MinMax;
+float4 PostprocessInput6MinMax;
+
+// viewport width, height, 1/width, 1/height (scaled to the current rendertarget resolution), depends on SetViewportAndCallRHI() call
+float4 ViewportSize;
+// in pixels (scaled to the current rendertarget resolution), float4(minx,miny,maxx,maxy), depends on SetViewportAndCallRHI() call
+uint4 ViewportRect;
+
+SamplerState BilinearTextureSampler0;
+SamplerState BilinearTextureSampler1;
+
+// transforms ScreenPos to the screen pixel position, not the viewport local position (*xy +wz)
+// (0,0) left top, (width-1,height-1) at right bottom, in pixels (without offset to reach the pixel center)
+// 	use ComputePixelPosCenter(UVAndScreenPos.zw, bPixelCenter) instead of directly accessing this
+float4 ScreenPosToPixel;
+
+// uses ScreenPosToPixel which is setup in FPostProcessPassParameters
+// for integer output bPixelCenter should be set to true (to avoid rounding errors), but often it's better to use "int2 PixelPos = (int2)SvPosition.xy;" instead
+// @param ScreenPos -1 .. 1, usually from UVAndScreenPos.zw
+// @param bCenter false: left top of the pixel and almost no fractional value, true: added 0.5 to be pixel center
+float2 ComputePixelPosCenter(float2 ScreenPos, bool bPixelCenter)
+{
+	float2 PixelOffset = bPixelCenter ? 0.5f : 0.0f;
+	return ScreenPos * ScreenPosToPixel.xy + ScreenPosToPixel.zw + PixelOffset;
+}
+
+// not well optimized but can be useful
+float2 ScreenPosFromPixelPos(float2 PixelPos, bool bPixelCenter)
+{
+	float2 PixelOffset = bPixelCenter ? 0.5f : 0.0f;
+
+	return (PixelPos - PixelOffset - ScreenPosToPixel.zw) / ScreenPosToPixel.xy;
+}
+
+// shape of the lens for vignette like effects and masking
+// @param ScreenPos -1 .. 1
+// @return 0..1 0:borders, 1:center
+float DiscMask(float2 ScreenPos)
+{
+	float x = saturate(1.0f - dot(ScreenPos, ScreenPos));
+
+	return x * x;
+}
+
+// black on the borders
+// @param ScreenPos -1 .. 1
+// @return 0..1 0:borders, 1:center
+float RectMask(float2 ScreenPos)
+{
+	float2 UV = saturate(ScreenPos * 0.5 + 0.5f);
+	float2 Mask2 = UV * (1 - UV);
+
+	return Mask2.x * Mask2.y * 8.0f;
+}
+
+// for rectangles with border
+// @return >=0, 0 if inside
+float ComputeDistanceToRect(int2 Pos, int2 LeftTop, int2 Extent, bool bRoundBorders = true)
+{
+	int2 RightBottom = LeftTop + Extent - 1;
+
+	// use int for more precision
+	int2 Rel = max(int2(0, 0), Pos - RightBottom) + max(int2(0, 0), LeftTop - Pos);
+
+	if(bRoundBorders)
+	{
+		// euclidian distance (round corners)
+		return length((float2)Rel);
+	}
+	else
+	{
+		// manhatten distance (90 degree corners)
+		return max(Rel.x, Rel.y);
+	}
+}
+
+
+float4 MappingPolynomial;			 // RGB = a, b, c where y = a * x*x + b * x + c
+
+// @param InLDRColor needs to be LDR (0..1) and in linear space
+half3 ColorCorrection(half3 InLDRColor)
+{
+	// final color correction to adjust for hardware differences, to make quick adjustements before a demo or simply a user setting
+	return MappingPolynomial.x * (InLDRColor * InLDRColor) + MappingPolynomial.y * InLDRColor + MappingPolynomial.z;
+}
+
+
+// Generate a mask to darken the screen borders.
+// (Camera artifact and artistic effect)
+// @param VignetteCircleSpacePos from VignetteSpace()
+float ComputeVignetteMask(float2 VignetteCircleSpacePos, float Intensity)
+{
+	// Natural vignetting
+	// cosine-fourth law
+	VignetteCircleSpacePos *= Intensity;
+	float Tan2Angle = dot( VignetteCircleSpacePos, VignetteCircleSpacePos );
+	float Cos4Angle = Square( rcp( Tan2Angle + 1 ) );
+	return Cos4Angle;
+}
+
+// Scale {-1 to 1} of the viewport space to vignette circle space.
+// Vignette space is scaled such that regardless of viewport aspect ratio, 
+// corners are at the same brightness on a circle.
+float2 VignetteSpace(float2 Pos)
+{
+	// could be optimized but this computation should be done in the vertex shader (3 or 4 vertices)
+	float Scale = sqrt(2.0) / sqrt(1.0 + (ViewportSize.y * ViewportSize.z) * (ViewportSize.y * ViewportSize.z));
+	return Pos * float2(1.0,  ViewportSize.y * ViewportSize.z) * Scale;
+}
+
+
+// gets 4 nearby SceneDepth values for one UV value, useful for depth downsample, uses Gather() if possible
+float4 GatherSceneDepth(float2 UV, float2 InvBufferSize)
+{
+#if FEATURE_LEVEL >= FEATURE_LEVEL_SM5
+	// using Gather: xyzw in counter clockwise order starting with the sample to the lower left of the queried location
+	float4 DeviceZ = SceneDepthTextureNonMS.Gather(BilinearTextureSampler0, UV);
+
+	return float4(
+		ConvertFromDeviceZ(DeviceZ.x),
+		ConvertFromDeviceZ(DeviceZ.y),
+		ConvertFromDeviceZ(DeviceZ.z),
+		ConvertFromDeviceZ(DeviceZ.w)
+		);
+#elif FEATURE_LEVEL == FEATURE_LEVEL_SM4
+	float2 TexelScale = 0.5f * InvBufferSize;
+	// @todo Optimize
+	// Manually sample neighbouring texels in counter clockwise order starting with the sample to the lower left of the queried location.
+	return float4(
+		CalcSceneDepth(UV + (float2(-1, 1) * TexelScale)),
+		CalcSceneDepth(UV + (float2( 1, 1) * TexelScale)),
+		CalcSceneDepth(UV + (float2( 1,-1) * TexelScale)),
+		CalcSceneDepth(UV + (float2(-1,-1) * TexelScale))
+		); 
+#else
+	return (float4)CalcSceneDepth(UV);
+#endif // FEATURE_LEVEL
+}
+
+half4 UnwrappedTexture3DSample( Texture2D Texture, SamplerState Sampler, float3 UVW, float Size )
+{
+	// a volume texture 16x16x16 would be unwrapped to a 2d texture 256x16
+
+	float IntW = floor( UVW.z * Size - 0.5 );
+	half FracW = UVW.z * Size - 0.5 - IntW;
+
+	float U = ( UVW.x + IntW ) / Size;
+	float V = UVW.y;
+
+	half4 RG0 = Texture2DSample( Texture, Sampler, float2(U, V) );
+	half4 RG1 = Texture2DSample( Texture, Sampler, float2(U + 1.0f / Size, V) );
+
+	return lerp(RG0, RG1, FracW);
+}
+
+bool IsComputeUVOutOfBounds(in float2 UV)
+{
+	float2 CenterDist = abs(UV - 0.5f);
+	return (max(CenterDist.x, CenterDist.y) >= 0.5f);
+}
+
+#endif // __POST_PROCESS_COMMON__

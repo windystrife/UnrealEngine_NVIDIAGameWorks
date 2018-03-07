@@ -1,0 +1,117 @@
+Availability: Public
+Title:Landscape Technical Guide
+Crumbs: %ROOT%, Engine, Engine/Landscape
+Description:Technical Settings for Landscape.
+version: 4.9
+parent:Engine/Landscape
+order:6
+topic-image:Engine/Landscape/Materials/LS_Technical.png
+
+[TOC(start:2 end:3)]
+
+
+
+To get the best performance possible from the Landscape system, there are certain technical restrictions that have to be adhered to. The following document aims to bring these restrictions to your attention as well as provide you with valuable information so that you can strike the best balance between beauty and performance with your Landscape. 
+
+
+## Technical Details
+
+
+Valid dimensions for Landscape heightmaps are not always immediately obvious when getting started. Being able to determine what dimensions for heightmaps are valid and, beyond that, which are optimal requires a thorough understanding of the underlying architecture of the Landscape. In order to create a system that allows for huge terrains while still being efficient in terms of memory and performance, the architecture implicitly applies restrictions on the dimensions of the heightmap, meaning there are certain dimensions that are valid and others that are not. In previous terrain systems in Unreal Engine, there were either no restrictions (i.e., any dimensions were valid and would work) or the restrictions were fairly simple (i.e., only square power of two heightmaps were allowed). The restrictions on heightmaps for Landscapes are much more complex and rigid.
+
+A Landscape Actor is color coded so that it is easier to tell what each section does. The edges of the Landscape are highlighted in yellow, the edge of each component is in light green, section edges (if set to 2x2 sections) in a medium green, and the individual Landscape quads in a dark green.
+
+| Color: |Landscape Component|
+|---|---|
+| **Yellow:**|Landscape Actor Edge|
+|**Light Green:**| Landscape Component Edge|
+|**Medium Green:**| Landscape Section Edge|
+|**Dark Green:**|Landscape Individual Quad|
+![](Landscape_Create_Preview.png)
+
+## Landscape Components
+
+Landscapes are divided into multiple Components, which are Unreal's base unit of rendering, visibility calculation, and collision. Components in a Landscape are all the same size and are always square. The size of the Landscape component is decided when the Landscape is created and the choice depends on the size and detail of the Landscape you wish to create.
+
+Each component's height data is stored in a single texture. Because of this, its size has to be a power-of-two number of vertices. The shared row of vertices along the edge of two neighboring components are duplicated and stored in each component. For this reason, it makes sense to think about the number of quads in each component.
+
+A very simple Landscape is illustrated below (outlined in green) containing four components. Each component is made up of a single quad. One component has been separated to show how the vertices where the components meet are duplicated.
+
+![Landscape_Components.jpg](Landscape_Components.jpg)(w:256 h:256)
+
+
+## Component Sections
+
+Components can optionally be divided into either 1 or 4 (2x2) subsections. These sections are the base unit of Landscape LOD calculation.
+
+Using the 4 (2x2) subsections option gives you the same size heightmap as using four times as many components with only one subsection each, but using fewer components generally gives better performance.
+
+The size of each section (in number of vertices) must be a power of two (with a maximum of 256x256). This is so that the different LOD levels can be stored in mipmaps of the texture. This will lead to the number of quads in a component either being a power of two minus 1 (if 1 section per component) or a power of two minus 2 (if 4 sections per component).
+
+An individual component is illustrated below (outlined in green) containing four sections. Each section is made up of 9 (3x3) quads. Again, you can see that the vertices where the sections meet are duplicated.
+
+![Landscape_Component_Sections.jpg](Landscape_Component_Sections.jpg)(w:256 h:256)
+
+
+## Calculating Heightmap Dimensions
+
+As you can see, the dimensions for a Landscape are based on the number of quads in each section, the number of sections in each component, and the number of components present in the Landscape. Once you determine the number of components and the resolution of each of those components, then calculating the dimensions of the Landscape as a whole becomes a trivial calculation.
+
+Here are some example scenarios:
+
+**Example 1**
+
+
+If we start with a component comprised of a single section that contains 64x64 vertices, then the component size is 63x63 quads. Say we have a Landscape of 10x10 of these components, then we have 630x630 quads total in our Landscape. Now if we wanted to import the heights for such a Landscape, we would have to have a heightmap of 631x631 vertices, because there is always one more row of vertices than there are quads (think of a 1x1 quad - it needs 4 vertices).  So 631x631 is a valid Landscape size.
+
+
+**Example 2**
+
+
+If we have a component divided into 4 subsections, each of which is made up of 64x64 vertices. That leads to 63x63 quads per section and 126x126 quads per component. If we have 32x32 of these components, we get 126 * 32 = 4032 quads total in each direction. So the total Landscape will be 4033x4033 vertices.
+
+
+These examples focus on square Landscapes. However, you can create Landscapes that are not square. For instance, in the first example the 10x10 is not special. Assuming 63 quads per component, you could have any Landscape of AxB components with total size in vertices of (A*63+1 , B*63+1).
+
+
+## Performance Considerations
+
+The choice of component size vs the total number of components is a performance trade-off. Smaller component sizes allow quicker LOD transitions and also allows for the occlusion of more terrain, but the smaller size necessitates more components.
+
+Each component has a render-thread CPU processing cost and each section is a draw call, so try to keep these numbers to a minimum. For the largest Landscapes, Epic recommends a maximum of 1024 components.
+
+
+## Recommended Landscape Sizes
+
+In order to make things easier, here are a number of sizes that maximize the area while minimizing the number of Landscape components.
+[EXCERPT:RecommendedLSS]
+| **Overall size** (vertices) | **Quads / section** | **Sections / component** | **Component size** | **Total Components** |
+| --------- | --- | ------- | ------- | ------------ |
+| 8129x8129 | 127 | 4 (2x2) | 254x254 | 1024 (32x32) |
+| 4033x4033 | 63  | 4 (2x2) | 126x126 | 1024 (32x32) |
+| 2017x2017 | 63  | 4 (2x2) | 126x126 | 256 (16x16)  |
+| 1009x1009 | 63  | 4 (2x2) | 126x126 | 64 (8x8)     |
+| 1009x1009 | 63  | 1       | 63x63   | 256 (16x16)  |
+| 505x505   | 63  | 4 (2x2) | 126x126 | 16 (4x4)     |
+| 505x505   | 63  | 1       | 63x63   | 64 (8x8)     |
+| 253x253   | 63  | 4 (2x2) | 126x126 | 4 (2x2)      |
+| 253x253   | 63  | 1       | 63x63   | 16 (4x4)     |
+| 127x127   | 63  | 4 (2x2) | 126x126 | 1            |
+| 127x127   | 63  | 1       | 63x63   | 4 (2x2)      |
+
+
+## Layer Debug Mode
+
+**Layer Debug** mode allows the weight of specific layers to be visualized on the Landscape in the viewport. You can enable Layer Debug mode in the viewport's View menu, under **Landscape Visualizers**. For more information about the viewport's Landscape-related view modes, see the [Landscape Visualizers](Engine/UI/LevelEditor/Viewports/ViewModes\#LandscapeVisualizers).
+
+When Layer Debug mode is enabled, radio buttons allowing selection of individual color channels are shown with the target layers in the list.
+
+![Landscape_Target_Debug.png](Landscape_Target_Debug.png)(convert:false)
+
+Selecting a channel will apply a shader to the Landscape which shows the area that channel of the selected target layer covers.
+
+![Landscape_Target_Debug_Demo.png](Landscape_Target_Debug_Demo.png)
+
+[/EXCERPT:RecommendedLSS]
+
+

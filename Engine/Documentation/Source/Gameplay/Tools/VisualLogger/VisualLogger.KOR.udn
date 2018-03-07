@@ -1,0 +1,121 @@
+﻿INTSourceChangelist:3108692
+Title:비주얼 로거
+Availability:Public
+Crumbs:
+Description: 액터에서 스테이트를 캡처하여 게임 또는 에디터에 시각적으로 보여주는 툴입니다.
+
+사용자 보고만으로는 추적해 내기가 힘든 게임플레이 버그 급이 있습니다. 이러한 버그 유형은 보통 AI 가 당시 게임 상태에 따라 의사결정을 내린 복잡한 경우에 발생하기 마련입니다. 그런 경우 사용자 보고는 관찰가능 결과에 대한 보고일 뿐, 특정 게임플레이 상황에 관련된 문제 추적을 매우 어렵게 만듭니다. UE4 에는 이런 부분에 도움이 되는 툴이 있습니다. Visual Logger, 비주얼 로거라 하는데요. 핵심 부분은 여타 로깅 시스템처럼 기록 대상 액터의 상태를 캡처한 뒤 그 사실이 있은 후 게임이나 에디터에서 시각적으로 표시해 주는 기능을 합니다. 사용자의 보고와 함께 하면 해당 시간의 게임플레이 상태를 볼 수 있도록 해 주는 강력한 툴입니다. 그 데이터를 살펴보는 것으로, 데이터와 내재 코드에 원래 일어났어야 할 일과 비교해 볼 수 있습니다.
+
+비주얼 로거 실제 모습은, **창 | 개발자 툴 | 비주얼 로거** 메뉴를 사용합니다. 4.7 버전 이전에서는 콘솔 명령 "VisLog" 입니다. 전략 게임 예제의 세션 모습입니다. 첫 그림은 비주얼 로거, 두 번째 그림은 에디터의 뷰포트에서 본 것입니다. 참고로 선택된 AI 의 경로를 나타내는 보라색 선이 있으며, 타임라인 내 선택된 위치에 빨강색 위치 마커가 있습니다.
+
+![image alt text](image_0.png)
+[REGION:caption]실제 비주얼 로거[/REGION]
+
+![image alt text](image_1.png)
+[REGION:caption]에디터의 레벨 뷰포트에서 비주얼 로거가 정보를 보여주는 모습[/REGION]
+
+아래 그림에서 강조된 부분은 녹화된 세션 도중 비주얼 로거에 정보가 기록된 액터 목록을 보여줍니다. 검색창도 있어서 액터의 로그 정보를 이름으로 빠르게 찾아볼 수 있습니다.
+
+![image alt text](image_2.png)
+[REGION:caption]액터 목록과 검색 옵션[/REGION]
+
+다음 그림은 타임라인 뷰에 대한 강조입니다. 그림의 스크러버는 23.53 위치에 가 있습니다. StrategyAIController_1 가 선택되어 있어 다른 영역의 정보는 그 시간에 그 액터에서 온 것입니다. 컬러 가로 바는 로깅된 이벤트입니다. 타임 바를 앞뒤로 스크러빙하여 다른 영역을 시간상의 특정 스냅샷으로 업데이트할 수 있습니다.
+
+![image alt text](image_3.png)
+[REGION:caption]The timeline area[/REGION]
+
+아래 그림 좌하단의 4분면에 강조된 부분의 비주얼 로거는 타임라인 지정 시간에 해당 액터에 대해 캡처된 스냅샷 데이터를 표시합니다. 이 데이터는 주어진 프레임에 한 번 캡처되어 액터가 UE_VLOG() 매크로를 사용해서 비주얼 로그 항목을 요청합니다. 같은 프레임에 비주얼 로깅 호출을 여러 번 하면 해당 프레임에 같은 데이터를 재사용합니다. 스냅샷의 일부로 캡처된 데이터는 게임에 맞게 카테고리별로 특화시킬 수 있습니다 (뒷부분의 코드 예제 참고).
+
+![image alt text](image_4.png)
+[REGION:caption]특화된 카테고리를 펼친 액터 스냅샷 영역[/REGION]
+
+아래 그림에서 강조된 부분은 비주얼 로거의 로깅 영역을 둘러싸고 있습니다. 거기에는 로그가 작성된 카테고리와 아울러 로그 메시지 자체가 표시됩니다. 한 프레임에 로그 메시지가 여럿 있다면, 그 영역에 목록으로 나타납니다.
+
+![image alt text](image_5.png)
+[REGION:caption]메시지가 표시되는 로그 영역[/REGION]
+
+비주얼 로거의 주요 영역이 어떤 일을 하는지 알았으니, 게임에서 지원하도록 하는 방법을 살펴봅시다. 아래 그림에서, 일인칭 템플릿을 사용하여 GDC 라는 이름의 프로젝트를 새로 만들고 GDC 프리젠테이션에 사용했습니다. 액터에 대한 정보 캡처를 위한 함수를 하나 추가하고, 비주얼 로깅 캡처를 발동시킬 UE_VLOG() 매크로 호출 하나를 추가했습니다.
+
+![image alt text](image_6.png)
+[REGION:caption]예제 데이터 포함 비주얼 로거[/REGION]
+
+툴의 스냅샷 영역을 채우기 위해, GrabDebugSnapshot() 라는 가상함수 하나를 덮어쓸 필요가 있습니다. 이 함수는 액터의 일부분으로 구현된 것인데, 커스텀 정보 제공을 원치 않는다면 이 단계는 건너뛰어도 됩니다. 비주얼 로거는 빌드 세팅에 따라 컴파일 가능하므로, 함수 선언부를 적합한 헤더로 둘러싸줘야 합니다. 아래는 스냅샷 지원을 위해 GDCCharacter.h 에 추가한 코드입니다.
+
+	#if ENABLE_VISUAL_LOG
+		/** Appends information about this actor to the visual logger */
+		virtual void GrabDebugSnapshot(FVisualLogEntry* Snapshot) const override;
+	#endif
+
+이 메소드의 구현은, 아래에서 보듯이, 카테고리를 하나 추가하고, 그 카테고리에 항목을 하나 추가합니다. 다시 말씀드리지만, 이 부분은 빌드 세팅을 통해 비주얼 로거 지원 부분을 컴파일시 제거할 경우를 대비해 적합한 #ifdef 안에 둘러싸져 있습니다. 이 코드는 GDCCharacter.cpp 에 추가되었습니다.
+
+	#if ENABLE_VISUAL_LOG
+	void AGDCCharacter::GrabDebugSnapshot(FVisualLogEntry* Snapshot) const
+	{
+		Super::GrabDebugSnapshot(Snapshot);
+		const int32 CatIndex = Snapshot->Status.AddZeroed();
+		FVisualLogStatusCategory& PlaceableCategory = Snapshot->Status[CatIndex];
+		PlaceableCategory.Category = TEXT("GDC Sample");
+		PlaceableCategory.Add(TEXT("Projectile Class"), ProjectileClass != nullptr ? ProjectileClass->GetName() : TEXT("None"));
+	}
+	#endif
+
+이 함수는 액터가 비주얼 로거에 데이터를 기록할 때만 호출됩니다. 예를 들자면, 프로젝타일 발사를 기록하도록 하면 트리거하기도 쉽고 일인칭 템플릿 코드에 추가하기도 좋습니다. 아래 OnFire() 함수에서 UE_VLOG() 매크로 사용 부분을 주목하세요. 그런 식으로 저 액터 데이터를 캡처하고 싶다고 비주얼 로거에게 알려주는 것입니다. 앞서 말씀드렸듯이, 그 매크로 첫 사용시 비주얼 로거는 GrabDebugSnapshot() 을 호출하여 스냅샷 패널에 필요한 데이터를 수집합니다. 이 매크로는 다른 UE_LOG() 매크로와 마찬가지로 컴파일시 제거되니, 명시적으로 #ifdef 로 감쌀 필요가 없습니다.
+
+	void AGDCCharacter::OnFire()
+	{
+		// try and fire a projectile
+		if (ProjectileClass != NULL)
+		{
+			const FRotator SpawnRotation = GetControlRotation();
+
+			// MuzzleOffset is in camera space, so transform it to world space before offsetting from the character location to find the final muzzle position
+			const FVector SpawnLocation = GetActorLocation() + SpawnRotation.RotateVector(GunOffset);
+			UWorld* const World = GetWorld();
+			if (World != NULL)
+			{
+				// spawn the projectile at the muzzle
+				World->SpawnActor<AGDCProjectile>(ProjectileClass, SpawnLocation, SpawnRotation);
+				UE_VLOG(this, LogFPChar, Verbose, TEXT("Fired projectile (%s) from location (%s) with rotation (%s)"), 
+					*ProjectileClass->GetName(),
+					*SpawnLocation.ToString(), 
+					*SpawnRotation.ToString());
+			}
+		}
+
+		// try and play the sound if specified
+		if (FireSound != NULL)
+		{
+			UGameplayStatics::PlaySoundAtLocation(this, FireSound, GetActorLocation());
+		}
+
+		// try and play a firing animation if specified
+		if(FireAnimation != NULL)
+		{
+			// Get the animation object for the arms mesh
+			UAnimInstance* AnimInstance = Mesh1P->GetAnimInstance();
+			if(AnimInstance != NULL)
+			{
+				AnimInstance->Montage_Play(FireAnimation, 1.f);
+			}
+		}
+	}
+
+기록할 수 있는 것은 텍스트 정보뿐 아니라, 앞서 전략 게임 레벨 뷰포트에서 보셨던 시각적 모양 정보도 가능합니다. 게임에 무슨 일이 벌어지고 있는지 시각화시켜 보는데 도움이 되기에 강력한 기능입니다. 비주얼 로깅이 가능한 여러가지 모양 유형을 나타내는 그림입니다.
+
+![image alt text](image_7.jpg)
+[REGION:caption]경로 정보, 원기둥, 원뿔, 캡슐, 박스 예제 모양[/REGION]
+
+모양의 기록 지원을 위해 제공되는 매크로는 다음과 같습니다.
+
+* UE_VLOG_SEGMENT
+* UE_VLOG_LOCATION
+* UE_VLOG_BOX (axis aligned box)
+* UE_VLOG_OBOX (oriented box)
+* UE_VLOG_CONE
+* UE_VLOG_CYLINDER
+* UE_VLOG_CAPSULE
+
+이 매크로 각각은 각기 다른 파라미터를 통해 모양 정보를 기록합니다. 각각의 기록에 필요한 것이 무엇인지 VisualLogger.h 에서 매크로를 확인하실 수 있습니다.
+
+마지막으로 한 가지 더 말씀드릴것은, 비주얼 로거는 나중의 디버깅 세션을 위해 이 파일을 디스크에 저장할 수 있습니다. QA 더러 이 세션을 항상 기록하게 하면, 결함(defect) 추적 항목 생성시 첨부시킬 수 있습니다. 그리고서 그에 해당하는 레벨과 비주얼 로거 파일을 로드하여 무슨 일이 있었는지 확인할 수 있습니다. 이 툴 덕에 디버깅 작업 속도 향상에 큰 도움이 될 것입니다.
+

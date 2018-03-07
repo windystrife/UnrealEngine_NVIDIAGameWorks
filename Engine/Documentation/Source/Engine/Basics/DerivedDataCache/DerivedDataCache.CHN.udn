@@ -1,0 +1,69 @@
+﻿Availability:Public
+Title:衍生数据缓存
+Crumbs:%ROOT%, Engine
+Description: 由虚幻引擎4及其目标平台所使用的衍生数据缓存和资源存储格式的概述。 
+
+**衍生数据缓存** (DDC)以引擎及其目标平台使用的资源格式保存资源的各个版本， 这种格式和导入到编辑器并存储在`.uasset` 文件中的美术人员创建的资源的原有格式是不同的 。 存储在衍生数据缓存中的内容是可以随意丢弃的，因为 每当使用存储在 `.uasset` 文件中的数据时都会重新生成这些内容。 通过存储这些 _衍生数据_ 格式， 使得可以轻松地添加或改变引擎所使用的格式，而不必修改原有资源文件。
+
+## 使用共享的衍生数据缓存
+
+工作室应该使用一个共享的衍生数据缓存，让位于特定位置的所有用户都可以访问。 这样，仅一个人需要 生成衍生数据资源格式，然后这些资源会自动和其他用户共享 。 当有资源需要处理时偶尔会出现停，但所获的结果会被记录并和其他人共享。 所以只要少数开发人员处理资源，大部分人就不会受到任何影响。
+
+[REGION:warning]
+请不要从网络上拷贝整个衍生数据缓存、备份您的衍生数据缓存或者从备份中恢复衍生数据缓存。 尽管这 没有任何坏处，但却很浪费时间，因为相对于在本地重新简单地生成这些数据来说，从衍生数据缓存中转移大量数据会花费 更长的时间。
+[/REGION]
+
+要想创建一个共享的衍生数据缓存，可以通过在您的游戏的 `DefaultEngine.ini` 文件中声明 `[DerivedDataBackendGraph]` 这部分内容 来覆盖`[DerivedDataBackendGraph]`的路径。 这个部分最初声明位于 `BaseEngine.ini` 文件中， 在该文件中路径设置为Epic的内部衍生数据缓存共享。 重新声明该部分，并修改其路径使其指向 你的网络上的共享位置(比如 `Path=\\mystudio.net\DDC`):
+
+	[DerivedDataBackendGraph]
+	MinimumDaysToKeepFile=7
+	Root=(Type=KeyLength, Length=120, Inner=AsyncPut)
+	AsyncPut=(Type=AsyncPut, Inner=Hierarchy)
+	Hierarchy=(Type=Hierarchical, Inner=Boot, Inner=Pak, Inner=EnginePak, Inner=Local, Inner=Shared)
+	Boot=(Type=Boot, Filename=\%GAMEDIR\%DerivedDataCache/Boot.ddc, MaxCacheSize=256)
+	Local=(Type=FileSystem, ReadOnly=false, Clean=false, Flush=false, PurgeTransient=true, DeleteUnused=true, UnusedFileAge=17, FoldersToClean=-1, Path=../../../Engine/DerivedDataCache)
+	Shared=(Type=FileSystem, ReadOnly=false, Clean=false, Flush=false, DeleteUnused=true, UnusedFileAge=19, FoldersToClean=-1, Path=\\mystudio.net\DDC, EnvPathOverride=UE-SharedDataCachePath)
+	AltShared=(Type=FileSystem, ReadOnly=true, Clean=false, Flush=false, DeleteUnused=true, UnusedFileAge=19, FoldersToClean=-1, Path=\\mystudio.net\DDC2, EnvPathOverride=UE-SharedDataCachePath2)
+	Pak=(Type=ReadPak, Filename=\%GAMEDIR\%DerivedDataCache/DDC.ddp)
+	EnginePak=(Type=ReadPak, Filename=../../../Engine/DerivedDataCache/DDC.ddp)
+
+
+Satellite工作室制作了一个独立共享的基础代码，它可以将 `UE-SharedDataCachePath` 环境变量 设置为任何位置的所有用户都可以读写的地方。 这使得每个地方都可以访问 它共享的衍生数据缓存。 
+
+比如：
+
+	UE-SharedDataCachePath=\\mystudio.net\DDC
+
+## 使用本地的衍生数据缓存
+
+独立的开发人员或者远程工作的开发人员一般仅使用本地的衍生数据缓存。 要想让引擎不要尝试并 使用共享的衍生数据缓存，请使用以下方法：
+
+* 在命令行里传入 `-ddc=noshared` 命令
+* 设置环境变量为本地硬盘驱动器: 
+    
+		UE-SharedDataCachePath=c:\DDC
+
+
+## 生成衍生数据
+
+一般，导入资源的用户负责生成衍生数据，因为他们一般会 在引擎中使用及测试这些资源。 但是，有些时候 可能需要处理某个新的资源。 当需要应用资源时会自动进行处理， 如果运行的硬件较快，应该不会带来太大的影响，尽管偶尔可能会出现停顿现象。  
+ 
+任何时候您都可以向可执行文件中传入以下参数来填充您的衍生数据缓存：
+ 
+	UE4\Engine\Binaries\Win64\UE4Editor.exe MyGame -run=DerivedDataCache -fill 
+
+我们每天夜里执行一次这个过程，以确保总是可以准备好衍生数据缓存，但一般不需要这么做， 因为自动缓存应该会 _发挥作用的_ 。
+
+## 发布衍生数据缓存
+ 
+打包游戏时我们一般倾向于使用烘焙这种方法，因为烘焙过的版本不需要也不使用衍生数据缓存。 但是， 如果需要，也可以打包衍生数据缓存以进行发布。
+
+**要想打包衍生数据缓存:**
+ 
+1. 从 `UE4/Engine/Binaries/Win64`  目录运行 `UE4.exe` 并传入以下参数：
+
+		UE4Editor.exe [GameName] -run=DerivedDataCache -fill -DDC=CreatePak
+ 
+1. 这将在 `UE4\[GameName]\DerivedDataCache` 文件夹中创建一个 `DDC.ddp` 文件。
+
+1. 引擎会自动检测及使用该 `.ddp`  文件。

@@ -1,0 +1,541 @@
+﻿INTSourceChangelist:3507178
+Availability:Public
+Title:Reflection Environment (反射環境)
+Crumbs: %ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description:光沢のある部分反射をキャプチャして表示する機能
+Version:4.14
+
+[TOC(start:2)]
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:title%](%ROOT%/Engine/Rendering/LightingAndShadows/ReflectionEnvironment/reflection_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+	![](%ROOT%/ue4_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+	%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:title%
+	[/PARAM]
+	[PARAM:description]
+	%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/ReflectionEnvironment]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:title%](%ROOT%/Engine/Rendering/LightingAndShadows/ReflectionEnvironment/reflection_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+	![](%ROOT%/ue4_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+	%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:title%
+	[/PARAM]
+	[PARAM:description]
+	%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/ReflectionEnvironment]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[EXCERPT:ReflectionEnv001]
+**Reflection Environment (反射環境)** は、レベルのあらゆる領域に効率的な反射を作成する機能です。メタルなど 
+重要なマテリアルの多くは、光を全方向へ反射させる必要がありますが、 
+それを行うのが Reflction Environment です。対象デバイスがコンソールと中間スペック PC なので、高速処理が要求されます。動的オブジェクトの反射あるいは鋭い反射をサポートする代わりに、 
+その分メモリ オーバーヘッドが発生します。 
+[/EXCERPT:ReflectionEnv001]
+
+[REGION:fullwidth]
+![Reflection Environment](reflection_environment.png)
+[/REGION]
+
+## Reflection Environment のクイック設定
+
+プロジェクト レベルですぐに Reflection Environment を使用するには、以下の手順に従います。
+
+1. レベルにライトを幾つか追加してライティングをビルドします。Reflection Environment を完全に表示するには、間接的なディフューズ ライティングが必要です。 
+
+1. **[Modes]** パネルの **[Visual Effects (ビジュアル エフェクト)]** セクションで、**Sphere Reflection Capture** アクタを選択してレベルへドラッグします。 
+
+レベル内で反射が確認できない場合は強度が十分ではありません。以下を試してみてください。
+
+* 反射を良くするために、マテリアルのスペキュラは明確に、ラフネスは低めにしてください。
+* マテリアルのどの値を調整すればよいのか判断しやすいように、[Reflection Override] ビューモードを使用してキャプチャした画像を可視化します。 
+
+## Reflection Environment を使用するためのレベル設定
+
+リアルな反射を作成する最初のステップは、 
+ライトマップを使用して間接ライティングを含むディフューズ ライティングを設定することです。設定方法の詳細は [Lightmass](Engine/Rendering/LightingAndShadows/Lightmass/) ページをご覧ください。以下は、ビルド後に発生する Lightmass の間接ライティングの機能を妨げる 
+一般的なエラーの一例です。
+* シャドウ キャスティング スカイボックス
+* **LightmassImportanceVolume** がない。
+* ライトマップ UV がない、または正しく設定されていない。
+* **[World Properties]** の **[Force No Precomputed Lighting (ライティングの事前計算を非アクティブにする)]** が **True** に設定されている。
+
+レベルの拡散色は Reflection Environment によって反射するので、次の操作をすると最高の反射結果が得られます。 
+* 直接 Lit (ライティング有) されている領域とシャドウがかかった領域のコントラストが確実に大きく異なるようにしてください。 
+* 明るいディフューズで照らされた領域は、反射の中でくっきり表れる部分であることを覚えておいてください。
+* 暗いシャドウが適用された領域では、反射が最も見えやすくなります。 
+* 反射キャプチャが見るレベルを確認するためにスペキュラの表示フラグを無効にして Lit ビューモードを使用します。
+
+Reflection Environment とうまく機能するようにシーンのマテリアルを設定することは大変重要です。以下の点に留意してください。 
+* 平面および鏡面サーフェスでは、シンプルな形状にキューブマップを結合すると誤差が生じます。 
+* 曲線ジオメトリまたはラフなサーフェスではこのようなアーティファクトが不明瞭なため、結果に納得してしまいます。 
+* 詳細な法線マップを使って、マテリアルのラフネス度を指定して平面な領域に使用することが重要です。 
+これが反射をきれいに見せるコツです。
+
+[REGION:imagetable]
+| ![Curvy and Sharp](1CurvyAndSharp.png)(w:290) | ![Flat and Rough](1FlatAndRough.png)(w:290) | ![Flat and Sharp](1FlatAndSharp.png)(w:290)|
+| ------ | ------ | ------ |
+| 滑らかな表面＋曲線ジオメトリ:適切な反射 | 粗いサーフェス＋平面ジオメトリ:適切な反射 |滑らかな表面＋平面ジオメトリ:反射が明らかにうまく調和していない
+[/REGION]
+
+反射させたい領域に Reflection Environment  を配置します。シーンは球体へ再投影されるため、 
+反射させたいレベルの一部が半径のちょうど内側へ含まれるように 
+球体キャプチャを配置します。キャプチャはレベル ジオメトリに近くなりすぎないように配置してください。 
+隣接するジオメトリの方が優位となり、後方に位置する重要な詳細がブロックされてしまいます。
+
+## 光沢のある間接スペキュラ
+
+技術的に言うと、Reflection Environment は間接スペキュラを作成します。間接スペキュラは解析ライトを通じて受け取りますが、 
+明るい方向への反射のみをいくつか作成します。スペキュラは、スカイライトを通じて空からも受け取りますが、 
+スカイライト キューブマップはあまりに距離が遠いため、部分的な反射は作成されません。間接スペキュラは、レベルのすべての部分をすべての別の部分へ反射させます。 
+ディフューズ反応をしないメタルなどのマテリアルには、特に重要な機能です。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Diffuse Only](DiffuseOnly.png)(w:700)
+	[/PARAM]
+	[PARAM:after]
+	![Reflection Only](ReflectionOnly.png)(w:700)
+	[/PARAM]
+[/OBJECT]
+
+**フル ライティング**
+
+[REGION:fullwidth]
+![Full Scene](Complete.png)
+[/REGION]
+
+[EXCERPT:RefEnvIntro]
+Reflection Environment はいろいろなポイントで静的レベルをキャプチャし、 
+それを球体などシンプルな形状へ再投影します。アーティストは、**_ReflectionCapture_** アクタを配置して 
+キャプチャする点を選択します。反射は配置調整のため、編集中はリアルタイムで更新されますが、実行時は静的です。 
+キャプチャしたレベルをシンプルな形状に投影すると、反射のおおよその視差がわかります。各ピクセルは 
+複数のキューブマップをブレンドして最終結果を表示します。小さい ReflectionCapture アクタが大きいアクタをオーバーライドするので、必要に応じて領域の反射の視差精度の微調整ができます。ブループリントの 
+部屋の真ん中にキャプチャを配置した後に、部屋の隅に小さなキャプチャを配置することによって 
+反射を微調整します。 
+[/EXCERPT:RefEnvIntro]
+
+さまざまな光沢をもつマテリアルは、キャプチャしたキューブマップからブラー ミップマップの生成によってサポートされています。
+  
+![Varying Glossiness](VaryingGlossiness.png)
+
+ただし、非常にラフなサーフェスへキューブマップ反射を使用すると、 
+ローカル オクルージョンがないために大量のライトが漏れることになり、オーバーレイ表示の明るい反射となってしまいます。Lightmass で生成される 
+ライトマップ データを再利用してこの問題を解決します。マテリアルの粗さに基づいて、キューブマップ反射効果を 
+ライトマップの間接スペキュラと混ぜ合わせます。とても粗いマテリアル (完全にディフューズ) は、ライトマップの結果に収束します。 
+効果の混ぜ合わせは、本質的にライティング データ (キューブマップ) の非常に精度の高い部分と、別のライティング データ (ライトマップ) の低周波の部分を結合したものです。これを正しく機能させるには、 
+ライトマップに含むことができるのは間接ライティングのみにします。つまり、粗いサーフェスの反射品質を改善できるのは、 
+固定ライトからの間接ライトのみということです。**静的ライトタイプはライトマップに直接ライティングを放つため、 
+ReflectionCapture と一緒に使用しないでください。** ライトマップと混ぜるためには、 
+マップに意味のある間接ディフューズ ライティングが必要であり、かつ 
+結果を確認するためにライティングがビルド済みでなければならないことにご注意ください。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Reflections on a rough surface with no shadowing](2RoughWithNoShadowing.png)(w:550)
+	[/PARAM]
+	[PARAM:after]
+	![Rough with Shadowing](2RoughWithShadowing.png)(w:550)
+	[/PARAM]
+[/OBJECT]
+
+## 反射キャプチャのライティング ミックス
+
+反射キャプチャ アクタを使用する場合、UE4 は反射キャプチャからの間接スペキュラと、ライトマップからの間接ディフューズ ライティングをミックスします。これにより、リークを減らします。反射キューブマップは空間の一点のみでキャプチャーされますが、ライトマップはそれを受けるすべてのサーフェスで計算されてローカルのシャドウイング情報を含むからです。
+
+[OBJECT:ComparisonSlider]
+    [PARAM:before]
+    ![Reduce Lightmap Mixing On Smooth Surfaces Off](ReduceLightmapMixingOnSmoothSurfaces_Off.png)
+    [/PARAM]
+    [PARAM:after]
+    ![Reduce Lightmap Mixing On Smooth Surfaces On.png](ReduceLightmapMixingOnSmoothSurfaces_On.png)
+    [/PARAM]
+[/OBJECT]
+
+ラフなサーフェスではライトマップをミックスするとうまく機能しますが、滑らかなサーフェスでは Reflection Capture アクタからの反射がスクリーン スペースの反射や平面反射のような他の方法からの反射に対応しなくなります。このため、ライトマップのミックスは非常に滑らかなサーフェスでは行われなくなりました。ラフネス値 0.3 のサーフェスは、ライトマップのミックスをフルに受けて、ラフネス値 0.1 以下でライトマップのミックスなしにフェードアウトします。また、反射キャプチャと SSR がはるかにうまく対応するようになり、2 つの間の遷移がわかりずらくなります。
+
+### ライトマップ ミックスと既存コンテンツ
+
+デフォルトで、ライトマップのミックスは有効にされているので、既存コンテンツに影響します。滑らかなサーフェスで反射のリークがあると、より目立ってしまいます。対応策としては、反射プローブを追加で配置してリークを減らす方法があります。古いライトマップ ミックス ビヘイビアのリバートも可能です。手順は、**[Edit]** > **[Project Settings]** >  **[Rendering]** > **[Reflections]** を選択し **[Reduce lightmap mixing on smooth surfaces (スムース サーフェス上のライトマップ ミックスを減らす)]** のチェックを外します。
+
+![](Engine\Rendering\LightingAndShadows\ReflectionEnvironment\Enable_LM_Mixing.png)
+
+UE4 コンソールで以下のコマンドを調節すると、ライトマップ ミックスの量の微調整ができます。 
+ 
+* **r.ReflectionEnvironmentBeginMixingRoughness (default = 0.1)**
+* **r.ReflectionEnvironmentEndMixingRoughness (default = 0.3)**
+* ** r.ReflectionEnvironmentLightmapMixBasedOnRoughness (default = 1)**
+* **r.ReflectionEnvironmentLightmapMixLargestWeight (default = 1000)**
+
+## 質の高い反射
+
+反射の品質は、パフォーマンスと外見がちょうどよいバランスが保つことができるデフォルト設定になっていますが、さらに反射品質を良くしたい場合があります。以下のセクションでは、質の高い反射を実現するためのメソッドを説明します。
+
+### スタティックメッシュ頂点法線とタンジェントの正確なエンコード
+
+正確な反射を作成するためには、頂点法線とタンジェントを正確に表現することが重要な要因となります。密度が非常に高いメッシュは、隣接している頂点を同じ頂点法線とタンジェント値に量子化することになり、法線方向でのブロック ジャンプを引き起こします。法線とタンジェントをチャネル ベクターごとに 16 ビットとしてエンコードするオプションを追加しました。デベロッパーは品質と頂点バッファのエンコードによるメモリの使用量のトレードオフができるようになります。 
+
+** スタティックメッシュ頂点法線とタンジェントの正確なエンコードを有効にする方法:**
+
+1. **コンテンツ ブラウザ** でスタティックメッシュをダブルクリックして **スタティックメッシュ エディタ** の中で開きます。
+
+1. スタティクメッシュ エディタの **[Details (詳細)]** パネルの **[LOD0]** オプションを展開します。
+
+	[REGION:lightbox]
+	[![](SM_HP_Vertex_Normals_00.png)(w:400 h:350)](SM_HP_Vertex_Normals_00.png)
+	[/REGION]
+
+1. **LOD0** の一番下に、**[Build Settings (ビルド設定)]** というセクションがあります。[Build Settings (ビルド設定)] の横の小さい三角をクリックしてビルド設定オプションを展開します。
+
+	[REGION:lightbox]
+	[![](SM_HP_Vertex_Normals_01.png)(w:400 h:350)](SM_HP_Vertex_Normals_01.png)
+	[/REGION]
+
+1. 名前の横のチェックボックスをクリックして **[Use High Precision Tangent Basis]** オプションを有効にして **[Apply Changes (変更を適用)]** ボタンを押して新規設定を適用します。
+
+	[REGION:lightbox]
+	[![](SM_HP_Vertex_Normals_02.png)(w:400 h:350)](SM_HP_Vertex_Normals_02.png)
+	[/REGION]
+
+ビューポートは変更を自動的に更新します。 
+
+[REGION:note]
+表示されている反射の品質は、スタティックメッシュのテセレーション密度に直接的に関連します。テセレーションが少ないスタティックメッシュは、テセレーションが多いスタティックメッシュよりも反射中のアーティファクトが長くなります。
+[/REGION] 
+
+[OBJECT:ComparisonSlider]
+[PARAM:before]
+![High Precision Vertex Normal Off](SM_HP_Vertex_Normals_Off.png)(h:580)
+[/PARAM]
+[PARAM:after]
+![High Precision Vertex Normal On](SM_HP_Vertex_Normals_On.png)(h:580)
+[/PARAM]
+[/OBJECT]
+
+[REGION:lightbox]
+[![](SM_HP_Vertex_Normals_Wireframe.png)(w:582 h:580)](SM_HP_Vertex_Normals_Wireframe.png)
+[/REGION]
+
+
+### High Precision GBuffer Normal Encoding
+
+[High Precision GBuffer Normal Encoding] オプションを有効にすると、GBuffer の法線エンコードがより正確になります。GBuffer が法線エンコードをより正確に行うことで、法線ベクトルは 3 つのチャンネルのそれぞれに 16 ビットでエンコードされます。また、Screen Space Reflections (SSR) などの技術を高精度法線に依存させることもできます。 
+
+**High Precision GBuffer Normal Encoding を有効にする方法:**
+
+1. **メイン ツールバー** で、 **[Edit (編集)] > [Project Settings (プロジェクト設定)]** の順に選択します。
+
+	[REGION:lightbox]
+	[![](ARCS_00.png)(w:400 h:350)](ARCS_00.png)
+	[/REGION]
+
+1. [Project Settings (プロジェクト設定)] の **[Engine]** セクションで、**[Rendering]** オプションをクリックし、**[Optimizations (最適化)]** セクションで **[Gbuffer Format]** を **[Default]** から **[High Precision Normals (精度の高い法線)]** に変更します。
+
+	[REGION:lightbox]
+	[![](HPGBuffer_01.png)(w:400 h:350)](HPGBuffer_01.png)
+	[/REGION]
+
+	[region:warning]
+	このエンコード処理はより多くの GPU メモリを必要とするので、有効にするとプロジェクトのパフォーマンスに直接影響します。
+	[/region]
+
+GBuffer フォーマットを変更してもエディタの再起動は必要ないので、異なる GBuffer フォーマット間で簡単に変更して、反射の外見に及ぼす影響を確認することができます。以下の画像を見ると、GBuffer フォーマットがデフォルトから [High Precision Normals (精度の高い法線)] へ変更すると、反射の見た目と質の変化が分かります。
+
+[OBJECT:ComparisonSlider]
+[PARAM:before]
+![Default GBuffer Format](Default_GBuffer_Format.png)(h:600)
+[/PARAM]
+[PARAM:after]
+![High Precision GBuffer Format](Hight_P_GBuffer_Format.png)(h:600)
+[/PARAM]
+[/OBJECT]
+
+## 反射キャプチャの形状
+
+[EXCERPT:RefCaptures]
+現時点で有効な反射キャプチャの形状は、球とボックスの 2 種類です。キャプチャ形状は、 
+キューブマップへキャプチャするシーンの一部、反射でレベルを再投影する形状、 
+またキューブマップ (影響範囲) から反射を受け取ることができるレベルの一部を制御するため大変重要です。
+[/EXCERPT:RefCaptures]
+
+### 球体形状
+
+現時点で球は一番便利な形状です。反射しているジオメトリ形状と一致することは絶対にありませんが、
+形状に切れ目や隅がないため、エラーに整合性があります。 
+
+![Sphere Shape](SphereShape.png)(w:720)
+
+球体形状には、キューブマップから影響を受けるピクセルと、 
+レベルが再投影される球体を制御するオレンジの影響半径があります。 
+
+小さいほうのキャプチャが大きい方のキャプチャをオーバーライドするので、レベルの周りに小さなキャプチャを配置して微調整ができます。
+
+### ボックス形状
+
+ボックス形状の用途は非常に限られており、通常は廊下や四角い部屋のみに使用することができます。その理由は、ボックス内のピクセルのみが反射を理解すると同時に、 
+ボックス内の全てのジオメトリはボックス上に投影されるため、 
+重大なアーティファクトを発生させる場合が多いためです。
+
+![Box Shape](BoxShape.png)
+
+選択時は、投影形状のオレンジのプレビューがボックスに表示されます。ボックスの外側の **Box Transition Distance** 内にある 
+レベルのみをキャプチャします。キャプチャの影響は、ボックス内でも 
+移動することでフェードインします。 
+
+## リフレクション プローブ (Reflection Probes) の編集
+
+リフレクション プローブを編集する場合、確実に正しい結果となるように様々なことを覚えておく必要があります。次のセクションで、その内容、そして最高品質の反射をプロジェクトで行う方法を説明します。
+
+### リフレクション プローブの更新
+
+リフレクション プローブは自動更新されません。このことをしっかり覚えておいてください。ただし、以下の場合のみ、リフレクション プローブはレベル内で自動更新されます。
+
+* マップをロードする
+* 反射キャプチャ アクタのプロパティを直接編集する
+* レベル ライティングをビルドする
+
+ライドの輝度の変更やレベル ジオメトリの移動など、レベルに何かしら編集を行う場合、反射キャプチャ アクタを選択し、**[Update Captures (キャプチャを更新する)]** ボタンをクリックして変更を伝播します。 
+
+[REGION:lightbox]
+[![](Update_Captures_Button.png)(w:400 h:350)](Update_Captures_Button.png)
+[/REGION]
+
+### リフレクション プローブで Custom HDRI Cubemap を使う
+
+リフレクション プローブは、反射データに使うキューブマップを指定するだけでなく、キューブマップの大きさも指定できます。スカイライトおよびリフレクション プローブに使用するクック済みキューブマップの解像度は、これまではハードコード化されていました。今回のリリースで、デベロッパーは必要とするパフォーマンス、メモリ、品質にするために最も適した解像度を選択できるようになりました。以下の画像では、**Captured Scene** オプションと **Specified Cubemap** オプションを使った場合の違いが分かります。 
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Captured Scene](CC_Capture_Scene.png)(h:500)
+	[/PARAM]
+	[PARAM:after]
+	![Specified Cubemap](CC_Specified_Cubemap.png)(h:500)
+	[/PARAM]
+[/OBJECT]
+
+プロジェクトのリフレクション プローブにカスタム HDRI キューブマップの使用を指定するには、以下の手順を行います。
+
+1. まず、HDRI キューブマップ テクスチャが使用できる状態であることを確認してください。プロジェクトに HDRI キューブマップ テクスチャがなければ、スターター コンテンツに **「HDRI_Epic_Courtyard_Daylight」** というテクスチャがあります。
+
+	[REGION:lightbox]
+	[![](Custom_Cubemap_00.png)(w:400 h:350)](Custom_Cubemap_00.png)
+	[/REGION]
+
+	[region:note]
+	[Migrate](Engine/Content/Browser/UserGuide/Migrate/) 機能を使えば、プロジェクト間でアセットの移動ができます。
+	[/region]
+
+
+1. レベルに配置されている **リフレクション プローブ** アクタを選択して **[Details (詳細)]** パネルの **[Reflection Capture (反射キャプチャ)]]** セクションで、**[Reflection Source Type (反射ソース タイプ)]** を **[Captured Scene (キャプチャしたシーン)]** から **[Specified Cubemap (指定したキューブマップ)]** へ変更します。
+
+	[REGION:lightbox]
+	[![](Custom_Cubemap_01.png)(w:400 h:350)](Custom_Cubemap_01.png)
+	[/REGION]
+
+1. レベルでリフレクション プローブアクタを選択した状態で、コンテンツ ブラウザから使用する HDRI テクスチャを選択します。次に、反射キャプチャ アクタの **Reflection Capture** で、コンテンツ ブラウザから HDRI テクスチャを **Cubemap** 入力へドラッグします。
+
+	[REGION:lightbox]
+	[![](Custom_Cubemap_02.png)(w:400 h:350)](Custom_Cubemap_02.png)
+	[/REGION]
+
+1. **[Update Capture]** ボタンを押して、反射キャプチャ アクタを更新して、指定した新しいHDRI キューブマップ テクスチャで使えるようにします。 
+
+	[REGION:lightbox]
+	[![](Custom_Cubemap_03.png)(w:400 h:350)](Custom_Cubemap_03.png)
+	[/REGION]
+
+### リフレクション プローブの解像度の調整
+
+反射キャプチャ アクタに使用している HDRI キューブマップの解像度をグローバルに調整するには、以下の手順に従います。 
+
+1. まず、メインツールバーから **[Project Settings (プロジェクト設定)]** を開いて、**[Edit (編集)]** オプション、次に **[Project Settings (プロジェクト設定)]** を選択します。
+
+	[REGION:lightbox]
+	[![](ARCS_00.png)(w:400 h:350)](ARCS_00.png)
+	[/REGION]
+
+1. [Project Settings (プロジェクト設定)] メニューから **[Engine (エンジン)]** > **[Rendering (レンダリング)]** セクションの **[Textures]** オプションを開きます。
+
+	[REGION:lightbox]
+	[![](ARCS_01.png)(w:400 h:350)](ARCS_01.png)
+	[/REGION]
+
+1. **[Reflection Capture Resolution]** オプションで、指定した HDRI キューブマップの大きさの増減を調節することができます。
+
+	![](ARCS_02.png)
+
+	[region:warning]
+	解像度が非常に高いテクスチャは、大量の GPU メモリが必要とします。パフォーマンスに著しい影響を与えますので、細心の注意を払って使用してください。
+	[/region]
+
+反射キャプチャの解像度を **1**、**4**、**8**、**16**、**32**、**64**、**128**、**256**、**512**、**1024** に設定すると、以下のようになります。
+[REGION:fullwidth]
+[INCLUDE:Engine\Rendering\LightingAndShadows/ReflectionEnvironment#ReflectionResolution]
+[/REGION]
+
+### スカイライトの反射解像度の調整
+
+リフレクション プローブと同様に、スカイライトにも反射用に使用している HDRI キューブマップの解像度の定義と調節ができます。UE4 プロジェクトでこの機能を使用するには、以下の手順を行います。 
+
+1. **[Mode]** パネルの **[Lights]** セクションで、**[Skylight]** を選択してレベルにドラッグします。 
+
+	[REGION:lightbox]
+	[![](Skylight_Reflection_00.png)(w:500 h:300)](Skylight_Reflection_00.png)
+	[/REGION]
+
+1. そのスカイライトを選択して **[Details (詳細)]** パネルの **[Light]** セクションの **[Source Type (ソースタイプ)]** を **[SLS Captured Scene (SLS キャプチャしたシーン)]** から **[SLS Specified Cubemap (SLS 指定したキューブマップ)]** へ変更します。
+
+	[REGION:lightbox]
+	[![](Skylight_Reflection_01.png)(w:500 h:300)](Skylight_Reflection_01.png)
+	[/REGION]
+
+1. **[Cubemap]** セクションのドロップダウン ボックスをクリックして、リストから HDRI キューブマップを選択します。
+
+	[REGION:lightbox]
+	[![](Skylight_Reflection_02.png)(w:300 h:300)](Skylight_Reflection_02.png)
+	[/REGION]
+
+1. 選択したキューブマップに対して **Cubemap Resolution** 入力の値を変更して解像度を調節することができます。
+
+	[REGION:lightbox]
+	[![](Skylight_Reflection_03.png)(w:300 h:300)](Skylight_Reflection_03.png)
+	[/REGION]
+
+	[region:note]
+	Cubemap Resolution は、16、64、128、25、512、1024 などの 2 のべき乗の数字のみ使用できます。  
+	[/region]
+
+
+### 複数のリフレクション プローブ データのブレンド
+反射キャプチャ アクタに異なる HDRI キューブマップを与えると、異なる複数のキューブマップ リフレクションをブレンドすることができます。UE4 プロジェクトでこの操作を行うには、以下の手順に従います。
+
+1. まず **リフレクション プローブ** を最低 1 つレベルに追加し **[Reflection Source Type (反射ソース タイプ)]** を **[Specified Cubemap (指定したキューブマップ)]** に変更して HDRI テクスチャを **Cubemap** 入力へつなぎます。 
+
+	[REGION:lightbox]
+	[![](Blend_RFD_00.png)(w:600 h:400)](Blend_RFD_00.png)
+	[/REGION]
+
+1. レベルにリフレクション プローブを複製または追加して、黄色の影響半径が最初のリフレクション プローブと交わるように **影響半径** を配置 / 調整します。 
+
+	[REGION:lightbox]
+	[![](Blend_RFD_01.png)(w:600 h:400)](Blend_RFD_01.png)
+	[/REGION]
+
+1. 新規に複製 / 作成したリフレクション プローブ アクタを選択し、**[Details (詳細)]** パネルの **[Cubemap]** セクションで、HDRI キューブマップを別のものに変更します。
+
+	[REGION:lightbox]
+	[![](Blend_RFD_02.png)(w:600 h:400)](Blend_RFD_02.png)
+	[/REGION]
+
+1. 複製 / 追加しリフレクション プローブを選択したままの状態で、**[Details (詳細)]** パネルの **[Reflection Capture]** セクションの **[Update Captures (キャプチャを更新)]** ボタンを押して Cubemap 入力にした値を使用するためにリフレクションを更新します。
+
+	[REGION:lightbox]
+	[![](Blend_RFD_03.png)(w:600 h:400)](Blend_RFD_03.png)
+	[/REGION]
+
+1. レベル内でリフレクション プローブを選択して移動すると、この 2 つの HDRI キューブマップがどのようにブレンドされるのか理解できます。
+
+	[OBJECT:EmbeddedVideo]
+		[PARAMLITERAL:width]
+		640
+		[/PARAMLITERAL]
+		[PARAMLITERAL:height]
+		360
+		[/PARAMLITERAL]
+		[PARAMLITERAL:videoid]
+		QYbSsYP2Nkk
+		[/PARAMLITERAL]
+	[/OBJECT]
+
+### 視覚化
+
+反射の設定を簡単に理解するために [Reflection Override] ビューモードが追加されました。 
+このビューモードは全ての法線を滑らかな頂点法線へとオーバーライドして、 
+すべてのサーフェスを完全なスペキュラ (鏡面反射) および全体的に滑らかにします (鏡のような効果)。このモードでは Reflection Environment 機能の制限事項やアーティファクトも顕著になるため、 
+定期的に Lit (ライティング有) へ切り替えて、 
+通常の状態 (凸凹な法線、さまざまな光沢、薄暗いスペキュラ) で反射の見え方を確認することが重要です。
+
+![Reflection Override](ReflectionOverride.png)
+
+ライティングのコンポーネントへ分離する場合に便利な表示フラグが新規に追加されました。
+
+| フラグ | 説明 |
+| ---- | ----------- |
+| **Lighting Components > Diffuse** | ディフューズを無効にすると、すべてのライティング手法でディフューズ効果が非表示にされます。 |
+| **Lighting Components > Diffuse** | スペキュラを無効にすると、すべての反射手法でスペキュラ効果が非表示にされます。 |
+| **Lighting Features > ReflectionEnvironment** | Reflection Environment 機能が無効にされますが、その他の Reflection Environment はアクティブなままです (SSR、解析的スペキュラ)。 |
+
+
+## パフォーマンスへの配慮
+
+Reflection Environment のコストは、スクリーン上のピクセルに影響を及ぼすキャプチャの数に依存します。 
+このシーンのディファード (遅延) ライティングにとても似ています。反射キャプチャは、影響を及ぼす半径に制約されるため、 
+カリング処理の効率が非常に良いです。光沢はキューブマップ ミップマップを通じて実装されるため、 
+シャープまたはラフな質感の反射では、パフォーマンスが若干異なります。
+
+## 制限事項
+
+* このメソッドではおおよその反射しか得られません。具体的に言うと、オブジェクトの反射はシンプルな形状への投影となるため、 
+実際のレベルのオブジェクトと一致することはほとんどありません。多数のキューブマップが一緒にブレンドされているため、 
+多様なバージョンのオブジェクトを反射へ作成する傾向があります。鏡面反射の要因となる平面、滑らかなサーフェスには 
+こうしたエラーが顕著に表れます。反射とこれらのアーティファクトを分散させるために、
+詳細な法線マップとラフネスを使用します。
+* キューブマップへのレベルのキャプチャは、ゲームセッションから離れて実行しなくてはいけないため処理が遅くなります。従って、 
+静的レベルから反射を受け取ることはできても、動的オブジェクトを反射させることはできません。
+* エラーを削減するために、レベルのディフューズのみがキャプチャされます。純粋にスペキュラ サーフェス (メタル) は、キャプチャ中のディフューズであるかのようにスペキュラを適用させます。
+* 両サイドの壁で別々のライティング条件が使用されていると、かなりの漏れ光が発生します。 
+片方の壁は正確な反射効果をもたらす設定にできますが、反射はもう片方の壁側へ常に漏れてしまいます。 
+* DX11 ハードウェアの制限により、レベルのキャプチャに使用するキューブマップは全て片側が 128 です。 
+ワールドは一度に最大 341 の反射のキャプチャが可能です。
+
+
+<!-----
+[EXCERPT:ReflectionResolution]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:max]
+	10
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	RCR
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	**スライダーをドラッグすると、解像度が反射の見え方に及ぼす影響を確認することができます。**
+	[/PARAM]
+	[PARAM:image_list]
+	![](RCR_1.png)
+	![](RCR_2.png)
+	![](RCR_3.png)
+	![](RCR_4.png)
+	![](RCR_5.png)
+	![](RCR_6.png)
+	![](RCR_7.png)
+	![](RCR_8.png)
+	![](RCR_9.png)
+	![](RCR_10.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:ReflectionResolution]
+-->

@@ -1,0 +1,59 @@
+﻿INTSourceChangelist:2726964
+Availability:Public
+Title:AsyncCompute
+Crumbs:%ROOT%, Programming, Programming/Rendering, Programming/Rendering/ShaderDevelopment
+Description:効率性向上のためにさまざまな GPU をインターリーブするハードウェア機能、 AsyncCompute に関する説明
+Version:4.9
+
+レンダリング ハードウェア インターフェース (RHI) が Xbox One 向けに非同期計算 (**AsyncCompute**) をサポートするようになりました。レンダリングと非同期に **dispatch()** コールを実行することにより、
+未使用の GPU のリソース (CU、レジスターや帯域幅) を有効利用する方法です。非同期計算は別のコンテキストを利用して、UE4 は
+レンダリングとコンテキストの計算の同期を行う RHI 機能を提供します。
+非同期計算でメリットがある領域の特定に Dr PIX が有用です。例えば特定のレンダリングパスを実行中に CU の半分が未使用の場合は、
+この部分の CU は潜在的に非同期計算に利用することができます。
+非同期計算にはいくつかの制限事項があります。
+
+ * UAV counter があるバッファはサポートしていません (XDK の制限事項により D3D 警告を生成します)。
+ * 非同期計算ジョブは PIX GPU キャプチャに表示されません(Timing Captures には表示されます)。
+   PIX はグラフィックスの即時コンテキストだけをキャプチャします (これはプラットフォーム制限です)。
+ * ドライバーはパイプラインを自動的にフラッシュしません。フラッシュする必要がある場合は、明示的に RHICSManualGpuFlush を呼び出します。
+   (例えば、あるディスパッチが前回のディスパッチに依存する場合など)
+
+## API
+
+ * **RHIBeginAsyncComputeJob_DrawThread** (EAsyncComputePriority Priority)
+   はレンダリング スレッドから 非同期計算ジョブを開始します。プライオリティはジョブに割り当てるシェーダーリソース数の判断に使用します
+   (ID3D11XComputeContext::SetLimits 経由)。現時点では、 AsyncComputePriority_High と AsyncComputePriority_Default の
+   2 つのプライオリティが利用可能です。
+ * **RHIEndAsyncComputeJob_DrawThread**
+   は、非同期計算ジョブを終了します。同期に使用する 32 ビットの Fence インデックス、または計算が無効またはアクティブな計算ジョブが無い場合は、
+   「-1」を返します。
+ * **RHIGraphicsWaitOnAsyncComputeJob**
+   はグラフィックスのイミディエイトコンテキストにコマンドを挿入して、同期ジョブが完了するまでブロックします。「-1」 を渡すと、アーリーアウトの要因となります。
+
+RHIBeginAsyncComputeJob_DrawThread と RHIEndAsyncComputeJob_DrawThread の呼び出し間で、 RHI は非同期計算のステートになります。
+この時にサポートしている RHI コマンドは、非同期計算コンテクストを通じて実行されます。非サポートの RHI 関数はアサートされます。
+
+## 非同期計算の無効化/有効化
+
+非同期計算はコンパイル時に #define USE_ASYNC_COMPUTE_CONTEXT で有効/無効にすることができます。ランタイム時に r.AsyncCompute コンソール変数で
+無効にすることができます。非同期計算が無効になると、非同期計算ブロック内のディスパッチがグラフィックコマンドバッファで
+同期的に実行されます。D3D11.1. でサポートしていないため、USE_ASYNC_COMPUTE_CONTEXT は PC 上で「0」として定義されます。
+
+## PIX
+
+非同期計算のコンテクストジョブは GPU キャプチャでキャプチャされないため、非同期計算が有効時は、
+GPU パフォーマンスの画像に誤解を与えてしまうかもしれません。グラフィックスのデバッグのために、非同期計算は上述の「.cvar」を使用して無効にします。
+非同期計算は PIX タイミングキャプチャでサポートしています。タイムラインでは以下のように表示されます。
+
+![](PixTimingCapture.png)
+
+## 今後について
+
+この機能は Lionhead Studios により実装されました。XboxOne レンダリングの最適化を図るためにこの機能を実装し、ツールとして利用することを意図しています。
+
+より多くの API でハードウェア機能が公開されるようになったため、システムをよりクロスプラットフォーム対応となるように仕上げて行きます。AsyncCompute を利用する機能は、
+(コンソール変数 / 定義) を必要とせずに別のプラットフォーム上での実行が常に可能でデバッグやプロファイリングも簡単に行えます。AsyncCompute のプロファイリングは、予想外のパフォーマンスを引き起こしたり、同期化に対応するためのコーディング作業時間を要するため
+利用には注意が必要です。
+
+
+

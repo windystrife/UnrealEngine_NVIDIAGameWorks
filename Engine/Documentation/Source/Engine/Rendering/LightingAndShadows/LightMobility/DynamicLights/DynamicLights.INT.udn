@@ -1,0 +1,134 @@
+Availability:Public
+Title:Movable Lights
+Crumbs: %ROOT%, Engine, Engine/Rendering/LightingAndShadows,Engine/Rendering/LightingAndShadows/LightMobility
+Description:A fully dynamic light capable of changing all of its properties during runtime.
+Version: 4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/LightMobility/DynamicLights:title%](PL_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/LightMobility/DynamicLights:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/LightMobility/DynamicLights:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/LightMobility/DynamicLights]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/LightMobility/DynamicLights:title%](PL_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/LightMobility/DynamicLights:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/LightMobility/DynamicLights:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/LightMobility/DynamicLights]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:fullwidth raw]
+![](Engine/Rendering/LightingAndShadows/lighting_overview_banner_001.png)(convert:false)
+[/REGION]
+
+[TOC(start:2 end:3)]
+
+
+
+[EXCERPT:Movable001]
+
+**Movable Lights** cast completely dynamic light and shadows, can change position, rotation, color, brightness, falloff, radius, and just about every other property they have. None of the light they cast gets baked into the light maps, and currently they cannot have any indirect lighting.
+
+[/EXCERPT:Movable001]
+
+## Shadowing
+
+Movable lights setup to cast shadows use whole scene dynamic shadows, which have a significant performance cost.  The performance cost comes primarily from the number of meshes affected by the light, and the triangle count of those meshes.  This means that a shadow casting movable light with a large radius will cost many times more than a movable light with a small radius.
+
+## Usage
+
+On any light, under the **Transform** category, you will find a pull down property called **Mobility**; change that to **Movable**. This property also appears on light components added to a Blueprint.
+
+![](ML_movableProp.png)
+
+## Shadow Map Caching 
+
+When a point or spot light is not moving, we can store off the shadow map for that light and reuse it next frame. This makes shadow casting movable Point and Spot lights much more affordable in games where the environment is often not moving. In the following document we will take a look at how you can use this feature in your Unreal Engine 4 (UE4) projects.
+
+### Shadow Map Caching & Performance
+Shadow Map Caching should be an automatically enabled feature in any UE4 project. To check and see the performance you get from using Shadow Map Caching you can enable and disable Shadow Map Caching by doing the following:
+
+[region:note]
+For following demonstration of Shadow Map Caching the Sun Temple project was used. You can find the Sun Temple map in the Learn tab of the Epic games launcher.
+[/region]
+
+1. Select all of the lights that you want to have cast dynamic shadows in your project's level.
+
+	![](SMC_Select_All_Lights.png)
+
+1. Set the lights' **Mobility**  to **Movable** and make sure that **Cast Shadows** is enabled.
+
+	![](SMC_Set_Mob_Shadow_Cast.png)
+
+1. Press the **Backtick (\`)** key to open up the **Console** and type `Stat Shadowrendering` to see the current cost of dynamic shadows. 
+
+	![](SMC_Console_ShadowRendering.png)
+
+1. Press the Backtick (\`) key again to open the **Console** and type `r.Shadow.CacheWholeSceneShadows 0` to disable dynamic shadow caching.
+
+	![](SMC_Disable_Shadow_Cache.png)
+	
+	[region:note]
+	 Make sure to note the the numbers in the **CallCount** and **InclusiveAug** sections.
+	[/region]
+
+1. Now press the Backtick key one more time to open the **Console** and type `r.Shadow.CacheWholeSceneShadows 1` to re-enable shadow caching. If you compare the **CallCount** and **InclusiveAug** numbers you can see the impact this feature has on dynamic shadow performance.
+
+	[OBJECT:ComparisonSlider]
+		[PARAM:before]
+		![Shadow Caching On](SMC_On.png)
+		[/PARAM]
+		[PARAM:after]
+		![Shadow Caching Off](SMC_Off.png)
+		[/PARAM]
+	[/OBJECT]
+
+### Performance
+Shadow Map Caching has a significant impact on performance. Here are the results of testing this optmization out using an NVIDIA 970 GTX GPU at a screen resolution of 1920x1200.
+
+* Before enabling this feature, three shadow casting point lights without caching took 14.89ms to render Shadow Depths.
+
+* When Cached Shadow Maps were enabled, the same three shadow casting lights took .9ms to render which is about **16 times faster**!
+	[region:note]
+	Note that it still costs 2 ms to render the contributions of the 33 point lights, which can be optimized in other ways but are not affected by this change.
+	[/region]
+* You can control the maximum amount memory used by the Shadow Map Cache using **r.Shadow.WholeSceneShadowCacheMb**
+
+### Limitations
+While Shadow Map Caching can decrease the cost of using dynamic shadows in your UE4 projects, there are some limitations that could cause rendering artifacts if used with non-supported features. In the following section we will take a look at what the limitations of Shadow Map Caching are and what you can do about them.
+
+
+* By default, caching can only happen when an object meets the following requirements:
+
+	* Primitives have their mobility **Mobility** set to **Static** or **Stationary**. 
+	* Materials used in the level do not use **World Position Offset**.
+	* Light need to be either a **Point** or **Spot** light, have its **Mobility** set to **Movable**, and have **Shadow Casting** enabled.
+	* Lights have to remain at one location.
+	* Materials that use animated **Tessellation** or **Pixel Depth Offset** can cause artifacts as their shadow depths are cached.
+

@@ -1,0 +1,91 @@
+﻿INTSourceChangelist:2714483
+Availability:Public
+Title: 环境遮挡（AO）
+Crumbs: %ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description:由于遮挡造成的近似光衰减。
+Version: 4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/AmbientOcclusion:title%](ao.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/tech_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/AmbientOcclusion:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/AmbientOcclusion:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/AmbientOcclusion]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[EXCERPT:AmbientOcclusion_Desc]
+**Screen Space Ambient Occlusion** （屏幕空间环境遮挡）是由于遮挡而造成的近似于光衰减的效果。
+这个效果的最佳应用是进行细微调整，除了可用于标准的全局光照外，还可用于角落、缝隙或其他地方来使其变暗，从而创建更为自然、真实的外观。
+[/EXCERPT:AmbientOcclusion_Desc]
+
+[REGION:imagetable]
+| ![Ambient Occlusion - Off](ao_0.png)(w:300) | ![Ambient Occlusion - Visualized](ao_1.png)(w:300) | ![Ambient Occlusion - Final](ao_2.png)(w:300) |
+| :----: | :----: | :----: |
+|无环境遮挡的场景|仅使用环境遮挡的场景|使用场景遮挡的场景|
+[/REGION]
+
+此效果通过 SSAO（屏幕空间环境遮挡）方式来实现，这表示环境遮挡的程度是在屏幕空间的延迟渲染中进行计算的。
+我们使用深度缓冲器以及 GBuffer 中的法线（参阅延迟着色）。这意味着法线贴图细节将会影响运算结果。
+在虚幻引擎4中，该效果被应用于 AmbientCubemap（环境立方体贴图）。 于此处我们使用阴影贴图，它不会影响直接光照。
+
+您可以通过使用 "Visualize GBuffer"（可视化 GBuffer）视图模式（请参阅视图模式），或通过显示标识“可视化环境遮挡”来直接查看 AO（环境遮挡）值。
+
+由于 AO（环境遮挡）是G Buffer 的一部分，它也可以由材质来输出。 SSAO（屏幕空间环境遮挡）和材质 AO（环境遮挡）会组合起来，从而形成更暗的 AO（环境遮挡）。
+
+| 属性 | 描述 |
+| -------- | ----------- |
+| **Intensity** （强度） |控制全局的环境遮挡数量。 值为0.0意味着无环境遮挡；值为1.0表示完全环境遮挡。 [INCLUDE:Engine/Rendering/LightingAndShadows/AmbientOcclusion#Intensity] |
+| **Radius**  (半径）|定义了虚幻单位中的半径。 由于样本数量有限，更大的半径值会使运行变得更为缓慢（贴图缓存造成的垃圾）并显示出更多的失真。 [INCLUDE:#Radius] |
+| **Radius in WorldSpace** （世界空间中的半径）|如启用，**AO Radius** （环境遮挡半径）属性值将被认为位于世界空间内。 否则，则认为其位于视图空间内。  |
+| **Distance** （距离） | 用来防止物体周围的暗色光晕的调整参数。 由于 SSAO（屏幕空间环境遮挡）技术且仅有zbuffer值，因此它无法获知物体的厚度。 [INCLUDE:Engine/Rendering/LightingAndShadows/AmbientOcclusion#Distance] |
+| **Power** （力度）|控制计算的变暗特效的力度。 [INCLUDE:Engine/Rendering/LightingAndShadows/AmbientOcclusion#Power] |
+| **Bias** （偏移）|用来修改 AO (环境遮挡）细节。 为防止一定距离内的精度失真，我们需要设置一些偏移。 >0,以虚幻单位为单位，默认值(3.0)适用于平整表面，但会降低细节。 <!--TODO: images--> |
+
+<!--
+[EXCERPT:Intensity]
+[REGION:imagetable]
+| ![AO Intensity - 0.0](ao_intensity_0.png)(w:390) | ![AO Intensity - 1.0](ao_intensity_1.png)(w:390)
+| :-----------: | :----------------: |
+| 0.0 | 1.0 |
+[/REGION]
+[/EXCERPT:Intensity]
+
+[EXCERPT:Radius]
+[REGION:imagetable]
+| ![AO Radius - 40.0](ao_radius_0.png)(w:255) | ![AO Radius - 80.0](ao_radius_1.png)(w:255) | ![AO Radius - 200.0](ao_radius_2.png)(w:255) |
+| :--------: | :---------: | :---------: |
+| 40.0 | 80.0 | 200.0 |
+[/REGION]
+[/EXCERPT:Radius]
+
+[EXCERPT:Distance]
+[REGION:imagetable]
+| ![AO Distance - 100.0](ao_distance_0.png)(w:390) | ![AO Distance - 1200.0](ao_distance_2.png)(w:390) |
+| :--------: | :--------: |
+| 100.0 | 1200.0 |
+[/REGION]
+[REGION:note]
+	请注意在右侧的示例中，角色的角位置处的光晕。 由于距离值被设置得非常大，造成了角部在计算其后方表面的遮挡时，使用了不切实际的算法。
+[/REGION]
+[/EXCERPT:Distance]
+
+[EXCERPT:Power]
+[REGION:imagetable]
+| ![AO Power - 1.0](ao_power_0.png)(w:255) | ![AO Power - 4.0](ao_power_1.png)(w:255) | ![AO Power - 10.0](ao_power_2.png)(w:255) |
+| :--------: | :--------: | :--------: |
+| 1.0 | 4.0 | 10.0 |
+[/REGION]
+[/EXCERPT:Power]
+-->

@@ -1,0 +1,102 @@
+﻿INTSourceChangelist:3124629
+Availability:Public
+Title:사용자에 맞는 텍스트 포맷
+Crumbs:%ROOT%, Gameplay, Gameplay/Localization
+Description:Format 함수를 사용하여 사용자에 맞게 현지화된 텍스트를 제공하는 방법입니다.
+Parent:Gameplay/Localization
+Order:3
+version: 4.13
+Related:Programming/UnrealArchitecture/StringHandling/FText
+
+FText 는 사용자에 맞는 텍스트를 만드는 데 사용되는데, 보통 현지화된 상태이기 마련입니다. 즉 게임플레이 진행에 따라 동적으로 변하는 사용자 인터페이스 텍스트 역시도 여러가지 언어의 문법 규칙에 따라 바뀔 수 있는 대상이 될 수 있다는 뜻입니다. `FText::Format` 와 그에 맞는 
+**Format Text** 블루프린트 노드를 사용하면 현지화 프로세스의 노고를 덜어주면서 희귀한 오류 상황에도 강한 재사용 가능 포맷 패턴을 만들 수 있습니다. 이 두 함수 모두 서수 및 이름 인수는 물론, 복수, 성별, 한글 조사에 따른 
+특수 인수 역시도 지원합니다.
+
+C++ 에서는 FText 포맷 패턴을 FTextFormat 으로 미리 컴파일해 넣고, 그 컴파일된 포맷 패턴을 재사용할 수 있습니다. 어떤 포맷 패턴의 사용 빈도가 높은 경우에 좋은 방식인데, 이는 컬처 변경에 따라 소스 포맷 패턴이 변하는 경우 자동으로 다시 컴파일되기도 합니다.
+
+블루프린트에서의 FText 포맷은 **Format Text** 노드를 사용해서도 정할 수 있습니다. **Format** 텍스트는 리터럴이 될 수도, 핀에 연결할 수도 있습니다. 리터럴로 사용할 경우, 포맷에 쓸 인수를 자동 생성합니다. 즉 "There are {number} days until {day}." 와 같은 리터럴을 사용할 경우, **Number** 핀과 **Day** 핀이 
+노드에 자동 추가됩니다. 이 핀들도 리터럴이나 변수로 채워넣을 수 있으며, 출력 **Text** 는 그 핀에 연결된 값에 따라 대체됩니다.
+
+**Format** 핀이 변수에 연결되면 해독이 불가능한데, **Format** 은 게임플레이에 따라 바뀔 수가 있기 때문입니다. 이 경우 핀을 직접 추가하여 가능한 인수 이름을 따서 지어주면 됩니다. 이런 식으로 **Format Text** 노드를 여러가지 가능성에 대비하여 구성할 수 있습니다. 어느 한 인수가 
+Format 변수의 인수에 일치할 때마다, 제공된 정보를 사용할 것입니다.
+
+핀 이름은 **디테일** 패널에서 변경, 추가, 제거 가능합니다.
+
+[REGION:imagetable]
+|![](FormatNode.png)(h:400) | ![](FormatNodeDetails.png)(h:400)|
+|--- |---- |
+|**Format Text** 노드 | **디테일** 패널 | 
+[/REGION]
+
+
+[REGION:tip]
+언리얼 엔진 소스 빌드를 사용하시는 경우, `TextTest.cpp` 를 통해 유효 컬처를 인식하는 포맷, 비교, 소팅 수행 방법 예제를 확인할 수 있습니다.
+[/REGION]
+
+## 서수 인수
+ 
+ 서수 인수로 포맷 인수를 만들 때, 대괄호를 통해 포맷 인수의 시작과 끝을 알리고, 그 안의 수치를 통해 전달되는 파라미터를 나타냅니다.
+ 인수는 {0} 에서 시작해서 ( {0}, {1}, {2}, 식으로) 순차 진행합니다. Format 함수와 **Format Text** 노드는 변수를 제공된 순서대로 포맷 인수에 
+ 끼워 넣습니다.
+
+ 다음 C++ 및 블루프린트 조각은 플레이어의 현재 생명력과 최대 생명력 표시를 위한 서수 포맷 인수를 나타냅니다.
+
+### C++ 예
+
+	FText::Format( LOCTEXT( "HealthFormatStr",  "{0} / {1}" ), FText::AsNumber( CurrentHealth ), FText::AsNumber( MaxHealth )  ) 
+		
+### 블루프린트 예
+
+![](OrderedArgs.png)
+
+## 이름 인수
+
+이름 인수로 포맷 인수를 만들 때는, 대괄호로 포맷 인수의 시작과 끝을, 그 안의 텍스트로 전달받을 인수의 인수 이름을 나타냅니다.
+흔한 인수 예제는 {Name}, {ID}, {Health} 정도입니다.
+
+다음 C++ 및 블루프린트 조각은 플레이어의 현재 생명력 표시를 위한 이름 포맷 인수를 보여줍니다.
+
+### C++ 예
+
+	FFormatNamedArguments Arguments;
+	Arguments.Add(TEXT("CurrentHealth"), FText::AsNumber( CurrentHealth ));
+	EditorErrors.Error(FText::Format(LOCTEXT("ExampleFText", "You currently have {CurrentHealth} health left."), Arguments ) );
+
+### 블루프린트 예
+			
+![](CurrentHealth.png)
+
+## 특수 인수
+
+복수/성별 형태 지원에 필요한 숫자/성별 값을 전달하기 위해, 모든 `FText::Format(...)` 군 함수는 이제 그 값을 FText 가 아닌 FFormatArgumentValue 값으로 받습니다. 이는 묵시적으로 어떠한 숫자 유형, ETextGender, FText 로 구성할 수 있습니다.
+
+블루프린트에서 이와같은 값 유형을 설정하는 기능이, **Format Text** 노드의 와일드카드 핀으로 노출되어 있습니다.
+
+위 예제에 이어 다음과 같은 포맷 패턴을 `FText::Format` 나 **Format Text** 에 인수로 제공할 수 있습니다. 
+
+### 복수 형태
+
+복수(Plural) 형태는 텍스트 포맷에 주어진 수치 값에 따라 다양한 텍스트를 사용할 수 있습니다. 복수 형태는 "There is 1 cat" 이나 "There are 4 cats" 처럼 기수(cardinal)가 될 수도, "You came 1st!" 나 "You came 2nd!" 처럼 서수(ordinal)가 될 수도 있습니다.
+
+복수 형태는 키->값 짝으로 지정되며, (컬처 별로 [CLDR data](http://www.unicode.org/cldr/charts/29/supplemental/language_plural_rules.html) 에 지정된 대로) zero, one, two, few, many, other 와 같은 키워드를 지원합니다. 이 값은 선택적으로 따옴표에 묶인 스트링이 될 수 있으며, 여기에는 포맷 마커가 포함될 수도 있습니다.
+
+기수 포맷 예제: `"There {NumCats}|plural(one=is,other=are) {NumCats} {NumCats}|plural(one=cat,other=cats)"`
+
+서수 포맷 예제: `"You came {Place}{Place}|ordinal(one=st,two=nd,few=rd,other=th)!"`
+
+
+### 성별 형태
+
+성별(Gender) 형태는 텍스트 포맷에 주어진 ETextGender 값에 따라 다른 텍스트를 사용할 수 있도록 해줍니다. 예: "Le guerrier est fort" 또는 "La guerrière est forte".
+성별 형태는 값의 목록으로 지정되며, [남성, 여성, 중성] 순이고, 중성은 옵션입니다. 이 값은 선택적으로 따옴표에 묶인 스트링이 될 수 있으며, 여기에는 포맷 마커가 포함될 수도 있습니다.
+
+포맷 예제: `"{Gender}|gender(Le,La) {Gender}|gender(guerrier,guerrière) est {Gender}|gender(fort,forte)"`
+
+### 한글 조사
+
+hpp(Hangul Post-Positions)는 한국어에서 선행하는 낱말 끝 글자의 종성 유무에 따라 바뀌는 조사를 자동으로 처리해 줍니다.  
+문법: {변수}|hpp(은,는) - {변수}가 종성으로 끝나면 조사는 "은", 아니면 "는" 이 됩니다. 지원되는 조사 목록은 다음과 같습니다: (은,는) (이,가) (을,를) (과,와) (아,야) (이어,여) (이에,예) (이었,였) (으로,로)
+
+포맷 예제: "{Arg}|hpp(은,는)"  
+{Arg}="사람" 이면 결과는 "사람은"  
+{Arg}="사자" 면 결과는 "사자는"

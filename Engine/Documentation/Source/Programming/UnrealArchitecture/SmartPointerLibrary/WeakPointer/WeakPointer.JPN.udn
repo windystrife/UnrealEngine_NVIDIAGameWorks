@@ -1,0 +1,86 @@
+﻿INTSourceChangelist:3485038
+Availability:Public
+Title:弱いポインタ
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture/SmartPointerLibrary
+Description:弱い参照を格納してオブジェクトの破棄を防止しないスマート ポインタ
+Type:reference
+Version:4.9
+Parent:Programming/UnrealArchitecture/SmartPointerLibrary
+Order:
+Tags:Programming
+
+[TOC(start:2)]
+
+**弱いポインタ** はオブジェクトに対する弱い参照を格納します。シェアード ポインタとは異なり、弱いポインタはオブジェクトの破棄を防止しません。弱いポインタは、ポインタのオブジェクトが破棄されるとオブジェクト破棄の原因がなんであれ自動的に空になります。そのため volatile オブジェクトに対してポインタを安全にキャッシュできます。これはつまり、弱いポインタは予期しないときに空になることがあり、弱いポインタは参照サイクルの中断に使用できることを意味します。
+
+弱いポインタのオブジェクトは共有参照がなくなると破棄されます。
+
+弱いポインタは目的の実行を支援します。クラスに弱いポインタが存在する場合、それはオブジェクトにポインタをキャッシュするのみで寿命をコントロールするわけではありません。
+
+## 宣言と初期化
+
+弱いポインタは常にシェアード ポインタや参照、または別の弱いポインタから作成されます。
+
+	// Allocate a new tree node. (新規の Tree ノードをアロケートする)
+	TSharedRef<FTreeNode> NodeOwner( new FTreeNode() );
+
+	// Create a weak pointer to the new tree node. (新規の Tree ノードに弱いポインタを作成する) 
+	TWeakPtr<FTreenode> NodeObserver( NodeOwner );
+
+弱いポインタはオブジェクトの破棄を防止しないことを覚えておいてください。NodeObserver がまだスコープ内の時に NodeOwner がリセットされると、オブジェクトは削除されます。
+
+	// Destroy the node (ノードを破棄する)
+	NodeOwner.Reset();
+
+弱いポインタはシェアード ポインタと同様に、安全にコピーすることができます。
+
+	TWeakPtr<FTreeNode>  NodeObserverB = NodeObserver;
+
+使用後は弱いポインタをリセット (または再代入) することができます。
+
+	NodeObserver = null;
+
+## 逆参照とアクセス
+
+弱いポインタのオブジェクトへのアクセスは、まず **Pin()** メソッドを呼び出してで弱いポインタをシェアード ポインタへ昇格させます。
+
+	// Get access to the node through the weak pointer. (弱いポインタを経由してノードへアクセスする)
+	TSharedPtr<TFreeNode> LockedObserver( NodeObserver.Pin() );
+
+	// Check that the shared reference was successfully created from the weak reference. (弱い参照から共有参照の作成に成功したことを確認します。) 
+	If( LockedObserver.IsValid() )
+	{
+		// Object still exists, so it can be accessed. (オブジェクトはまだ存在しアクセスが可能です) 
+		LockedObserver->ListChildren();
+	}
+
+Pin() は高速です。Pin と呼ばれるのは、弱いポインタが一時的にアクセスされている間オブジェクトの破棄を防ぐからです。
+
+弱いポインタはオブジェクトが削除されると自動的に認識します。このようなケースは IsValid() メソッドを使用して安全に処理できます。
+
+	// Make sure the weak pointer's object still exists before accessing it. (アクセスする前に弱いポインタのオブジェクトがまだ存在することを確認します。)
+	if( NodeObserver.IsValid() )
+	{
+		...
+	}
+
+## 弱いポインタで循環参照を解決する
+
+循環参照を解決するために弱いポインタを使用します。
+
+	class FTreeNode
+	{
+		/** このノードによって所有される子ノード */
+		TArray< TSharedPtr<FTreeNode> > Children;
+
+		/** 弱いポインタはこのノードの親へ戻ります */
+		TWeakPtr<FTreeNode> Parent;
+	}
+
+FTreeNode は _所有する_ 子ノードに対してシェアード ポインタを持ちます。つまり子ノードは FTreeNode によって破壊されます。親ノードに対して参照をキャッシュする弱いポインタも使用します。弱いポインタはオブジェクトの破棄を決して防止することはありません。シェアード ポインタ / 弱いポインタをこのように使うと権限のチェーンがより明確になります。
+
+弱いポインタは、オブジェクトが削除されるとこれを認識します。このように、ツリーのどのノードに対しても安全にポインタをキャッシュすることができます。
+
+## 変換
+
+弱いポインタをシェアード ポインタへ変換するには **Pin()** メソッドを使用しなくてはいけません。明示的なコンストラクターはありません。

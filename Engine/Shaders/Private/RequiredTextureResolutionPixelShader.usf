@@ -1,0 +1,128 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	MaterialTexCoordScalesPixelShader.usf: Pixel shader to analyse coordinate scale per texture
+=============================================================================*/
+
+#define TEX_COORD_SCALE_ANALYSIS 1
+#define DEBUG_MATERIAL_PARAMETERS 1
+
+#include "Common.ush"
+#include "SHCommon.ush"
+
+ // If -1, output everything to the RW texture.
+float4 AccuracyColors[5];
+int2 AnalysisParams; // (TextureAnalysisIndex, TextureResolution)
+float PrimitiveAlpha;
+
+// Analysis index will be in [0, 31] if analysing a single texture
+#define TextureAnalysisIndex (AnalysisParams.x)
+#define TextureResolution (AnalysisParams.y)
+
+float GetComponent(float4 V, int Index)
+{
+	FLATTEN
+	if (Index == 0) return V.x;
+	FLATTEN
+	if (Index == 1) return V.y;
+	FLATTEN
+	if (Index == 2) return V.z;
+	return V.w;
+}
+
+struct FTexCoordScalesParams
+{
+	float RequiredResolution;
+	float TexSample;
+};
+
+MaterialFloat StoreTexCoordScale(in out FTexCoordScalesParams Params, float2 UV, int TextureReferenceIndex)
+{
+#if FEATURE_LEVEL >= FEATURE_LEVEL_SM5
+	float2 CoordDDX = ddx_fine(UV);
+	float2 CoordDDY = ddy_fine(UV);
+#else
+	float2 CoordDDX = ddx(UV);
+	float2 CoordDDY = ddy(UV);
+#endif 
+
+	if (TextureAnalysisIndex == TextureReferenceIndex)
+	{
+		float MinDelta = min(length(CoordDDX), length(CoordDDY));
+		float RequiredResolution = (1 / max(MinDelta, 0.0000000001f));
+		Params.RequiredResolution = max(Params.RequiredResolution, RequiredResolution);
+	}
+	return 1.f;
+}
+
+MaterialFloat StoreTexSample(in out FTexCoordScalesParams Params, float4 C, int TextureReferenceIndex)
+{
+	Params.TexSample = TextureAnalysisIndex == TextureReferenceIndex ? lerp(.4f, 1.f, saturate((C.r + C.g + C.b) / 3)) : Params.TexSample;
+	return 1.f;
+}
+
+#include "/Engine/Generated/Material.ush"
+#include "DebugViewModeCommon.ush"
+
+void Main(
+	in FDebugPSIn DebugInputs
+	OPTIONAL_IsFrontFace,
+	out float4 OutColor : SV_Target0
+	)
+{
+#if INSTANCED_STEREO
+	ResolvedView = ResolveView(GetEyeIndex(DebugInputs.PackedEyeIndex));
+#else
+	ResolvedView = ResolveView();
+#endif
+
+	// This default value will make it dark grey when nothing updates the texSample.
+	float3 Result = float3(UNDEFINED_ACCURACY, UNDEFINED_ACCURACY, UNDEFINED_ACCURACY);
+
+	FMaterialPixelParameters MaterialParameters = GetMaterialPixelParameters(DebugInputs, DebugInputs.SvPosition);
+
+	MaterialParameters.TexCoordScalesParams.RequiredResolution = 0;
+	MaterialParameters.TexCoordScalesParams.TexSample = 0;
+
+	half3 BaseColor;
+	{
+		FPixelMaterialInputs PixelMaterialInputs;
+		CalcMaterialParameters(MaterialParameters, PixelMaterialInputs, DebugInputs.SvPosition, bIsFrontFace);
+
+		// Sample material properties. The results are not used, but the calls to StoreTexCoordScale are still be made.
+		BaseColor = GetMaterialBaseColorRaw(PixelMaterialInputs);
+		half  Metallic = GetMaterialMetallicRaw(PixelMaterialInputs);
+		half  Specular = GetMaterialSpecularRaw(PixelMaterialInputs);
+		float Roughness = GetMaterialRoughnessRaw(PixelMaterialInputs);
+		half3 Normal = GetMaterialNormalRaw(PixelMaterialInputs);
+		half3 Emissive = GetMaterialEmissiveRaw(PixelMaterialInputs);
+		half Opacity = GetMaterialOpacityRaw(PixelMaterialInputs);
+#if MATERIALBLENDING_MASKED || (DECAL_BLEND_MODE == DECALBLENDMODEID_VOLUMETRIC)
+		half Mask = GetMaterialMask(PixelMaterialInputs);
+#endif
+		half4 SSData = GetMaterialSubsurfaceDataRaw(PixelMaterialInputs);
+		float Custom0 = GetMaterialCustomData0(MaterialParameters);
+		float Custom1 = GetMaterialCustomData1(MaterialParameters);
+		float MaterialAO = GetMaterialAmbientOcclusionRaw(PixelMaterialInputs);
+		float PixelDepthOffset = GetMaterialPixelDepthOffset(PixelMaterialInputs);
+#if CLEAR_COAT_BOTTOM_NORMAL && NUM_MATERIAL_OUTPUTS_CLEARCOATBOTTOMNORMAL > 0
+		float3 BottomNormal =  ClearCoatBottomNormal0(MaterialParameters);
+#endif
+	}
+
+	Result *= saturate(Luminance(BaseColor));
+
+	if (MaterialParameters.TexCoordScalesParams.RequiredResolution > 0)
+	{
+		float Accuracy = clamp(log2(TextureResolution / MaterialParameters.TexCoordScalesParams.RequiredResolution), -1.99, 1.99);
+		int ColorIndex = floor(Accuracy) + 2;
+		Result = MaterialParameters.TexCoordScalesParams.TexSample * lerp(AccuracyColors[ColorIndex].rgb, AccuracyColors[ColorIndex + 1].rgb, frac(Accuracy));
+	}
+	OutColor = RETURN_COLOR(float4(Result, PrimitiveAlpha));
+}
+
+
+
+
+
+

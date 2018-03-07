@@ -1,0 +1,144 @@
+﻿INTSourceChangelist:3244089
+Availability: Public
+Title:이벤트로 UI 업데이트 구동
+Crumbs: %ROOT%, Engine, Engine/UMG, Engine/UMG/HowTo
+Description:이벤트를 통한 업데이트를 구동시켜 UI 요소를 최적화시키는 법을 배워봅니다.
+Related: Engine/UMG
+Related: Engine/UMG/UserGuide
+Related: Engine/Blueprints
+Related: Resources\SampleGames\UnrealMatch3
+Version: 4.10
+SkillLevel: Advanced
+tags:UMG UI Designer
+
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/UMG/HowTo/EventBasedUI:title%](EventUI.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/start_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/UMG/HowTo/EventBasedUI:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/UMG/HowTo/EventBasedUI:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/UMG/HowTo/EventBasedUI]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/UMG/HowTo/EventBasedUI:title%](EventUI.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/start_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/UMG/HowTo/EventBasedUI:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/UMG/HowTo/EventBasedUI:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/UMG/HowTo/EventBasedUI]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:note]
+이 문서는 [](Engine/UMG) 에 대한 일반적인 이해가 있으신 분들을 대상으로 합니다.
+[/REGION]
+
+UI 요소를 제작할 때 만드는 콘텐츠를 최적화시킬 수 있는 방법을 미리 염두에 두는 습관을 들이는 것이 좋은데, 그래야 나중에 크게 최적화시키지 않고도 퍼포먼스를 향상시키는 데 도움이 되기 때문입니다. 예를 들어 프로젝트 범위 내에서라면, [](Engine/UMG/UserGuide/PropertyBinding) 으로 UI 에 정도를 전달하기에 충분할 수 있습니다. 하지만 UI 구성이 좀 더 복잡하다든가 프로젝트를 최적화시킬 필요가 있다면, UI 업데이트를 매 프레임이 아닌 알 필요가 있을 때만 하는 것이 좋을 것입니다.
+
+이번 비법에서는 HUD 에 정보를 전달하는 세 가지 예제를 살펴보겠습니다. 세 가지 모두 정보 전달은 되지만, 세 번째 예제가 업데이트 프로세스를 틱 이벤트에서 옮기고 [이벤트 디스패처](Engine/Blueprints/UserGuide/EventDispatcher) 를 사용하여 정보를 수동으로 업데이트하는, 비용상 가장 효율적인 방법을 사용하고 있습니다.
+
+
+## 예제 1. 함수 바인딩
+
+이번 예제에서는 **함수 바인딩** 을 사용하여 플레이어의 생명력(Health)/에너지(Energy) 업데이트 방법을 살펴보겠습니다.
+
+기본적인 생명력/에너지 구성입니다.
+
+![](CastBinding_SimpleHealth.png)
+	
+디스플레이가 놓였으니, _GetHealth_ 와 _GetEnergy_ 라는 프로그레스 바에 대해 **바인딩 생성** 을 합니다. 그러면 함수 바인딩은 플레이어 캐릭터 블루프린트 및 생명력과 에너지에 대해 정의한 변수를 구해와 할당합니다 (아래는 _GetHealth_ 바인딩이 표시됩니다).
+
+![](CastBinding_BindingScript.png)
+
+디버깅을 위해, **Print String** 노드를 추가하여 화면에 생명력 변수값을 출력하기도 했습니다.
+
+게임에서 (아래 그림과 같이) 플레이어 캐릭터의 생명력과 에너지 값이 HUD 에 전달되어 반영되고 있습니다. 하지만 생명력 값을 업데이트하지 않을 때도, 파랑 디버그 텍스트를 보면 매 프레임 생명력 값을 검사하고 있다는 것을 볼 수 있습니다.
+
+![](CastBinding_InGame.png)
+
+우리가 하는 일이 이게 전부라면, 아마도 그렇게 큰 영향을 끼치지는 않을 것입니다. 보다 복잡한 시스템이 있고, 이런 식으로 여러 프로퍼티를 구성하여 모든 업데이트 검사가 매 프레임마다 일어난다면, 아마도 퍼포먼스에 영향을 끼치게 되니 피해야 할 일일 것입니다.
+
+
+
+## 예제 2. 프로퍼티 바인딩
+
+함수 바인딩 대신, **프로퍼티 바인딩** 을 사용하면 비용적인 면에서 약간 더 효율적입니다.
+
+동일한 생명력/에너지 구성을 예로 들어봅시다.
+
+![](CastBinding_SimpleHealth.png)
+
+[위젯 블루프린트](Engine/UMG/UserGuide/WidgetBlueprints) 의 **그래프** 탭에서, **Event Construc** 를 사용하여 플레이어 캐릭터 블루프린트로의 레퍼런스를 구합니다.
+
+![](PropBinding_EventConstruct.png)
+
+첫 번째 예제에서는, 생명력과 에너지 변수에 접근하기 위해 매 프레임 캐릭터 블루프린트에 [](Engine/Blueprints/UserGuide/CastNodes) 했었습니다. 여기서는 한 번만 한 다음 레퍼런스로 저장하여 매 프레임 하지 않아도 됩니다. 예전 방법보다는 약간 더 비용 효율이 좋습니다.
+
+그런 다음 프로그레스 바에 대한 값을 캐릭터 블루프린트 안에서 변수에 바로 바인딩해 주면 됩니다.
+
+![](PropBinding_HealthBound.png)
+
+이러한 방법으로 더이상 "플레이어 캐릭터 블루프린트가 무엇인지" 매 프레임 형변환하여 검사하지 않아도 되고, 그냥 한 번만 한 뒤에 "생명력과 에너지 값을 달라"고 할 수 있습니다. 플레이어 캐릭터가 무엇인지는 알지만, 여전히 계속 쳐다보면서 매 프레임 "캐릭터의 생명력과 에너지 값이 어찌되나" 묻고 있는 것입니다.
+
+예전 방법과 비슷하게 이 방법은, 프로젝트의 범위에 따라서, 일반적으로 안전한 방법입니다. 하지만 범위가 확장되면서 최적화가 필요해짐에 따라, 이런 식으로 구성된 프로퍼티가 여럿 있으면 퍼포먼스에 끼치는 영향을 확인할 수 있게 될 것입니다.
+
+
+
+## 예제 3. 이벤트 주도형
+
+여기서는 이벤트를 사용하여 HUD 에 변화가 있을 때만 업데이트합니다.
+
+위의 생명력/에너지 구성을 가지고 계속 해 봅시다.
+
+![](CastBinding_SimpleHealth.png)
+
+캐릭터 블루프린트 안에서 생명력을 감소시키는 스크립트 끝에 **이벤트 디스패처** 를 추가합니다.
+
+![](DecreaseHealth.png)
+
+테스팅 목적으로 **F** 키를 누를 때마다 생명력을 감소시키도록 설정했습니다.
+
+이제 생명력이 감소될 때마다, 이 이벤트 디스패처도 호출합니다. HUD 위젯 블루프린트의 그래프에서, Event Construct 를 다시 사용하여 플레이어 캐릭터 블루프린트로의 레퍼런스를 구하고 저장합니다. 그 캐릭터 블루프린트 안의 이벤트 디스패처에 커스텀 이벤트를 바인딩하여 이벤트 디스패처 호출시마다 커스텀 이벤트를 호출하도록 할 수도 있습니다.
+
+[REGION:lightbox]
+[![](Event_WBGraph.png)](Event_WBGraph.png)
+[/REGION]
+
+[REGION:caption]
+이미지를 클릭하면 원래 크기로 봅니다.
+[/REGION]
+
+HUD 위젯 블루프린트 안의 커스텀 이벤트는 이제 플레이어의 생명력 값이 변하든 말든 상관없이 항상 검사하는 것이 아닌, 변화가 있을 때만 업데이트하여 표시합니다. 예로 캐릭터의 에너지에도 같은 구성을 적용하면, HUD 위젯 블루프린트 최종 모습은 아래와 같을 것입니다.
+
+[REGION:lightbox]
+[![](FullSetup.png)](FullSetup.png)
+[/REGION]
+
+[REGION:caption]
+이미지를 클릭하면 원래 크기로 봅니다.
+[/REGION]
+
+위에서 _UpdateHealth_ 와 _UpdateEnergy_ 커스텀 이벤트는 캐릭터 블루프린트에서의 이벤트 디스패처에 바운딩되어 캐릭터의 생명력/에너지 값이 변할 때만 호출됩니다. 바인딩 프로세스 이후 HUD 가 생성되면 위 두 커스텀 이벤트를 호출하여 디스플레이를 초기화시키기도 합니다.
+

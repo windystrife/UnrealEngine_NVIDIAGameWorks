@@ -1,0 +1,283 @@
+﻿INTSourceChangelist:2741559
+Availability:Public
+Title:材质属性
+Crumbs:%ROOT%, Engine, Engine/Rendering/Materials, Engine/Rendering/Materials/IntroductionToMaterials
+Description:有关 UE4 材质及其工作方式的介绍文档。
+Version:4.9
+
+[TOC(start:2 end:2)]
+
+
+
+本文详细说明材质的属性。您可通过在材质编辑器中选择主材质节点来访问这些属性。
+
+<!---， 
+或者在 **内容浏览器** 中 **右键单击** 材质，选择 **资产操作（Asset Actions）**，然后选择 [属性矩阵](Engine/UI/PropertyMatrix)。
+--->
+
+* 材质内的属性：
+
+![](PropertiesPanelMaterialEditor_Mat.png)(h:445) 
+
+<!---
+* 访问属性矩阵：
+
+![](PropertiesContextMenu_Mat.png)(h:445) 
+
+* 属性矩阵：
+
+![](PropertyMatrix.png)(h:445)
+--->
+
+
+基本材质节点具有多个属性，这些属性将影响材质的行为。这些属性说明如下，其中每个类别都有相应的文档小节，并按它们在 **属性（Properties）**面板中的显示顺序排列。
+
+
+## 物理材质（Physical Material）
+
+![](PhysicalMaterials.png)
+
+| 属性 | 说明 |
+| -------- | ----------- |
+| **物理材质（Phys Material）** |与此材质相关联的 [物理材质](Engine/Physics\PhysicalMaterials)。物理材质提供物理属性的定义，例如碰撞时保留的能量（弹性）以及其他基于物理的方面。物理材质不影响材质的视觉效果。|
+
+## 材质（Material）
+
+![](MaterialSection.png)
+
+| 属性 | 说明 |
+| -------- | ----------- |
+| **材质域（Material Domain）** | [INCLUDE:#MaterialDomain] |
+| **混合模式（Blend Mode）** | [INCLUDE:#BlendModes]   |
+| **贴花混合模式（Decal Blend Mode）**| 定义贴花材质过程如何处理 GBuffer 通道。（仅当 MaterialDomain == MD_DeferredDecal 时才可用）|
+| **贴花反应（Decal Response）**| 定义材质如何对 DBuffer 贴花作出反应（影响外观、性能以及纹理/样本使用）。对于基本对象（例如静态网格），可禁用非 Dbuffer 贴花。|
+| **明暗处理模型（Shading Model）** | [INCLUDE:#ShadingModels] |
+| **不透明蒙版剪辑值（Opacity Mask Clip Value）** | 这是一个参考值，被屏蔽材质的“不透明蒙版”（OpacityMask）输入将根据此值按像素进行剪辑。任何大于“不透明蒙版剪辑值”（OpacityMaskClipValue）的值都将通过，像素将绘制（不透明），而任何小于它的值都将失败，像素将被废弃（透明）。|
+| **双面（Two Sided）** | 法线将在背面翻转，这意味着将同时针对正面和反面来计算光线。这通常用于植物叶子，以避免必须加倍使用多边形。“双面”（Two Sided）无法正确地与静态光线配合使用，因为网格仍然仅将单个 UV 集合用于光线贴图。因此，使用静态光线的双面材质的两面将以相同方式处理明暗。|
+| **切线空间法线（Tangent Space Normal）** | 切线空间法线从对象表面开始计算，其中，Z 轴（蓝色）始终从表面垂直指向外部。全局空间法线使用全局坐标系统来计算像素角度，从而忽略表面的原始方向。就性能而言，切线空间计算的成本略高，但通常更加方便，这是因为此类贴图通常是您可以在 Photoshop 之类的 2D 应用程序中创建的法线贴图类型。在视觉上，切线空间法线贴图看起来主要呈蓝色，而全局空间贴图具有更加生动的彩虹色。|
+| **贴花混合模式（Decal Blend Mode）** | [INCLUDE:#DecalBlendModes] |
+| **使用材质属性（Use Material Attributes）** | 此复选框将导致材质的主节点压缩成标签为“材质属性”（Material Attributes）的单个输入。当您需要使用分层材质来混入多个材质，或者在使用 Make Material Attributes（建立材质属性）表达式节点来定义多种材质类型时，这非常有用。有关更多信息，请参阅“分层材质”文档。|
+| **次表面轮廓（Subsurface Profile）** | 这将允许您更改材质中使用的 [次表面轮廓](Engine/Rendering/Materials/LightingModels/SubSurfaceProfile)。|
+| **定制 UV 数目（Num Customized Uvs）** | 设置要显示的定制 UV 输入的数目。未连接的定制 UV 输入将直接通过顶点 UV 来传递。|
+| **生成球形粒子法线（Generate Spherical Particle Normal's）** | 生成表面法线，当您环绕使用此材质的粒子系统旋转时，这些法线将保持球形。这对于体积粒子系统非常有用，因为精灵始终会进行旋转以面向摄像机。使用此选项时，它们将具有更似球形的体积外观。|
+| **自发光（动态区域光线）（Emissive(Dynamic Area Light)）** | 如果启用此属性，那么材质的自发光颜色将注入到光线传播体积。|
+| **线框（Wire Frame）** | 启用材质所应用于的网格的线框视图。|
+| **折射偏差（Refraction Bias）** | 此属性使折射测试的深度产生偏移。这在折射值导致邻近对象（通常是位于半透明对象之前的对象）意外渲染到材质表面这种不良效果时特别有用。较大的值将开始分隔折射，但是，这会导致表面与折射的对象之间出现明显的分离。直到您将某个表达式节点连接到“折射”（Refraction）输入之后，此属性才会启用。|
+
+
+## 半透明（Translucency）
+
+![](TranslucencyProperties.png)
+
+| 属性 | 说明 |
+| -------- | ----------- |
+| **单独半透明（Separate Translucency）** | 指示材质应该在单独的半透明过程中进行渲染（这表示不受 DOF 影响，并且还要求在 .INI 文件中设置 bAllowSeparateTranslucency）|
+| **回应性 AA（抗锯齿）（Responsive AA (Ant aliasing)）** | 较小的移动对象（尤其是粒子）有时会因为抗锯齿而变得模糊不清；通过将此属性设置为 _true_，可使用另一种 AA 算法，该算法将提供更高的清晰度。换而言之，如果您创建暴风雪或类似的粒子系统，并且感觉无法真正看到雪花，请开启此属性，这将有所帮助。但是，此属性应该 _仅_ 用于较小的移动对象，因为会在背景产生锯齿失真。|
+| **半透明照明模式（Translucency Lighting Mode）** | [INCLUDE:#TransLightingMode]  请参阅 [带光照的半透明物体](Engine/Rendering/LightingAndShadows/LitTranslucency)。|
+| **半透明方向性照明强度（Translucency Directional Lighting Intensity）** | 用于人为增加法线对半透明照明结果的影响。大于 1 的值将增加法线的影响，而小于 1 的值将使照明更加环境化。|
+| **禁用深度测试（Disable Depth Test）** |  允许材质禁用深度测试，这仅在半透明混合模式下有意义。禁用深度测试将显著减慢渲染速度，这是因为没有任何被遮挡的像素可进行 Z 剔除。<!--- In short, you'll be able to--->  |
+| **使用半透明顶点雾（Use Translucency Vertex Fog）** | 设置为 _true_ 时，半透明材质将被雾笼罩。默认值为 _true_。|
+
+## 半透明自身阴影（Translucency Self Shadowing）
+
+![](TransSelfShadowingProperties.png) ![](PerPixNonDirectional.png)(h:189)
+
+半透明自身阴影是一种以体积方式照亮半透明对象（例如烟雾或蒸汽柱）的好方法。自身阴影分为两个主要部分：自身阴影密度和第二自身阴影密度。分为两个部分是为了支持各种变化。您可以独立定义每个部分的密度，并使用两者之间的差别在整个自身阴影内产生有趣的模式。
+
+| 属性 | 说明 |
+| -------- | ----------- |
+| **半透明阴影密度比例（Translucent Shadow Density Scale）** | 设置此半透明材质投射到其他表面上的阴影密度。此属性的作用有点像是阴影主要比例；如果设置为 0，则不会产生任何阴影。当您将值增大到 1 以及更大的值时，投射阴影和自身阴影都会变暗。|
+| **半透明自身阴影密度比例（Translucent Self Shadow Density Scale）** | 设置此材质投射到自身上的阴影密度。请考虑烟雾柱内的阴影。|
+| **半透明自身阴影第二密度比例（Translucent Self Shadow Second Density Scale）** | 这是可以设置的第二自身阴影密度，用于产生变化。在此值与“半透明自身阴影密度比例”（Translucent Self Shadow Density Scale）之间，将创建内部梯度。|
+| **半透明自身阴影第二不透明度（Translucent Self Shadow Second Opacity）** | 设置第二自身阴影的不透明度值，用来调整自身阴影与第二自身阴影之间的梯度效果。|
+| **半透明反向散射指数（Translucent Backscattering Exponent）** | 控制将次表面明暗处理模型与半透明度配合使用时使用的反向散射。较大的值将产生较小而较亮的反向散射高光。只有在定向光所形成的体积半透明阴影内，才会使用这个值。|
+| **半透明多重散射消光（Translucent Multiple Scattering Extinction）** | 对于具有体积半透明阴影的对象（例如烟雾或蒸汽），提供彩色的消光值 - 基本上相当于阴影颜色。|
+| **半透明阴影开始偏移（Translucent Shadow Start Offset）** | 这是在半透明体积内创建的自身阴影的全局空间偏移。数值越大，阴影就越远离光源。|
+
+
+## 用途（Usage）
+
+![](UsageFlagProperties.png)
+
+“用途”（Usage）标志用来控制材质所用于的对象类型。编译材质时，这些设置允许引擎为每个应用程序编译特殊版本。仅当使用“次表面材质域”（Surface Material Domain）设置时，这些设置才有效。
+
+在编辑器中，对于任何已存在于贴图内的对象，将自动设置这些标志。例如，如果您的粒子系统使用放在关卡内某处的材质，那么当您在编辑器中加载该贴图时，它将自动设置 _与粒子系统配合使用（Used with Particle System）_标志。需要保存材质资产，游戏才能在该特定网格上使用该材质。
+
+[REGION:warning]
+ 如果未设置适当的用途标志，那么在游戏中将改为使用默认的全局栅格材质！这将在游戏客户端的日志中输出相应的消息。
+[/REGION]
+
+| 属性 | 说明 |
+| -------- | ----------- |
+| **与骨骼网格配合使用（Used with Skeletal Mesh）** | 如果材质将放在静态网格上，请设置此属性。|
+| **与编辑器编写配合使用（Used with Editor Compositing）** | 如果材质将在编辑器 UI 中使用，请设置此属性。|
+| **与景观配合使用（Used with Landscape）** | 如果材质将在景观表面上使用，请设置此属性。|
+| **与粒子精灵配合使用（Used with Particle Sprites）** | 如果材质将放在粒子系统上，请使用此属性。|
+| **与光束轨迹配合使用（Used with Beam Trails）** | 如果材质将与光束轨迹配合使用，请设置此属性。|
+| **与网格粒子配合使用（Used with Mesh Particles）** | 指示材质及其实例可以与网格粒子配合使用。这将产生支持编译网格粒子所需的着色器，从而增加着色器编译时间和内存用量。|
+| **与静态照明配合使用（Used with Static Lighting）** | 如果考虑将材质用于静态照明，比如，如果材质使用了应该影响照明的自发光效果，请设置此属性。|
+| **与液体表面配合使用（Used with Fluid Surfaces）** | 在虚幻引擎 4 中，不再支持液体表面。此选项很快将会移除。|
+| **与变形目标配合使用（Used with Morph Targets）** | 如果材质将应用于利用了变形目标的骨骼网格，请设置此属性。|
+| **与样条网格配合使用（Used with Spline Meshes）** | 如果材质将应用于景观样条网格，请设置此属性。|
+| **与实例化静态网格配合使用（Used with Instanced Static Meshes）** | 如果材质打算应用于实例化静态网格，请设置此属性。|
+| **与扭曲配合使用（Used with Distortion）** | 不再支持扭曲（现在使用“折射”），此选项很快将会移除。|
+| **与衣服配合使用（Used with Clothing）** | 如果材质将应用于 Apex 以物理方式模拟的衣服，那么应设置此属性。|
+| **与 UI 配合使用（Used with UI）** | 此属性指示材质及任何材质实例可以与 Slate UI 和 UMG 配合使用。|
+| **在编辑器中自动设置用途（Automatically Set Usage in Editor）** | 是否根据材质的应用对象在编辑器中自动设置用途标志。此属性的默认选项是已启用。|
+
+## 移动（Mobile）
+
+![](MobileProperties.png)
+
+| 属性 | 说明 |
+| -------- | ----------- |
+| **完全粗糙（Fully Rough）** | 强制使材质完全粗糙，这可以节省大量着色器指令和一个纹理样本。|
+| **使用光照贴图方向性（Use Lightmap Directionality）** | 这将使用光照贴图方向性以及按像素的法线。如果禁用此属性，那么来自光照贴图的光线将不具有方向，但成本较低。|
+
+## 铺嵌（Tessellation）
+
+![](TessellationProperties.png)
+
+铺嵌功能允许您在运行时向网格添加更多物理细节。 
+
+| 属性 | 说明 |
+| -------- | ----------- |
+| **铺嵌模式（Tessellation Mode）** | [INCLUDE:#TessellationMode] |
+| **启用无裂缝移位（Enable Crack Free Displacement）** | 启用一个移位算法，该算法可修正网格中可能出现的任何裂缝。但是，此操作的成本较高，因此如果您移位时看不到任何裂缝，请将此属性保持设置为 _False_。|
+| **启用自适应铺嵌（Enable Adaptive Tessellation）** | 此铺嵌方法将尝试为每个三角形维护相同数目的像素。|
+
+## 后处理材质（Post Process Material）
+
+![](PostProcessMaterialProperties.png)
+
+| 属性 | 说明 |
+| -------- | ----------- |
+| **可混合位置（Blendable Location）** | 如果此材质要用作后处理材质，那么此属性允许您控制是在色调贴图之前还是之后计算此材质。如果材质将用来修改后处理过程的颜色，那么这非常重要。|
+| **可混合优先级（Blendable Priority）** | 这是一个优先级值，用于任何其他可应用于后处理过程的材质。|
+
+
+## 光照系统（Lightmass）
+
+![](LightmassProperties.png)
+
+| 属性 | 说明 |
+| -------- | ----------- |
+| **以遮掩方式投射阴影（Cast Shadow as Masked）** | 如果设置为 _true_，那么照亮的半透明对象将投射阴影，就像它们使用了“遮掩”照明模式一样。这有助于使半透明对象上的阴影更加清晰。| 
+| **漫射提升（Diffuse Boost）** | 材质的漫射成分对静态照明的影响量乘数。|
+| **导出分辨率比例（Export Resolution Scale）** | 导出此材质的属性时采用的分辨率乘数。需要细节时，应该增大此值。|
+
+## 材质接口（Material Interface）
+
+![](MaterialInterfaceProperties.png)
+
+| 属性 | 说明 |
+| -------- | ----------- |
+| **预览网格（Preview Mesh）** | 设置一个静态网格，用于在 **预览（Preview）**窗格中预览材质。|
+
+## 缩略图（Thumbnail）
+
+![](ThumbnailProperties.png)
+| 属性 | 说明 |
+| -------- | ----------- |
+| **基本类型（Primitive Type）** | 设置缩略图预览中使用的基本形状类型。|
+| **预览网格（Preview Mesh）**   | 设置缩略图预览中使用的网格。仅当“基本类型”（Primitive Type）设置为 **TPT 无（TPT None）**时，此属性才有效|
+| **轨道俯仰角（Orbit Pitch）**    | 设置摄像机围绕对象的轨道的俯仰角。|
+| **轨道偏航角（Orbit Yaw）**    | 设置摄像机围绕对象的轨道的偏航角。|
+| **轨道缩放（Orbit Zoom）**     | 相对于资产的界限球体距离的偏移。|
+
+
+<!--
+
+[EXCERPT:ShadingModels]
+明暗处理模型确定材质输入（例如自发光、漫射、镜面反射和法线）如何进行组合以确定最终颜色。  
+
+[REGION:simpletable]
+| 模型 | 说明 |
+| ---- | ----------- |
+| **_不照亮（Unlit）_** | 此材质仅由“自发光”（Emissive）和“不透明”（Opacity）输入定义。它不会对光线作出反应。|
+| **_默认照亮（Default Lit）_** | 默认明暗处理模型。适用于大部分实心对象。|
+| **_次表面（Subsurface）_** | 用于次表面散射材质，例如蜡和冰。激活“次表面颜色”（Subsurface Color）输入。|
+| **_预整合皮肤（Preintegrated Skin）_** | 用于类似于人体皮肤的材质。激活“次表面颜色”（Subsurface Color）输入。|
+| **_透明涂层（Clear Coat）_** | 用于表面具有半透明涂层的材质，例如透明涂层汽车喷漆或清漆。激活“透明涂层”（Clear Coat）和“透明涂层粗糙度”（Clear Coat Roughness）输入。|
+| **_次表面轮廓（Subsurface Profile）_** |  用于类似于人体皮肤的材质。要求使用 [次表面轮廓](Engine/Rendering/Materials/LightingModels/SubSurfaceProfile)才能正确工作。|
+
+[/REGION]
+
+有关这些明暗处理模型的更多信息，请参阅 [明暗处理模型文档](Engine/Rendering/Materials\MaterialProperties\LightingModels)。 
+
+[/EXCERPT:ShadingModels]
+
+
+
+[EXCERPT:BlendModes]
+混合模式说明当前材质的输出如何与背景中已绘制的内容进行混合。更专业地说，混合模式允许您控制引擎在渲染时，如何将此材质（**来源颜色**）与帧缓冲区中已有的内容（**目标颜色**）混合。可用的混合模式如下：
+
+[REGION:simpletable]
+| 模式 | 说明 |
+| ---- | ----------- |
+| **_BLEND_Opaque_** | 最终颜色 = 来源颜色。这意味着材质将绘制在背景前面。这种混合模式与照明兼容。
+| **_BLEND_Masked_** | 如果“不透明蒙版”（OpacityMask）>“不透明蒙版剪辑值”（OpacityMaskClipValue），则最终颜色为来源颜色，否则废弃像素。这种混合模式与照明兼容。
+| **_BLEND_Translucent_** | 最终颜色 = 来源颜色 * 不透明度 + 目标颜色 * (1 - 不透明度)。这种混合模式与动态照明 **不** 兼容。
+| **_BLEND_Additive_** | 最终颜色 = 来源颜色 + 目标颜色。这种混合模式与动态照明 **不** 兼容。
+| **_BLEND_Modulate_** | 最终颜色 = 来源颜色 x 目标颜色。除非是贴花材质，否则这种混合模式与动态照明或雾 **不** 兼容。
+[/REGION]
+
+有关这些混合模式的更多信息，请参阅 [混合模式文档](Engine/Rendering/Materials\MaterialProperties\BlendModes)。 
+[/EXCERPT:BlendModes]
+
+
+[EXCERPT:MaterialDomain]
+此设置允许您指定此材质的使用方式。特定材质用途（例如贴花）需要额外的指令以供渲染引擎加以考虑。因此，将材质指定为用于这些情况十分重要。“材质域”（Material Domain）包含下列选项：
+
+[REGION:simpletable]
+| 域 | 说明 |
+| ------ | ----------- |
+| **表面（Surface）** | 此设置将材质定义为将要用于对象表面，例如金属、塑料、皮肤或任何物理表面。因此，在大部分情况下，您将使用此设置。|
+| **延迟贴花（Deferred Decal）** | 建立 [贴花材质](Engine/Actors/DecalActor) 时，您将使用此设置。|
+| **光函数（Light Function）** | 创建要与光函数配合使用的材质时，使用此设置。|
+| **后处理（Post Process）** | 如果材质将用作 [后处理材质](Engine/Rendering\PostProcessEffects\PostProcessMaterials)，那么使用此设置。|
+[/REGION]
+[/EXCERPT:MaterialDomain]
+
+
+[EXCERPT:DecalBlendModes]
+正如名称所指，这将定义“材质域”（Material Domain）属性设置为 _延迟贴花（Deferred Decal）_ 时使用的混合模式，并且直到相应地设置材质域之后才可更改。它包含与那些可用于表面的混合模式不同的混合模式。
+
+[REGION:simpletable]
+| 模式 | 说明 |
+| ---- | ----------- |
+| **半透明（Translucent）** | 这将导致贴花混合底色、金属色、镜面反射、粗糙度、自发光颜色、不透明度和法线。使用此模式，可混合完全分隔的材质，例如波纹起伏的水坑，及其周围基于法线贴图的烂泥构造。|
+| **斑点（Stain）** | 仅混合底色和不透明度。适用于仅更改颜色的贴花，例如墙上干燥的喷漆。|
+| **法线（Normal）** | 仅混合法线和不透明度。这适合于在表面上添加裂缝。|
+| **自发光（Emissive）** | 仅混合自发光和不透明度通道。适合于让原先不发光的对象发光。|
+[/REGION]
+[/EXCERPT:DecalBlendModes]
+
+
+[EXCERPT:TransLightingMode]
+这允许控制此材质内的不透明度所使用的照明模式。这特别适合于使用了不透明度的粒子系统，例如自身产生阴影的烟雾或蒸汽。 
+
+[REGION:simpletable]
+| 模式 | 说明 |
+| ---- | ----------- |
+| **TLM_体积非方向性（TLM_VolumetricNonDirectional）** | 将计算体积的照明，而不具有方向性。请将此模式用于烟雾和灰尘等粒子效果。这是成本最低的照明方法，但是不考虑材质法线。|
+| **TLM_体积方向性（TLM_VolumetricDirectional）** | 将计算体积的照明，具有方向性，因此对材质的法线加以考虑。请注意，默认的粒子切线空间面向摄像机，因此请启用 bGenerateSphericalParticleNormals 以获取更有用的切线空间。|
+| **TLM_表面（TLM_Surface）** |将计算表面的照明。请将此模式用于玻璃和水之类的半透明表面。|
+[/REGION]
+[/EXCERPT:TransLightingMode]
+
+
+[EXCERPT:TessellationMode]
+控制材质将要使用的铺嵌类型（如果有的话）。
+
+[REGION:simpletable]
+| 模式 | 说明 |
+| ---- | ----------- |
+| **无铺嵌（No Tessellation）** | 网格不铺嵌。这将有效地禁用此功能。|
+| **扁平铺嵌（Flat Tessellation）** | 简单形式的铺嵌。这将增加更多三角形，而不使网格平滑。|
+| **PN 三角形（PN Triangles）** | 利用基于样条的简单铺嵌，这样做的成本较高，但细节更好。|
+[/REGION]
+
+[/EXCERPT:TessellationMode]
+
+-->

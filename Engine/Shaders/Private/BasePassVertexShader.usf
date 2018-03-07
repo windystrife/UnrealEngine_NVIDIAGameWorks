@@ -1,0 +1,208 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	BasePassVertexShader.usf: Base pass vertex shader
+=============================================================================*/
+
+#include "BasePassVertexCommon.ush"
+#include "SHCommon.ush"
+#include "VolumetricLightmapShared.ush"
+
+// Metal needs to combine the vertex & hull shaders for tesellation support.
+#if COMPILER_METAL && USING_TESSELLATION
+#include "BasePassTessellationShaders.usf"
+#endif
+
+#if WRITES_VELOCITY_TO_GBUFFER
+//@todo-rco: Move to pixel shader
+float SkipOutputVelocity;
+#endif
+
+#if TRANSLUCENCY_PERVERTEX_FORWARD_SHADING
+#include "ReflectionEnvironmentShared.ush"
+#include "ForwardLightingCommon.ush"
+#endif
+
+/** Entry point for the base pass vertex shader. */
+void Main(
+	FVertexFactoryInput Input,
+	OPTIONAL_VertexID
+	out FBasePassVSOutput Output
+#if USE_GLOBAL_CLIP_PLANE && !USING_TESSELLATION
+	, out float OutGlobalClipPlaneDistance : SV_ClipDistance
+#endif
+#if INSTANCED_STEREO
+	, uint InstanceId : SV_InstanceID
+	#if !MULTI_VIEW
+		, out float OutClipDistance : SV_ClipDistance1
+	#else
+		, out uint ViewportIndex : SV_ViewPortArrayIndex
+	#endif
+#endif
+	)
+{	
+#if INSTANCED_STEREO
+	const uint EyeIndex = VertexFactoryGetEyeIndex(InstanceId);
+	ResolvedView = ResolveView(EyeIndex);
+	#if !MULTI_VIEW
+		OutClipDistance = 0.0;
+	#else
+		ViewportIndex = EyeIndex;
+	#endif
+#else
+	uint EyeIndex = 0;
+	ResolvedView = ResolveView();
+#endif
+
+	FVertexFactoryIntermediates VFIntermediates = GetVertexFactoryIntermediates(Input);
+	float4 WorldPositionExcludingWPO = VertexFactoryGetWorldPosition(Input, VFIntermediates);
+	float4 WorldPosition = WorldPositionExcludingWPO;
+	float4 ClipSpacePosition;
+
+	float3x3 TangentToLocal = VertexFactoryGetTangentToLocal(Input, VFIntermediates);	
+	FMaterialVertexParameters VertexParameters = GetMaterialVertexParameters(Input, VFIntermediates, WorldPosition.xyz, TangentToLocal);
+
+	// Isolate instructions used for world position offset
+	// As these cause the optimizer to generate different position calculating instructions in each pass, resulting in self-z-fighting.
+	// This is only necessary for shaders used in passes that have depth testing enabled.
+	ISOLATE
+	{
+		WorldPosition.xyz += GetMaterialWorldPositionOffset(VertexParameters);
+	}
+
+#if USING_TESSELLATION
+	// We let the Domain Shader convert to post projection when tessellating
+	Output.Position = WorldPosition;	
+
+	#if USE_WORLD_POSITION_EXCLUDING_SHADER_OFFSETS
+		Output.BasePassInterpolants.WorldPositionExcludingWPO = WorldPositionExcludingWPO.xyz;
+	#endif
+#else
+	ISOLATE
+	{
+		float4 RasterizedWorldPosition = VertexFactoryGetRasterizedWorldPosition(Input, VFIntermediates, WorldPosition);
+		ClipSpacePosition = mul(RasterizedWorldPosition, ResolvedView.TranslatedWorldToClip);
+		Output.Position = INVARIANT(ClipSpacePosition);
+	}
+
+	#if INSTANCED_STEREO && !MULTI_VIEW
+	BRANCH
+	if (bIsInstancedStereo)
+	{
+		// Clip at the center of the screen
+		OutClipDistance = dot(Output.Position, EyeClipEdge[EyeIndex]);
+
+		// Scale to the width of a single eye viewport
+		Output.Position.x *= 0.5 * ResolvedView.HMDEyePaddingOffset;
+
+		// Shift to the eye viewport
+		Output.Position.x += (EyeOffsetScale[EyeIndex] * Output.Position.w) * (1.0f - 0.5 * ResolvedView.HMDEyePaddingOffset);
+	}
+	#endif
+	
+#if USE_GLOBAL_CLIP_PLANE
+	OutGlobalClipPlaneDistance = dot(ResolvedView.GlobalClippingPlane, float4(WorldPosition.xyz - ResolvedView.PreViewTranslation.xyz, 1));
+#endif
+	#if USE_WORLD_POSITION_EXCLUDING_SHADER_OFFSETS
+		Output.BasePassInterpolants.PixelPositionExcludingWPO = WorldPositionExcludingWPO.xyz;
+	#endif
+#endif	// USING_TESSELLATION
+
+	Output.FactoryInterpolants = VertexFactoryGetInterpolants(Input, VFIntermediates, VertexParameters);
+
+#if INSTANCED_STEREO
+	#if USING_TESSELLATION	
+		Output.FactoryInterpolants.InterpolantsVSToPS.PackedEyeIndex = PackEyeIndex(EyeIndex, bIsInstancedStereo);
+	#else
+		Output.FactoryInterpolants.PackedEyeIndex = PackEyeIndex(EyeIndex, bIsInstancedStereo);
+	#endif
+#endif
+
+// Calculate the fog needed for translucency
+#if NEEDS_BASEPASS_VERTEX_FOGGING
+	#if BASEPASS_ATMOSPHERIC_FOG
+	Output.BasePassInterpolants.VertexFog = CalculateVertexAtmosphericFog(WorldPosition.xyz, ResolvedView.TranslatedWorldCameraOrigin);
+	#else
+	Output.BasePassInterpolants.VertexFog = CalculateHeightFog(WorldPosition.xyz - ResolvedView.TranslatedWorldCameraOrigin);
+	#endif
+#endif
+
+#if TRANSLUCENCY_ANY_PERVERTEX_LIGHTING
+	float3 WorldPositionForVertexLightingTranslated = VertexFactoryGetPositionForVertexLighting(Input, VFIntermediates, WorldPosition.xyz);
+	float3 WorldPositionForVertexLighting = WorldPositionForVertexLightingTranslated - ResolvedView.PreViewTranslation.xyz;
+#endif
+
+#if TRANSLUCENCY_PERVERTEX_LIGHTING_VOLUME
+	float4 VolumeLighting;
+	float3 InterpolatedLighting = 0;
+
+	float3 InnerVolumeUVs;
+	float3 OuterVolumeUVs;
+	float FinalLerpFactor;
+
+	//@todo - get from VF
+	float3 LightingPositionOffset = 0;
+	ComputeVolumeUVs(WorldPositionForVertexLighting, LightingPositionOffset, InnerVolumeUVs, OuterVolumeUVs, FinalLerpFactor);
+
+	#if TRANSLUCENCY_LIGHTING_VOLUMETRIC_PERVERTEX_DIRECTIONAL
+	
+		Output.BasePassInterpolants.AmbientLightingVector = GetAmbientLightingVectorFromTranslucentLightingVolume(InnerVolumeUVs, OuterVolumeUVs, FinalLerpFactor).xyz;
+		Output.BasePassInterpolants.DirectionalLightingVector = GetDirectionalLightingVectorFromTranslucentLightingVolume(InnerVolumeUVs, OuterVolumeUVs, FinalLerpFactor);
+
+	#elif TRANSLUCENCY_LIGHTING_VOLUMETRIC_PERVERTEX_NONDIRECTIONAL
+
+		Output.BasePassInterpolants.AmbientLightingVector = GetAmbientLightingVectorFromTranslucentLightingVolume(InnerVolumeUVs, OuterVolumeUVs, FinalLerpFactor).xyz;
+
+	#endif
+#elif TRANSLUCENCY_PERVERTEX_FORWARD_SHADING
+
+	float4 VertexLightingClipSpacePosition = mul(WorldPositionForVertexLightingTranslated, ResolvedView.TranslatedWorldToClip);
+	float2 SvPosition = (VertexLightingClipSpacePosition.xy / VertexLightingClipSpacePosition.w * float2(.5f, -.5f) + .5f) * ResolvedView.ViewSizeAndInvSize.xy;
+	uint GridIndex = ComputeLightGridCellIndex((uint2)SvPosition, VertexLightingClipSpacePosition.w, EyeIndex);
+	Output.BasePassInterpolants.VertexDiffuseLighting = GetForwardDirectLightingForVertexLighting(GridIndex, WorldPositionForVertexLighting, VertexParameters.TangentToWorld[2], EyeIndex);
+
+#endif
+
+	#if PRECOMPUTED_IRRADIANCE_VOLUME_LIGHTING && TRANSLUCENCY_ANY_PERVERTEX_LIGHTING
+		float3 BrickTextureUVs = ComputeVolumetricLightmapBrickTextureUVs(WorldPositionForVertexLighting);
+
+		#if TRANSLUCENCY_LIGHTING_VOLUMETRIC_PERVERTEX_NONDIRECTIONAL
+			FOneBandSHVectorRGB IrradianceSH = GetVolumetricLightmapSH1(BrickTextureUVs);
+			Output.BasePassInterpolants.VertexIndirectAmbient = float3(IrradianceSH.R.V, IrradianceSH.G.V, IrradianceSH.B.V);
+		#elif TRANSLUCENCY_LIGHTING_VOLUMETRIC_PERVERTEX_DIRECTIONAL
+			// Need to interpolate directional lighting so we can incorporate a normal in the pixel shader
+			FTwoBandSHVectorRGB IrradianceSH = GetVolumetricLightmapSH2(BrickTextureUVs);
+			Output.BasePassInterpolants.VertexIndirectSH[0] = IrradianceSH.R.V;
+			Output.BasePassInterpolants.VertexIndirectSH[1] = IrradianceSH.G.V;
+			Output.BasePassInterpolants.VertexIndirectSH[2] = IrradianceSH.B.V;
+		#endif
+	#endif
+
+#if WRITES_VELOCITY_TO_GBUFFER
+	{
+		float4 PrevTranslatedWorldPosition = VertexFactoryGetPreviousWorldPosition( Input, VFIntermediates );	
+		VertexParameters = GetMaterialVertexParameters(Input, VFIntermediates, PrevTranslatedWorldPosition.xyz, TangentToLocal);
+		PrevTranslatedWorldPosition.xyz += GetMaterialPreviousWorldPositionOffset(VertexParameters);
+
+		#if USING_TESSELLATION
+			// We let the Domain Shader convert to post projection when tessellating
+			Output.BasePassInterpolants.VelocityPrevScreenPosition = PrevTranslatedWorldPosition;
+			// Store the mask in .w when doing tessellation as we need the world space Z
+			Output.BasePassInterpolants.VelocityPrevScreenPosition.w = 1 - SkipOutputVelocity;
+			#if WRITES_VELOCITY_TO_GBUFFER_USE_POS_INTERPOLATOR
+			Output.BasePassInterpolants.VelocityScreenPosition = WorldPosition;
+			#endif
+		#else
+			// compute the old screen pos with the old world position and the old camera matrix
+			Output.BasePassInterpolants.VelocityPrevScreenPosition = mul(float4(PrevTranslatedWorldPosition.xyz, 1), ResolvedView.PrevTranslatedWorldToClip);		
+			// Store the mask in .z when as we don't need the clip space Z
+			Output.BasePassInterpolants.VelocityPrevScreenPosition.z = 1 - SkipOutputVelocity;
+			#if WRITES_VELOCITY_TO_GBUFFER_USE_POS_INTERPOLATOR
+			Output.BasePassInterpolants.VelocityScreenPosition = ClipSpacePosition;
+			#endif
+		#endif	// USING_TESSELLATION
+	}
+#endif	// WRITES_VELOCITY_TO_GBUFFER
+
+	OutputVertexID( Output );
+}

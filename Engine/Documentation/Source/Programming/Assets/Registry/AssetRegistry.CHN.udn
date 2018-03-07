@@ -1,0 +1,150 @@
+﻿Availability:Public
+Title:资源注册表
+Crumbs: %ROOT%, Engine, Engine/UI, Programming
+Description:编辑器如何发现资源及怎样在加载资源前了解关于资源类型的更多信息。
+Version: 4.5
+
+**Asset Registry(资源注册表)** 是一个编辑器子系统，它在编辑器加载资源过程中，异步地收集卸载的资源的信息。 该信息存储在内存中，以便编辑器不必加载这些资源就可以创建资源列表。 该信息是权威信息，且随着资源在内存中发生改变或者文件在磁盘中发生改变，该信息可以自动更新。 **内容浏览器** 是该系统的主要用户，但是这个信息可以在编辑器代码中的任何地方进行应用。
+
+## 获得资源列表
+
+要想按类别形成一个资源列表，仅需加载 Asset Registry模块，然后调用 `Module.Get().GetAssetsByClass()` 即可。
+
+	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+	TArray<FAssetData> AssetData;
+	const UClass* Class = UStaticMesh::StaticClass();
+	AssetRegistryModule.Get().GetAssetsByClass(Class, AssetData);
+
+这将会返回一系列 `FAssetData` 对象，它们描述了可以加载或卸载的资源。 `FAssetData` 对象存放了关于资源的信息，该信息在加载该资源之前就可以确定。
+
+这里是其成员的列表及介绍：
+
+| 成员| 描述|
+| ------ | ----------- |
+| `FName ObjectPath` | 资源的对象路径，以 `包.组名称.资源名称` 形式呈现。 |
+| `FName PackageName` | 在其中找到该资源的包的名称。 |
+| `FName PackagePath` | 在其中找到该资源的包的路径。 |
+| `FName GroupNames` | 在其中找到该资源的组的名称，名称以 '`.`' 分隔。 如果没有组，则名称为 `NAME_None`  。 |
+| `FName AssetName` | 没有包或组的资源的名称。 |
+| `FName AssetClass` | 资源类的名称。 |
+| `TMap<FName, FString> TagsAndValues` | 标记为 `AssetRegistrySearchable` 的属性的值的映射表。 请参照[标签和值](#标签和值) 部分获得更多信息。 |
+
+您也可以通过调用以下其中一个函数，来使用其他标准来构成一个列表：
+
+| 函数| 描述|
+| -------- | ----------- |
+| `GetAssetsByPackageName()` | 返回指定包中的资源列表。 |
+| `GetAssetsByPath()` | 返回指定路径中的资源列表。 |
+| `GetAssetByObjectPath()` | 返回具有指定对象路径的资源列表。 |
+| `GetAssetsByTagValues()` | 返回具有一组指定标签和值的资源列表。 |
+| `GetAllAssets()` | 返回所有资源的列表。 这个过程可能很慢。 |
+
+
+[REGION:tip]
+	如果需要使用多个标准来形成一个资源列表，那么请使用 `GetAssets()` 并提供一个`FARFilter`结构体 ，正如 [创建过滤器](#创建过滤器) 部分所介绍的那样。
+[/REGION]
+
+## 将FAssetData转换为UObject*
+
+`FAssetData` 对象有一个 `GetAsset()` 函数，该函数将会返回 `FAssetData`所代表的  `UObject*` 。 如果需要，这将会加载该资源，然后返回它。
+
+如果仅是想判断一个资源是否已加载，请使用 `IsAssetLoaded()` 函数。
+
+## 创建过滤器
+
+当调用 `GetAssets()` 创建资源列表时，可以提供 `FARFilter`来通过多个标准筛选资源。 过滤器由多个部分组成： 
+
+* PackageName（包名称）
+* PackagePath（包路径）
+* Collection（收藏夹）
+* Class（类）
+* Tags/Value pairs（标签/值 对）
+
+
+一个构成部分可以有多个元素。 一个资源如果满足 **所有** 构成部分的要求，则通过过滤器。 要想满足一个构成部分的要求，那么该资源必须满足该构成部分中的 **每个** 元素的要求。
+
+比如，如果存在一个静态网格物体，路径是 /Game/Meshes/BeachBall:
+
+* 如果过滤器仅包路径`/Game/Meshes`，则该资源通过过滤器。 该过滤器仅有一个构成部分，且该构成部分仅有一个元素。
+* 如果过滤器包路径 `/Game/Meshes` 和 类 `UParticleSystem` **及** `UStaticMesh`，那么该资源将通过过滤器。 这个过滤器有两个构成部分，第一部分有一个元素，第二部分有两个元素。
+* 如果过滤器包路径 `/Game/Meshes` 和 **唯一的**  类 `UParticleSystem` ，那么该资源将不能通过过滤器。 该过滤器有两个构成部分，每个部分有一个元素。
+* 如果过滤器包含路径 `/Game/NotMeshes` 和类`UStaticMesh`，那么该资源将不能通过过滤器。 该过滤器也具有两个构成部分，但每个部分有一个元素。
+
+
+这里是一个应用过滤器的示例，该过滤器由Class（类）和PackagePath（路径）两个构成部分构成：
+
+	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+	TArray<FAssetData> AssetData;
+	FARFilter Filter;
+	Filter.Classes.Add(UStaticMesh::StaticClass());
+	Filter.PackagePaths.Add("/Game/Meshes");
+	AssetRegistryModule.Get().GetAssets(Filter, AssetData);
+
+## 标签和值
+
+从资源注册表中返回的 `FAssetData` 对象包含一个名称和数值的映射表，称为 `TagsAndValues` 。 这是 `FAssetData` 代表的资源的属性名称和相关值的列表。 该信息是在保存一个资源时收集的，且存储在包含该资源的 `UAsset`  文件的头文件中。 资源注册表读取这个头文件并相应地填充  `TagsAndValues`  映射表。 资源注册表仅收集标记为 `AssetRegistrySearchable` 的属性。
+
+比如(来自 `UTexture` )：
+
+	/** 当对该贴图进行采样时所使用的贴图过滤方式。 */
+	UPROPERTY(Category=Texture, AssetRegistrySearchable)
+	TEnumAsByte<enum TextureFilter> Filter;
+
+一旦该标记添加到了 `UTexture` 的 'Filter' 属性上，那么后续保存的所有 `UTextures` 在其  `FAssetData` 的 `TagsAndValues` 映射表中都有一项键值对: 键名是 `"Filter"` ，值是一个枚举值的字符串表示，比如 "TF_Linear"` 。
+
+[REGION:note]
+	在资源注册表可以发现这些资源的属性之前， **必须重新保存资源** 。
+[/REGION]
+
+如果您想让资源注册表可以搜索一条不直接是UProperty的信息 ，那么您资源的类可以实现这个虚函数: GetAssetRegistryTags()来手动地向TagsAndValues 映射表中添加键/值 对。 GetAssetRegistryTags继承于UObject。
+
+## 异步数据收集
+
+资源注册表异步地读取  `UAsset` 文件，且在您需要资源列表时它可能还没有完整的资源列表。 如果您的编辑器代码需要一个完整的列表，那么资源注册表会提供一个代理回调函数，来提供什么时候发现/创建资源、重命名资源、或删除资源的信息。 还有一个代理用于提供什么时候资源注册表完成第一次搜索的信息，这对于很多系统来说是非常有用的。
+
+您可以通过加载Asset Registry模块来注册这些代理，然后使用 `IAssetRegistry` 内提供的函数：
+
+	/** 在资源被添加到注册表时注册/取消注册函数调用 */
+	virtual FAssetAddedEvent& OnAssetAdded() = 0;
+
+	/** 在资源从注册表移除时注册/取消注册函数调用 */
+	virtual FAssetRemovedEvent& OnAssetRemoved() = 0;
+
+	/** 在资源于注册表中重命名时注册/取消注册函数调用 */
+	virtual FAssetRenamedEvent& OnAssetRenamed() = 0;
+
+	/** 在资源注册表完成文件载入时时注册/取消注册函数调用 */
+	virtual FFilesLoadedEvent& OnFilesLoaded() = 0;
+
+	/** 注册/取消注册函数调用来更新背景文件载入的进度 */
+	virtual FFileLoadProgressUpdatedEvent& OnFileLoadProgressUpdated() = 0;
+
+	/** 如资源注册表当前正在载入文件并且尚不知道所有的资源，则返回true */
+	virtual bool IsLoadingAssets() = 0;
+
+比如：
+
+	void FMyClass::FMyClass()
+	{
+		// 载入资源注册表模块以监听更新
+		FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		AssetRegistryModule.Get().OnAssetAdded().AddRaw( this, &FMyClass::OnAssetAdded );
+	}
+
+	FMyClass::~FMyClass()
+	{
+		// 载入资源注册表模块以取消注册代理
+		FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		AssetRegistryModule.Get().OnAssetAdded().RemoveAll( this );
+	}
+
+	void FMyClass::OnAssetAdded(const FAssetData& AssetData)
+	{
+		// 由资源注册表发现的资源。
+		// 这意味着其刚刚被创建或最近在硬盘上被发现。
+		// 请确认此函数中的代码速度够快，否则它会让收集过程变慢。
+	}
+
+资源注册表可以用于命令行开关中，但是这时会同步地收集信息。 直到收集信息完成之前， `LoadModule()` 调用将会被阻止。
+
+如果您的代码需要等待异步发现的资源，并具有 [Slate用户界面](Programming/Slate) 前端，那么它应该包含一个  `SAssetDiscoveryIndicator` 控件来向用户呈现进度。

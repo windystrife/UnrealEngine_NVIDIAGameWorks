@@ -1,0 +1,247 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+ MediaShaders.usf: Shaders to convert various media decoder outputs to RGBA
+ =============================================================================*/
+
+#include "Common.ush"
+#include "GammaCorrectionCommon.ush"
+
+
+/* Helpers
+=============================================================================*/
+
+float3 YuvToRgb(float3 YUV, float4x4 ColorTransform, uint SrgbToLinear)
+{
+	float3x3 Coeff = float3x3(
+		ColorTransform[0].xyz,
+		ColorTransform[1].xyz,
+		ColorTransform[2].xyz
+	);
+
+	YUV -= float3(0.0625, 0.5, 0.5);
+	float3 sRGB = mul(Coeff, YUV);
+
+	return (SrgbToLinear == 1) ? sRGBToLinear(sRGB) : sRGB;
+}
+
+
+/* Vertex shader
+=============================================================================*/
+
+void MainVertexShader(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InUV : ATTRIBUTE1,
+	out float4 OutPosition : SV_POSITION,
+	out float2 OutUV : TEXCOORD0)
+{
+	OutPosition = InPosition;
+	OutUV = InUV;
+}
+
+
+/* Pixel shaders
+=============================================================================*/
+
+// shader to convert a AYUV texture to RGBA
+void AYUVConvertPS(
+	float4 InPosition : SV_POSITION,
+	float2 InUV : TEXCOORD0,
+	out float4 OutColor : SV_Target0)
+{
+	float4 AYUV = AYUVConvertUB.Texture.Sample(AYUVConvertUB.Sampler, InUV.xy);
+	
+	OutColor.xyz = YuvToRgb(AYUV.zyx, AYUVConvertUB.ColorTransform, AYUVConvertUB.SrgbToLinear);
+	OutColor.w = AYUV.w;
+}
+
+
+// shader to convret a Windows Bitmap texture
+void BMPConvertPS(
+	float4 InPosition : SV_POSITION,
+	float2 InUV : TEXCOORD0,
+	out float4 OutColor : SV_Target0)
+{
+	InUV.y = 1.0f - InUV.y;
+	float2 ScaledUV = InUV * BMPConvertUB.UVScale;
+	float4 RGB = BMPConvertUB.Texture.Sample(BMPConvertUB.Sampler, ScaledUV);
+
+	OutColor.xyz = (BMPConvertUB.SrgbToLinear == 1) ? sRGBToLinear(RGB.xyz) : RGB.xyz;
+	OutColor.w = RGB.w;
+}
+
+
+// shader to convert a NV12 texture to RGBA
+void NV12ConvertPS(
+	float4 InPosition : SV_POSITION,
+	float2 InUV : TEXCOORD0,
+	out float4 OutColor : SV_Target0)
+{
+	float2 ScaledUV = InUV * NV12ConvertUB.UVScale;
+
+	float3 YUV;
+	YUV.x = NV12ConvertUB.Texture.Sample(NV12ConvertUB.SamplerB, ScaledUV).x;
+
+	ScaledUV.y *= 0.5f;
+	ScaledUV.y += 2.0f / 3.0f;
+
+	uint UVOffs = uint(InUV.x * NV12ConvertUB.OutputWidth / 2.0f) * 2;
+	float UPos = (float(UVOffs * NV12ConvertUB.UVScale.x) + 0.5f) / NV12ConvertUB.OutputWidth;
+	float VPos = (float(UVOffs * NV12ConvertUB.UVScale.x) + 1.5f) / NV12ConvertUB.OutputWidth;
+
+	YUV.y = NV12ConvertUB.Texture.Sample(NV12ConvertUB.SamplerP, float2(UPos, ScaledUV.y)).x;
+	YUV.z = NV12ConvertUB.Texture.Sample(NV12ConvertUB.SamplerP, float2(VPos, ScaledUV.y)).x;
+
+	OutColor.xyz = YuvToRgb(YUV, NV12ConvertUB.ColorTransform, NV12ConvertUB.SrgbToLinear);
+	OutColor.w = 1.0f;
+}
+
+
+// shader to convert a NV21 texture to RGBA
+void NV21ConvertPS(
+	float4 InPosition : SV_POSITION,
+	float2 InUV : TEXCOORD0,
+	out float4 OutColor : SV_Target0)
+{
+	float2 ScaledUV = InUV * NV21ConvertUB.UVScale;
+
+	float3 YUV;
+	YUV.x = NV21ConvertUB.Texture.Sample(NV21ConvertUB.SamplerB, ScaledUV).x;
+
+	ScaledUV.y *= 0.5f;
+	ScaledUV.y += 2.0f / 3.0f;
+
+	uint UVOffs = uint(ScaledUV.x * NV21ConvertUB.OutputWidth / 2.0f) * 2;
+	float UPos = (float(UVOffs * NV21ConvertUB.UVScale.x) + 1.5f) / NV21ConvertUB.OutputWidth;
+	float VPos = (float(UVOffs * NV21ConvertUB.UVScale.x) + 0.5f) / NV21ConvertUB.OutputWidth;
+
+	YUV.y = NV21ConvertUB.Texture.Sample(NV21ConvertUB.SamplerP, float2(UPos, ScaledUV.y)).x;
+	YUV.z = NV21ConvertUB.Texture.Sample(NV21ConvertUB.SamplerP, float2(VPos, ScaledUV.y)).x;
+
+	OutColor.xyz = YuvToRgb(YUV, NV21ConvertUB.ColorTransform, NV21ConvertUB.SrgbToLinear);
+	OutColor.w = 1.0f;
+}
+
+
+// shader to resize an RGB texture
+void RGBConvertPS(
+	float4 InPosition : SV_POSITION,
+	float2 InUV : TEXCOORD0,
+	out float4 OutColor : SV_Target0)
+{
+	float2 ScaledUV = InUV * RGBConvertUB.UVScale;
+	OutColor = RGBConvertUB.Texture.Sample(RGBConvertUB.Sampler, ScaledUV);
+}
+
+
+// shader to convert a luma (Y) and chroma (CbCr) texture to RGBA
+void YCbCrConvertPS(
+	float4 InPosition : SV_POSITION,
+	float2 InUV : TEXCOORD0,
+	out float4 OutColor : SV_Target0)
+{
+	float3 YUV;
+	YUV.x = YCbCrConvertUB.LumaTexture.Sample(YCbCrConvertUB.LumaSampler, InUV.xy).x;
+	YUV.yz = YCbCrConvertUB.CbCrTexture.Sample(YCbCrConvertUB.CbCrSampler, InUV.xy).xy;
+	
+	OutColor.xyz = YuvToRgb(YUV, YCbCrConvertUB.ColorTransform, YCbCrConvertUB.SrgbToLinear);
+	OutColor.w = 1.0f;
+}
+
+// shader to convert a luma (Y) and chroma (CbCr) texture to RGBA using a full 4x4 matrix passed in
+void YCbCrConvertPS_4x4Matrix(
+    float4 InPosition : SV_POSITION,
+    float2 InUV : TEXCOORD0,
+    out float4 OutColor : SV_Target0)
+{
+    float4 YUV;
+    YUV.x = YCbCrConvertUB.LumaTexture.Sample(YCbCrConvertUB.LumaSampler, InUV.xy).x;
+    YUV.yz = YCbCrConvertUB.CbCrTexture.Sample(YCbCrConvertUB.CbCrSampler, InUV.xy).xy;
+    YUV.w = 1.0;
+
+    float4 sRGB = mul(YCbCrConvertUB.ColorTransform, YUV);
+    if (YCbCrConvertUB.SrgbToLinear == 0)
+    {
+        OutColor = sRGB;
+    }
+    else
+    {
+        OutColor = float4(sRGBToLinear(sRGB.xyz), 1.0);
+    }
+}
+
+
+// shader to convert a UYVY texture to RGBA
+void UYVYConvertPS(
+	float4 InPosition : SV_POSITION,
+	float2 InUV : TEXCOORD0,
+	out float4 OutColor : SV_Target0)
+{
+	float4 UYVYB = UYVYConvertUB.Texture.Sample(UYVYConvertUB.SamplerB, float2(InUV.x, InUV.y));
+	float4 UYVYP = UYVYConvertUB.Texture.Sample(UYVYConvertUB.SamplerP, float2(InUV.x, InUV.y));
+
+	float Pos = 2.0f * InUV.x * UYVYConvertUB.Width;
+	float3 YUV;
+
+	YUV.x = (floor(Pos % 2.0f) == 0) ? UYVYP.y : UYVYP.w;
+	YUV.yz = UYVYB.zx;
+
+	OutColor.xyz = YuvToRgb(YUV, UYVYConvertUB.ColorTransform, UYVYConvertUB.SrgbToLinear);
+	OutColor.w = 1.0f;
+}
+
+
+// shader to convert three Y, U, and V textures to RGBA
+void YUVConvertPS(
+	float4 InPosition : SV_POSITION,
+	float2 InUV : TEXCOORD0,
+	out float4 OutColor : SV_Target0)
+{
+	float3 YUV;
+	YUV.x = YUVConvertUB.YTexture.Sample(YUVConvertUB.YSampler, InUV.xy).x;
+	YUV.y = YUVConvertUB.UTexture.Sample(YUVConvertUB.USampler, InUV.xy).x;
+	YUV.z = YUVConvertUB.VTexture.Sample(YUVConvertUB.VSampler, InUV.xy).x;
+	
+	OutColor.xyz = YuvToRgb(YUV, YUVConvertUB.ColorTransform, YUVConvertUB.SrgbToLinear);
+	OutColor.w = 1.0f;
+}
+
+
+// shader to convert a YUY2 texture to RGBA
+void YUY2ConvertPS(
+	float4 InPosition : SV_POSITION,
+	float2 InUV : TEXCOORD0,
+	out float4 OutColor : SV_Target0)
+{
+	float2 ScaledUV = InUV * YUY2ConvertUB.UVScale;
+
+	float3 YUV;
+	YUV.yz = YUY2ConvertUB.Texture.Sample(YUY2ConvertUB.SamplerB, ScaledUV).yw;
+
+	float4 YUY2P = YUY2ConvertUB.Texture.Sample(YUY2ConvertUB.SamplerP, ScaledUV);
+	float Pos = InUV.x * YUY2ConvertUB.OutputWidth;
+	YUV.x = (floor(Pos % 2.0f) == 0) ? YUY2P.z : YUY2P.x;
+
+	OutColor.xyz = YuvToRgb(YUV, YUY2ConvertUB.ColorTransform, YUY2ConvertUB.SrgbToLinear);
+	OutColor.w = 1.0f;
+}
+
+
+// shader to convert a YVYU texture to RGBA
+void YVYUConvertPS(
+	float4 InPosition : SV_POSITION,
+	float2 InUV : TEXCOORD0,
+	out float4 OutColor : SV_Target0)
+{
+	float4 YVYUB = YVYUConvertUB.Texture.Sample(YVYUConvertUB.SamplerB, float2(InUV.x, InUV.y));
+	float4 YVYUP = YVYUConvertUB.Texture.Sample(YVYUConvertUB.SamplerP, float2(InUV.x, InUV.y));
+
+	float Pos = 2.0f * InUV.x * YVYUConvertUB.Width;
+	float3 YUV;
+
+	YUV.x = (floor(Pos % 2.0f) == 0) ? YVYUP.z : YVYUP.x;
+	YUV.yz = YVYUB.wy;
+
+	OutColor.xyz = YuvToRgb(YUV, YVYUConvertUB.ColorTransform, YVYUConvertUB.SrgbToLinear);
+	OutColor.w = 1.0f;
+}

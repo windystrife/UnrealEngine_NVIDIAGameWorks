@@ -1,0 +1,615 @@
+﻿INTSourceChangelist:0
+Availability: Docs
+Title: Visibility Culling
+Crumbs: %ROOT%, Engine, 
+Description: How Visibility Culling works in your game.
+Version: 4.13
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Rendering/VisibilityCulling:title%]()
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/VisibilityCulling:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/VisibilityCulling:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/VisibilityCulling]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/VisibilityCulling:title%]()
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/VisibilityCulling:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/VisibilityCulling:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/VisibilityCulling]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+[TOC(start:2 end:2)]
+
+## What is Visibility Culling?
+
+Visibility culling uses a process to gather all the Actors in the scene and then will use one of the available culling methods to test whether the Actor is visible or not. The process of checking 
+an Actor's visibility state is used to increase the culling effecitveness by reducing the number of queries to the GPU to test. 
+
+In order to understand how visibility and occlusion culling works it is necessary to first understand how an Actors bounding box and sphere is used to test its visibility state, 
+what the view frustum does, and lastly what makes an Actor an occluder or occludee. 
+
+### Actor Bounds
+
+Each Actor has its own bounds. These are made up of a bounding box and sphere that surround the geometry of the mesh. The bounds can be edited via the Static Mesh Editor, Persona, or per-instance via the 
+Detail's panel in your scene. For visibility and occlusion culling purposes it is used to test whether an Actor is visible within the Camera's field of view.
+
+
+![](BoundsEditorView1.png)(w:350)
+[REGION:caption]
+Actor's bounding box and sphere
+[/REGION]
+
+##### Setting the Bounds Scale
+
+You can set the Static and Skeletal Meshes bounds by using the following options.
+
+[REGION:imagetable]
+| ![](BoundScaleSetting.png)(w:400) | ![](BoundsScaleSettingSMEditor.png)(w:400) |
+| --- | --- |
+| Scene Per-Instance Detail's panel | Static and Skeletal Mesh Editor Detail's panel | 
+[/REGION]
+
+[REGION:note]
+The per-instance setting for the **Bounds Scale** will use a multiplier that scales evenly for the Actor's bounds, whereas the Static Mesh Editor and Persona will allow you to set specific XYZ coordinate values.
+[/REGION]
+
+To view the bounds of an Actor, you must first go to the viewport and **Show** > **Advanced** > **Bounds** or use the console command `Show Bounds`. Then when you select the Actor in the scene
+to see the bounds visualization.
+
+[OBJECT:ComparisonSlider]
+ [PARAM:before]
+ ![Bounds Scale: 1.0](Bounds2.png)(w:500)
+ [/PARAM]
+ [PARAM:after]
+ ![Bounds Scale: 1.25](Bounds3.png)(w:500)
+ [/PARAM]
+[/OBJECT]
+[REGION:caption]
+_Setting the Bounds Scale in the Detail's panel of the selected Actor._
+[/REGION]
+
+[REGION:tip]
+When you increase the bounds of an Actor you do not have to increase by whole numbers. You can increase with decimal values incrementally until you get the results you are wanting. For example, 
+increase the Bounds Scale to 1.15 rather than increasing to 2.0. 
+[/REGION]
+
+
+
+### What is the Camera's View Frustum?
+
+The Camera's view frustum is the viewing area within 3D space that is represented by a pyramidal shape from its viewpoint. 
+
+[REGION:imagetable]
+| [INCLUDE:#cameraview1] |
+| ---------------------- |
+| Camera Field of View (FOV) set to 90 degrees (Default) |
+[REGION:caption]
+_Click images for full size_
+[/REGION]
+[/REGION]
+
+This pyramidal shape represents up our **Field of View** (FOV) as seen from the Camera's perspective. This perspective shows our various Actors in the scene that are within this view.
+The image below contains all the elements that make up the scene above. This can include Actors that are not visibile within the view frustum, like the Spot Light that is lighting the scene, 
+or other Actors not visible within the view frusum.  
+
+[REGION:imagetable]
+| [INCLUDE:#sceneview1]| 
+| --- |
+| Scene View with Camera Attributes  |
+[/REGION]
+[REGION:caption]
+_Click images for full size_
+[/REGION]
+
+| Number | Description |
+| ------ | ----------- |
+| **1**  | **Field of View (FOV):** The width of the view angle measured in degrees. |
+| **2**  | **Near Clip Plane:** The nearest point to the camera that will render. |
+| **3**  | **Camera View Frustum:** The area between the near and far clip planes. Anything within this view is considered for rendering. |
+| **4**  | **Far Clip Plane:** The farthest point from the camera that will render. This is controlled by scene depth instead of a set distance that clips the view. |
+
+<!---
+[EXCERPT:CameraView1]
+[REGION:lightbox]
+[![](CameraView.png)(w:600)](CameraView.png)
+[/REGION]
+[/EXCERPT:CameraView1]
+
+[EXCERPT:SceneView1]
+[REGION:lightbox]
+[![](FrustumView.png)(w:600)](FrustumView.png)
+[/REGION]
+[/EXCERPT:SceneView1]
+--->
+
+The view frustum is controlled by its **Field of View** (FOV). Higher values will give wider viewing angle and a lower value will restrict the available viewing angle.
+
+[REGION:note]
+The Camera's view frustum visualization is not enabled by default. You must first go to the Viewport and select **Show** > **Advanced** > **Camera Frustum** to enable it.
+[/REGION]
+
+[OBJECT:EmbeddedVideo]
+ [PARAMLITERAL:width]
+ 640
+ [/PARAMLITERAL]
+ [PARAMLITERAL:height]
+ 360
+ [/PARAMLITERAL]
+ [PARAMLITERAL:videoid]
+ RqTqc0dLKPM
+ [/PARAMLITERAL]
+[/OBJECT]
+
+For more information on [using and setting up Cameras](Gameplay/HowTo/UsingCameras) you can read about them in this page.
+
+
+### What is Occlusion?
+
+Occlusion happens when you have an Actor that can block or become blocked by another Actor. The Actors are either occluders, occludees, or both. 
+ 
+* An occluder is any Actor that can occlude another Actor from being visible to the view frustum.
+* An occludee is any Actor that is occluded by another Actor from being visible to the view frustum. If this Actor is large enough it can also be an occluder for smaller Actors that it blocks from the view frustum.
+
+In the example below, the Camera represents the view of the scene. Behind the wall lies two Actors that cannot be seen because they are blocked from the camera view. The statue and barrel both would be occludees since 
+they are being blocked by the wall that is an occluding them. Also, remember that both the barrel and statue could be occluders if they were blocking anything behind them. Every occluder can be an occludee if it is large 
+enough to block another actor.
+
+[REGION:imagetable]
+| [INCLUDE:#OccluderVsOccludee1] | [INCLUDE:#OccluderVsOccludeeCV] |
+| --- | --- | 
+| Occluder = Wall, Occludee = Barrels and Statue  | Camera FOV shows the wall that occludes the barrels and statue. |
+[/REGION]
+[REGION:caption]
+_Click images for full size_
+[/REGION]
+
+<!---
+[EXCERPT:OccluderVsOccludee1]
+[REGION:lightbox]
+[![](OccluderVsOccludee.png)(w:450)](OccluderVsOccludee.png)
+[/REGION]
+[/EXCERPT:OccluderVsOccludee1]
+
+[EXCERPT:OccluderVsOccludeeCV]
+[REGION:lightbox]
+[![](OccluderVsOccludeeCameraView.png)(w:450)](OccluderVsOccludeeCameraView.png)
+[/REGION]
+[/EXCERPT:OccluderVsOccludeeCV]
+--->
+
+### Visibility Culling
+
+The following types of culling are used to determine the current visibility state of an Actor in the scene.
+
+| Types of Culling | Description |
+| ---------------- | ----------- |
+| **Distance** | The Actor's set distance is used to determine its visibility state. |
+| **View Frustum** | This is used to remove any Actors that do not have its bounds visible within the Camera's view frustum. Anything outside of this viewing area will not be rendered.  |
+| **Occlusion** | This is used to remove any additional Actors that are within the Camera's view frustum that is blocked by another from being viewed. This is done by testing if the Actor is visible within the scene's depth buffer. If it is visible it will be rendered, and if it is not it will be considered occluded and not rendered. |
+
+
+For more information on [Buffer Visualizations](Engine/UI/LevelEditor/Viewports/ViewModes#buffervisualization) you can read about them on this page.
+
+## Visibility Culling Methods
+
+Once the data has been culled from the scene it is tested against the available culling methods that have been implemented to test the visibility state of the Actors. The visibility culling methods work
+together and in the case of mobile offer a solution where dynamic occlusion is not possible.
+
+These culling methods listed here are in the order they are applied, which is also from least to most expensive in terms of rendering thread cost.
+
+* Distance culling (Per-instance and Cull Distance Volumes)
+* View frustum culling
+* Precomputed occlusion culling
+* Dynamic occlusion culling (hardware occlusion queries)
+
+
+#### Distance Culling (Per-instance)
+
+Each Actor in the scene can have its own set draw distance that will allows minimum and maximum distance for it to be rendered visible.
+
+![](DistanceCullSettings.png)
+
+| **Property** | **Description** |
+| ------------ | --------------- |
+| **Min Draw Distance** | The minimum distance at which the primitive should be rendered. This is measured in world space units from the center of the primitive's bounding sphere to the camera position. |
+| **Desired Max Draw Distance** | The max draw distance exposed to Level Designers. The real max draw distance is the min (disregarding 0) of this and volumes effecting this object. |
+| **Current Max Draw Distance** | This is not an editable property. This field shows the cull distance that is set by the CullDistanceVolume that the primitive is residing inside of. If it is set to 0 no Cull Distance Volume has been set so the value will be 0. |
+
+In the examples below, the **Min Draw Distance** and **Desired Max Draw Distance** have been set for the cube. These values determine the closest distance to render the Actor or the farthest distance that 
+the Actor can be rendered from the Camera's view.
+
+* **Min Draw Distance:** 500
+* **Desired Max Draw Distance:** 1000
+
+[REGION:note]
+Note that the **Desired Max Draw Distance** here will override any higher value set in a Cull Distance Volume. See the [Cull Distance Volume](1_TimH\2_IN_PROGRESS\VisibilityCulling\CullDistanceVolume) page for more information.
+[/REGION]
+
+[OBJECT:EmbeddedVideo]
+ [PARAMLITERAL:width]
+ 640
+ [/PARAMLITERAL]
+ [PARAMLITERAL:height]
+ 360
+ [/PARAMLITERAL]
+ [PARAMLITERAL:videoid]
+ LiiJ13LulIU
+ [/PARAMLITERAL]
+[/OBJECT]
+
+
+<!---
+[REGION:imagetable]
+| [INCLUDE:#Units1500] | [INCLUDE:#Units1000] | [INCLUDE:#Units500] |
+| --- | --- | --- |
+| More than Desired Max Draw Distance | Within Range of Min and Max Draw Distance | Less than Min Draw Distance | 
+[/REGION]
+
+To help illustrate what is happening in the video above, the images here show a top-down view and mark the distance from the **Camera** Actor to the center point of the **Cube** Actor. 
+The image directly below the top-down view shows the camera's view.
+
+--->
+
+Since the **Desired Max Draw Distance** is set to 1000 and the **Min Draw Distance** is set to 500 the cube Actor will only be visible when the Camera moves within this distance from the Actor's bounding box
+center. When the Camera moves outside of this space the Actor will no longer be rendered. 
+
+<!--
+[EXCERPT:Units1500]
+[REGION:lightbox]
+[![](1500units.png)(w:300)](1500Units.png)
+[/REGION]
+[/EXCERPT:Units1500]
+
+[EXCERPT:Units1000]
+[REGION:lightbox]
+[![](1000units.png)(w:300)](1000Units.png)
+[/REGION]
+[/EXCERPT:Units1000]
+
+[EXCERPT:Units500]
+[REGION:lightbox]
+[![](500units.png)(w:300)](500Units.png)
+[/REGION]
+[/EXCERPT:Units500]
+-->
+
+
+#### Cull Distance Volume
+
+Cull Distance Volumes allow you to specify a set of sizes and distances in an array that will automatically remove any Actor based on its bounds size at the corresponding distance. These volumes are useful
+for large outdoor scenes that have detailed interiors. 
+
+For more information on using and setting up [Cull Distance Volumes](1_TimH\2_IN_PROGRESS\VisibilityCulling\CullDistanceVolume) you can read about it in this page.
+
+
+#### View Frustum Culling
+
+The Camera's view frustum is used to test whether the culled data from the scene is visible within its viewing area. This process uses the Actor's bounding box and sphere to check if it is visible within the view. If not, the 
+Actor will not be rendered.
+
+The following example demonstrates how the view frustum considers Actors that are visible within the viewing area.
+
+* Yellow represents FOV of the view frustum and the area that is no occluded by other Actors.
+* Red represents the part of the view frustum that is occluded due to other Actors (ie. walls and large objects).
+
+[REGION:imagetable]
+| [INCLUDE:#Camera1] | [INCLUDE:#Camera2] | [INCLUDE:#Camera3] | [INCLUDE:#Camera4] |
+| ------------------ | ------------------ | ------------------ | ------------------ |
+|          1         |          2         |          3         |          4         | 
+[/REGION]
+
+| **Number** | **Description** |
+| ---------- | --------------- |
+| **1** | From this perspective there are large walls that act as occluders obstructing all but the view along the hallway. Because of this only the cube is visible. This means that the sphere and cone are occludees of the wall and will not be rendered. |
+| **2** | As the Camera moves forward there is more of the scene that is exposed to the view frustum. The walls no longer fully occlude the sphere and cone now that we can see parts of them around the corners of the wall. This means that they are now being fully rendered even though we can only see a small part of them. |
+| **3** | Next the as the Camera turns to the left we now have the sphere and cube within the view frustum. The cone and walls out of view will no longer be rendered. |
+| **4** | Now as the Camera is turned back to the right the cone and cube are within the view and the walls and sphere that are out of view are no longer being rendered. |
+
+[REGION:note]
+This is a generalized example of how visibility culling works and there is a number of caveats and reasons to how things can be rendered that are not covered here. For additional tips and strategies to use
+with visibility culling see the [Culling Strategies for Best Practices](#cullingstrategiesforbestpractices) section in this page.
+[/REGION]
+
+<!--
+[EXCERPT:Camera1]
+[REGION:lightbox]
+[![](Camera1.png)(w:215)](Camera1.png)
+[/REGION]
+[/EXCERPT:Camera1]
+
+[EXCERPT:Camera2]
+[REGION:lightbox]
+[![](Camera2.png)(w:215)](Camera2.png)
+[/REGION]
+[/EXCERPT:Camera2]
+
+[EXCERPT:Camera3]
+[REGION:lightbox]
+[![](Camera3.png)(w:215)](Camera3.png)
+[/REGION]
+[/EXCERPT:Camera3]
+
+[EXCERPT:Camera4]
+[REGION:lightbox]
+[![](Camera4.png)(w:215)](Camera4.png)
+[/REGION]
+[/EXCERPT:Camera4]
+-->
+
+
+#### Precomputed Visibility Volume
+
+<!---![](PrecomputedVisibilityVolume.png)(w:500)--->
+
+Precomputed Visibility Volumes use visibility cells that are placed on surfaces after a static lighting build. These visibility cells use the Camera view to change the visibility state of an Actor.
+This culling method is good for having visibility culling on mobile devices where hardware occlusion queries cannot be issued to check the visibility state. 
+
+For more information on using and setting up [Precomputed Visibility Volumes](1_TimH\2_IN_PROGRESS\VisibilityCulling\PrecomputedVisibilityVolume) you can read about them in this page.
+
+#### Dynamic Occlusion
+
+Dynamic occlusion queries are performed last in the chain of culling methods by only looking at the Actors that have been determined to be within the view frustum of the Camera. The Actors bounds that are 
+within the view frustum are then tested against the Scene Depth Buffer for their visibility by sending them to the GPU and reading them back one frame later. If an Actor's bounds is not visible within the 
+scene depth it will not be rendered. This allows the visibility state for any Actor occluded by another Actor to not be rendered. This method can allow for farther view distances because it relies on appoximate
+distances rather than setting a specific value for the far clip plane's distance.
+
+#### Hierarchical Z Buffer
+
+[REGION:warning]
+The Hierarchical Z-Buffer occlusion implementation is still considered experimental. There are some known issues that have not yet been addressed, like some meshes being culled when they should not be. 
+[/REGION]
+
+The idea behind Hierarchical Z-Buffer occlusion is to represent the depth of the scene with multiple resolutions to determine the visibility of an Actor. This is done by creating mipmapped version 
+of the render target for the scene depth which has texels that identify the depth in the scene for the Actors tested. The Actors can be tested for occlusion by comparing the depth value of the Actor's bounds
+to that in the render target that was captured. By using a lower resolution mip level this will use a more conservative check for the bounds of an Actor which leads to fewer texture fetches when sampling from
+a mip level. 
+
+[REGION:note]
+By rendering the scene to a lower resolution than the actual scene resolution you risk falsely culling Actors that should be visible.  
+[/REGION]
+
+Hierarchical Z-Buffer Occlusion Culling can be enabled by using the following console command: 
+
+	r.HZBOcclusion
+
+* 0 will disable Hierarchical Z-Buffer occlusion
+* 1 will enable Hierarchical Z-Buffer occlusion
+* 2 will force the Hierarchical Z-Buffer system, which will override any rendering platform preferences
+
+
+## Culling Strategies for Best Practices
+
+Below are some good practices to follow when designing and working with visibility culling for your game.
+
+### "Popping" in/Lag from GPU Queries of Actors
+
+This is a common issue with using visibility culling for the view frustum and hardware occlusion queries since they are being read back from the GPU one frame later. This is often 
+noticeable when turning your player camera very fast or when you come around a corner in darkly lit areas that have a contrasting lit area behind them. 
+
+* Use other geometry to help hide this artifact. For something like caves or darkened areas with bright outsides use a large occluder mesh that can sit just outside of these pieces to hide the popping in and block the light that makes it evident.
+* Increase the Bounds Scale of the Actor that is causing the offending behavior. 
+* Build geometry in a way that does not have too many small pieces that need to be assembled. This is especially true for walls, floors, and ceilings.
+
+### Large View Distances
+
+Large view distances can cause an impact on performance due to the number of Actors that need to be rendered. By blocking these large view distances with large occluders you can block Actors that would have been rendered otherwise.
+This can reduce the number of queries that need to be sent to the GPU by having fewer Actors to check. In turn, you get better performance by having fewer Actors to check and render.
+
+* Use large occluders where possible. 
+* Use Cull Distance Volumes to remove any smaller Actors that will not be easily visible at far distances, even if they are occluded from view.
+* Limit the amount of overdraw you get from Translucent Actors, since they will not occlude.
+
+### Asset Construction
+
+When creating geometry for your game it is a good idea to break your geometry up into modular pieces for design purposes and reusability. However, it is possible to modularize too much in the design 
+process by using pieces that are too small to make up larger geometry. Because of this, each actor will need to be have its visibility state checked. It's best to find a balance that makes sense
+for your game design and optimize for the best performance. Reducing the number of queries needed to check visibility is key for optimization and to help reduce the "Popping" in that can happen. 
+
+* Use larger geometry when crafting your levels for structural surfaces rather than breaking it up into many smaller pieces. There is more impact on the GPU testing multiple smaller Actors than a single Actor.
+* "Popping" in of Actors is reduced when considering the construction of the mesh.
+
+
+### Consider Occlusion vs Distance Culling Cost
+
+Occlusion and visibility culling methods cost much more than distance culling since these require GPU queries, so it is a good idea to setup Cull Distance Volumes for distant stuff even if they will 
+be occluded from a certain part of the scene.
+
+* Make good use of Cull Distance Volumes to reduce occlusion culling costs.
+* Stream out levels where possible instead of relying on distance or occlusion culling.
+* Use the `Stat Initviews` command to keep performance balance in check.
+
+For information about [Level Streaming](Engine/LevelStreaming) see how to set this up in this page.
+
+## Project Settings
+
+To open the **Project Settings** you must first go to the main menu and select **Edit** > **Project Settings**. When the window opens you can select the **Rendering** category to see the available
+settings under the section named **Culling**.
+
+
+![](ProjectSettingsCulling.png)
+
+| Setting | Description |
+| --- | --- |
+| **Occlusion Culling** | Allows occluded meshes to be culled and not rendered. If this is disabled all occlusion culling will be disabled for the project which can have performance implications. |
+| **Min Screen Radius for EarlyZPass** | Screen radius at which objects are culled for early Z pass. Larger values can improve performance but very large values can degrade performance if large occluders are not rendered. |
+| **Warn about no precomputed visibility** | Displays a warning when no precomputed visibility data is available for the current camera location. This can be helpful if you are making a game that relies on precomputed visibility. |
+
+[REGION:tip]
+​If you are developing a mobile game it would be beneficial to enable the option for **Warn about no precomputed visibility** as a good reminder for your Level Designers when developing for mobile, since it does not currently use dynamic 
+occlusion culling.
+[/REGION]
+
+
+<!---
+## Console Commands
+
+| Console Variable | Description |
+| --- | --- |
+| **r.OneFrameThreadLag** | Controls when occlusion queries are rendered. Rendering before the base pass may give worse occlusion (because not all occluders generally render in the earlyzpass). However, it may reduce CPU waiting for query result stalls on some platforms and increase overall performance. 0: After BasePass. 1: After EarlyZPass, but before BasePass. |
+| **r.AllowOcclusionQueries** | If zero, occlusion queries will not be used to cull primitives. |
+| **r.DownsampledOcclusionQueries** | Whether to issue occlusion queries to a downsampled depth buffer. |
+| **r.NumBufferedOcclusionQueries** | Number of frames to buffer occlusion queries (including the current render thread frame). More frames reduce the chance of stalling the CPU waiting for the results, but increases out of date query artifacts. |
+-->
+
+## Relevant Stats for Performance
+
+In real-time rendering for games, it is important to manage your scene for optimization by keeping check of the stats generated for your scene that are relevant to visibility and occlusion culling.
+
+Use the following console command to view the stats relevant to visibility and occlusion culling for your scene: 
+
+	Stat Initviews
+
+[REGION:warning]
+Keep in mind that when testing visibility and occlusion culling there are a couple of things to be aware of.
+
+* Occlusion culling is disabled in **Wireframe** view mode.
+* Use the console command **Stat Initviews** in PIE or Standalone games for more accurate results, because geometry for editor Actors that represent Lights, Cameras, and so on will be included when calculating visibility and occlusion culling.
+[/REGION]
+
+
+[REGION:lightbox]
+![](StatInitViews.png)
+[/REGION]
+[REGION:caption]
+The scene's stats above were taken from the [Infinity Blade Grasslands](https://www.unrealengine.com/marketplace/infinity-blade-plain-lands) created by EPIC Games and is freely available on the EPIC Games Marketplace.
+[/REGION]
+
+The **Stat Initiviews** window is broken up into two sections for `Cycle Counters` and `Counters`. The Cycle Counter's stats focus on the number of cycles in milliseconds it took to process, while the Counter's stats simply
+add up the primitives that are processed.
+
+[REGION:tip]
+`Visible Static Mesh Elements` is the single biggest contributor to rendering thread time and should be carefully watched and optimized.
+[/REGION]
+
+| Stat Initviews |  |
+| --- | --- |
+| **Cycle Counters** | [INCLUDE:#cyclecounter] |
+| **Counters** | [INCLUDE:#counters] |
+
+
+<!--
+[EXCERPT:CycleCounter]
+| Stat | Description|
+| --- | --- |
+| **View Visibility** | The amount of frame time spent to process Actor visibility queries. |
+| **Occlusion Cull** | The amount of frame time spent to query the scene for Actors within the view frustum that were occluded by other Actors. |
+| **Frustum Cull** | The amount of frame time spent to query if an Actor's bounds were within the view frustum. |
+| **Decompress Occlusion** | The amount of frame time it took to load the precomputed visibility. |
+[/EXCERPT:CycleCounter]
+
+[EXCERPT:Counters]
+| Stat | Description|
+| --- | --- |
+| **Processed Primitives** | This is the total number of Actors that are being processed in the scene.  |
+| **Frustum Culled Primitives** | This is the number of primitives culled when not within the view frustum's FOV. |
+| **Occluded Primitives** | The number of Actors that are occluded by other Actors from within the view frustum's FOV. |
+| **Occlusion Queries** | This is the number of scene occlusion queries sent to the GPU based on the number of Actors visible within the view frustum. |
+| **Visible Dynamic Primitives** | This is the number of dynamic primitives in the scene that have their mobility set to Movable, like Particle Systems and Foliage instances. |
+| **Visible Static Mesh Elements** | This is the number of visible meshes that have their mobility set to Static within the scene. |
+[/EXCERPT:Counters]
+-->
+
+## Tips & Tricks
+
+The following Tips & Tricks can be used to help troubleshoot and test your scene when you suspect problem related to visibility or occlusion culling. 
+
+##### Visualize Occluded Primitives
+
+This will enable the visualization mode to draw the bounding boxes of any Actors in your scene that are occluded from the Camera view. A green bounding box indicates the Actor is 
+dynamically occluded and a red bounding box indicates that the Actor is statically occluded when using [Precomputed Visibility Volumes](1_TimH\2_IN_PROGRESS\VisibilityCulling\PrecomputedVisibilityVolume). 
+
+Use the following console command to enable this visualization: 
+
+	r.VisualizeOccludedPrimitives 1
+
+
+[REGION:note]
+This console command will only work while in the editor and not in PIE or Standalone games.
+[/REGION]
+
+In the example below, the visualization of occluded Actors blocked by the wall is compared to the placement of the Actor's with the wall removed. 
+
+[OBJECT:ComparisonSlider]
+ [PARAM:before]
+ ![Visualize Occluded Primitives Enabled (Green Box)](VisOccludedPrimitives1.png)(w:500)
+ [/PARAM]
+ [PARAM:after]
+ ![Actors occluded by the wall](VisOccludedPrimitives2.png)(w:500)
+ [/PARAM]
+[/OBJECT]
+
+
+##### Freeze Rendering
+
+This will toggle the rendering state of the scene from the current Camera perspective while allowing you to freely move around the world.
+
+Use the following console command to toggle this mode:
+
+	FREEZERENDERING
+
+
+[OBJECT:EmbeddedVideo]
+ [PARAMLITERAL:width]
+ 640
+ [/PARAMLITERAL]
+ [PARAMLITERAL:height]
+ 360
+ [/PARAMLITERAL]
+ [PARAMLITERAL:videoid]
+ El127q0lv5s
+ [/PARAMLITERAL]
+[/OBJECT]
+
+
+##### Game View Mode
+
+You can use the keyboard shortcut for **G** or use the main **Viewport Options** down-arrow to select **Game View** to be able to work in the editor and switch between what you would see in game. 
+This is helpful when you do not want to PIE or launch a game but need to check what the game would look like. This is ideal for checking [Cull Distance Volumes](1_TimH\2_IN_PROGRESS\VisibilityCulling\CullDistanceVolume) 
+and [Precomputed Visibility Volumes](1_TimH\2_IN_PROGRESS\VisibilityCulling\PrecomputedVisibilityVolume) since these do not work unless you are in game or using the Game View.
+
+For more information on the [Game View](Engine\UI\LevelEditor\Viewports\Basics) mode, you can read about it in this page.
+
+
+
+
+[OBJECT:TopicButtonList]
+ [PARAM:icon]
+  ![](%ROOT%/related_icon.png)(convert:false)
+ [/PARAM]
+ [PARAM:title]
+  Related Links
+ [/PARAM]
+ [PARAM:description]
+ [/PARAM]
+ [PARAM:links]
+  * [](1_TimH\2_IN_PROGRESS\VisibilityCulling\PrecomputedVisibilityVolume)
+  * [](1_TimH\2_IN_PROGRESS\VisibilityCulling\CullDistanceVolume)
+ [/PARAM]
+[/OBJECT]

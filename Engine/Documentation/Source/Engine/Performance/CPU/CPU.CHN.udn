@@ -1,0 +1,75 @@
+﻿INTSourceChangelist:2846061
+Availability:Public
+Title:CPU 性能分析
+Crumbs: %ROOT%, Engine
+Description:如何优化游戏的 CPU 需求。
+Navigation:topic
+version:4.9
+
+
+如渲染线程中出现 CPU 受限，原因可能是绘制调用过多。这是一个常见问题，美术师通常会将绘制调用进行组合，从而减少消耗（如：将多个墙壁组合为一个网格体）。实际消耗存在于多个区域中：
+* 渲染线程需要处理每个物体（剔除、材质设置、灯光设置、碰撞、更新消耗等）。
+  材质越复杂，设置消耗越高。
+* 渲染线程需要准备 GPU 指令，以便为每个绘制调用（常量缓冲、纹理、实例属性、着色器）设置状态，并执行实际的 API 调用。
+  基础通道绘制调用的消耗通常比仅限深度的绘制调用更高。
+* DirectX 将验证部分数据并将信息传递到显卡驱动。
+* 驱动（如 NVIDIA、AMD、Intel...）将进一步验证并为硬件创建指令缓冲区。该部分有时会在另一线程中分离。
+
+使用 stats 命令显示由 3D 网格体引起的绘制调用时将显示 **Mesh Draw Calls** - 美术师可通过以下方法减少此项的数量：
+* 减少物体数量（静态/动态网格体、网格体粒子）
+* 缩短可视距离（如：场景捕捉 Actor 或每个物体上的距离）
+* 调整画面（将画面拉得更远、使移动物体不在同一个画面中）
+* 不使用 SceneCaptureActor（须重新渲染场景、调低帧率、或只在需要时进行更新）
+* 不使用分屏（分屏比单屏的 CPU 受限更大，需对可延展性设置进行自定义或将内容设为更加主动）
+* 减少每次绘制调用的元素（将接受更复杂像素着色器的材质进行组合或单纯地减少材质数量，将纹理组合为少数几块较大的纹理 - 只在减少材质数量时才使用元素较少的 LOD 模型）
+* 禁用网格体上自定义深度或阴影投射的功能
+* 将光源设为不投射阴影，或拥有更紧凑的边界体（视锥、衰减半径）
+
+在一些情况下，硬件实例化不失为一个选择（相同的 3D 模型、相同的着色器、较少的参数变化、需硬件支持）。硬件实例化可极大降低每次绘制调用的驱动过载，但会使灵活性受限。我们将其用于网格体粒子和实例化植物。
+
+
+[REGION:imagetable]
+| ![](SceneRendering.png)(w:813) |
+| :----:| 
+| CONSOLE: stat SceneRendering |
+[/REGION]
+
+高端 PC 上的实验说明每帧可拥有数千次绘制调用（DirectX11、OpenGL）。更新的 API（AMD Mantle、DirectX12）将尝试解决驱动过载，并可执行更大次数的绘制调用。
+在移动设备上，绘制调用次数为数百次（OpenGL ES2、OpenGL ES3），但即使如此仍能极大地降低驱动过载（Apple Metal）。
+
+如在游戏线程中 CPU 受限，需要找到引起此问题的游戏代码（如蓝图、光线投射、物理、AI、内存分配）。 
+
+[REGION:imagetable]
+| ![](Game.png)(w:813) |
+| :----:| 
+| CONSOLE: stat Game |
+[/REGION]
+
+CPU 分析工具中的构造有助于找到引起此问题的函数：
+
+[REGION:imagetable]
+| ![](DumpFrame.png)(w:474) |
+| :----:| 
+| CONSOLE: stat DumpFrame -ms=0.1 |
+[/REGION]
+
+在此我们使用 0.1 毫秒的阈值自定义输出。运行指令后，可在日志和控制台中找到结果。
+层级将显示时间（以毫秒为单位）和调用次数。如有必要，可在代码中添加 QUICK_SCOPE_CYCLE_COUNTER，进一步改善层级（如下例所示）：
+
+	virtual void DrawDynamicElements(FPrimitiveDrawInterface* PDI,const FSceneView* View) override
+	{
+		QUICK_SCOPE_CYCLE_COUNTER( STAT_BoxSceneProxy_DrawDynamicElements );
+
+		const FMatrix& LocalToWorld = GetLocalToWorld();
+		const FColor DrawColor = GetSelectionColor(BoxColor, IsSelected(), IsHovered(), false);
+		DrawOrientedWireBox(PDI, LocalToWorld.GetOrigin(), ...);
+	}
+
+如 CPU 未受限，则为 [GPU 受限](Engine/Performance\GPU)。
+
+
+
+
+
+
+

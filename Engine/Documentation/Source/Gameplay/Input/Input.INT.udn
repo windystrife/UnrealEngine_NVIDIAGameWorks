@@ -1,0 +1,153 @@
+Availability: Public
+Title:Input
+Crumbs:%ROOT%
+Description:The Input object is responsible for converting input from the player into data in a form Actors can understand and make use of.
+version: 4.15
+skilllevel:Beginner
+Parent:Engine/Gameplay
+order:
+type:overview
+tags:Input
+
+[TOC (start:2 end:4)]
+
+The **PlayerInput** Object is responsible for converting input from the player into data that Actors (like PlayerControllers or Pawns) 
+can understand and make use of. It is part of an input processing flow that translates hardware input from players into game events and movement with PlayerInput mappings and InputComponents.
+
+[REGION:note]
+For an example of setting up Input, refer to the [](Gameplay\HowTo\SetUpInput) documentation.
+[/REGION]
+
+## Hardware Input
+Hardware input from a player is very straightforward.  It most commonly includes key presses, mouse clicks or mouse movement, and controller button presses or joystick movement. Specialized input devices that don't conform to standard axis or button indices, or that have unusual input ranges, can be configured manually by using the [](Gameplay\Input\RawInput).
+
+
+## PlayerInput
+[EXCERPT:PlayerInput]
+PlayerInput is a UObject within the PlayerController class that manages player input. It is only spawned on the client.  Two structs are
+defined within PlayerInput.  The first, **FInputActionKeyMapping**, defines an ActionMapping. The other, **FInputAxisKeyMapping**, defines an AxisMapping. 
+The hardware input definitions used in both ActionMappings and AxisMappings are established in InputCoreTypes.
+
+[EXCERPT:ActionMapping]
+$ ActionMappings : Map a discrete button or key press to a "friendly name" that will later be bound to event-driven behavior. The end effect is that pressing (and/or releasing) a key, mouse button, or keypad button
+directly triggers some game behavior.   
+[/EXCERPT:ActionMapping]
+
+[EXCERPT:AxisMapping]
+$ AxisMappings : Map keyboard, controller, or mouse inputs to a "friendly name" that will later be bound to continuous game behavior, such as movement.  The inputs mapped in AxisMappings are continuously polled, even if they are just reporting that their input value 
+is currently zero.  This allows for smooth transitions in movement or other game behavior, rather than the discrete game events triggered by inputs in ActionMappings.  
+
+	[REGION:tip]
+	Hardware axes, such as controller joysticks, provide degrees of input, rather than discrete 1 (pressed) or 0 (not pressed) input.  That is, they can be moved to a small degree or a large degree, and 
+	your character's movement can vary accordingly. While these input methods are ideal for providing scalable amounts of movement input, AxisMappings can also map common movement keys, like WASD or Up, Down, Left, Right, to continuously-polled game behavior. 
+	[/REGION:tip]
+[/EXCERPT:AxisMapping]
+
+### Setting Input Mappings
+
+Input mappings are stored in configuration files, and can be edited in the Input section of Project Settings.
+
+1. In the Level Editor, select **Edit > Project Settings**.
+
+	![](ProjectSettingsMenu.png)
+
+1. Click **Input** in the **Project Settings** tab that appears.
+
+
+In this window, you can:
+	
+**Change the properties of (hardware) axis inputs:**
+![](AxisConfig.png)
+
+**Add or edit ActionMappings:**
+![](ActionMappings.png)
+
+**Add or edit AxisMappings:**
+![](AxisMappings.png)
+[/EXCERPT:PlayerInput]
+
+## InputComponent
+**InputComponents** are most commonly present in Pawns and Controllers, although they can be set in other Actors and Level Scripts if desired.  The InputComponent links the AxisMappings and ActionMappings in your
+project to game actions, usually functions, set up either in C++ code or Blueprint graphs.  
+
+The priority stack for input handling by InputComponents is as follows (highest priority first):
+
+1. Actors with "Accepts input" enabled, from most-recently enabled to least-recently enabled.
+	[REGION:tip]
+	If you want a particular Actor to always be the first one considered for input handling, you can re-enable its "Accepts input" and it will be moved to the top of the stack. 
+	[/REGION:tip]
+1. Controllers.
+1. Level Script.
+1. Pawns.
+
+If one InputComponent takes the input, it is not available further down the stack.
+
+## Input Processing Procedure
+
+[REGION:raw]
+![](InputFlow.png)
+[/REGION]
+
+### Example - Moving Forward
+
+This example is taken from the First Person template provided with Unreal Engine 4.  
+
+1. **Hardware Input from Player:** The player presses W.
+1. **PlayerInput Mapping:** The AxisMapping translates W to "MoveForward" with a scale of 1.
+		
+	![](AxisMappingW.png)
+
+1. **InputComponent Priority Stack:** Proceeding through the InputComponent priority stack, the first binding of the "MoveForward" input is in the AFirstPersonBaseCodeCharacter class. This class is the current player's Pawn, so its InputComponent is checked last. 
+
+		void AFirstPersonBaseCodeCharacter::SetupPlayerInputComponent(class UInputComponent* InputComponent)
+			{
+				// set up gameplay key bindings
+				check(InputComponent);
+				...
+				InputComponent->BindAxis("MoveForward", this, &AFirstPersonBaseCodeCharacter::MoveForward);
+				...
+			} 
+
+	This step could also be accomplished in Blueprints by having an InputAxis MoveForward node in the Character's EventGraph. Whatever this node is connected to is what will execute when W is pressed.
+
+	![](InputMappingMoveForward.png)
+
+1. 	**Game Logic:** AFirstPersonBaseCodeCharacter's MoveForward function executes.
+
+		void AFirstPersonBaseCodeCharacter::MoveForward(float Value)
+			{
+				if ( (Controller != NULL) && (Value != 0.0f) )
+				{
+					// find out which way is forward
+					FRotator Rotation = Controller->GetControlRotation();
+					// Limit pitch when walking or falling
+					if ( CharacterMovement->IsMovingOnGround() || CharacterMovement->IsFalling() )
+					{
+						Rotation.Pitch = 0.0f;
+					}
+					// add movement in that direction
+					const FVector Direction = FRotationMatrix(Rotation).GetScaledAxis(EAxis::X);
+					AddMovementInput(Direction, Value);
+				}
+			}
+	
+	Blueprint Implementation: 
+
+	[REGION:fullwidth]
+	![](MoveForward_Blueprint.png)
+	[/REGION:fullwidth]
+
+## Touch Interface
+
+By default, games running on touch devices will have two virtual joysticks (like a console controller). You can change this in your **Project Settings**, in the **Input** section, with the 
+**Default Touch Interface** property. This points to a Touch Interface Setup asset. The default one, **DefaultVirtualJoysticks** is located in shared engine content (`/Engine/MobileResources/HUD/DefaultVirtualJoysticks.DefaultVirtualJoysticks`). 
+There is also a Left Stick only version, **LeftVirtualJoystickOnly**, for games that do not need to turn the camera.
+
+![](VirtualJoysticksSettings.png)(w:800)
+
+Note that you will need to check the **Show Engine Content** checkbox in the object picker **View Options** settings to see these.
+
+![](showenginecontent.png)
+
+If you do not want any virtual joysticks, just clear the Default Touch Interface property. Additionally, you can force the touch interface for your game independent of the platform it is running by checking
+Always Show Touch Interface (or by running the PC game with -faketouches).

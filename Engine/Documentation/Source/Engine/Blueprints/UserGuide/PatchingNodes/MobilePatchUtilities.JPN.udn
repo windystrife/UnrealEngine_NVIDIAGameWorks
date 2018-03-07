@@ -1,0 +1,110 @@
+﻿INTSourceChangelist:3339919
+Availability:Public
+Title:Mobile Patch Utility ノード
+Crumbs:
+Description:各種 Mobile Patch Utility Blueprint ノードの説明
+Related:Engine/Blueprints
+Related:Platforms/Mobile
+Related:Platforms/Mobile/MobilePackagingWizard
+version:4.14
+Parent:Engine/Blueprints
+type:overview
+tags:Blueprints
+skilllevel:Intermediate
+topic-image:Patching_Topic.png
+
+[TOC (start:2 end:2)]
+
+[](Platforms/Mobile/MobilePackagingWizard) を使ってモバイル プロジェクト用に小さなサイズの初回ダウンロードセットを作成したら、残りのプロジェクトはダウンロード可能なチャンクにしてユーザーに提供する必要があります。
+新しい Mobile Patch Utilities Blueprint ライブラリは、App Store から初回ダウンロードの一部として配布されるのではなく、 
+モバイル ゲームでクラウド ウェブサイトからゲーム コンテンツとパッチをダウンロードしてインストールするために必要なすべての機能が含まれています。更新されたゲーム コンテンツの可用性を判断、ダウンロードの開始、進捗のトラック、すべてのエラー処理、 
+正常にダウンロードされたコンテンツ パックのインストールに対応する機能が付いています。空き容量および WiFi 接続の確認機能も付いているので、適宜ブループリントから警告が出されます。 
+Android と iOS の両方でサポートされています。
+
+[REGION:tip]
+これらの関数を 1 つずつ設定例を交えて説明します。
+ブループリント グラフのサンプルに入っているのに下表にない場合、その関数あるいはイベントはカスタム ノードになるので、ご自身でプロジェクト内に作成する必要があります。 
+[/REGION]
+
+## Pending Content で作業する
+
+[REGION:lightbox]
+[![](Patching_1.png)(convert:false)](Patching_1.png)
+[/REGION]
+
+パッチング処理の最初の段階です。レベル ロードまたはユーザー アクションからパッチング処理が開始すると、**Request Content** ノードを使ってリモート サーバーからコンテンツが要求される必要があります。
+このサンプルでは、インストール ディレクトリは変数で保存されますが、関数入力によるパスも可能です。**Content To Install** も再度使用するために変数に保存されます。 
+コンテンツ リクエストが完了すると、要求の処理結果 (成功 / 失敗) によって異なるイベントが実行されます。カスタム イベントは **Request Content** 関数の入力として使われます。 
+この例で使われている **Check Download Space** 関数は、以下のパッチ処理ロジックを開始するカスタム イベントを呼び出します。
+
+| ノード | 説明 | 
+| --- | --- |
+| Request Content |  指定されたマニフェスト URL を使ってマニフェスト ファイルのダウンロードを試みます。ダウンロードできたら、リモート コンテンツを表すオブジェクトを返します。このオブジェクトはコンテンツサイズの合計、ダウンロード サイズなど、追加情報をクエリすることができます。ユーザーはリモート コンテンツのダウンロードとインストールを選択することができます。 |
+
+[REGION:lightbox]
+[![](Patching_2.png)(convert:false)](Patching_2.png)
+[/REGION]
+
+リモート コンテンツの要求が正常に完了したら、次は **Get Required Disk Space** ノードを使ってその結果を **Get Disk Free Space** からの結果と比較して、ダウンロードに十分な空き容量があるか検証します。
+必要なディスク容量より空き容量が大きければ、カスタム イベントが呼び出されてダウンロードが始まります。
+
+| ノード | 説明 | 
+| --- | --- |
+| Get Disk Free Space | コンテンツのインストール場所 (インストール予定場所) にメガバイトでディスク空き容量を取得します |
+| Get Required Disk Space | このコンテンツのインストールに必要なディスク容量をメガバイトで取得します。 |
+
+[REGION:lightbox]
+[![](Patching_3.png)(convert:false)](Patching_3.png)
+[/REGION]
+
+このグラフにはたくさんのノードが含まれていますが、Mobile Patch Utility 関数は **Start Install** のみで、リモート コンテンツのダウンロードとインストールを試みます。**Request Content** のように **Start Install** にも
+成功と失敗を示すためのイベント パラメータがあります。インストールが正常に完了したら **Mount Content** カスタム イベントを使って、パッチ処理の最終ステージをトリガーします。別のカスタム イベントである **Display Download State** は
+タイマー設定でここで発行します。タイマーと **Update Download State** 関数を使って、ダウンロード状況を一定の間隔でユーザーに表示することができます。次のブループリント グラフでこのロジックについてさらに詳しく見てみましょう。
+
+| ノード | 説明 | 
+| --- | --- |
+| Start Install |  ユーザーはリモート コンテンツのダウンロードとインストールをするか選択できます。ユーザーはインストール済みコンテンツをゲームへマウントするか選択できます。 |
+
+[REGION:lightbox]
+![](Patching_4.png)
+[/REGION]
+
+**Display Download State** カスタム イベントをこの **Format Text** ノードに接続している間、
+UI (User Interface) 上のプログレス バーを埋めるパッチ処理ステージ、あるいはユーザーに進捗を表示する別のメソッドにもなります。**Get Download Size**、**Get Download Speed**、**Get Download Status Text**、**Get Install Progress**、**Get Total Downloaded Size** ノードの出力は、 
+ユーザーに表示するためにシンプル テキスト ブロックとしてまとめられます。このスクリプトはタイマーから一定間隔で呼び出されますが、他のサンプル グラフに対する呼び戻しを行いません。
+
+| ノード | 説明 | 
+| --- | --- |
+| Get Download Size | このコンテンツのインストールに必要なダウンロード サイズの合計を取得します。 |
+| Get Download Speed | 現在のダウンロード速度を秒速メガバイトで取得します。インストール中は有効です。 |
+| Get Download Status Text | 現在のインストレーション ステータス テキストを取得します。インストール中は有効です。 |
+| Get Install Progress | 現在のインストールの進捗を取得します。既知の進捗は 0 と 1 の間、未知の進捗は 0 より小さい値になります。  |
+| Get Total Downloaded Size | ダウンロード サイズの合計をメガバイトで取得します。インストール中は有効です。 |
+
+## Installed Content で作業する
+
+[REGION:lightbox]
+![](Patching_5.png)
+[/REGION]
+
+パッチ処理の最後のステージは、コンテンツのマウントです。格納された **Install Directory** 変数を最初のブループリント グラフから使用しますが、この変数は関数入力として再度パスされます。
+**Get Installed Content** ノードはディレクトリからコンテンツを検索するために使用します。そして **Mount** 関数でそのコンテンツをゲームに搭載します。**Request Content** や **Start Install** とは異なり、
+**Mount** には、成功時および失敗時のイベント コールバックがありません。
+
+| ノード | 説明 | 
+| --- | --- |
+| Get Installed Content | インストール済みコンテンツを取得します。指定ディレクトにインストール済みコンテンツがあれば、non-null オブジェクトを返します。ユーザーはインストール済みコンテンツをゲームへマウントするか選択できます。 |
+| Mount | インストール済みコンテンツをマウントします。 |
+
+## その他のモバイル パッチ関数
+
+上のグラフはモバイル デバイス上でのパッチ設定方法のシンプルな例ですが、さらに複雑なビヘイビアの設定も可能です。例えば、WIFI が接続されていない時、ユーザーに警告を出すようにゲームを設定できます。
+あるいは、iOS または Android デバイスに別のコンテンツを送ることができます。以下の関数は、このユースケース以外でもブループリントで使うと便利な関数です。
+
+| ノード | 説明 | 
+| --- | --- |
+| Get Active Device Profile Name | 現在選択されているデバイス プロファイル名を取得します。 |
+| Get Installed Content Size | インストール済みコンテンツをメガバイトで取得します。 |
+| Get Supported Platform Names | このデバイス上でサポートされているプラットフォーム名のリストを取得します。例:Android_ETC2, Android_ASTC |
+| Has Active Wi Fi Connection | WiFi 接続が現在利用可能かどうかを返します。 |
+	 

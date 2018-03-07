@@ -1,0 +1,130 @@
+Availability: Public
+Title:Landscape Outdoor Terrain
+Crumbs:%ROOT%, Engine
+Description:Landscape system for creating terrain for large, open, outdoor environments.
+version: 4.9
+parent:Engine
+order:10
+topic-image:landscape_topic.png
+
+[REGION:banner]
+![Landscape](landscape_landing_banner.png)
+[/REGION]
+
+[EXCERPT:landscape002]
+
+[DIR(output:"topiccompact" parent:"Engine/Landscape" org:"hierarchy" end:"1")]
+
+[/EXCERPT:landscape002]
+
+[TOC(start:2 end:3)]
+
+[EXCERPT:Intro]
+The **Landscape** system enables you to create terrain for your world - mountains, valleys, uneven or sloped ground, even openings for caves - and easily modify both its shape and its appearance by using a range of tools.
+[/EXCERPT:Intro]
+
+For information about opening and using the Landscape tool, see [](Engine/Landscape\Creation).
+
+
+## Landscape Tool Modes
+[EXCERPT:LandscapeToolModes1] 
+![Landscape Tool Modes](Landscape_Modes.png)
+[/EXCERPT:LandscapeToolModes1]
+
+The Landscape tool has three modes, accessible by their icons at the top of the Landscape tool's window.
+
+[EXCERPT:LandscapeToolModes2] 
+| Icon | Mode | Description |
+| ---- | ---- | ----------- |
+| ![](Engine/Landscape\Editing\Landscape_ManageMode.png) | **Manage mode** | Enables you to create new Landscapes, and to modify Landscape components. Manage mode is also where you work with [Landscape Gizmos](Engine/Landscape\Editing\Gizmos) to copy, paste, import, and export parts of your Landscape. <br/>For more information about Manage mode, see [](Engine/Landscape\Editing\ManageMode). |
+| ![](Engine/Landscape\Editing\Landscape_SculptMode.png)| **Sculpt mode** | Enables you to modify the shape of your Landscape, by selecting and using specific tools. <br/>For more information about Sculpt mode, see [](Engine/Landscape\Editing\SculptMode).|
+| ![](Engine/Landscape\Editing\Landscape_PaintMode.png)| **Paint mode** | Enables you to modify the appearance of parts of your Landscape by painting textures on it, based on the layers defined in the Landscape's Material. <br/>For more information about Paint mode, see [](Engine/Landscape\Editing\PaintMode).|
+[/EXCERPT:LandscapeToolModes2]
+
+[REGION:tip]
+Creating a Landscape means creating a Landscape Actor. As with other Actors, you can edit many of its properties, including its assigned Material, in the Level Editor's **Details** panel. For more information about **Details** panels, see [](Engine/UI/LevelEditor/Details).
+[/REGION]
+
+
+## Landscape Features
+
+The main features and techniques employed by the Landscape terrain system are described below.
+
+### Large Terrain Sizes
+
+[EXCERPT:landscape001]
+The Landscape system paves the way for terrains that are orders of magnitude larger than what has been possible in Unreal Engine previously. Because of its powerful **Level of Detail** (**LOD**) system and the way it makes efficient use of memory, heightmaps up to 8192x8192 are now legitimately possible and feasible. The Unreal Engine now supports huge outdoor worlds that allow for any number of types of games to be created quickly, easily, and without modification of the stock engine or tools.
+[/EXCERPT:landscape001]
+
+[REGION:raw]
+![](Landscape_Terrain_Size.png)
+[/REGION]
+
+### Landscape Memory Usage
+
+For creating large terrains, Landscapes are generally a better choice than Static Meshes.
+
+Landscapes use 4 bytes per vertex for the vertex data. Static Meshes store position as a 12-byte vector, and tangent X and Z vectors packed into 4 bytes each, and either 16-bit or 32-bit float UVs for a total of either 24 or 28 bytes per vertex.
+
+This means that Static Meshes will use 6 or 7 times the memory of Landscapes for the same vertex density. Landscapes also store their data as Textures, and can stream out unused LOD levels for distant areas and load them from disk in the background as you approach them. Landscapes use a regular heightfield, so the collision data can also be stored more efficiently than the collision data for Static Meshes.
+
+
+### Static Render Data Stored as Textures in GPU Memory
+
+The Landscape system stores the render data for the terrain in Textures in GPU memory, allowing data to be looked up in the vertex shader. The data is packed into a 32-bit Texture with the height occupying 16-bits in the form of the R and G channels and X and Y offsets stored as 8-bit values in the B and A channels, respectively.
+
+### Continuous Geo-MipMap LOD
+
+LODs for Landscape terrains are handled using standard Texture mipmaps. Each mipmap is a level of detail and the mipmap to sample can be specified using the `text2Dlod` HLSL instruction. This allows for a large number of LODs and also allows for smooth LOD transition as both mip levels can be sampled and then the heights and X and Y offsets can be interpolated in the vertex shader creating a clean morphing effect.
+
+
+[REGION:imagetable]
+| ![](Landscape_LOD1.png) | ![](Landscape_LOD1toLOD2.png) |  ![](Landscape_LOD2.png) |
+| -------- | ----------- | ------- |
+| ** Fully LOD 1 **| ** Morphing from LOD 1 to LOD 2 ** | ** Fully LOD 2**|
+[/REGION]
+
+### Heightmap and Weight Data Streaming
+
+Since the data is being stored in Textures, the standard Texture streaming system in Unreal Engine 4 can be utilized to stream mipmaps in and out as needed. This not only applies to the heightmap data, but also to the weights for Texture layers. Only requiring the mipmaps needed for each LOD minimizes the amount of memory being used at any time, which increases the size of the terrains that can be created since memory is freed up.
+
+### High Resolution LOD-Independent Lighting
+
+Since the X and Y slopes of the Landscape are being stored, the entire high-resolution (non-LOD'd) normal data is available for lighting  calculations. 
+
+
+[REGION:imagetable]
+| ![](Landscape_LODs.png) | ![](Landscape_FullResNormals.png) |
+| -------- |-------- |
+| ** Landscape LODs **| ** Full Resolution Normals ** |
+[/REGION]
+
+This makes it possible to always use the highest resolution of the terrain for per-pixel lighting even on distant components that have been LOD'd out.
+
+
+[REGION:imagetable]
+| ![](Landscape_SimpleVertexLighting.png) | ![](Landscape_HRPerPixel.png) | 
+| -------- | ----------- | 
+| ** Simple Vertex Lighting **| ** High Res Per-Pixel Lighting ** | 
+[/REGION]
+
+
+When this high-resolution normal data is combined with detail normal maps, Landscape terrains can achieve extremely detailed lighting with very little overhead.
+
+
+
+[REGION:imagetable]
+| ![](Landscape_GeometryNormals.png) | ![](Landscape_DetailNormals.png) | 
+| -------- | ----------- | 
+| ** Geometry Normals Only **| ** With Detail Normals ** | 
+[/REGION]
+
+### PhysX Collision
+
+Landscape uses a PhysX heightfield object for its collision for both Unreal and rigid-body collision. [Physical Materials](https://docs.unrealengine.com/latest/INT/Engine/Physics/PhysicalMaterials/index.html) can be specified for each layer, and the collision system will use the dominant layer at each position to determine which Physical Material to use. It is possible to use a reduced resolution collision heightfield (e.g. 0.5x render resolution) to save on memory requirements for large Landscape terrains. The collision and render components for distant Landscapes can also be streamed out using the level streaming system.
+
+ 
+
+
+
+

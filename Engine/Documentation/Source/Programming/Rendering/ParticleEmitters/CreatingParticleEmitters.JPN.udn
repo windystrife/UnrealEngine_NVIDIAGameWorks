@@ -1,0 +1,395 @@
+﻿INTSourceChangelist:2872097
+Availability:Docs
+Title:パーティクル エミッタ テクニカル ガイド
+Crumbs:%ROOT%, Programming, Programming/Rendering
+Description:新規のパーティクル エミッタ タイプを追加する際のプログラマー向けガイド
+Version:4.9
+
+[TOC (start:2 end:3)]
+
+エミッタの新規タイプの作成には、カスタム仕様の `ParticleEmitterInstance` と `ParticleModuleTypeData` が必要です。このガイドでは、これらの主要側面を説明すると共に、カスタム仕様のエミッタタイプの新規作成方法を段階的に説明します。
+
+## パーティクル エミッタ リファレンス
+
+このセクションは `ParticleEmitterInstance` 変数および関数だけでなく、 `ParticleModuleTypeData` クラスについても説明します。
+
+### ParticleEmitterInstance 構造体
+
+`ParticleEmitterInstance` は、`ParticleSystemComponent` にインスタンスの効果を表現する単一のパーティクル エミッタです。 
+
+
+#### メンバ変数
+
+`ParticleEmitterInstance` 構造体には、以下のパブリック変数が含まれます。 
+
+| 変数 | 概要 |
+| -------- | -------- |
+| `StaticType` | エミッタ インスタンスのタイプ識別子です。エミッタの識別に加え安全なキャスト機能を提供します。 |
+| `SpriteTemplate` | インスタンスが基づいている `UParticleSpriteEmitter` テンプレートへのポインタです。カスタム エミッタ タイプの場合、必須の特定データは全て通常は `TypeDataModule` に格納されます。`TypeDataModule` については後にこのドキュメント内で説明します。|
+| `Component` | エミッタ インスタンスを _所有_ する `UParticleSystemComponent` へのポインタです。 |
+| `CurrentLODLevelIndex` | 現設定の LOD レベルのインデックスです。 |
+| `CurrentLODLevel` | 現在アクティブな `UParticleLODLevel` へのポインタです。 |
+| `TypeDataOffset` | パーティクル データに含まれる `TypeData` ペイロードに対するオフセットです。エミッタのタイプに固有のパーティクル単位のデータを、簡単に読み出します。 |
+| `SubUVDataOffset` | パーティクル データに含まれる SubUV 固有のペイロードに対するオフセットです。[subUV interpolation] モードが `NONE` に非設定時のみ有効です。 |
+| `Location` | エミッタ インスタンスの位置を提供する FVector です。 |
+| `KillOnDeactivate` | true の場合、エミッタ インスタンスは非アクティブになると kill (削除) されます。 |
+| `bKillOnCompleted` | true の場合、サイクルが終了するとエミッタ インスタンスは kill (削除) されます。 |
+| `ParticleData` | パーティクル データ配列へのポインタです。 |
+| `ParticleIndices` | パーティクル インデックス配列へのポインタです。パーティクル データを使用したラウンドロビン システムを提供します。 |
+| `ModuleOffsetMap` | パーティクル ペイロード データ内へモジュールポインターをそれぞれのオフセットへマッピングします。 |
+| `InstanceData` | インスタンス単位のデータ配列へのポインタです。 |
+| `InstancePayloadSize` | インスタンス単位のデータ配列のサイズです。 |
+| `ModuleInstanceOffsetMap` | インスタンス単位のデータ内へモジュール ポインターをそれぞれのオフセットへマッピングします。|
+| `PayloadOffset` | パーティクル ペイロード データ開始のオフセットです。 |
+| `ParticleSize` | パーティクル サイズをバイト単位で表した合計サイズです。 |
+| `ParticleStride` | ParticleData 配列にあるパーティクル間のストライドです (潜在的に整列しているパーティクル データを有効にするため)。 |
+| `ActiveParticles` | エミッタで現時点でアクティブなパーティクル数です。 |
+| `MaxActiveParticles` | パーティクル データ配列で保持することができるパーティクルの最大数です。 |
+| `SpawnFraction` | 最終フレームのスポーンから残されたわずかな時間です。 |
+| `SecondsSinceCreation` | インスタンスが作成されてから経過した秒数です。 |
+| `EmitterTime` | エミッタのシングル ループの時間 _位置_ です。 |
+| `OldLocation` | エミッタの前回の位置です。 |
+| `ParticleBoundingBox` | エミッタのバウンディング ボックスです。 |
+| `BurstFired` | バーストの発行を追跡するためのエントリの配列です。 |
+| `LoopCount` | インスタンスが完了したループ数です。 |
+| `IsRenderDataDirty` | レンダリング データが dirty かどうかを示すフラグです。 |
+| `Module_AxisLock` | 存在する場合、 AxisLock モジュールのことです。ティック毎の検索を回避するために保持します。 |
+| `EmitterDuration` | インスタンスの進行中の継続期間です。 |
+| `EmitterDurations` | インスタンスの各 LOD レベルごとの継続期間の配列です。 |
+| `TrianglesToRender` | エミッタがこのフレームをレンダリングするトライアングル数です。 |
+| `MaxVertexIndex` | レンダリング時にエミッタがアクセスする最大頂点インデックスです。 |
+
+#### メンバ関数
+
+ParticleEmitterInstance 構造体は、ベースとなる機能をオーバーライドするきっかけとなる、以下のメンバ関数を含みます。 
+
+| 関数 | 概要 |
+| -------- | -------- |
+| [REGION:wrap]`void SetKillOnDeactivate(bool bKill)`[/REGION] | `KillOnDeactivate` フラグを任意の値に設定します。 |
+| [REGION:wrap]`void SetKillOnCompleted(bool bKill)`[/REGION] | `KillOnDeactivate` フラグを任意の値に設定します。 |
+| [REGION:wrap]`void InitParameters(UParticleEmitter* InTemplate, UParticleSystemComponent* InComponent, bool bClearResources = true)`[/REGION] | `KillOnDeactivate` テンプレートと 親 `ParticleSystemComponent` に与えられた構造体に対して、パラメータを初期化します。 |
+| [REGION:wrap]`void Init()`[/REGION] | インスタンスを初期化するために呼ばれます。 |
+| [REGION:wrap]`void Resize(int32 NewMaxActiveParticles, bool bSetMaxActiveCount = true)`[/REGION] | パーティクルデータ配列を `MaxActiveParticles` の一定数にサイズ変更するために呼ばれます。 |
+| [REGION:wrap]`void Tick(float DeltaTime, bool bSuppressSpawning)`[/REGION] | 特定のタイム スライスでインスタンスをティックします。`bSuppressSpawning`  が `true` の場合、新規パーティクルをスポーンしてはいけません。 |
+| [REGION:wrap]`void Rewind()`[/REGION] | エミッタ インスタンスを巻き戻します。 |
+| [REGION:wrap]`FBox GetBoundingBox()`[/REGION] | インスタンスへバウンディングボックスを戻します。 |
+| [REGION:wrap]`void UpdateBoundingBox(float DeltaTime)`[/REGION] | インスタンスへバウンディング ボックスを更新します。全ての更新がされたと保証できるため、ここでフレームに対するパーティクルの最終位置が決定します。 |
+| [REGION:wrap]`uint32 RequiredBytes()`[/REGION] | エミッタが必要とするパーティクル単位のバイト数を検索します。 |
+| [REGION:wrap]`uint8* GetModuleInstanceData(UParticleModule* Module)`[/REGION] | 所定のモジュールに適用されたインスタンス単位のデータに対し、ポインタを取得します。 |
+| [REGION:wrap]`uint32 CalculateParticleStride(uint32 ParticleSize)`[/REGION] | このインスタンスに対し、単一パーティクルのストライドを計算します。 |
+| [REGION:wrap]`void ResetBurstList()`[/REGION] | インスタンスのバーストリスト情報をリセットします。 |
+| [REGION:wrap]`float GetCurrentBurstRateOffset(float& DeltaTime, int32& Burst)`[/REGION] | 現バーストレートオフセットを取得します。バーストを生成するために `DeltaTime` を人為的に増加させます。 |
+| [REGION:wrap]`float Spawn(float OldLeftover, float Rate, float DeltaTime, int32 Burst = 0, float BurstTime = 0.0f)`[/REGION] | 現タイムスライスに与えられたインスタンスに対し、パーティクルをスポーンします (DeltaTime)。(OldLeftover) を考慮に入れながら最後の Leftover を受け取ります。 |
+| [REGION:wrap]`void PreSpawn(FBaseParticle* Particle)`[/REGION] | このインスタンスのパーティクルが必要とするすべてのプレスポーン アクションを処理します。|
+| [REGION:wrap]`bool HasCompleted()`[/REGION] | インスタンスが実行を終了すると `true` を返します。 |
+| [REGION:wrap]`void PostSpawn(FBaseParticle* Particle, float InterpolationPercentage, float SpawnTime)`[/REGION] | このインスタンスのパーティクルが必要とする全ての _ポスト スポーン_ アクションを処理します。 |
+| [REGION:wrap]`void KillParticles()`[/REGION] | 消滅したパーティクルを消去します。アクティブ配列から全てを削除します。 |
+| [REGION:wrap]`void RemovedFromScene()`[/REGION] | インスタンスがシーンから削除されると、呼び出されます。 |
+| [REGION:wrap]`FBaseParticle* GetParticle(int32 Index)`[/REGION] | 所定のインデックスでパーティクルを検索します。|
+| [REGION:wrap]`FDynamicEmitterDataBase* GetDynamicData(bool bSelected)`[/REGION] | フレームのインスタンスをレンダリングするために動的データを取得します。 |
+| [REGION:wrap]`void GetAllocatedSize(int32& InNum, int32& InMax)`[/REGION] | メモリ追跡のためにエミッタ インスタンスの割り当てサイズを取得します。 |
+
+
+### ParticleModuleTypeDataBase クラス
+
+ParticleModuleTypeDataBase クラスは エンジンで用いる **ParticleSystem** 作成時に、カスタム エミッタ インスタンスを生成するメカニズムを提供します。例えば `ParticleModuleTypeDataMesh` クラスは ParticleSystem のために作成された `FParticleMeshEmitterInstance` という結果になります。
+
+
+#### メンバ関数
+
+`ParticleModuleTypeDataBase` 構造体は、カスタム エミッタの生成に役立つ以下のパブリック関数を格納します： 
+
+| 関数 | 概要 |
+| -------- | -------- |
+| [REGION:wrap]`FParticleEmitterInstance* CreateInstance(UParticleEmitter* InEmitterParent, UParticleSystemComponent* InComponent)`[/REGION] | UE4 パーティクル システムでエミッタ インスタンスの作成をオーバーライドするために重要な関数です。この関数はインスタンス作成中の UParticleEmitter で TypeData モジュールが見つかった時に呼ばれます。この関数で、 FParticleEmitterInstance 構造体を作成して返さなくてはいけません。
+| [REGION:wrap]`void SetToSensibleDefaults()`[/REGION] | モジュールが最初に作成されたら呼ばれます。この関数は、道理にかなったデフォルト値の設定を有効にしてくれます。
+| [REGION:wrap]`void PreSpawn(FParticleEmitterInstance* Owner, FBaseParticle* Particle)`[/REGION] | エミッタ インスタンスの PreSpawn 関数実行時に呼ばれます。この関数は、新規にスポーンされたパーティクルの TypeDataModule 固有の設定を有効にします。
+| [REGION:wrap]`void PreUpdate(FParticleEmitterInstance* Owner, int32 Offset, float DeltaTime)`[/REGION] | エミッタ インスタンスの更新前に呼ばれます。この関数は、エミッタに格納された各モジュールとパーティクルの更新前に発生する必要があるすべての更新の処理を有効にします。
+| [REGION:wrap]`void PostUpdate(FParticleEmitterInstance* Owner, int32 Offset, float DeltaTime)`[/REGION] | エミッタ インスタンスの更新後に呼ばれます。この関数は、エミッタに格納された各モジュールとパーティクルの更新後に発生する必要があるすべての更新の処理を有効にします。
+| [REGION:wrap]`bool SupportsSpecificScreenAlignmentFlags() const`[/REGION] | パーティクル エミッタで発見されたスクリーン アライメント フラグのオーバーライドを有効にします。現時点ではメッシュ エミッタのみで使用します。
+
+
+## パーティクル エミッタの事例
+
+カスタム エミッタ インスタンスは、二段階に分けて書き込みます。最初に、エミッタ インスタンスに特定データを提供する `TypeDataModule` を、最適なタイミングで作成しなくてはいけません。例えば、エミッタ インスタンスのスピンに加え、親パーティクルシステム コンポーネントを回転させるエミッタ インスタンスが作成されます。
+
+### TypeDataModule の宣言
+
+最初のステップは、新規のエミッタ インスタンス タイプを生成する `TypeDataModule` の作成です。
+
+	UCLASS(editinlinenew, collapsecategories, hidecategories=Object)
+	public class UParticleModuleTypeDataSpinner : public UParticleModuleTypeDataBase
+	{
+
+		/** 
+
+			*  The amount to spin the emitter instance (in complete rotations) at   
+			*  the given time.
+			*/
+
+		UPROPERTY(Category=Spinner)
+		rawdistributionvector Spin;
+
+	#if CPP
+		/**
+		*   Create the custom ParticleEmitterInstance.
+		*
+		*   @param  InEmitterParent           The UParticleEmitter that holds this TypeData module.
+		*   @param  InComponent               The UParticleSystemComponent that 'owns' the emitter instance being created.
+		*   @return FParticleEmitterInstance* The create emitter instance.
+		*/
+		virtual FParticleEmitterInstance*   CreateInstance(UParticleEmitter* InEmitterParent, UParticleSystemComponent* InComponent);
+	#endif
+	}		
+
+### TypeDataModule の実装
+
+`TypeDataModule` のコンストラクタは `Spin` 変数を割り当てるための `UDistributionVectorConstant` を作成します。
+
+	UParticleModuleTypeDataSpinner::UParticleModuleTypeDataSpinner(const FObjectInitializer& ObjectInitializer)
+	:Super(ObjectInitializer)
+	{
+		UDistributionVectorConstant* DistributionSpin = ConstructorHelpers::CreateDefaultSubobject<UDistributionVectorConstant>(this, TEXT("DistributionSpin"));
+		DistributionSpin->Constant = FVector(0.0f, 0.0f, 0.0f);
+		Spin.Distribution = DistributionSpin;
+	}
+
+`CreateInstance()` 関数はエミッタ インスタンスを保持する `ParticleSystemComponent` に呼ばれます。ここで、システムが利用するあらゆるタイプの `ParticleEmitterInstance` を `TypeDataModule` が作成します。
+
+	FParticleEmitterInstance* UParticleModuleTypeDataSpinner::CreateInstance(UParticleEmitter* InEmitterParent, UParticleSystemComponent* InComponent)
+	{
+	   // Create our Spinner emitter instance.(Spinner エミッタ インスタンスを作成します。)
+	   FParticleSpinnerEmitterInstance* SpinnerInst = ::new FParticleSpinnerEmitterInstance();
+	   if (SpinnerInst)
+	   {
+		  // Initialize the parameters for the emitter.(エミッタ用にパラメータを初期化します。)
+		  SpinnerInst->InitParameters(InEmitterParent, InComponent);
+		  return SpinnerInst;
+	   }
+
+	   // We failed.(失敗しました。)Return NULL to let a default sprite emitter be generated, or assert.
+	   return NULL;
+	}
+
+上記は、FParticleSpinnerEmitterInstance のインスタンスを生成する例です。既存コードを可能な限り活用するために、 FParticleSpriteEmitterInstance から派生しています。
+
+### パーティクル エミッタの宣言
+
+FParticleSpinnerEmitterInstance カスタム エミッタ インスタンス構造体は以下のように定義します。
+
+	struct FParticleSpinnerEmitterInstance : public FParticleSpriteEmitterInstance
+	{
+	   /** Pointer to the spinner TypeDatModule.         */
+	   UParticleModuleTypeDataSpinner* SpinnerTypeData;
+	   /** The rotation that was used during the Tick call.   */
+	   FVector CurrentRotation;
+	   /** The rotation of the component.            */
+	   FRotator ComponentRotation;
+
+	   /** Constructor */
+	   FParticleSpinnerEmitterInstance();
+
+	   virtual void InitParameters(UParticleEmitter* InTemplate, UParticleSystemComponent* InComponent, bool bClearResources = true);
+	   virtual void Tick(float DeltaTime, bool bSuppressSpawning);
+	   virtual void UpdateBoundingBox(float DeltaTime);
+
+	   /**
+		*   Adjust the component rotation to take the instance rotation into account.
+		*/
+	   void AdjustComponentRotation();
+	   /**
+		*   Restore the component rotation.
+		*/
+	   void RestoreComponentRotation();
+	};
+
+以下のメンバ変数は、 FParticleSpinnerEmitterInstance に格納されています。
+
+| 変数 | 概要 |
+| -------- | -------- |
+| `SpinnerTypeData` |  UParticleModuleTypeDataSpinner へのポインタです。TypeData モジュールへアクセスするたびに、直接保持してキャストを防ぎます。 |
+| `CurrentRotation` | エミッタ インスタンスの現在の回転を追跡する FVector です。回転を更新するために Tick() と TickEditor() 関数に書き込んで、 UpdateBoundingBox() 関数の実行時に使用するため格納します。 |
+
+### パーティクルエミッタの実装
+
+以下のメンバ関数が、カスタム エミッタインスタンスに実装されています。
+
+|関数||
+| -------- | -------- |
+| [INCLUDE:#Constructor] ||
+| [INCLUDE:#InitParameters] ||
+| [REGION:wrap]`virtual void Tick(float DeltaTime, bool bSuppressSpawning)`[/REGION] | Tick() 関数はインスタンス上のパーティクルのスポーンと更新を担当します。最初に EmitterTime を使用して `SpinnerTypeData` 分布から現在の回転を取得します。_親_ コンポーネントの `LocalToWorld` はさまざまなモジュール内の `Spawn()` および `Update()` 関数で使用できるため、エミッタ インスタンスの回転を考慮する必要があります。これはコンポーネントの `Rotation` (回転) を保存して、その後これにエミッタ インスタンス量を追加することによって実現します。その後、コンポーネント変換は新しい回転で更新されます。エミッタ インスタンスはスーパー `Tick()` 関数を呼ぶことによって、通常通り _ティック_ します。その後、コンポーネント `Rotation` が復元されます。 [INCLUDE:#tick] |
+| [REGION:wrap]`virtual void UpdateBoundingBox(float DeltaTime)`[/REGION] | bUseLocalSpace が true の時にエミッタ インスタンス回転が考慮されるように `UpdateBoundingBox()` 関数はオーバーライドされなくてはいけません。 [INCLUDE:#UpdateBoundingBox] |
+| [REGION:wrap]`void FParticleSpinnerEmitterInstance::AdjustComponentRotation()`[/REGION] | エミッタ インスタンス回転を考慮するために `AdjustComponentRotation()` 関数はコンポーネント `LocalToWorld` を変更します。 [INCLUDE:#AdjustComponentRotation] |
+| [REGION:wrap]`void FParticleSpinnerEmitterInstance::RestoreComponentRotation()`[/REGION] | `RestoreComponentRotation()` 関数は、エミッタインスタンス回転をコンポーネント LocalToWorld から削除します。 [INCLUDE:#RestoreComponentRotation] |
+
+<!--
+[EXCERPT:Constructor]
+[REGION:transparenttable]
+| --- | --- |
+| [REGION:wrap]`FParticleSpinnerEmitterInstance()`[/REGION] | コンストラクタのコードは、単に `SpinnerTypeData` を NULL に、`CurrentRotation` を (0.0f 、 0.0f 、 0.0f) に初期化します。 |
+| [INCLUDE:#ConstructorCode] ||
+[/REGION]
+[/EXCERPT:Constructor]
+[EXCERPT:ConstructorCode]
+	FParticleSpinnerEmitterInstance::FParticleSpinnerEmitterInstance() :
+		 FParticleSpriteEmitterInstance()
+	   , SpinnerTypeData(NULL)
+	{
+	}
+[/EXCERPT:ConstructorCode]
+
+[EXCERPT:InitParameters]
+[REGION:transparenttable]
+| --- | --- |
+| [REGION:wrap]`virtual void InitParameters(UParticleEmitter* InTemplate, UParticleSystemComponent* InComponent, bool bClearResources = true)`[/REGION] | `InitParameters()` 関数は標準の機能を実行するために Super バージョンを呼んで、その後アクセスごとのキャストを避けるため `TypeDataModule` ポインタを `UParticleModuleTypeDataSpinner` へキャストします。|
+| [INCLUDE:#InitParametersCode] ||
+[/REGION]
+[/EXCERPT:InitParameters]
+[EXCERPT:InitParametersCode]
+	void FParticleSpinnerEmitterInstance::InitParameters(UParticleEmitter* InTemplate, UParticleSystemComponent* InComponent, bool bClearResources)
+	{
+	   // Call the super InitParameters.(スーパー InitParameters を呼びます)
+	   FParticleEmitterInstance::InitParameters(InTemplate, InComponent, bClearResources);
+
+	   // Get the type data module (タイプデータモジュールを取得します)
+	   UParticleLODLevel* LODLevel   = InTemplate->GetCurrentLODLevel(this);
+	   check(LODLevel);
+	   SpinnerTypeData = CastChecked<UParticleModuleTypeDataSpinner>(LODLevel->TypeDataModule);
+	}
+[/EXCERPT:InitParametersCode]
+
+[EXCERPT:Tick]
+	void FParticleSpinnerEmitterInstance::Tick(float DeltaTime, bool bSuppressSpawning)
+	{
+	   // Update our current rotation (現在の回転を更新します)
+	   check(SpinnerTypeData);
+	   CurrentRotation = SpinnerTypeData->Spin.GetValue(EmitterTime, Component);
+
+	   // Adjust the component rotation (コンポーネント回転を調整します)
+	   AdjustComponentRotation();
+
+	   // Call the super Tick (スーパー Tick を呼びます)
+	   FParticleEmitterInstance::Tick(DeltaTime, bSuppressSpawning);
+
+	   // Restore the component rotation (コンポーネント回転を復元します)
+	   RestoreComponentRotation();
+	}
+[/EXCERPT:Tick]
+
+[EXCERPT:UpdateBoundingBox]
+	void FParticleSpinnerEmitterInstance::UpdateBoundingBox(float DeltaTime)
+	{
+		// Unfortunately, we have to completely override the UpdateBoundingBox function in (回転を確実に考慮するために)
+		// order to ensure our rotation is taken into account...(UpdateBoundingBox 関数を完全にオーバーライドしなくてはいけません)
+		// 
+		// Except for the last bit of code (where the bUseLocalSpace flag is taken into account), ((bUseLocalSpaceフラグを取り入れた) コードの最終箇所を除いて) 
+		//the function is identical to the FParticleSpriteEmitterInstance (この関数はFParticleSpriteEmitterInstance と同一です)
+		// version.
+		if (Component)
+		{
+			// Take component scale into account
+			FVector Scale = FVector(1.0f, 1.0f, 1.0f);
+			Scale *= Component->Scale * Component->Scale3D;
+			AActor* Actor = Component->GetOwner();
+			if (Actor && !Component->AbsoluteScale)
+			{
+				Scale *= Actor->DrawScale * Actor->DrawScale3D;
+			}			
+			float MaxSizeScale = 1.0f;
+			FVector NewLocation;
+			float NewRotation;
+			ParticleBoundingBox.Init();
+			// For each particle, offset the box appropriately 
+			for (int32 i=0; i<ActiveParticles; i++)
+			{
+				DECLARE_PARTICLE(Particle, ParticleData + ParticleStride * ParticleIndices[i]);
+				// Do linear integrator and update bounding box
+				// Do angular integrator, and wrap result to within +/- 2 PI
+				Particle.OldLocation = Particle.Location;
+				if ((Particle.Flags & STATE_Particle_Freeze) == 0)
+				{
+					if ((Particle.Flags & STATE_Particle_FreezeTranslation) == 0)
+					{
+						NewLocation = Particle.Location + (DeltaTime * Particle.Velocity);
+					}
+					else
+					{
+						NewLocation = Particle.Location;
+					}
+					if ((Particle.Flags & STATE_Particle_FreezeRotation) == 0)
+					{
+						NewRotation = (DeltaTime * Particle.RotationRate) + Particle.Rotation;
+					}
+					else
+					{
+						NewRotation = Particle.Rotation;
+					}
+				}
+				else
+				{
+					NewLocation = Particle.Location;
+					NewRotation = Particle.Rotation;
+				}
+				FVector Size = Particle.Size * Scale;
+				MaxSizeScale = Max(MaxSizeScale, Size.GetAbsMax()); //@todo particles: this does a whole lot of compares that can be avoided using SSE/ Altivec.
+				Particle.Rotation = appFmod(NewRotation, 2.f*(float)PI);
+				Particle.Location = NewLocation;
+				ParticleBoundingBox += NewLocation;
+			}
+			ParticleBoundingBox = ParticleBoundingBox.ExpandBy(MaxSizeScale);
+			// Transform bounding box into world space if the emitter uses a local space coordinate system.
+			UParticleLODLevel* LODLevel = SpriteTemplate->GetCurrentLODLevel(this);
+			check(LODLevel);
+			if (LODLevel->RequiredModule->bUseLocalSpace) 
+			{
+				// Adjust the component rotation (コンポーネント回転を調整します)
+				AdjustComponentRotation();
+				// Transform the bounding box (バウンディングボックスを変換します)
+				ParticleBoundingBox = ParticleBoundingBox.TransformBy(Component->LocalToWorld);
+				// Restore the component rotation (コンポーネント回転を復元します)
+				RestoreComponentRotation();
+			}
+		}
+	}
+[/EXCERPT:UpdateBoundingBox]
+
+[EXCERPT:AdjustComponentRotation]
+	void FParticleSpinnerEmitterInstance::AdjustComponentRotation()
+	{
+	   // Save the true rotation (正確な回転を保存します)
+	   ComponentRotation = Component->Rotation;
+	   // Since the LocalToWorld of the component can be used in the Update functions of various modules, (コンポーネントの LocalToWorld はさまざまなモジュールの Update 関数で使用できるため)
+	   // we need to spoof it so our instance rotation is taken into account.(インスタンス回転が考慮されるようにスプーフィングする必要があります)
+	   // We need to reconstruct the components LocalToWorld so the rotation is taken into account
+	   // (正確な位置で回転を考慮するためにコンポーネント LocalToWorld を再構成する必要があります)
+	   FVector CurrRotInDegrees = CurrentRotation * 360.0f;
+	   FRotator RotationRot = FRotator::MakeFromEuler(CurrRotInDegrees);
+	   Component->Rotation += RotationRot;
+	   Component->SetTransformedToWorld();
+	}
+[/EXCERPT:AdjustComponentRotation]
+
+[EXCERPT:RestoreComponentRotation]
+	void FParticleSpinnerEmitterInstance::RestoreComponentRotation()
+	{
+	   // Restore the component rotation (コンポーネント回転を復元します)
+	   Component->Rotation = ComponentRotation;
+	   Component->SetTransformedToWorld();
+	}
+[/EXCERPT:RestoreComponentRotation]
+-->
+
+### 結果
+
+以下のスクリーンショットは、作動中のスピナー エミッタ インスタンスを示しています。設定は以下の通りです。
+
+* **Spin** 分布は定数カーブの **(Time=0,X=0,Y=0,Z=0)** の位置と別の **(Time=1,X=0,Y=0,Z=1)** の位置に設定され、エミッタの寿命期間に渡りインスタンスを変数レートで Z 軸周りを回転させます。 
+* **InitialVelocity** モジュールは、全てのパーティクルを直線方向に放射させるために、 **(X=100,Y=100,Z=100)** に設定された Constant Distribution と使用します (インスタンスの回転を事前に考慮します)。 
+* **InitialColor** モジュールは、定数カーブを **(Time=0,R=1,G=0,B=0)** の位置と別の **(Time=1,R=0,G=0,B=1)** 位置に設定した **StartColor** と使用し、エミッタの寿命期間に渡り放射されるパーティクルを赤から青へ変化させます。
+
+[REGION:imagetable]
+| ![Spinner A](Spinner_A.png) | ![Spinner B](Spinner_B.png) |
+| --------------------------- | --------------------------- |
+|  |  |
+[/REGION]

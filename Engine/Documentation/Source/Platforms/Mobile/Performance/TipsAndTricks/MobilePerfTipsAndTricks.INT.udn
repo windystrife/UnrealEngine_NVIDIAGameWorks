@@ -1,0 +1,195 @@
+Title: Mobile Performance Tips and Tricks
+Description:Optimizations and techniques utilized in the Unreal Match 3 game to ensure optimal performance on supported mobile devices.
+Crumbs:%ROOT%, Platforms, Platforms/Mobile
+Availability:Public
+Version: 4.9
+Platform:Mobile
+parent:Platforms/Mobile
+order:6
+type:overview
+tags:mobile
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Platforms/Mobile/Performance/TipsAndTricks:title%](Platforms/Mobile/Performance/TipsAndTricks/perf_topic.png)
+	[/PARAM]
+	[PARAM:title]
+		%Platforms/Mobile/Performance/TipsAndTricks:title%
+	[/PARAM]
+	[PARAM:description]
+		%Platforms/Mobile/Performance/TipsAndTricks:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Platforms/Mobile/Performance/TipsAndTricks]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Platforms/Mobile/Ads:title%](Platforms/Mobile/Performance/TipsAndTricks/perf_topic.png)
+	[/PARAM]
+	[PARAM:title]
+		%Platforms/Mobile/Performance/TipsAndTricks:title%
+	[/PARAM]
+	[PARAM:description]
+		%Platforms/Mobile/Performance/TipsAndTricks:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Platforms/Mobile/Performance/TipsAndTricks]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+This guide contains optimizations and techniques utilized in the Unreal Match 3 game to ensure that it performed as well as possible when played on supported mobile devices.
+
+## Default Device Profiles
+
+To ensure that Unreal Match 3 worked on as many mobile devices as possible, modifications were made to the  **DefaultDeviceProfiles.ini** that turned down the rendering settings of Unreal Match 3 when it was played on lower end mobile devices. This allowed the game to be available on a wider variety of mobile devices without having to sacrifice the overall look and feel of the game.  In the following section we will take a look at what some of these settings are and how you can use them in your Unreal Engine 4 mobile projects.
+
+If you have not done so, open up the Unreal Match 3 DefaultDeviceProfiles.ini, which can be found in `Match3\Config\DefaultDeviceProfiles.ini`.
+
+Once the DefaultDeviceProfiles.ini is open, look for the following sections for iOS and Android:
+
+	[IOS DeviceProfile]
+	+CVars=r.Streaming.PoolSize=160
+	+CVars=r.Streaming.UseFixedPoolSize=1
+	+CVars=p.EnableAsyncScene=0
+	+CVars=r.Scalability.MaxTextureQualityForLowVirtualMemory=3
+	+CVars=r.MaxAnisotropy=1 
+
+	[Android DeviceProfile]
+	+CVars=r.Streaming.PoolSize=160
+	+CVars=r.Streaming.UseFixedPoolSize=1
+	+CVars=p.EnableAsyncScene=0
+	+CVars=r.Scalability.MaxTextureQualityForLowVirtualMemory=3
+	+CVars=r.MaxAnisotropy=1 
+
+[region:tip]
+For Unreal Match 3, we did not add anything to the base device profile and only modified the individual device profiles for each device.
+[/region]
+
+The two blocks of text above are responsible for the basic rendering settings each device family should have enabled by default. You should only put CVars in here that you know will work on every single one of the mobile devices your project targets. Adding a CVar here that one mobile device supports, but others do not, can cause your project to run poorly on those mobile devices. To avoid this, you should only add device specific CVars under the Device Profile section. For example, take a look at the iPhone 4s Device Profile versus the iPhone 6s profile.
+
+	[iPhone4s DeviceProfile]
+	+CVars=r.MobileContentScaleFactor=1.0
+	+CVars=r.ParticleLODBias=1
+	+CVars=sg.EffectsQuality=2
+	+CVars=fx.MaxCPUParticlesPerEmitter 50
+
+	[iPhone6 DeviceProfile]
+	+CVars=r.MobileContentScaleFactor=2.0
+	+CVars=r.ParticleLODBias=0
+	+CVars=sg.EffectsQuality=3
+	+CVars=fx.MaxCPUParticlesPerEmitter 1000
+
+Because the iPhone 6 is more powerful than the iPhone 4, many of the settings were increased on the 6, but decreased on the 4. If we take a look at the Android section below the iOS section, we can see the same thing between the low and high device profile.
+
+	[Android_Low DeviceProfile]
+	+CVars=r.MobileContentScaleFactor=1.0
+	+CVars=r.ParticleLODBias=1
+	+CVars=sg.EffectsQuality=2
+	+CVars=fx.MaxCPUParticlesPerEmitter 50
+	BaseProfileName=Android
+
+	[Android_High DeviceProfile]
+	+CVars=r.MobileContentScaleFactor=1.0
+	+CVars=r.ParticleLODBias=0
+	+CVars=sg.EffectsQuality=3
+	+CVars=fx.MaxCPUParticlesPerEmitter 1000
+	BaseProfileName=Android
+
+Here is a breakdown of the settings that were used for Unreal Match 3 and what they do.
+
+| Setting Name | Description |
+| ------------ | ----------- |
+| r.MobileContentScaleFactor | This controls how the content will be scaled when it is on the device. A setting of 0 will use the native resolution of the device. If you are using a DPI scaling curve for UI scaling, make sure to set this to 0. |
+| r.ParticleLODBias | This controls which particle LOD will be displayed. 0 will use the base, while 1 will use the first LOD, 2 the second LOD and so on. In Unreal Match 3, only the first LOD was used to cut the amount of particles spawned in half on lower-end devices. |
+| sg.EffectsQuality | This controls the spawn rate of the particles per tick. It ranges from 0 to 3, with the default value being 3. Lowering this number will result in fewer particles being spawned per tick. Setting this to 1 will result in particles being very sparse and is only recommended for extremely low-end devices. Setting to 0 will stop all particles from spawning entirely. |
+| fx.MaxCPUParticlesPerEmitter | This controls how my CPU particles can be emitted per emitter. |
+
+## Utilizing LODs in a different way
+
+![](ULOD_00.png)
+
+Level of Detail (LOD) is a rendering trick that helps to lessen the rendering cost of objects that are far away from the player's camera.  LODs work by storing multiple, lower-resolution versions of an object and then automatically switching between those objects based on how far the player's camera is from them.  You can see an example of this LOD switch in action by watching the video below.
+
+[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:videoid]
+	ZtJt5GhaNhI
+	[/PARAMLITERAL]
+	[PARAMLITERAL:width]
+	640
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	390
+	[/PARAMLITERAL]
+[/OBJECT]
+
+While Unreal Match 3 did not make use of LODs for Static Meshes, it did make use of LODs for particle effects to help lessen the rendering demands on lower end devices. This was accomplished by first creating a new LOD using a particle as a starting point. Then, inside the newly created LOD, the amount of particles that are to be spawned was reduced by half. In some instances, entire modules in the effect were disabled. In the image below, you can see an example of this VFX LOD in practice. 
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Base](PLOD_Base_00.png)(w:320)
+	[/PARAM]
+	[PARAM:after]
+	![LOD 1](PLOD_LOD_00.png)(w:320)
+	[/PARAM]
+[/OBJECT]
+
+<!--
+[REGION:imagetable]
+| ![](PLOD_Base_00.png) | ![](PLOD_LOD_00.png) |
+| --- | --- |
+| Base | LOD 1 |
+[/REGION]
+-->
+
+The image above shows how the **P_Selected_Title** particle effect that shows your currently selected gem was optimized for lower-end devices. The left-hand image shows the base of the **P_Selected_Title** particle effect, which is meant for higher-end devices. If you look closely at this picture, you will notice that there are some small white squares in the particle effect. Now look at the right-hand image and you will see the same effect,  **P_Selected_Title**, but this time the small white squares are missing, as they have been completely removed from the effect's LOD to help Unreal Match 3 run better on lower-end mobile devices. However, this is only half of what needs to be done in order to get this working.  The next step requires that you define which mobile devices should use the main particle effect and which mobile devices should use the various LODs based on the main particle effect. To do this, first open up DefaultDeviceProfiles.ini in a text editor and look for the **Android_Low DeviceProfile** entry, which is shown in the image below.
+
+![](ULOD_Android_Low_Profile.png)
+
+In the Android_Low Device Profile section, the following CVar was added and set to 1 to force the particle effect to use the first LOD when used.
+
+	+CVars=r.ParticleLODBias=1
+	
+Taking a look at the low and mid device entries in the Android Device Profile section reveals that both low and mid tier Android mobile devices will use the LOD for the particle effect, while on the highest end Android devices, the base effect will be used instead of the LOD. In the image below, we can see how this all comes together to allow low-, mid-, and high-end Android devices to display particle effects at different LODs.
+
+![](ULOD_Android_Effect_LOD_Settings.png)
+
+[region:note]
+While Android was used for this example, the same concepts and commands can be used for the iOS section as well.
+[/region]
+
+## Recording Video on Android Devices
+
+You can record video on certain Android devices by opening up a Console window and input the following command line argument.
+
+	adb shell screenrecord /sdcard/(Insert Name Here).mp4 --bit-rate 8000000
+
+This will then record what is happening on the device for up to 180 seconds. You can stop the video at any time by pressing **Ctrl + C** in the ADB Console Window.
+
+Videos can usually be found in the root directory of the phone, or by searching for the name of the video when the device is plugged into your development PC. 
+
+## Lighting the Character
+
+If you take a look at the Material that was used for the Character in Unreal Match 3 you will notice that the Material uses the Default Lit Shading Model instead of the cheaper Unlit Shading Model. This was done so that when the the night theme is purchased and enabled, the light on the torch will dynamically shade and shadow the character. If the Material had been changed so that it was Unlit, this dynamic shadow interaction would not have been possible. While dynamic lighting can be expensive, especially on mobile devices, Unreal Match 3 requires so little resources that having a single dynamic point light did not make a noticeable difference in performance.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Default Theme](Lighting_Default_Theme.png)(w:320)
+	[/PARAM]
+	[PARAM:after]
+	![Night Theme](Lighting_Night_Theme.png)(w:320)
+	[/PARAM]
+[/OBJECT]
+
+<!--
+[REGION:imagetable]
+| ![](Lighting_Default_Theme.png)(w:320) | ![](Lighting_Night_Theme.png)(w:320) |
+| --- | --- |
+| Default Theme | Night Theme |
+[/REGION]
+-->

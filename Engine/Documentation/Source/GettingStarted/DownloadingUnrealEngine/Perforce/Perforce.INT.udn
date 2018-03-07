@@ -1,0 +1,145 @@
+Availability: Licensee
+Title:Using Perforce with Unreal Engine
+Crumbs:%ROOT%, Engine, Programming, Programming/Basics
+Description:Guide to using Perforce source control with Unreal Engine.
+version: 4.9
+
+[TOC(start:2)]
+
+Unreal Engine is provided through a Perforce depot that licensees must connect to in order to download the engine. Since Unreal Engine is updated regularly, as a licensee working on a project, you may choose to update your version of the engine to a newer version at one or more times during the development cycle. Setting up Perforce properly from the outset to sync and integrate builds of the engine as easily as possible is important.
+
+Epic has set aside the **2nd and 4th Sunday of the month from 8am-Noon EST** for performing scheduled maintenance. Please keep this in mind when planning as it is possible that any or all of the support outlets, especially network/server resources, could be affected during these times.
+
+
+
+## Connecting to Epic's Depot
+
+The first step to being able to connect to Epic's public Perforce depot is to set up a secure Virtual Private Network (VPN) connection to Epic Games. This requires installing Cisco's VPN client (either manually or through an automated web-based process) and signing in using your VPN/Perforce credentials. An overview of the process for creating a VPN connection is provided below:
+
+**Web-based Connection**
+
+
+1. Go to [https://vpn.epicgames.com](https://vpn.epicgames.com) in your web browser (IE recommended for stability).
+1. Log in using your VPN credentials provided by your technical contact.
+1. Follow any on-screen instructions and prompts.
+1. The VPN client is installed and the connection is established.
+
+
+**Manual Connection**
+
+
+1. Download the Cisco AnyConnect VPN client from: [AnyConnect VPN Client Download](http://www.cisco.com/cisco/software/navigator.html?mdfid=281268793&i=rm).
+1. Install the client and run it.
+1. Set **vpn.epicgames.com** as the address to connect to.
+1. Log in using your VPN credentials provided by your technical contact.
+1. The connection is established.
+
+
+The complete process for setting up and establishing a VPN connection to Epic Games private network is detailed on the [](GettingStarted/DownloadingUnrealEngine/VPNSetup) page.
+
+Once this VPN connection is established, you will be able to access the depot securely from your location using the Perforce client. The client needs to be installed and configured properly to connect. An overview of the process for installing and connecting with the P4V client is provided below:
+
+
+1. Download the Perforce Windows client from: [Perforce Downloads: The Essentials](http://www.perforce.com/downloads/complete_list).
+1. Install the client and run it.
+1. Fill in the appropriate **Server**, **User**, and **Workspace** info in the **Connection Dialog** and press **OK**.
+1. The client opens and connects to Epic's public Perforce depot.
+
+
+The complete process for setting up the Perforce client to connect to Epic's Perforce depot is detailed on the [Setting Up Perforce Connection](GettingStarted/DownloadingUnrealEngine/Perforce/Setup) page.
+
+
+
+## Downloading Builds or Revisions
+
+The two main ways sets of file revisions are identified are through labels and changelists. On a high level, a label identifies all the changes that make up a specific build of the engine, e.g. a QA-approved build, while a changelist identifies a specific set of changes. The actual differences between these two concepts is explained in much more detail on the [Codelines and Branching](http://www.perforce.com/perforce/doc.current/manuals/p4guide/06_codemgmt.html) page of the Perforce website. For the purposes of syncing to Epic's Perforce depot, here is what you need to know:
+
+
+* **Labels** - To update to a new QA-approved build, you will sync to a label.
+* **Changelists** - To update to a specific set of changes made to a specific aspect of the engine, you will sync to a changelist.
+
+
+To get started with Unreal Engine 4, you will want to sync to the latest QA Build, specified by a label in the Perforce depot. This process can take a while, especially the first time since it has to download all of the files that make up the entire engine. Subsequent syncs will go more quickly as only new or changed files will need to be downloaded.
+
+The complete process for downloading builds or revisions of Unreal Engine 4 from Epic's Perforce depot is detailed on the [Syncing Builds with Perforce](GettingStarted/DownloadingUnrealEngine/Perforce/Syncing) page.
+
+The following section contains information about how to setup your Perforce depot and maintain builds locally in order to make updating to new builds as painless as possible.
+
+
+
+## Maintaining the Local Depot
+
+When we add a new file to our depot that is considered an "auto-generated" (e.g. .exe / .u), we tell all of the programmers to update their client spec to mask out that file if it is not already included in the "masked out fileset".
+
+Basically, the programmers have a more complicated client spec to handle the auto-generated files that they will be creating. Content teams do not need to have any specialized mappings.
+
+Example: A new package was added. This will generate a new .u in both Script and ScriptFinalRelease. In our client spec we have:
+
+
+    
+     -//depot/UnrealEngine3.../...Game/Script%%1/....u //localdepot/UnrealEngine3.../...Game/Script%%1/....u
+    
+
+
+
+This makes it so that we do not need to update the clientspec each time we add a new script package.  Additionally, the above makes it so you do not have to worry about updating your client spec when working in another branch.
+
+You should be able to make a branch spec that can do a similar thing to the above client spec mapping. This way, every time you integrate, you will not integrate the known auto-generated files. That way you can see when there are new additions + and decide what to do with them at integration time.
+
+Similarly, content creators can mask out the contents of the Development directory, as they will not need any of the source, tools, or external libraries for building and linking.
+
+
+
+## Integration, Merging, and Branching
+
+During the production cycle for your game, your team may decide to periodically update to newer builds that contain new features and bug fixes. The process for this is the same as the initial sync as far as obtaining the build from the Perforce depot. However, there is a lot to consider as far as how you maintain the engine locally and how that affects your ability to easily integrate and merge new builds into your codebase keeping all of your local changes and additional code intact.
+
+You can use branches in your depot to make the integration and merging process easier; something similar to:
+
+
+* **//depot/Epic** - Each QA Build version, unchanged
+* **//depot/MergeTest** - Merging/testing area
+* **//depot/Devel** - Your development tree
+
+
+![Perforce_33.jpg](Perforce_33.jpg)(w:640 h:443)
+
+A simple overview of the process of upgrading your engine version to a new QA build might be:
+
+
+1. Get the contents of a QA-Approved Build from Epic. A good way to take a new QA build is:
+    * Delete everything in the Epic branch.
+    * Copy the new QA build in its place.
+    * Use the "Reconcile Offline Work" of P4V to make a CL that represents change that Epic made. Check that in. Now the Epic branch is a copy of the QA build, but you have not lost your integration history. This gives the merge tool substantially better information on what exactly has changed and should reduce the number of conflicts.
+1. Integrate from that Epic branch to your main development branch using the MergeTest branch as a testing area.
+
+
+You can see an example of this workflow here:
+
+![Perforce_34.jpg](Perforce_34.jpg)(w:665 h:443)
+
+The more frequently you update, the less likely you are to run into serious conflicts when merging. It can be extremely useful to use merge programs such as Araxis to help resolve conflicts when they do arise.
+
+Here are some tips for preparing to merge a new QA build:
+
+
+* Keep a "merge diary". I keep a day by day account over the life of the merge highlighting any controversial choices, key decisions etc along the way and tracking the timeline. This comes in handy later when problems occur getting it running.
+* Make a testing plan for QA that is thorough and gain support from the department to make time to test the merge branch as well as the trunk for a period of time.
+* Make a record of any middleware you need to upgrade along with the engine. Make sure all middleware versions are made.
+* If possible, upgrade your main trunk platform SDK versions to the same as the new merge branch to make it easier (consoles) - and update firmware.
+* Check with IT that they are okay with you using a lot more space in perforce.
+* Check the performance and memory usage is as good or better using the UDK for your current and target QA builds for all your target platforms. If performance got worse, you will need to understand why. Sometimes Epic will take performance backwards on one platform to benefit quality on another platform for instance.
+* Make sure other departments understand the motivation for upgrading and you have a good list of reasons that it will be beneficial on the project(s) to get buyin and support from teams.
+
+
+For terminology and best practices regarding integration, merging, and branching, see the [Perforce Integration](GettingStarted/DownloadingUnrealEngine/Perforce/Integration) page.
+
+For an automated merge tool script, see the [Perforce AutoMerge](GettingStarted/DownloadingUnrealEngine/Perforce/AutoMerge) page.
+
+For tips and strategies on merging builds of the Unreal Engine, see the [Merging](GettingStarted/DownloadingUnrealEngine/Perforce/CommonMergeProblems) page.
+
+ 
+
+
+
+

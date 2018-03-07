@@ -1,0 +1,48 @@
+﻿INTSourceChangelist:2714483
+Availability:Public
+Title:Panini 投影
+Crumbs: %ROOT%, Engine, Engine/Rendering/PostProcessEffects
+Description:一种 3D 投影，可修复透视投影在宽视野画面两侧出现的几何失真。
+
+
+## 配置
+
+虚幻引擎默认使用透视投影。然而，此投影模型结合宽视野使用时将出现几何失真。在此例中的球体上非常明显，视野为 120。
+
+![](qagame_fov120.png)
+
+因此，虚幻引擎提供了一个可选的后期处理通道，使用 Panini 投影修复此问题。该后期处理的概念是使用 panini 投影（而非透视投影）替代所处位置上的渲染像素。设置所需要的唯一操作是设置 r.Upscale.Panini.D > 0。此后期处理效果在 Upscaling 通道中完成。这意味着，如
+果 r.ScreenPercentage != 100 或 r.Upscale.Panini.D > 0，将使用此通道。如需进一步了解此参数，可直接参考本页面最下方的原始研究文章。
+
+![](qagame_fov120_panini.png)
+
+r.Upscale.Panini.D > 0 直接强调效果。然而其并非唯一的参数。r.Upscale.Panini.S 和纸张的硬压缩进行插值。如果部分球体在角落中仍然显示为遮暗，也可对参数进行调整。然而，r.Upscale.Panini.S < 0 时角落中将开始显示未渲染的黑色像素。
+
+![](qagame_fov120_vertical_compression.png)
+
+也可对 r.Upscale.ScreenFit 进行修改，获得此效果原理的深度理解。需要注意的一点是，部分透视投影像素处于末端，不会显示在屏幕上下方的区域中。
+
+![](qagame_actual_effect.png)
+
+
+## 直线
+
+Panini 投影将对线条进行多重保证。首先，垂直线条将保证对任意 r.Upscale.Panini.D 和 r.Upscale.Panini.S 保持笔直。其次，穿过屏幕中央的线条将对任意 r.Upscale.Panini.D 保证笔直，但 r.Upscale.Panini.S = 0。该数学特性非常适用于第一人称射击游戏，因为武器的 panini 投影朝向屏幕中央，保证直线向中央前进。
+
+![](shootergame_fov120.png)
+![](shootergame_fov120_panini.png)
+
+
+## 中央模糊
+
+该后期处理效果的一个问题是：r.Upscale.Panini.D 增加时屏幕中央会出现模糊现象。Panini 投影已特别应用到高端通道中，通过锐化滤波修复此现象。然而，它可能很快便无法修复此问题。因此需要增加 r.ScreenPercentage 帮助修复该问题，但绘制的像素数量将增加，渲染性能消耗也将增加。可以考虑平衡性更好的方案：在无法达到较高画面比例的硬件上选择较低的 r.Upscale.Panini.D 值，只借助高级通道的锐化滤波来达到此效果。
+
+![](shootergame_fov120_panini_screen_percentage.png)
+
+Panini 投影的另一种使用方法是通过材质函数输出一个世界位置偏移，将其插入材质的世界位置偏移输入引脚。Unreal Tournament 中便使用了这种方法，并未通过渲染不同视野中的武器修复透视投影失真。可在 Unreal Tournament 的 Github 资源库中进行查看。
+
+
+## 参考
+
+* [原始文章网站](http://tksharpless.net/vedutismo/Pannini/)
+* [原始文章链接](http://tksharpless.net/vedutismo/Pannini/panini.pdf)

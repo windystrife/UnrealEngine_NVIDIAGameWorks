@@ -1,0 +1,105 @@
+﻿INTSourceChangelist:2666790
+Availability:Public
+Title:間接ライティング キャッシュ
+Crumbs: %ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description:動的オブジェクトのグローバル イルミネーションおよびビルドされていないシーンのプレビューに使用するキャッシュされた間接ライティングのサンプル
+Versinon:4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/IndirectLightingCache:title%](%ROOT%/Engine/Rendering/LightingAndShadows/IndirectLightingCache/indirectcache_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/ue4_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/IndirectLightingCache:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/IndirectLightingCache:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/IndirectLightingCache]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:banner]
+![](indirectcache_banner.png)
+[/REGION]
+
+[EXCERPT:LightCache001]
+[ライトマス](Engine/Rendering/LightingAndShadows/Lightmass) は、静的オブジェクトを照らす間接ライティングに対しライトマップを生成しますが、 
+キャラクターなどの動的オブジェクトも間接ライティングを受け取る手法が必要となります。ビルド時にライトマスによって生成されるサンプルを活用する **間接ライティング キャッシュ** が、 
+ランタイム時に動的オブジェクトの間接ライティングを計算してこの問題を解決します。
+[/EXCERPT:LightCache001]
+
+以下の画像で、動的オブジェクトのレンダリングに間接ライティング キャッシュを使用した場合と、 
+使用していない場合の違いが分かります。
+
+[REGION:fullwidth]
+![](diffuse_no_indirect.png)
+[/REGION]
+
+[REGION:caption]
+**間接ライティング キャッシュ** 未使用時の基本レベルのディフューズ光源です。
+[/REGION]
+
+[REGION:fullwidth]
+![](diffuse_indirect.png)
+[/REGION]
+
+[REGION:caption]
+**間接ライティング キャッシュ** 使用時のディフューズ ライティングです。
+[/REGION]
+
+## 動作の仕組み
+
+[EXCERPT:LightCache002]
+概要をみてみましょう。
+
+*	ライトマスはレベルのあらゆる場所にライティング サンプルを配置し、ライティングのビルドの際にサンプルの間接ライティングを計算します。
+*	動的オブジェクトをレンダリングする際に、オブジェクトに利用可能な光源処理が存在するかを **間接ライティング キャッシュ** がチェックし、 
+	存在する場合はそれを使用します。
+*	光源処理が存在しない場合 (オブジェクトが新規または移動が多すぎた場合)、 **間接ライティング キャッシュ** は事前に計算された 
+	ライティングのサンプルを使用してライティングを補間します。
+
+
+ライトマスは、高密度で上向きの表面と低密度の表面であれば、 
+どこでもライティング サンプルを配置します。サンプルの配置は _LightmassImportanceVolume_ 範囲内に限定されていて、静的表面上のみに配置されます。
+[/EXCERPT:LightCache002]
+
+[REGION:fullwidth]
+![](lighting_samples.png)
+[/REGION]
+
+[REGION:caption]
+ライトマスによって生成されたライティング サンプルを視覚化するためには、[Show (表示)]->[Visualize (可視化)]->[Volume Lighting Samples] を選択します。
+[/REGION]
+
+このワークフローの最終目的は、コンテンツの設定を最小限にとどめることです。ただし、配置ヒューリスティックは、空間でフロート (浮動) している領域に対し 
+不十分な詳細結果をもたらすことがあります。例えば、キャラクターが乗っているエレベーターや 
+飛行しているセクションなどです。この領域周辺に _LightmassCharacterIndirectDetailVolumes_ を配置して詳細を取得することが出来ます。
+
+ランタイム時に、ライティング サンプルは **間接ライティング キャッシュ** によって可動オブジェクの周りに位置するよう補間されます。可動オブジェクトとは、可動性が可動に設定されたコンポーネントです。  
+
+このトーラス (環状体) はスタティックメッシュで、 5x5x5 の補間位置を表しています。  
+
+[REGION:fullwidth]
+![](interpolation_points.png)
+[/REGION]
+
+この補間は、オブジェクトが移動しすぎて無効となった場合のみ発生します。つまりキャッシュ命名です。位置がオブジェクトの 
+範囲からかなり離れています。オブジェクトがワールドを移動する間、継続的かつ安定したライティングを提供するためです。 
+ほとんどのオブジェクトは、効果的に 3x3x3 補間解像度を受け取ります。ボリューム ライティング サンプルには、法線マップが機能できるように指向性間接ライティングが格納されています。   
+
+##ビルドされていないライティングのプレビュー
+
+間接ライティング キャッシュは、ビルドされていないライティングを使用したオブジェクトのプレビューも可能にします。比較的小さなオブジェクトに対して上手く機能しますが、 
+建物や床など、大きめのメッシュに対してはあまりうまく機能しません。ライティングがビルドされているスタティックメッシュを移動すると、 
+次回のライティングのビルドまで間接ライティング キャッシュへ自動的に変更されます。
+
+ここではピラーのひとつが重複し、プレビューの為に黒色に間接ライティングがあたっています。 
+ 
+![](unbuilt.png)

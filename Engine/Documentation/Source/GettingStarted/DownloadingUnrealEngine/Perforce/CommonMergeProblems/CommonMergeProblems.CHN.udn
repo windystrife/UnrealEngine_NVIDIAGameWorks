@@ -1,0 +1,166 @@
+Availability: Licensee
+Title:常见融合问题
+Crumbs:%ROOT%, Engine, Programming, Programming/Basics, GettingStarted/DownloadingUnrealEngine/Perforce
+Description:当融合引擎的新版本时遇到的许多常见问题的解释。
+
+[TOC(start:2)]
+
+
+
+## 工具
+
+这里推荐了的用于融合和集成虚幻引擎4的经QA审核版本的工具：
+
+
+* Araxis Merge: http://www.araxis.com/merge/
+* Perforce: http://www.perforce.com/
+
+
+
+
+## 融合
+
+像Araxis Merge这样的融合工具在处理融合问题时是非常有用的。可以把它集成到版本控制系统比如Perforce，所以你可以使用Araxis进行比较/融合处理而不是使用内置的工具。
+
+对于代码版本的融合，在Araxis Merge中的文件夹比较(两方的比较或者三方的比较)对于比较当前的工程和最近经QA审核的版本是有帮助的；在某些情况下，也和前一个经QA审核的版本比较。这个策略是您可以看到在一个经QA审核的版本中做了哪些改进。
+
+在融合时，在类似于Perforce这样的版本控制系统中进行分支是有帮助的。在单独的分支中处理所有的和融合相关的变更，从而保持基础分支的干净，除非您准备好了完全的融合所有变更-通常是在一些回归测试和所有问题都被解决了之后。
+
+当然，以模块的方法来使用虚幻引擎进行工作的规则总是一种最好的应用方法，而不是把所有的东西塞入到基础代码中。保持基础代码尽可能的干净将会减少很多融合相关的bug。
+
+管理融合代码的另一个策略是要确保在基础版本的代码中有明显的注释，从而当部分发生改变时可以容易地识别出来：
+
+
+    
+    //myproject - modifying base code...
+    
+
+
+
+在您的工程中添加#define也是有帮助的:
+
+
+    
+    #define YOURGAME 1
+    
+
+
+
+这样您就可以在引擎的基础代码中封装出您自定义的代码:
+
+
+    
+    #ifdef YOURGAME
+       //myproject - doing custom stuff here...
+    #endif // YOURGAME
+    
+
+
+
+当您不用定义任何东西并且可以获得通用版本是最理想的；但是那总是不可能的。
+
+然而，这些技术将使融合变得更加可以忍受的…或许是令人愉快的？
+
+
+
+## 集成
+
+每个QA版本都有很多大的变更。其中一些变更触及了很多文件，这使得融合变得更加困难。
+
+处理这些问题最好的方式是使用Perforce中的集成功能。
+
+
+1. 在您的库中为QA版本创建一个区域。(比如 //depot/UE4Builds/... )
+
+1. 当一个新的QA版本出来后，下载它并把它提交到您的depot中。
+
+	在提交时处理文件的所有的添加/删除/编辑的最好方法是通过以下命令：
+	
+		REM PURPOSE:  确保在您的默认clientspec中的默认变更列表是空的。
+		
+		REM有两个变量
+		REM %1 == 硬盘PATH(在depot的root目录下)到新的版本目录(比如: c:/foo/bar/baz)
+		REM %2 == depot路径到版本(e.g. //depot_foo/bar/baz/...
+		
+		REM 使用:  p4ModifiedFiles.bat c:/foo/bar/baz //depot_foo/bar/baz/...
+		
+		REM保存状态
+		set MODFILES_FIND_ORIG=%MODFILES_FIND%
+		set MODFILES_FIND=C:\bin\cygwin\bin\find.exe
+		
+		REM找到所有的新文件并添加它们
+		%MODFILES_FIND% %1 -type f | p4 -x - add
+		
+		REM打开所有改变的文件来进行编辑
+		p4 diff -se %2 | p4 -x - edit
+		
+		REM打开所有已经移除的文件来删除
+		p4 diff -sd %2 | p4 -x - delete
+		
+		REM恢复状态
+		set MODFILES_FIND=%MODFILES_FIND_ORIG%
+	
+1. 使用Perforce的集成(`p4 integ`)来从the //depot/UE4Builds/...到您的本地引擎进行集成。
+
+1. 使用Perforce的安全自动冲突解决来自动解决在您本地没有改变的文件。(比如：版权更新基本上会触及所有文件 。其中的许多文件在本地将不会被该改变) )
+
+
+参考： http://www.perforce.com/perforce/doc.062/manuals/p4wsad/topics/resolving.html
+
+Safe Automatic Resolve(安全自动冲突解决): 如果您的文件或者他们的文件(但不是两方的文件都)和基础文件不同，接受不同的版本作为文件的最新修订版本。如果两方的文件都和基础文件不同，则在这个文件上不执行冲突解决。
+
+
+
+## 分支
+
+典型的分支策略是尽可能晚的进行分支来最小化在代码和内容两方面分支的变更。
+
+一旦进行了分支，它帮助维持在分支中的变更，经常需要这些负责特定的分支中变更的人员在合适的时候来集成和融合相关分支。
+
+
+
+## 错误以及疑难解答
+
+
+### "Not a class or namespace name(不是一个类名或命名空间名)" 错误
+
+**症状:**
+
+在FooClass.h文件的DECLARE_NATIVE_TYPE()宏中的类上的"Not a class or namespace name(不是一个类或命名空间名)" 错误。这个存在问题的类，已经在FooClasses.h文件中在它的上面被声明，但是大概因为当文件被包含时，启用了#defines命令，从而不能看到那个声明。
+
+**原因:**
+
+在LaunchEngineLoop.cpp(仅定义了NAMES_ONLY)文件中所包含的自动生成的头文件没有被包含在预编译头文件 (没有定义NAMES_ONLY) 中，导致了编译错误。
+
+**修复/对策:**
+
+在预编译的头文件中包含自动生成的同文件，并定义 NAMES_ONLY。
+
+
+参考： [https://udn.epicgames.com/lists/showpost.php?list=unprog3&id=10516](https://udn.epicgames.com/lists/showpost.php?list=unprog3&id=10516)
+
+
+### 枚举冲突
+
+**症状:**
+
+授权用户和Epic添加具有相同值的枚举变量。
+
+**原因:**
+
+Enums是通过值进行序列化而不是通过名称。
+
+**修复/对策:**
+
+一个对策是创建一个用于修补内容的命令集，但是这是一个容易产生错误且耗时的工作。另一个短期的临时对策是授权用户平移枚举值。这在C++中通过在枚举变量中指定一个偏移量是很容易做到的，然而在蓝图中平移的入口需要手动的添加。<br>  
+
+这个问题的解决方案需要在引擎层次上作出改变，即所有的enums(枚举值)将以FNames来序列化而不是以值的方式。这是一已经列出的任务：41337。41337.  这个改变将使重命名枚举变量变得困难，但是那是很少出现的情况。
+
+
+参考： [https://udn.epicgames.com/lists/showpost.php?list=unprog3&id=21598](https://udn.epicgames.com/lists/showpost.php?list=unprog3&id=21598)
+
+ 
+
+
+
+

@@ -1,0 +1,1 @@
+start %~dp0\..\..\Binaries\DotNET\unrealdoctool.exe ./;Engine/*;Gameplay/*;GettingStarted/*;Platforms/*;Programming/*;Resources/*;Search/*;Shared/*;Support/* -s=%~dp0\..\Source -pathPrefix=%~dp0\..\Source -o=%~dp0\..\UDNRelease -lang=INT -publish=licensee -v=info -outputFormat=HTML -doxygenCache=%~dp0\..\XML -linksToAllLangs

@@ -1,0 +1,84 @@
+﻿INTSourceChangelist:2669538
+Availability:Public
+Title:接口
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture/Reference
+Description:创建和实现接口的参考。
+Version:4.9
+
+[TOC(start:2)]
+
+
+接口类的声明和常规类的声明非常相似。语法中唯一的主要区别是描述符被传递到 `UINTERFACE` 宏，而非 `UCLASS` 宏。
+
+	UINTERFACE([specifier, specifier, ...], [meta(key=value, key=value, ...)])
+	class ClassName :ParentName
+
+## 接口声明
+
+在 .h 文件中（如 `ItemInterface.h`）：
+
+    #pragma once
+
+    #include "ItemInterface.generated.h"
+
+    UINTERFACE(Blueprintable)
+    class UItemInterface : public UInterface
+    {
+        GENERATED_UINTERFACE_BODY()
+    };
+
+    class IItemInterface
+    {    GENERATED_IINTERFACE_BODY()
+
+    public:
+
+        UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category="Item")
+        FItemStruct GetItem() const;
+    };
+
+在 .cpp 文件中（如 `ItemInterface.cpp`）：
+
+    #include "ItemInterface.h"
+
+    UItemInterface::UItemInterface(const FObjectInitializer& ObjectInitializer) :Super(ObjectInitializer)
+    {
+    }
+
+声明包含一个类的标准 C++ 类声明。在标准声明上，描述符（如类说明符和元数据）将被传递到 UINTERFACE 宏。它们用于为被声明的接口创建 UInterface，它可被看作引擎对类的专有表达。而且，GENERATED_UINTERFACE_BODY() 宏必须被放置在类体的最前方。
+
+对于引擎将要识别的接口，必须创建两个类，一个继承自 UInterface 的 UINTERFACE 类、一个纯粹的接口类。
+
+UINTERFACE 需带 U 前缀，因其从 UObject 扩展而来。接口需以 I 为前缀。
+
+如需要蓝图实现此接口，则 `Blueprintable` 说明符为必需。
+
+### 接口说明符
+
+[INCLUDE:Programming/UnrealArchitecture/Reference/Interfaces/Specifiers#main(offset:1)]
+
+## 在 C++ 中实现接口
+
+在 C++ 中声明类时，直接从接口（并非 UInterface 类）进行继承。
+
+    class AItem : public AActor, public IItemInterface
+    {
+        GENERATED_BODY()
+
+    public:
+
+        FItemStruct GetItem_Implementation() const;
+    };
+
+## 确定特定 Actor 是否实现接口
+
+为保证 C++ 和实现接口的蓝图类之间的兼容性，使用以下代码：
+
+    obj->GetClass()->ImplementsInterface(UItemInterface::StaticClass());
+
+[REGION:note]
+必须使用类的 UInterface 版本确定接口是否已实现。
+[/REGION]
+
+## 蓝图可实现类
+
+如需蓝图实现此节点，必须使用 `Blueprintable` 元数据说明符，接口中的每个函数必须为一个 `BlueprintNativeEvent` 或 `BlueprintImplementableEvent`。否则，实现接口的蓝图类可能无法实现接口的所有方法。

@@ -1,0 +1,71 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	MorphTargets.usf: Compute shader for calculating Morph Targets.
+=============================================================================*/
+
+
+#include "Common.ush"
+
+////////////////////////////////////////////////////////////////
+
+
+RWBuffer<uint> MorphVertexBuffer;
+
+float MorphTargetWeight;
+uint MorphWorkItems;
+uint2 OffsetAndSize;
+float4 PositionScale;
+
+Buffer<uint> VertexIndicies;
+Buffer<float> MorphDeltas;
+
+
+#if 0
+// This is how MorphVertexBuffer is interpreted as (6 floats)
+struct FMorphGPUSkinVertex
+{
+	FFloat16 PosDelta[3];
+	FFloat16 TangentDelta[3];
+};
+#endif
+
+[numthreads(6, 32, 1)]
+void GPUMorphUpdateCS(uint2 DispatchId : SV_DispatchThreadID, uint2 GroupId : SV_GroupThreadID)
+{
+	const uint WorkItemIndex = DispatchId.y + OffsetAndSize.x;
+	const uint ElementIndex = GroupId.x;
+
+	if (WorkItemIndex < OffsetAndSize.y)
+	{		
+		const uint MorphVertexBufferStride = 3 + 3;	
+		float MorphDelta = MorphDeltas[MorphVertexBufferStride * WorkItemIndex + ElementIndex];
+		float MorphOffset = MorphTargetWeight * MorphDelta;
+
+		float Scale = PositionScale[min(ElementIndex, (uint)3)];
+		int QuantizedOffset = round(MorphOffset * Scale);
+
+		const uint DestVertexIndex = MorphVertexBufferStride * VertexIndicies[WorkItemIndex] + ElementIndex;
+		InterlockedAdd(MorphVertexBuffer[DestVertexIndex], asuint(QuantizedOffset));
+	}
+}
+
+[numthreads(6, 32, 1)]
+void GPUMorphNormalizeCS(uint2 DispatchId : SV_DispatchThreadID, uint2 GroupId : SV_GroupThreadID)
+{
+	const uint WorkItemIndex = DispatchId.y;
+	const uint ElementIndex = GroupId.x;
+
+	if (WorkItemIndex < MorphWorkItems)
+	{
+		float Scale = PositionScale[min(ElementIndex, (uint)3)];
+
+		const uint MorphVertexBufferStride = 3 + 3;
+		const uint DestVertexIndex = MorphVertexBufferStride * WorkItemIndex + ElementIndex;
+
+		float NomalizedResult = float(asint(MorphVertexBuffer[DestVertexIndex])) * Scale;
+		//normalize directions by 1 / accumulated absolute weights
+		NomalizedResult = (ElementIndex > 2) ? NomalizedResult * MorphTargetWeight : NomalizedResult;
+		MorphVertexBuffer[DestVertexIndex] = asuint(NomalizedResult);
+	}
+}

@@ -1,0 +1,189 @@
+﻿INTSourceChangelist:3108692
+Availability:Docs
+Title:커스텀 임포터 테크니컬 가이드
+Crumbs: %ROOT%, Engine, Engine/UI, Programming
+Description:프로그래머를 위한 커스텀 애셋 유형 임포터 작성 안내서입니다.
+
+[REGION:todo]
+	언리얼 엔진 3 에서 이식해 온 문서로 현재 검토중에 있습니다. 정보가 맞지 않을 수 있습니다.
+[/REGION]
+
+[TOC(start:2)]
+
+UFactory 클래스는 주로 외부 파일을 기반으로 하여 에디터에서 새 애셋을 만드는 데 사용됩니다.
+
+UFactory 의 자매 클래스로는 UExporter 가 있는데, 복사/복제 작업을 위해 애셋을 익스포트하는 데는 물론, 애셋을 파일로 익스포트하는 데도 사용됩니다. 익스포터를 작성하는 법에 대한 정보는 [](Programming/Assets/CustomExporters) 페이지를 참고하시기 바랍니다.
+
+
+
+## 새 UFactory 클래스 추가하기
+
+UFactory 클래스를, 아마도 게임 에디터 프로젝터 안에 만드는 것이 좋겠지요. UnrealEngine4 에 포함된 UFactory 파생 유형 예제는 Editor/UnrealEd/Classes/Factories 에 있는 클래스를 참고해 보시기 바랍니다.
+
+
+
+## 중요 UFactory 멤버
+
+사용자의 입력을 원하는 팩토리는 전형적으로 UPROPERTY() 선언에 범주를 추가하는 식으로 자신의 멤버를 노출시킵니다. 이 UProperty 는 임포트/생성 대화창의 프로퍼티를 채우는 데 사용됩니다.
+
+그 다음에는 보통 UFactory 파생 유형의 생성자에 설정되는 UFactory 멤버 목록이 뒤따릅니다.
+
+
+### SupportedClass
+
+이 팩토리가 생성하는 오브젝트 타입을 가리킵니다. NULL 이면 팩토리가 멀티 타입을 지원함을 나타내며, ResolveSupportedClass 를 구현하여 명확히 해야 합니다. -- 아래 참고.
+
+
+### Description
+
+이 팩토리가 지원하는 타입에 대한 설명입니다. 에디터 UI 를 통해 사용자에게 표시됩니다.
+
+
+### bText
+
+_True_ 면 팩토리가 FactoryCreateText 를 통해 텍스트를, _False_ 면 팩토리가 FactoryCreateBinary 를 통해 바이너리 데이터를 임포트함을 나타냅니다.
+
+
+### bCreateNew
+_True_ 면 팩토리가 FactoryCreateText 나 FactoryCreateBinary 를 통해 데이터를 임포트하기 보다는 FactoryCreateNew 를 구현하여 오브젝트를 생성합니다.
+
+
+### bEditorImport
+
+_True_ 면 UI 가 팩토리를 데이터 임포트용 팩토리로 간주합니다. 다른 말로 팩토리가 외부 데이터를 기반으로 애셋 타입을 생성한다는 뜻입니다.
+
+
+### AutoPriority
+
+옵션. 같은 타입을 지원하는 팩토리의 우선권을 정하는 데 사용되는 정수입니다.
+
+
+
+## 싱글 타입을 지원하는 팩토리
+
+UFactory-파생형은 대부분, 팩토리 클래스의 StaticConstructor() 오버라이드 안에 SupportedClass 멤버를 설정하는 식으로 팩토리가 지정한, 싱글 타입 오브젝트를 임포트하거나 생성합니다. 아래는 새 UDecalMaterial 오브젝트를 만드는 데 사용되는 단순한 팩토리 구현 예제입니다.
+
+
+    
+	UCurveFactory::UCurveFactory(const FObjectInitializer& ObjectInitializer)
+		: Super(ObjectInitializer)
+	{
+		// Property initialization
+		bCreateNew = true;
+		bEditAfterNew = true;
+		SupportedClass = UCurveBase::StaticClass();
+		Description = TEXT("Curve");
+
+		CurveClass = UCurveFloat::StaticClass();
+	}
+    
+    UObject* UCurveFactory::FactoryCreateNew(UClass* Class,
+												UObject* InParent,
+												FName Name,
+												EObjectFlags Flags,
+												UObject* Context,
+												FFeedbackContext* Warn)
+	{
+		UCurveBase* NewCurve = NULL;
+		if(CurveClass != NULL)
+		{
+			NewCurve = CastChecked<UCurveBase>(StaticConstructObject(CurveClass,InParent,Name,Flags));		
+		}
+
+		return NewCurve;
+	}
+    
+
+
+
+
+
+## 멀티 타입을 지원하는 팩토리
+
+멀티 리턴 타입을 지원하는 팩토리를 구현하는 방식은 SupportedClass 를 NULL 로 선언한 다음, 임포트 이전 클래스를 리졸브하는 ResolveSupportedClass() 를 구현하는 식입니다.
+
+예를 들어 다음 코드를 가공의 .ABC 텍스트 파일 포맷을 읽어들인 다음 사용자의 선택에 따라 A 혹은 B 타입 오브젝트를 만드는 데 사용하는 팩토리라 가정해 봅시다:
+
+
+    
+	UCLASS(hidecategories=Object)
+	class UYourFactory : public UFactory
+	{
+		GENERATED_UCLASS_BODY()
+    
+        // 입력 파일을 A 또는 B 타입 중 어느 것으로 
+        // 간주할 지 나타내는 플래그. Import Dialog 에서 
+        // 사용자가 결정하며, 생성할 오브젝트 타입은 
+        // ResolveSupportedClass() 에서 
+        // 조사하여 결정.
+		UPROPERTY(Category=ABCOptions)
+        bool bTreatAsTypeA;
+
+	#if CPP
+		// UFactory 구현
+		UClass* ResolveSupportedClass();
+		UObject* FactoryCreateText(UClass* Class, /* more args */, FFeedbackContext* Warn);
+
+		/** A 유형 오브젝트 생성 */
+		UObject* UYourFactory::CreateTypeA(UClass* Class, /* more args */, FFeedbackContext* Warn)
+
+		/** B 유형 오브젝트 생성 */
+		UObject* UYourFactory::CreateTypeB(UClass* Class, /* more args */, FFeedbackContext* Warn)
+	#endif // CPP
+    }
+
+    UYourFactory::UYourFactory(const FObjectInitializer& ObjectInitializer)
+		: Super(ObjectInitializer)
+	{
+		// 프로퍼티 초기화
+
+		// "Import" UI 에서 이 팩토리를 고려할 것인가
+        bEditorImport = true;
+
+		// 지원되는 클래스가 없다고 선언하면
+        // Import Dialog 에서 'OK'가 선택되어 닫힐 때 
+        // 임포트 패스에서 ResolveSupportedClass() 호출
+        SupportedClass = NULL;
+
+        // 이 팩토리가 .ABC 파일에 관심있다고 등록
+        new(Formats) FString( TEXT("abc;Ye Olde ABC Type") );
+
+        bCreateNew = false;
+        bText = true;          // ABC 가 텍스트 파일 포맷임을 나타냄
+	}
+    
+    // SupportedClass==NULL 일때 Import Dialog 에서 호출되는 부분.
+    UClass* UYourFactory::ResolveSupportedClass()
+    {
+        UClass* UserSpecifiedClass = bTreatAsTypeA ? UTypeA::StaticClass() : UTypeB::StaticClass();
+        return UserSpecifiedClass;
+    }
+    
+    UObject* UYourFactory::FactoryCreateText(UClass* Class, /* more args */, FFeedbackContext* Warn)
+    {
+        UObject* NewObject;
+        if ( bTreatAsTypeA )
+        {
+            NewObject = CreateTypeA( Class, /* more args */, Warn );
+        }
+        else
+        {
+            NewObject = CreateTypeB( Class, /* more args */, Warn );
+        }
+        return NewObject;
+    }
+    
+    UObject* UYourFactory::CreateTypeA(UClass* Class, /* more args */, FFeedbackContext* Warn)
+    { ... }
+    UObject* UYourFactory::CreateTypeB(UClass* Class, /* more args */, FFeedbackContext* Warn)
+    { ... }
+    
+    
+
+
+
+ 
+
+
+
+

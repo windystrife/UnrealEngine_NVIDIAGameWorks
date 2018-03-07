@@ -1,0 +1,634 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	DeferredLightingCommon.usf: Common definitions for deferred lighting.
+=============================================================================*/
+
+#ifndef __DEFERRED_LIGHTING_COMMON__
+#define __DEFERRED_LIGHTING_COMMON__
+
+#include "DeferredShadingCommon.ush"
+#include "DynamicLightingCommon.ush"
+#include "BRDF.ush"
+#include "MonteCarlo.ush"
+#include "IESLightProfilesCommon.ush"
+#include "ShadingModels.ush"
+
+/** 
+ * Data about a single light.
+ * Putting the light data in this struct allows the same lighting code to be used between standard deferred, 
+ * Where many light properties are known at compile time, and tiled deferred, where all light properties have to be fetched from a buffer.
+ */
+struct FDeferredLightData
+{
+	float4 LightPositionAndInvRadius;
+	float4 LightColorAndFalloffExponent;
+	float3 LightDirection;
+	float3 LightTangent;
+    float SoftSourceRadius;
+	float4 SpotAnglesAndSourceRadius;
+	float MinRoughness;
+	float ContactShadowLength;
+	float2 DistanceFadeMAD;
+	float4 ShadowMapChannelMask;
+	/** Whether to use inverse squared falloff. */
+	bool bInverseSquared;
+	/** Whether this is a light with radial attenuation, aka point or spot light. */
+	bool bRadialLight;
+	/** Whether this light needs spotlight attenuation. */
+	bool bSpotLight;
+	/** Whether the light should apply shadowing. */
+	uint ShadowedBits;
+};
+
+/** Data about a single light to be shaded with the simple shading model, designed for speed and limited feature set. */
+struct FSimpleDeferredLightData
+{
+	float4 LightPositionAndInvRadius;
+	float4 LightColorAndFalloffExponent;
+	/** Whether to use inverse squared falloff. */
+	bool bInverseSquared;
+};
+
+#define REFERENCE_QUALITY	0
+
+#undef LIGHT_SOURCE_SHAPE
+#define LIGHT_SOURCE_SHAPE 1
+
+#define LIGHT_SHAPE_SPHERE	1
+#define LIGHT_SHAPE_RECT	2
+
+static const uint LightSourceShape = LIGHT_SHAPE_SPHERE;
+
+bool RayHitRect( float3 R, float3 RectCenter, float3 RectX, float3 RectY, float3 RectZ, float RectExtentX, float RectExtentY )
+{
+	// Intersect ray with plane
+	float3 PointOnPlane = R * max( 0, dot( RectZ, RectCenter ) / dot( RectZ, R ) );
+
+	bool InExtentX = abs( dot( RectX, PointOnPlane - RectCenter ) ) <= RectExtentX;
+	bool InExtentY = abs( dot( RectY, PointOnPlane - RectCenter ) ) <= RectExtentY;
+	return InExtentX && InExtentY;
+}
+
+float3 SphereLightingMIS( FGBufferData GBuffer, FDeferredLightData LightData, float3 LobeRoughness, float3 ToLight, float3 V, float3 N, uint2 Random )
+{
+	float3 Lighting = 0;
+
+	LobeRoughness = max( 0.08, LobeRoughness );
+
+	const float SourceRadius = max( 1, LightData.SpotAnglesAndSourceRadius.z );
+
+	const float DistanceSqr = dot( ToLight, ToLight );
+	const float3 ConeAxis = ToLight * rsqrt( DistanceSqr );
+	const float ConeCos = sqrt( 1 - Square( SourceRadius ) / DistanceSqr );
+
+	const float Area = PI * Square(SourceRadius);
+	const float SampleColor = 1.0 / Area;
+	
+	const uint NumSets = 3;
+	const uint NumSamples[ NumSets ] =
+	{
+		0,
+		4,
+		4,
+	};
+
+	UNROLL
+	for( uint Set = 0; Set < NumSets; Set++ )
+	{
+		LOOP
+		for( uint i = 0; i < NumSamples[ Set ]; i++ )
+		{
+			float2 E = Hammersley( i, NumSamples[ Set ], Random );
+			//float2 E = CorrelatedMultiJitter2D( i, NumSamples[ Set ], Random.x * Random.y * (Set + 17) );
+			
+			float3 L, H;
+			if( Set == 0 )
+			{
+				L = TangentToWorld( CosineSampleHemisphere( E ).xyz, N );
+				H = normalize(V + L);
+			}
+			else if( Set == 1 )
+			{
+				H = TangentToWorld( ImportanceSampleGGX( E, LobeRoughness[1] ).xyz, N );
+				L = 2 * dot( V, H ) * H - V;
+			}
+			else
+			{
+				L = TangentToWorld( UniformSampleCone( E, ConeCos ).xyz, ConeAxis );
+				H = normalize(V + L);
+			}
+
+			float NoL = saturate( dot(N, L) );
+			float NoH = saturate( dot(N, H) );
+			float VoH = saturate( dot(V, H) );
+
+			if( NoL > 0 && VoH > 0 )
+			{
+				BRANCH
+				if( Set != 2 && dot( L, ConeAxis ) < ConeCos )
+				{
+					// Ray misses sphere
+					continue;
+				}
+
+				float PDF[] =
+				{
+					NoL / PI,
+					D_GGX( LobeRoughness[1], NoH ) * NoH / (4 * VoH),
+					1.0 / ( 2 * PI * (1 - ConeCos) ),
+				};
+
+				// MIS balance heuristic
+				float InvWeight = 0;
+				UNROLL for( uint j = 0; j < NumSets; j++ )
+				{
+					InvWeight += PDF[j] * NumSamples[j];
+				}
+				float Weight = rcp( InvWeight );
+
+				float3 Shading = SurfaceShading( GBuffer, LobeRoughness, 1, L, V, N, Random ) * NoL;
+				Shading += SubsurfaceShading( GBuffer, L, V, N, 1, Random );
+			
+				Lighting += SampleColor * Shading * Weight;
+			}
+		}
+	}
+
+	return Lighting;
+}
+
+float Softmin(float y)
+{
+    return rcp(pow(1 + rcp(Pow3(y)), 1.0f / 3));
+}
+
+// Find representative incoming light direction and energy modification
+float3 AreaLightSpecular( FDeferredLightData LightData, inout float3 LobeRoughness, inout float3 ToLight, inout float3 L, float3 V, half3 N )
+{
+	float3 LobeEnergy = 1;
+
+	LobeRoughness = max( LobeRoughness, LightData.MinRoughness );
+	float3 m = LobeRoughness * LobeRoughness;
+    float3 m2 = m * m;
+
+	const float SourceRadius = LightData.SpotAnglesAndSourceRadius.z;
+	const float SourceLength = LightData.SpotAnglesAndSourceRadius.w;
+
+	// TODO early out for point lights
+	
+	float InvDistToLightSqr = rcp( dot( ToLight, ToLight ) );
+	float NoV = saturate( dot( N, V ) );
+	
+	float3 R = reflect( -V, N );
+	
+	// Point lobe in off-specular peak direction
+	float a = Square( LobeRoughness[1] );
+	R = lerp( N, R, (1 - a) * ( sqrt(1 - a) + a ) );
+	R = normalize( R );
+
+	BRANCH
+	if( LightData.SoftSourceRadius > 0 )
+	{
+		float SphereAngleSqr = saturate( Pow2( LightData.SoftSourceRadius ) * InvDistToLightSqr );
+		m2 += SphereAngleSqr / ( NoV * 3.6 + 0.4 );
+		m = sqrt(m2);
+		LobeRoughness = sqrt(m);
+	}
+
+	BRANCH
+	if( SourceLength > 0 )
+	{
+		// Energy conservation
+		float LineAngleSqr = saturate( Pow2( 0.5 * SourceLength ) * InvDistToLightSqr );
+		LobeEnergy *= sqrt( m2 / ( m2 + LineAngleSqr / ( NoV * 3.6 + 0.4 ) ) );
+
+		// Closest point on line segment to ray
+		float3 L01 = LightData.LightTangent * SourceLength;
+		float3 L0 = ToLight - 0.5 * L01;
+		float3 L1 = ToLight + 0.5 * L01;
+
+#if 1
+		// Shortest distance
+		float a = Square( SourceLength );
+		float b = dot( R, L01 );
+		float t = saturate( dot( L0, b*R - L01 ) / (a - b*b) );
+#else
+		// Smallest angle
+		float A = Square( SourceLength );
+		float B = 2 * dot( L0, L01 );
+		float C = dot( L0, L0 );
+		float D = dot( R, L0 );
+		float E = dot( R, L01 );
+		float t = saturate( (B*D - 2*C*E) / (B*E - 2*A*D) );
+#endif
+
+		ToLight = L0 + t * L01;
+	}
+
+	BRANCH
+	if( SourceRadius > 0 )
+	{
+		// asin(x) is angle to sphere, atan(x) is angle to disk, saturate(x) is free and in the middle
+		float SphereAngleSqr = saturate( Pow2( SourceRadius ) * InvDistToLightSqr );
+
+		// Energy conservation
+		LobeEnergy *= m2 / ( m2 + SphereAngleSqr / ( NoV * 3.6 + 0.4 ) );
+		
+		// Closest point on sphere to ray
+		float3 ClosestPointOnRay = dot( ToLight, R ) * R;
+		float3 CenterToRay = ClosestPointOnRay - ToLight;
+		float3 ClosestPointOnSphere = ToLight + CenterToRay * saturate( SourceRadius * rsqrt( dot( CenterToRay, CenterToRay ) ) );
+		ToLight = ClosestPointOnSphere;
+	}
+
+	L = normalize( ToLight );
+
+	return LobeEnergy;
+}
+
+/** Returns 0 for positions closer than the fade near distance from the camera, and 1 for positions further than the fade far distance. */
+float DistanceFromCameraFade(float SceneDepth, FDeferredLightData LightData, float3 WorldPosition, float3 CameraPosition)
+{
+	// depth (non radial) based fading over distance
+	float Fade = saturate(SceneDepth * LightData.DistanceFadeMAD.x + LightData.DistanceFadeMAD.y);
+	return Fade * Fade;
+}
+
+void GetShadowTerms(FGBufferData GBuffer, FDeferredLightData LightData, float3 WorldPosition, float4 LightAttenuation, out float OpaqueShadowTerm, out float SSSShadowTerm)
+{
+	// Remapping the light attenuation buffer (see ShadowRendering.cpp)
+
+	// LightAttenuation: Light function + per-object shadows in z, per-object SSS shadowing in w, 
+	// Whole scene directional light shadows in x, whole scene directional light SSS shadows in y
+	// Get static shadowing from the appropriate GBuffer channel
+	float UsesStaticShadowMap = dot(LightData.ShadowMapChannelMask, float4(1, 1, 1, 1));
+	float StaticShadowing = lerp(1, dot(GBuffer.PrecomputedShadowFactors, LightData.ShadowMapChannelMask), UsesStaticShadowMap);
+
+	if (LightData.bRadialLight)
+	{
+		// Remapping the light attenuation buffer (see ShadowRendering.cpp)
+
+		OpaqueShadowTerm = LightAttenuation.z * StaticShadowing;
+		// SSS uses a separate shadowing term that allows light to penetrate the surface
+		//@todo - how to do static shadowing of SSS correctly?
+		SSSShadowTerm = LightAttenuation.w * StaticShadowing;
+	}
+	else
+	{
+		// Remapping the light attenuation buffer (see ShadowRendering.cpp)
+		// Also fix up the fade between dynamic and static shadows
+		// to work with plane splits rather than spheres.
+
+		#if VXGI_EMITTANCE_VOXELIZATION
+		float DynamicShadowFraction = 0;
+		#else
+		float DynamicShadowFraction = DistanceFromCameraFade(GBuffer.Depth, LightData, WorldPosition, View.WorldCameraOrigin);
+		#endif
+
+		// For a directional light, fade between static shadowing and the whole scene dynamic shadowing based on distance + per object shadows
+		OpaqueShadowTerm = lerp(LightAttenuation.x, StaticShadowing, DynamicShadowFraction);
+		// Fade between SSS dynamic shadowing and static shadowing based on distance
+		SSSShadowTerm = min(lerp(LightAttenuation.y, StaticShadowing, DynamicShadowFraction), LightAttenuation.w);
+		
+		// combine with light function
+		OpaqueShadowTerm *= LightAttenuation.z;
+		SSSShadowTerm *= LightAttenuation.z;
+	}
+}
+
+float ShadowRayCast(
+	float3 RayOriginTranslatedWorld, float3 RayDirection, float RayLength,
+	int NumSteps, float StepOffset
+)
+{
+	float4 RayStartClip	= mul( float4( RayOriginTranslatedWorld, 1 ), View.TranslatedWorldToClip );
+	float4 RayDirClip	= mul( float4( RayDirection * RayLength, 0 ), View.TranslatedWorldToClip );
+	float4 RayEndClip	= RayStartClip + RayDirClip;
+
+	float3 RayStartScreen = RayStartClip.xyz / RayStartClip.w;
+	float3 RayEndScreen = RayEndClip.xyz / RayEndClip.w;
+	
+	float3 RayStepScreen = RayEndScreen - RayStartScreen;
+
+	float3 RayStartUVz = float3( RayStartScreen.xy * View.ScreenPositionScaleBias.xy + View.ScreenPositionScaleBias.wz, RayStartScreen.z );
+	float3 RayStepUVz = float3( RayStepScreen.xy * View.ScreenPositionScaleBias.xy, RayStepScreen.z );
+
+	float4 RayDepthClip	= RayStartClip + mul( float4( 0, 0, RayLength, 0 ), View.ViewToClip );
+	float3 RayDepthScreen = RayDepthClip.xyz / RayDepthClip.w;
+
+	const float Step = 1.0 / NumSteps;
+
+	// *2 to get less morie pattern in extreme cases, larger values make object appear not grounded in reflections
+	const float CompareTolerance = abs( RayDepthScreen.z - RayStartScreen.z ) * Step * 2;
+
+	float SampleTime = StepOffset * Step + Step;
+
+	float FirstHitTime = -1.0;
+
+	UNROLL
+	for( int i = 0; i < NumSteps; i++ )
+	{
+		float3 SampleUVz = RayStartUVz + RayStepUVz * SampleTime;
+		float SampleDepth = SceneDepthTexture.SampleLevel( SceneDepthTextureSampler, SampleUVz.xy, 0 ).r;
+
+		float DepthDiff = SampleUVz.z - SampleDepth;
+		bool Hit = abs( DepthDiff + CompareTolerance ) < CompareTolerance;
+
+		FirstHitTime = (Hit && FirstHitTime < 0.0) ? SampleTime : FirstHitTime;
+
+		SampleTime += Step;
+	}
+
+	float Shadow = FirstHitTime > 0.0 ? 1.0 : 0.0;
+
+	// Off screen masking
+	float2 Vignette = max(6.0 * abs(RayStartScreen.xy + RayStepScreen.xy * FirstHitTime) - 5.0, 0.0);
+	Shadow *= saturate( 1.0 - dot( Vignette, Vignette ) );
+
+	return 1 - Shadow;
+}
+
+#ifndef SUPPORT_CONTACT_SHADOWS
+#error "Must set SUPPORT_CONTACT_SHADOWS"
+#endif
+
+void GetLocalLightAttenuation(
+	float3 WorldPosition, 
+	float3 N,
+	FDeferredLightData LightData, 
+	float DistanceBiasSqr,
+	inout float3 ToLight, 
+	inout float3 L, 
+	inout float NoL, 
+	inout float DistanceAttenuation, 
+	inout float LightRadiusMask, 
+	inout float SpotFalloff)
+	{
+		ToLight = LightData.LightPositionAndInvRadius.xyz - WorldPosition;
+		
+		float DistanceSqr = dot( ToLight, ToLight );
+		L = ToLight * rsqrt( DistanceSqr );
+
+		if (LightData.bInverseSquared)
+		{
+			const float SourceRadius = LightData.SpotAnglesAndSourceRadius.z;
+			const float SourceLength = LightData.SpotAnglesAndSourceRadius.w;
+
+			BRANCH
+			if( SourceLength > 0 )
+			{
+				// Line segment irradiance
+				float3 L01 = LightData.LightTangent * SourceLength;
+				float3 ToLight0 = ToLight - 0.5 * L01;
+				float3 ToLight1 = ToLight + 0.5 * L01;
+
+				float LengthSqr0 = dot( ToLight0, ToLight0 );
+				float LengthSqr1 = dot( ToLight1, ToLight1 );
+				float rLength0 = rsqrt( LengthSqr0 );
+				float rLength1 = rsqrt( LengthSqr1 );
+				float Length0 = LengthSqr0 * rLength0;
+				float Length1 = LengthSqr1 * rLength1;
+
+				DistanceAttenuation = rcp( ( Length0 * Length1 + dot( ToLight0, ToLight1 ) ) * 0.5 + DistanceBiasSqr );
+				NoL = saturate( 0.5 * ( dot(N, ToLight0) * rLength0 + dot(N, ToLight1) * rLength1 ) );
+			}
+			else
+			{
+				DistanceAttenuation = rcp( DistanceSqr + DistanceBiasSqr );
+				NoL = saturate( dot( N, L ) );
+
+				if( SourceRadius > 0 )
+				{
+				#if 1	//HORIZON
+					NoL = dot( N, L );
+
+					float SinAlphaSqr = saturate( Square( SourceRadius ) / DistanceSqr );
+					float SinAlpha = sqrt( SinAlphaSqr );
+
+					if( NoL < SinAlpha )
+					{
+					#if 0
+						// Accurate sphere irradiance
+						float CosBeta = NoL;
+						float SinBeta = sqrt( 1 - CosBeta * CosBeta );
+						float TanBeta = SinBeta / CosBeta;
+					
+						float x = sqrt( 1 / SinAlphaSqr - 1 );
+						float y = -x / TanBeta;
+						float z = SinBeta * sqrt(1 - y*y);
+
+						DistanceAttenuation = SinAlphaSqr * ( NoL * acos(y) - x * z ) + atan( z / x );
+						DistanceAttenuation /= PI * Square( SourceRadius );
+						NoL = 1;
+					#else
+						// Hermite spline approximation
+						// Fairly accurate with SinAlpha < 0.8
+						// y=0 and dy/dx=0 at -SinAlpha
+						// y=SinAlpha and dy/dx=1 at SinAlpha
+						NoL = max( NoL, -SinAlpha );
+						NoL = Square( SinAlpha + NoL ) / ( 4 * SinAlpha );
+					#endif
+					}
+				#endif
+				}
+			}
+
+			// TODO optimize
+			LightRadiusMask = Square( saturate( 1 - Square( DistanceSqr * Square(LightData.LightPositionAndInvRadius.w) ) ) );
+		}
+		else
+		{
+			DistanceAttenuation = 1;
+			NoL = saturate( dot( N, L ) );
+			
+			LightRadiusMask = RadialAttenuation(ToLight * LightData.LightPositionAndInvRadius.w, LightData.LightColorAndFalloffExponent.w);
+
+#if REFERENCE_QUALITY
+			// anti Area
+			LightRadiusMask *= DistanceSqr + 1;
+#endif
+		}
+
+		if (LightData.bSpotLight)
+		{
+			SpotFalloff = SpotAttenuation(L, -LightData.LightDirection, LightData.SpotAnglesAndSourceRadius.xy);
+		}
+	}
+
+/** Calculates lighting for a given position, normal, etc with a fully featured lighting model designed for quality. */
+float4 GetDynamicLighting(float3 WorldPosition, float3 CameraVector, FGBufferData GBuffer, float AmbientOcclusion, uint ShadingModelID, FDeferredLightData LightData, float4 LightAttenuation, float Dither, uint2 Random)
+{
+	FLightAccumulator LightAccumulator = (FLightAccumulator)0;
+
+	float3 V = -CameraVector;
+	float3 N = GBuffer.WorldNormal;
+	float3 L = LightData.LightDirection;	// Already normalized
+	float3 ToLight = L * GBuffer.Depth;
+	float NoL = saturate( dot(N, L) );
+	float DistanceAttenuation = 1;
+	float LightRadiusMask = 1;
+	float SpotFalloff = 1;
+
+	if (LightData.bRadialLight)
+	{
+		GetLocalLightAttenuation(WorldPosition, N, LightData, 1, ToLight, L, NoL, DistanceAttenuation, LightRadiusMask, SpotFalloff);
+	}
+
+	LightAccumulator.EstimatedCost += 0.3f;		// running the PixelShader at all has a cost
+
+	BRANCH
+	if (LightRadiusMask > 0 && SpotFalloff > 0)
+	{
+		float SurfaceShadow = 1;
+		float SubsurfaceShadow = 1;
+
+		BRANCH
+		if (LightData.ShadowedBits)
+		{
+			GetShadowTerms(GBuffer, LightData, WorldPosition, LightAttenuation, SurfaceShadow, SubsurfaceShadow);
+
+			// greatly reduces shadow mapping artifacts
+			// Commented out because it reduces character shading quality.
+			//SurfaceShadow *= saturate(dot(N, L) * 6 - 0.2);
+
+#if SUPPORT_CONTACT_SHADOWS
+			BRANCH
+			if( LightData.ShadowedBits > 1 && LightData.ContactShadowLength > 0 )
+			{
+				float StepOffset = Dither - 0.5;
+				float Shadow = ShadowRayCast( WorldPosition + View.PreViewTranslation, L, LightData.ContactShadowLength * GBuffer.Depth, 8, StepOffset );
+				
+				SurfaceShadow *= Shadow;
+				SubsurfaceShadow *= Shadow * 0.5 + 0.5;
+			}
+#endif
+		}
+		else
+		{
+			SurfaceShadow = AmbientOcclusion;
+		}
+
+#if SUPPORT_CONTACT_SHADOWS
+		BRANCH
+		if( LightData.ShadowedBits < 2 && GBuffer.ShadingModelID == SHADINGMODELID_HAIR )
+		{
+			float StepOffset = Dither - 0.5;
+			SubsurfaceShadow = ShadowRayCast( WorldPosition + View.PreViewTranslation, L, 0.1 * GBuffer.Depth, 8, StepOffset );
+		}
+#endif
+
+		float SurfaceAttenuation	= (DistanceAttenuation * LightRadiusMask * SpotFalloff) * SurfaceShadow;
+		float SubsurfaceAttenuation	= (DistanceAttenuation * LightRadiusMask * SpotFalloff) * SubsurfaceShadow;
+
+		LightAccumulator.EstimatedCost += 0.3f;		// add the cost of getting the shadow terms
+
+		const bool bNeedsSeparateSubsurfaceLightAccumulation = GBuffer.ShadingModelID == SHADINGMODELID_SUBSURFACE_PROFILE;
+		const float3 LightColor = LightData.LightColorAndFalloffExponent.rgb;
+
+		#if NON_DIRECTIONAL_DIRECT_LIGHTING
+
+			float3 VolumeLighting = Diffuse_Lambert(GBuffer.DiffuseColor);
+			LightAccumulator_Add(LightAccumulator, VolumeLighting, (1.0/PI), LightColor * SurfaceAttenuation, bNeedsSeparateSubsurfaceLightAccumulation);
+
+		#else
+		{
+// NVCHANGE_BEGIN: Add VXGI
+#if VXGI_EMITTANCE_VOXELIZATION
+
+			float3 SurfaceLightingDiff = Diffuse_Lambert(GBuffer.DiffuseColor);
+			LightAccumulator_Add(LightAccumulator, SurfaceLightingDiff, 0, LightColor * (NoL * SurfaceAttenuation), false);
+
+			// accumulate subsurface
+			float3 SubsurfaceLighting = SubsurfaceShading(GBuffer, L, V, N, SubsurfaceShadow, Random);
+			LightAccumulator_Add(LightAccumulator, SubsurfaceLighting, 0, LightColor * SubsurfaceAttenuation, false);
+#else
+// NVCHANGE_END: Add VXGI
+
+			const float ClearCoatRoughness	= GBuffer.CustomData.y;
+
+			float3 LobeRoughness = float3(ClearCoatRoughness, GBuffer.Roughness, 1);
+			
+			#if REFERENCE_QUALITY
+				float LightMask = LightRadiusMask * SpotFalloff * SurfaceShadow;
+				LightAccumulator_Add(LightAccumulator, SphereLightingMIS( GBuffer, LightData, LobeRoughness, ToLight, V, N, Random ), 0, LightColor * LightMask, bNeedsSeparateSubsurfaceLightAccumulation);
+			#else
+				float3 LobeEnergy = AreaLightSpecular(LightData, LobeRoughness, ToLight, L, V, N);
+
+				// accumulate surface
+				{
+					float3 SurfaceLighting = SurfaceShading(GBuffer, LobeRoughness, LobeEnergy, L, V, N, Random);
+					LightAccumulator_Add(LightAccumulator, SurfaceLighting, (1.0/PI), LightColor * (NoL * SurfaceAttenuation), bNeedsSeparateSubsurfaceLightAccumulation);
+				}
+
+				// accumulate subsurface
+				{
+					float3 SubsurfaceLighting = SubsurfaceShading(GBuffer, L, V, N, SubsurfaceShadow, Random);
+
+					LightAccumulator_Add(LightAccumulator, SubsurfaceLighting, 0, LightColor * SubsurfaceAttenuation, false);
+
+					LightAccumulator.EstimatedCost += 0.4f;		// add the cost of the lighting computations (should sum up to 1 form one light)
+				}
+			#endif
+
+// NVCHANGE_BEGIN: Add VXGI
+#endif // VXGI_EMITTANCE_VOXELIZATION
+// NVCHANGE_END: Add VXGI
+		}
+		#endif
+	}
+
+	return LightAccumulator_GetResult(LightAccumulator);
+}
+
+/** 
+ * Calculates lighting for a given position, normal, etc with a simple lighting model designed for speed. 
+ * All lights rendered through this method are unshadowed point lights with no shadowing or light function or IES.
+ * A cheap specular is used instead of the more correct area specular, no fresnel.
+ */
+float3 GetSimpleDynamicLighting(float3 WorldPosition, float3 CameraVector, float3 WorldNormal, float AmbientOcclusion, float3 DiffuseColor, float3 SpecularColor, float Roughness, FSimpleDeferredLightData LightData)
+{
+	float3 V = -CameraVector;
+	float3 N = WorldNormal;
+	float3 ToLight = LightData.LightPositionAndInvRadius.xyz - WorldPosition;
+	float DistanceAttenuation = 1;
+	
+	float DistanceSqr = dot( ToLight, ToLight );
+	float3 L = ToLight * rsqrt( DistanceSqr );
+	float NoL = saturate( dot( N, L ) );
+
+	if (LightData.bInverseSquared)
+	{
+		// Sphere falloff (technically just 1/d2 but this avoids inf)
+		DistanceAttenuation = 1 / ( DistanceSqr + 1 );
+	
+		float LightRadiusMask = Square( saturate( 1 - Square( DistanceSqr * Square(LightData.LightPositionAndInvRadius.w) ) ) );
+		DistanceAttenuation *= LightRadiusMask;
+	}
+	else
+	{
+		DistanceAttenuation = RadialAttenuation(ToLight * LightData.LightPositionAndInvRadius.w, LightData.LightColorAndFalloffExponent.w);
+	}
+
+	float3 OutLighting = 0;
+
+	BRANCH
+	if (DistanceAttenuation > 0)
+	{
+		const float3 LightColor = LightData.LightColorAndFalloffExponent.rgb;
+
+		// Apply SSAO to the direct lighting since we're not going to have any other shadowing
+		float Attenuation = DistanceAttenuation * AmbientOcclusion;
+
+		#if NON_DIRECTIONAL_DIRECT_LIGHTING
+			float3 VolumeLighting = Diffuse_Lambert(DiffuseColor);
+			OutLighting += LightColor * Attenuation * VolumeLighting;
+		#else
+			OutLighting += LightColor * (NoL * Attenuation) * SimpleShading(DiffuseColor, SpecularColor, max(Roughness, .04f), L, V, N);
+		#endif
+	}
+
+	return OutLighting;
+}
+
+#endif

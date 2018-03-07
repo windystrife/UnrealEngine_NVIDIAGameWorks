@@ -1,0 +1,289 @@
+﻿INTSourceChangelist:3571159
+Availability:Public
+Crumbs: %ROOT%
+Title:Monoscopic Far Field Rendering
+Description:Monoscopic Far Field Rendering は、アンリアル エンジン 4 にビルトインされている VR モバイル アプリケーション向けの高度なレンダリング機能です。
+Type:Overview
+SkillLevel:Advanced
+Version:4.16
+Parent:Platforms/VR
+Order:
+Tags:Rendering
+Tags:Performance and Profiling
+Topic-Image:hybMonRend_topicImage.png
+related:Engine/Performance
+related:Engine/Performance/GPU
+related:Engine/Rendering
+related:Engine/Performance/StatCommands
+related:Platforms/VR/Profiling
+related:Platforms/VR/Profiling/Considerations
+related:Platforms/VR/Profiling/Overview
+Contributor:Oculus
+
+[TOC(start:2 end:3)]
+
+**Monoscopic Far Field** Rendering (正確には Hybrid Monoscopic Rendering) は、アンリアル エンジン 4 (UE4) にビルトインされている VR モバイル アプリケーション向けの高度なレンダリング機能です。一般的に、Monoscopic Far Field Rendering は 
+遠方のコンテンツを膨大に含むレベルのパフォーマンスを改善します。その理由は、 
+Monoscopic Far Field Rendering は両方の目に対して 1 度しかレンダリングしないからです。エピックは、この方法で遠方のオブジェクトをレンダリングすると、VR モバイル アプリケーションに対して著しいパフォーマンスの改善を生み出すことを発見しました。
+
+[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:videoid]
+	bAyqVgv-MqA
+	[/PARAMLITERAL]
+	[PARAMLITERAL:width]
+	100
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	56.25
+	[/PARAMLITERAL]
+	[PARAMLITERAL:units]
+	%
+	[/PARAMLITERAL]
+	[PARAMLITERAL:type]
+	simple
+	[/PARAMLITERAL]
+[/OBJECT]
+
+UE4 バージョン 4.16 のリリースで、Monoscopic Far Field Rendering は Gear VR デバイスのマルチビューでの使用が可能になりました。シーンの Stereoscopic Near Field Rendering 部分を最適化しておいてください。
+
+## Far Field Monoscopic Rendering を有効にする
+
+[REGION:note]
+UE4 の Monoscopic Far Field Rendering 設定を有効にする前に、Mobile HDR を必ず無効にしてください。
+[/REGION]
+
+新規プロジェクトの作成時に、Monoscopic Far Field Rendering はデフォルトで無効になっています。Monoscopic Far Field Rendering 設定にアクセスするには、アンリアル エディタの **[Project Settings (プロジェクト設定)]** メニューから **[Rendering]** を選択します。
+**[Project-Description]** メニューの **[VR]** ドロップダウン メニューの中にあります。
+
+[REGION:lightbox]
+	[![](uncheckedUI.png)(w:600)](uncheckedUI.png)
+[/REGION]
+
+[REGION:caption]
+	クリックしてフルサイズで表示
+[/REGION]
+
+Monoscopic Far Field Rendering を有効にするには、**[Monoscopic Far Field]** レンダリング バーの横のチェックボックスを選択します。
+
+![](checkedUI.png)
+
+**[Monoscopic Far Field]** 設定を有効にすると、UE4 の再起動を促されます。準備が出来たら UE4 を再起動して **[Monoscopic Far Field]** レンダリング設定をプロジェクトに適用します。
+
+![](restartWarning.png)  
+
+### モノスコピック カメラを追加する
+
+Monoscopic Far Field Rendering を無効の場合、プロジェクトには片目に 1 つずつ、合わせて 2 台のカメラがあります。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Disabled](Disabled.png)
+	[/PARAM]
+	[PARAM:after]
+	![Enabled](Enabled.png)
+	[/PARAM]
+[/OBJECT]
+
+Monoscopic Far Field Rendering を有効にすると、既存のステレオスコピック カメラの間に UE4 が 3 台目のカメラを追加します。追加されたこのカメラがモノスコピック カメラです。ハイブリッド モノスコピック (およびステレオスコピック) レンダリング パイプラインを有効にします。
+
+### 対称なステレオスコピック カメラ視錐体
+
+デバイスのプラットフォームによって、ステレオスコピック カメラ視錐体の平面ジオメトリは変化します。Gear VR デバイスの場合、ステレオスコピックおよびモノスコピック カメラ視錐体は対称ですが、Rift デバイスの場合はは非対称になります。 
+以下の表を参照して、Gear デバイスと Rift VR デバイスのカメラ視錐体の違いを確認してください。
+
+[REGION:imagetable]
+| ![FrustaGeometryGear.png](FrustaGeometryGear.png)(w:542) | ![FrustaGeometryRift.png](FrustaGeometryRift.png)(w:542) |
+| --- | --- |
+| Gear VR (対称の視錐体) | Rift (非対称の視錐体) |
+[/REGION]
+
+左側の図では、Gear VR ステレオスコピック カメラの視錐体は対象なので、モノスコピック カメラはステレオスコピック カメラ同じプロジェクション マトリクスを共有します。
+しかしながら Rift デバイスの場合、ステレオスコピック カメラは非対称 (ノイズに向かう内角は外角より小さい) です。 
+これは、モノスコピック カメラの視錐体は左右の視錐体の結合となり、モノスコピック レンダー ターゲットはステレオスコピック レンダー ターゲットよりもわずかに大きくなることを意味します。
+
+### 分割面の属性
+
+UE4 にモノスコピック カメラがある場合、レンダラに分割 (カリング) 面が追加されます。 
+
+![](AddingSplitPlane.png)
+
+[REGION:caption]
+緑の分割面がモノスコピック カメラの near 面となります。
+[/REGION]
+
+プロジェクトに追加される分割面には以下の属性があります。
+
+*	分割面はプロジェクトの z 軸に平行です。
+*	分割面の **Mono Culling Distance** のデフォルト設定は `750.0` センチメートル (7.5 メートル) です。
+*	面の向こう側のオブジェクトはモノスコピック カメラでレンダリングされています。
+*	カリング面をまたぐオブジェクトは両方のカメラ タイプ (モノスコピックとステレオスコピック) でレンダリングされます。
+
+以下の画像では、シェーダーのある (緑) 領域は分割面の向こう側を表します。この領域のオブジェクトはモノスコピック カメラの深度バッファでレンダリングされます。 
+分割面の near 面に入るオブジェクトは、ステレオスコピック カメラの深度バッファでレンダリングされます。
+
+![](MonoRenderArea.png)
+
+以下の 2 つの画像で実際の違いを比較できます。
+
+[REGION:imagetable]
+| ![StereoBuffer_banner.png](StereoBuffer_banner.png)(w:542) | ![MonoBuffer_banner.png](MonoBuffer_banner.png)(w:542) |
+| --- | --- |
+| ステレオスコピック深度バッファ | モノスコピック深度バッファ |
+[/REGION]
+
+## パフォーマンス上の配慮
+
+ここまでで、UE4 では深度バッファ レンダリング技術使って、ステレオスコピックまたはモノスコピック カメラのいずれかでコンテンツを分割することを学習しました。大まかに説明すると、 
+ステレオスコピック ピクセルがモノスコピック ピクセルより深度が低いかどうかを深度バッファで判断するように、UE4 モバイル フォワード レンダラを [修正](#Bookmark1) しました。オブジェクト ベースのレンダリング技術と比較すると、 
+ピクセル ベースの分割 (カリング) 面を使用するとパフォーマンスが向上しますが、分割面を通過するオブジェクトはモノスコピックとステレオスコピックの両方でレンダリングしなければいけない場合があります  
+(オブジェクトのピクセルがモノスコピックに描画する十分な距離がある場合でも)。これらの追加した描画コールは通常不要な帯域幅を生成して、GPU と CPU 頂点負荷を増加させます。
+
+以下の画像を見るとこのパフォーマンス ヒットが良く分かります。崖のバウンディング球が分割面と衝突すると、 
+ステレオスコピックの near 面カメラが崖をレンダリングします (崖のピクセルがモノスコピック far 面カメラによってレンダリングされるとしても)。
+
+![](StereoNoCull.png)
+
+## パフォーマンスの最適化
+
+プロジェクトのパフォーマンスを評価するために、**Rendering Hardware Interface (RHI)** から生成される統計的な出力を参照します。PHI から生成される統計情報を表示するには、以下の操作を行います。
+
+1.	エディタの **[Viewport Options]** ボタンをクリックします。
+
+	[REGION:lightbox]
+	[![](RHIStat_Step1.png)(w:600)](RHIStat_Step1.png)
+	[/REGION]
+
+	[REGION:caption]
+		クリックしてフルサイズで表示
+	[/REGION]
+
+1.	**[Stat]** オプションにカーソルを当てて情報メニューを開きます。
+
+	[REGION:lightbox]
+	[![](RHIStat_Step2.png)(w:600)](RHIStat_Step2.png)
+	[/REGION]
+
+	[REGION:caption]
+		クリックしてフルサイズで表示
+	[/REGION]
+
+1.	**[Stat] > [Advanced]** を選択します。
+
+	[REGION:lightbox]
+	[![](RHIStat_Step3.png)(w:600)](RHIStat_Step3.png)
+	[/REGION]
+
+	[REGION:caption]
+		クリックしてフルサイズで表示
+	[/REGION]
+
+1.	最後に **[RHI]** オプションを選択してプロジェクトの RHI [統計情報](Engine/Performance/StatCommands) を表示します。
+
+	[REGION:lightbox]
+	[![](RHIStat_Step4.png)(w:600)](RHIStat_Step4.png)
+	[/REGION]
+
+	[REGION:caption]
+		クリックしてフルサイズで表示
+	[/REGION]
+
+#### 最終結果
+
+プロジェクトの RHI [統計情報](Engine/Performance/StatCommands) はこのようになっているはずです。
+
+[REGION:lightbox]
+[![](RHIStat_Profiling.png)(w:600)](RHIStat_Profiling.png)
+[/REGION]
+
+[REGION:caption]
+	クリックしてフルサイズで表示
+[/REGION]
+
+プロジェクトの RHI プロファイルが好ましくないと判断した場合、プロジェクト パフォーマンスを最適化するために次の方法を試してみます。
+
+*	**分割面の距離を変更する**。シーンによっては、大きい (または小さい) レンダリング領域に合わせるために分割面の距離の修正が必要な場合があります。
+*	**Monoscopic Rendering モードを変更する**。Monoscopic Rendering モードを変更すると、そのオブジェクトを強制的にモノでレンダリングする必要性を判断することができます。
+*	**遠くのオブジェクトを強制的にモノでレンダリングする**。オブジェクトをモノでレンダリングしなければいけない場合があります (スカイボックスやバックグラウンド メッシュなど)。
+
+### 分割面の距離を変更する
+
+分割面の距離を変更するには、エディタでプロジェクトの **[World Settings]** を開き、**[VR]** メニューの **[Mono Culling Distance]** を好きな距離に変更します。
+
+![](MonoCullingDistance.png)
+
+### Monoscopic Rendering モードを更新する
+
+モノスコピック レンダリングを有効にした後で、プロジェクトの Monoscopic Rendering モードをアップデートした方が良いです。別のモードでシーンをレンダリングすると、プロジェクトで発生しうるパフォーマンス問題をデバッグしやすくなります。 
+アプリケーションの Monoscopic Rendering モードを更新するには、エディタのコマンド コンソールに `vr.MonoscopicFarFieldMode [0-4]` と入力します。
+
+![](UpdateMonoMode_console.png)
+
+`vr.MonoscopicFarFieldMode` のデフォルト値に設定されている `1` を変更する場合は以下の表を参照してください。
+
+|値|モード|
+|-----|---|
+|**0**| (Hybrid) Monoscopic Far Field Rendering を無効にします。 |
+|**1**| (Hybrid) Monoscopic Far Field Rendering を有効にします。Monoscopic Far Field Rendering が有効にされると、このモードがデフォルトで設定されます。 |
+|**2**| Stereoscopic Near Field Rendering のみを有効にします。 |
+|**3**| Stereoscopic Near Field Rendering を有効にし、Far Field Pixel Depth Test は無効にします。基本的にこのオプションは分割 (カリング) 面を無効にします。 |
+|**4**| Monoscopic Far Field Rendering のみを有効にします。 |
+
+### 遠くのオブジェクトを強制的にモノでレンダリングする
+
+このシーンで作業しているとしましょう。
+
+![](DebugScene.png)
+
+コンソール コマンドに `vr.MonoscopicFarFieldMode 3` を入力して、Stereoscopic far field redering を有効にし、分割面は無効にします。
+
+![](StereoNoCull.png)
+
+[REGION:caption]
+ステレオスコピック カメラが崖のメッシュをまだレンダリングしているため、崖をカリングするとパフォーマンスが落ちてしまいます。
+[/REGION]
+
+(シーンを検討した結果) 崖のメッシュを Monoscopic Far Field モードでレンダリングすることに決めた場合、**Blueprint Editor** でメッシュを開き、**[Details]** パネルの **[Rendering]** メニューから**[Render in Mono]** オプションを選択します。
+
+[REGION:lightbox]
+	[![](ForceRenderMono.png)(w:600)](ForceRenderMono.png)
+[/REGION]
+
+[REGION:caption]
+	クリックしてフルサイズで表示
+[/REGION]
+
+[REGION:tip]
+**Render in Mono** を true に設定すると、Head Mounted Device (HMD) が接続されて **Monoscopic Far Field** レンダリングがプロジェクトに対して有効になっていれば、崖のコンポーネントが Monoscopic Near Field カメラのみでレンダリングされます。
+[/REGION]
+
+## 立体視
+
+そもそも Hybrid Monoscopic Rendering の発想は、体視の目のプロセスから生まれました。[American Academy of Ophthalmology](https://www.aao.org/eye-health/ask-ophthalmologist-q/stereopsis) によると、立体視は深度の知覚と同じ意味です。 
+それぞれの目は、オブジェクトをわずかに違う角度から見ています。それぞれの目がそれぞれのイメージを脳に送り、脳で「合成」されて単一のイメージになります。それぞれの目から送り返された異なるイメージが両目視差を形成し、 
+脳はそれを使って深度情報を引き出します。 
+
+[REGION:note]
+オブジェクトが遠ざかるにつれて、脳によるオブジェクトの深度情報の抽出が難しくなります。
+[/REGION]
+
+(#Bookmark1)
+### 両目視差の使用方法
+
+脳は遠くのオブジェクトから深度情報を引き出すことが難しいという事実を利用して、UE4 モバイル フォワード レンダラを以下を実行するように修正しました (順番に):
+
+1.	ステレオスコピック カメラで不透明なオブジェクトをレンダリングします。
+
+	![](Stereo.png)
+
+1.	出力を変更および組み合わせて、モノスコピック深度バッファを事前追加して、モノスコピック オクルージョン マスクを作成します。
+
+1.	モノスコピック カメラで不透明なオブジェクトをレンダリングします。
+
+	![](MonoOnly.png)
+
+1.	モノスコピック カメラの結果をステレオ深度バッファに合成します。
+
+	![](MonoStereo.png)
+
+1.	透明なコンテンツをすべてレンダリングし、ステレオスコピック カメラですべてのポストプロセスを実行します。
+

@@ -1,0 +1,44 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	PostProcessHistogramReduce.usf: PostProcessing combine multiple histograms into a single one
+=============================================================================*/
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+
+// how many lines of histograms should be compiled into one
+uint LoopSize;
+//
+float4 EyeAdapationTemporalParams;
+// the last frames eye adaptation settings
+Texture2D EyeAdaptationTexture;
+
+void MainPS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvPosition: SV_POSITION, out float4 OutColor : SV_Target0)
+{
+	float2 UV = UVAndScreenPos.xy;
+
+	float4 SceneColor = 0;
+
+	// accumulate all histograms into a single one
+	// could be optimized using bilinear filtering (half sample count)
+	for(uint y = 0; y < LoopSize; ++y)
+	{
+		SceneColor += Texture2DSample(PostprocessInput0, PostprocessInput0Sampler, UV + float2(0, y * PostprocessInput0Size.w));
+	}
+
+	if(SvPosition.y < 1.0f)
+	{
+		// line 0: histogram
+		OutColor = SceneColor / LoopSize;
+	}
+	else
+	{
+		// line 1: eye adaptation exposure scale (copied over so we can read the value in EyeAdaptation pass which is writing to eye adaptation)
+
+		// second line first pixel in the texture has the ExposureScale from last frame
+		float OldExposureScale = EyeAdaptationTexture.Load(int3(0, 0, 0)).x;
+
+		OutColor = OldExposureScale;
+	}
+}

@@ -1,0 +1,210 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	PostProcessBloom.usf: PostProcessing bloom
+=============================================================================*/
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+#include "EyeAdaptationCommon.ush"
+
+// for VisualizeBloomOverlayPS
+// xyz:Bloom1Tint.rgb, w:unused
+float4 ColorScale1;
+
+// vertex shader entry point
+void MainPostprocessCommonVS(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out noperspective float4 OutTexCoord : TEXCOORD0,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	DrawRectangle(InPosition, InTexCoord, OutPosition, OutTexCoord.xy);
+	OutTexCoord.zw = OutPosition.xy;
+}
+
+void VisualizeBloomSetupPS(
+	noperspective float4 UVAndScreenPos : TEXCOORD0,
+	float4 SvPosition : SV_POSITION, 
+	out float4 OutColor : SV_Target0)
+{
+	float2 UV = UVAndScreenPos.xy;
+
+	OutColor = 0;
+
+	int2 PixelPos = (int2)SvPosition.xy;
+
+	int2 ViewportCenter = (int2)(ViewportRect.xy + ViewportSize.xy / 2);
+
+	// cross in x and y
+//	bool bMask = ViewportCenter.x == PixelPos.x || ViewportCenter.y == PixelPos.y;
+	// vertical line at viewport center
+	bool bMask = ViewportCenter.x == PixelPos.x;
+
+	if(bMask)
+	{
+		// green is the test impulse
+		OutColor.g = 20;
+	}
+	
+	float3 HDRColor = Texture2DSample(PostprocessInput0, PostprocessInput0Sampler, UV).rgb;
+
+	// reference is in red
+	OutColor.r = dot(HDRColor, 1/3.0f);
+	// blue is unused
+	OutColor.b = 0;
+}
+
+void VisualizeBloomOverlayPS(
+	noperspective float4 UVAndScreenPos : TEXCOORD0,
+	float4 SvPosition : SV_POSITION,
+	out float4 OutColor : SV_Target0)
+{
+	float2 UV = UVAndScreenPos.xy;
+	int2 PixelPos = (int2)SvPosition.xy;
+
+	int2 ViewportCenter = (int2)(ViewportRect + ViewportSize / 2);
+
+	// debug: zoomin
+	if(0)
+	{
+		PixelPos.x = (PixelPos.x - ViewportCenter.x) / 10 + ViewportCenter.x;
+		UV.x = PixelPos.x * PostprocessInput0Size.z;
+	}
+
+	float2 ViewPortUV = PixelPos * ViewportSize.zw;
+
+	float2 UVCenter = float2(UV.x, (int)(ViewportRect.y + ViewportSize.y / 2) * PostprocessInput0Size.w);
+
+	// bottom is reference, top is cretated through the bloom system
+	bool bBottom = PixelPos.y > ViewportCenter.y;
+
+	float HDRValueTest;
+	{
+		float3 NonBloomColorTop = Texture2DSampleLevel(PostprocessInput1, PostprocessInput1Sampler, UVCenter, 0).rgb;
+		float4 CombinedBloom = Texture2DSample(PostprocessInput2, PostprocessInput2Sampler, UVCenter);
+		float3 BloomDirtMaskColor = 0;
+
+		// only take green, in red is the reference
+		HDRValueTest = (NonBloomColorTop + CombinedBloom.rgb * (ColorScale1.rgb + BloomDirtMaskColor)).g;
+	}
+
+	float HDRValueReference = Texture2DSampleLevel(PostprocessInput1, PostprocessInput1Sampler, UVCenter, 0).r;
+
+	float CompareY = lerp(1.1f, -0.1f, ViewPortUV.y);
+
+	bool bOutside = CompareY <= 0 || CompareY >= 1;
+
+	// non linear distribution for easier tweaking?
+	float ValueCompare = exp(-20 * (1-CompareY) + 3.5);
+
+	bool bReferenceMask = HDRValueReference > ValueCompare;
+	bool bTestMask = HDRValueTest > ValueCompare;
+	bool bCenter = ViewportCenter.x == PixelPos.x;
+
+	// faint grey in the background to see where the diagram ends
+	OutColor = 0.05f;
+
+	FLATTEN if(bReferenceMask || bTestMask)
+	{
+		OutColor = 0;
+	}
+
+	FLATTEN if(bReferenceMask)
+	{
+		OutColor.g = 1;
+	}
+
+	FLATTEN if(bTestMask)
+	{
+		OutColor.r = 1;
+	}
+
+	FLATTEN if(bOutside)
+	{
+		OutColor.rgb = bCenter ? float3(1, 0, 0) : float3(0,0,0);
+	}
+
+}
+
+// vertex shader entry point
+void MainVS(
+	float4 InPosition : ATTRIBUTE0,
+	float2 InTexCoord : ATTRIBUTE1,
+	out noperspective float4 OutTexCoord : TEXCOORD0,
+	out nointerpolation float OutExposureScale : TEXCOORD1,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	MainPostprocessCommonVS(InPosition, InTexCoord, OutTexCoord, OutPosition);
+
+#if FEATURE_LEVEL >= FEATURE_LEVEL_SM5
+	// texture can be GWhiteTexture which is 1x1. It's important we don't read outside bounds.
+	OutExposureScale = EyeAdaptation.Load(int3(0, 0, 0)).r;
+#else
+	OutExposureScale = 1;
+#endif
+}
+
+// -----------------------------
+float4 BloomSetupCommon(float2 UV, float Threshold, float ExposureScale)
+{
+	half4 SceneColor = Texture2DSample(PostprocessInput0, PostprocessInput0Sampler, UV);
+
+	// clamp to avoid artifacts from exceeding fp16 through framebuffer blending of multiple very bright lights
+	SceneColor.rgb = min(float3(256 * 256, 256 * 256, 256 * 256), SceneColor.rgb);
+	
+	half3 LinearColor = SceneColor.rgb;
+
+	// todo: make this adjustable (e.g. LUT)
+	half TotalLuminance = Luminance( LinearColor ) * ExposureScale;
+	half BloomLuminance = TotalLuminance - Threshold;
+	// mask 0..1
+	half BloomAmount = saturate(BloomLuminance / 2.0f);
+
+	return float4(BloomAmount * LinearColor, 0);
+}
+
+// x:BloomThreshold, yz:unused, w:ExposureScale (useful if eyeadaptation is locked)
+float4 BloomThreshold;
+
+// bloom threshold
+void MainPS(
+	noperspective float4 UVAndScreenPos : TEXCOORD0,
+	nointerpolation float InExposureScale : TEXCOORD1,
+	out float4 OutColor : SV_Target0)
+{
+	float2 UV = UVAndScreenPos.xy;
+
+#if NO_EYEADAPTATION_EXPOSURE_FIX 
+	float ExposureScale = BloomThreshold.w;
+#else
+	float ExposureScale = InExposureScale;
+#endif
+
+	OutColor = BloomSetupCommon(UV, BloomThreshold.x, ExposureScale);
+}
+
+#if COMPUTESHADER
+// x: BloomThreshold, y: Unused, zw: ThreadToUVScale
+float4 BloomSetupComputeParams;
+RWTexture2D<float4> OutComputeTex;
+
+[numthreads(THREADGROUP_SIZEX, THREADGROUP_SIZEY, 1)]
+void MainCS(uint2 DispatchThreadId : SV_DispatchThreadID)
+{
+	float2 UV = ((float2)DispatchThreadId + View.ViewRectMin.xy + 0.5f) * BloomSetupComputeParams.zw;
+
+	if (IsComputeUVOutOfBounds(UV))
+	{
+		return;
+	}
+
+	float ExposureScale = EyeAdaptationLookup();
+	float4 OutColor = BloomSetupCommon(UV, BloomSetupComputeParams.x, ExposureScale);
+
+	uint2 PixelPos = DispatchThreadId + (uint2)View.ViewRectMin.xy;
+	OutComputeTex[PixelPos] = OutColor;
+}
+#endif 

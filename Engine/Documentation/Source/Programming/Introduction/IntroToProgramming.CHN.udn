@@ -1,0 +1,857 @@
+﻿INTSourceChangelist:2723194
+Title:UE4 中的 C++ 编程介绍
+Crumbs:
+Description:C++ 程序员的虚幻引擎介绍指南
+Availability:Public
+Version:4.9
+
+![image alt text](image_0.png)
+
+## 虚幻 C++ 妙不可言！
+
+此指南讲述如何在虚幻引擎中编写 C++ 代码。不必担心，虚幻引擎中的 C++ 编程乐趣十足，上手完全不难！我们可以将虚幻 C++ 视为“辅助 C++”，因为诸多功能使 C++ 的使用变得十分简单。
+
+阅读此指南的前提是您需要熟悉 C++ 或其他编程语言。理解此指南的前提是您已有 C++ 使用经验，但如您了解 C#、Java 或 JavaScript，也会发现其中的共通之处。
+
+如您编程经验为零，我们也能助您一臂之力！阅读 [蓝图可视化脚本](Engine/Blueprints) 后即可上手。可通过蓝图脚本编写创建整个游戏！
+
+可以在虚幻引擎中编写“纯旧式 C++ 代码”，但您通读此指南并学习虚幻编程模型的基础后可达到更高的成就。我们将在随后进一步讨论。
+
+## C++ 和蓝图
+
+虚幻引擎提供两种方法创建游戏性元素：C++ 和蓝图可视化脚本。程序员可通过 C++ 添加基础游戏性系统。设计师即可在此系统上（或使用此系统）创建关卡或游戏的自定义游戏性。在这类情况下，C++ 程序员在他们最擅长的 IDE （通常为 Microsoft Visual Studio 或 Apple Xcode）中工作，而设计师则在虚幻编辑器的蓝图编辑器中工作。
+
+两个系统均可使用游戏性 API 和框架类。这两个系统可单独使用，而结合使用形成相互补充后将展示真正的强大之处。那么这究竟意味着什么呢？这意味着：程序员在 C++ 中创建游戏性构建块，设计师利用这些块打造有趣游戏性时，引擎能发挥最佳工作效率。
+
+如此说来，让我们一探究竟，了解 C++ 程序员为设计师创建构建块的典型工作流。在此例中，我们将创建一个类。此类稍后会由设计师或程序员通过蓝图进行延展。在此类中，我们将创建一些设计师可进行设置的属性，并且我们将从这些属性派生出新数值。结合我们提供的工具和 C++ 宏即可轻松完成整个过程的操作。
+
+### 类向导
+
+首先我们将使用虚幻编辑器中的类向导生成基础 C++ 类，以便蓝图稍后进行延展。下图展示了向导的第一步 - 新建一个 Actor。
+
+![image alt text](image_1.png)
+
+进程中的第二步是告知向导需要生成类的命名。下图显示的第二步中使用了默认命名。
+
+![image alt text](image_2.png)
+选择创建类后，向导将生成文件并打开开发环境，以便开始编辑。这便是生成的类定义。如需了解类向导的更多信息，请查阅此 [链接](Programming/Development/ManagingGameCode/CppClassWizard)。
+
+	#include "GameFramework/Actor.h"
+	#include "MyActor.generated.h"
+
+	UCLASS()
+	class AMyActor : public AActor
+	{
+		GENERATED_BODY()
+		
+	public:	
+		// 设置该 actor 属性的默认值
+		AMyActor();
+		// 游戏开始时或生成时调用
+		virtual void BeginPlay() override;
+		
+		// 每帧调用
+		virtual void Tick( float DeltaSeconds ) override;
+	};
+
+类向导通过指定为重载的 **BeginPlay()** 和 **Tick()** 生成类。**BeginPlay()** 是一个事件，将告知您 Actor 已以可操作状态进入游戏中。现在便适合开始类的游戏性逻辑。**Tick()** 每帧调用一次，对应的时间量为自上次调用传入的实际运算时间。在此可创建反复逻辑。如不需要此功能，最好将其移除，以节约少量性能开销。如要移除此功能，必须将构建函数中说明 tick 应该发生的代码行删除。以下构建函数包含讨论中的代码行。
+
+	AMyActor::AMyActor()
+
+	{
+
+		// 将此 actor 设为每帧调用 Tick()。不需要时可将此关闭，以提高性能。
+
+		PrimaryActorTick.bCanEverTick = true;
+
+	}
+
+### 使属性出现在编辑器中
+
+类创建好之后，现在即可创建一些属性（设计师可在虚幻编辑器中设置这些属性）。使用特殊宏 **UPROPERTY()** 即可轻松将属性公开到编辑器。只需在属性声明之前使用 **UPROPERTY(EditAnywhere)** 宏即可，如以下类所示。
+
+	UCLASS()
+	class AMyActor : public AActor
+	{
+		GENERATED_BODY()
+
+		UPROPERTY(EditAnywhere)
+		int32 TotalDamage;
+
+		...
+	};
+
+执行这些操作后，即可在编辑器中对数值进行编辑。有多种方式控制其编辑方法和位置。为 **UPROPERTY()** 宏传入更多信息可完成此操作。例如：如需 TotalDamage 属性和相关属性出现在一个部分中，可使用分类功能。以下属性声明对此进行演示。
+
+	UPROPERTY(EditAnywhere, Category="Damage")
+	int32 TotalDamage;
+
+用户需要编辑此属性时，它将和其他属性（这些属性已以此类型命名标记）一同出现在 Damage 标题之下。这可将常用设置放置在一起，便于设计师进行编辑。
+
+现在让我们将相同属性对蓝图公开。
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Damage")
+	int32 TotalDamage;
+
+如您所见，存在一个蓝图特有的参数。正是此参数使属性为可读取和可编写状态。还存在一个单独选项 - BlueprintReadOnly。可通过此选项使属性在蓝图中被识别为常量。此外还有多个选项可控制属性对引擎公开的方式。如需了解更多选项，请查阅此 [链接](Programming/UnrealArchitecture/Reference/Properties/Specifiers)。
+
+继续讨论以下部分之前，我们来添加一些属性到这个示例类。已有属性对此 actor 输出的伤害总量进行控制。我们更进一步，实现随时间输出伤害。以下代码添加了一个设计师可进行设置的属性，和另一个设计师可查看但无法进行更改的属性。
+
+	UCLASS()
+	class AMyActor : public AActor
+	{
+		GENERATED_BODY()
+
+		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Damage")
+		int32 TotalDamage;
+
+		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Damage")
+		float DamageTimeInSeconds;
+
+		UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Transient, Category="Damage")
+		float DamagePerSecond;
+	
+		...
+	};
+
+DamageTimeInSeconds 是设计师可进行修改的属性。DamagePerSecond 属性是使用设计师设置的计算值（详见下一部分）。VisibleAnywhere 标记意味着属性在虚幻编辑器中为可见状态，但不可进行编辑。Transient 标记意味着无法从硬盘对其进行保存或加载；它应该为一个派生的非持久值。下图将属性显示为类默认的部分。
+
+![image alt text](image_3.png)
+
+### 在构建函数中设置默认值
+
+在构建函数中设置属性默认值和典型 C++ 类方法一致。以下是在构建函数中设置默认值的两个例子，它们在功能上相同。
+
+	AMyActor::AMyActor()
+	{
+		TotalDamage = 200;
+		DamageTimeInSeconds = 1.f;
+	}
+
+	AMyActor::AMyActor() :
+		TotalDamage(200),
+		DamageTimeInSeconds(1.f)
+	{
+	}
+
+下图是在构建函数中添加默认值后的属性视图。
+
+![image alt text](image_4.png)
+
+为支持设计师对每个实例设置属性，数值也从给定对象的实例数据中加载。此数据应用在构建函数之后。与 **PostInitProperties()** 调用链挂钩即可基于设计师设置的数值创建默认值。此处的进程范例中，**TotalDamage** 和 **DamageTimeInSeconds** 为设计师指定的数值。即时这些数值为设计师指定，您仍然可以为它们提供恰当的默认值，正如我们在上例中执行的操作。 
+[REGION:note]
+如未向属性提供默认值，引擎将自动把属性设为零（指针类设为 nullptr）。
+[/REGION]
+	void AMyActor::PostInitProperties()
+	{
+		Super::PostInitProperties();
+		DamagePerSecond = TotalDamage / DamageTimeInSeconds;
+	}
+
+下图是添加以上 **PostInitProperties()** 代码后的属性视图。
+
+![image alt text](image_5.png)
+
+###热重载
+
+如您习惯于使用 C++ 在其他项目中编程，虚幻引擎的一个炫酷功能可能会让您小吃一惊。无需关闭编辑器即可对 C++ 变更进行编译！有两种方法实现：
+
+1. 在编辑器仍在运行时直接以普通方式从 Visual Studio 或 Xcode 进行编译。编辑器将检测到新编译的 DLL 文件并即时重载变更！
+
+	![image alt text](image_6.png)
+	[REGION:note]
+	如与调试器存在附着，则需要先分离，方可通过 Visual Studio 进行编译。
+	[/REGION]
+2. 或者，直接点击编辑器主工具栏上的 **Compile** 按钮。
+
+	![image alt text](image_7.png)
+
+此功能可用于此教程之后的部分。
+
+### 通过蓝图延展 C++ 类
+
+迄今为止，我们已通过 C++ 类向导创建了一个简单的游戏性类，并添加了一些供设计师设置的属性。现在我们一起来了解设计师应该如何从零开始创建唯一类。
+
+首先我们需要从 AMyActor 类新建一个蓝图类。注意下图中选中的基类名显示为 MyActor，而非 AMyActor。这是刻意设置的结果。对设计师隐藏工具使用的命名规则，使命名更加浅显易懂。
+
+![image alt text](image_8.png)
+
+按下 **Select** 后，便将新建一个默认命名的蓝图类。在此例中，如下方的 **内容浏览器** 截图所示 - 命名被设为 CustomActor1。
+
+![image alt text](image_9.png)
+
+这是我们以设计师身份进行自定义的第一个类。首先我们需要变更伤害属性的默认值。在此例中，设计师将 **TotalDamage** 改为 300，将输出该伤害的时间设为 2 秒。这便是属性现在出现的方式。
+
+![image alt text](image_10.png)
+
+我们的计算值与期望的数值不匹配。它应该为 150，但却仍然为默认的 200。出现此现象的原因是 - 属性从载入过程被初始化后，才会对每秒伤害数值进行计算。虚幻编辑器中的运行时变更并非原因所在。因为目标对象在编辑器中被更改时引擎将对其进行通知，所以该问题拥有简单的解决方法。以下代码显示派生值在编辑器中发生变化时进行计算所需要添加的钩。
+
+	void AMyActor::PostInitProperties()
+	{
+		Super::PostInitProperties();
+
+		CalculateValues();
+	}
+
+	void AMyActor::CalculateValues()
+	{
+		DamagePerSecond = TotalDamage / DamageTimeInSeconds;
+	}
+
+	#if WITH_EDITOR
+	void AMyActor::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+	{
+		CalculateValues();
+
+		Super::PostEditChangeProperty(PropertyChangedEvent);
+	}
+	#endif
+
+需要注意的一点是 - **PostEditChangeProperty()** 法存在于编辑器特有的 #ifdef 中。这是为了用游戏必需的代码进行游戏构建，并删除使可执行文件容量无谓变大的多余代码。将代码编译后，如下图所示，**DamagePerSecond** 数值与期望值达成匹配。
+
+![image alt text](image_11.png)
+
+### 跨 C++ 和蓝图边界调用函数
+
+我们已经谈到如何对蓝图公开属性，在深入探索引擎之前还有最后一个需要介绍的要点。在游戏性系统的创建中，设计师需要调用 C++ 程序员创建的函数，而游戏性程序员需要从 C++ 代码调用蓝图中实现的函数。首先，我们先实现从蓝图中调用 CalculateValues() 函数。对蓝图公开函数和公开属性同样简单。在函数声明前放置一个宏即可！以下代码片段显示了所需内容。
+
+	UFUNCTION(BlueprintCallable, Category="Damage")
+	void CalculateValues();
+
+**UFUNCTION()** 宏把 C++ 函数对反射系统公开。BlueprintCallable 选项将其对蓝图虚拟机公开。每个对蓝图公开的函数都需要与其相关的类型，右键单击快捷菜单才能正常使用。下图显示了类型对快捷菜单的影响。
+
+![image alt text](image_12.png)
+
+如您所见，可从 **Damage** 类型选择函数。以下蓝图代码显示 TotalDamage 数值发生变化后将进行调用，重新计算依赖数据。
+
+![image alt text](image_13.png)
+
+计算依赖属性使用的函数与之前添加的函数相同。引擎的大部分通过 **UFUNCTION()** 宏对蓝图公开，开发者无需编写 C++ 代码即可构建游戏。然而，最佳方法是使用 C++ 构建基础游戏性系统和与性能关系密切的代码，而蓝图则用于自定义行为或从 C++ 构建块创建合成行为。
+
+实现设计师调用 C++ 代码的操作后，我们来寻找一个越过 C++/蓝图边界的好方法。此方法允许 C++ 代码调用蓝图中定义的函数。通常使用此方法告知设计师在适当时可进行反馈的事件。通常这包括特效生成或其他视觉效果，如 actor 的隐藏和现身。以下代码片段显示蓝图实现的函数。
+
+	UFUNCTION(BlueprintImplementableEvent, Category="Damage")
+	void CalledFromCpp();
+
+此函数的调用方式和其他 C++ 函数相同。虚幻引擎在后台生成一个基础 C++ 函数实现；它理解如何调入蓝图 VM。这通常被称作 Thunk（形实转换程序）。如讨论中的蓝图不为此方法提供函数主体，函数的行为则与不含主体行为的 C++ 函数一样：不执行任何操作。如果希望提供 C++ 默认实现，同时仍允许蓝图覆写此方法，结果会怎样？UFUNCTION() 宏也拥有针对此情况的选项。以下代码片段显示达成此效果需要在头中进行的的变更。
+
+	UFUNCTION(BlueprintNativeEvent, Category="Damage")
+	void CalledFromCpp();
+
+此版本仍然生成 thunking 法，以调入蓝图 VM。那么如何提供默认实现呢？工具还将生成外观与 <function name>_Implementation() 相似的新函数实现。您必须提供函数的这个版本，否则项目将无法链接。以下是上方声明的实现代码。
+
+	void AMyActor::CalledFromCpp_Implementation()
+	{
+		// 玩点花活
+	}
+
+现在，讨论中的蓝图不覆写方法时将调用函数的这个版本。需要注意：在编译工具的旧版本中，_Implementation() 声明为自动生成。在 4.8 或更高版本中，这会被显式添加到头中。
+
+了解常规游戏性程序员工作流以及协同设计师构建游戏性功能的方法后，您便可以开始自己的游戏开发冒险之旅。您可继续阅读此文档了解如何在引擎中使用 C++，也可直接对 launcher 中的实例进行操作，获得实际操作经验。 
+
+## 深入了解
+
+您决定继续和我们一同冒险。太棒啦！下个讨论要点围绕游戏性类层级进行。这部分我们将讨论基础构建块以及它们之间相互关联的方式。在此我们将了解虚幻引擎如何使用继承和合成构建自定义游戏性功能。
+
+### 游戏性类：对象、Actor 和组件
+
+多数游戏性类派生自 4 个主要类型。它们是 **UObject**、**AActor**、**UActorComponent** 和 **UStruct**。以下部分会对这些构建块进行一一说明。当然，您还可以创建并非派生自这些类的类型，但其无法采用引擎中内置的功能。**UObject** 层级树之外创建的类的典型用法有：整合第三方库、封装操作系统特定功能等。
+
+#### 虚幻对象（UObject）
+
+虚幻引擎中的基础构建块被称作 UObject。此类结合 **UClass** 提供引擎中最重要的若干基础服务：
+
+* 属性和方法反射
+* 属性序列化
+* 垃圾回收
+* 按命名查找 UObject
+* 可配置属性数值
+* 属性和方法网络支持
+
+派生自 UObject 的每个类拥有一个为其创建的单例 UClass，此对象包含关于类实例的所有元数据。UObject 和 UClass 是游戏性对象在其生命期中执行所有操作的根源。区分 UClass 和 UObject 的最佳方式：UClass 描述 UObject 实例的组成、可用于序列化的属性、网络等。多数的游戏性开发不会直接从 UObject 进行派生，而从 AActor 和 UActorComponent 进行派生。编写游戏性代码无需了解 UClass/UObject 的工作细节。但了解这些系统的存在也会有所帮助。
+
+#### AActor
+
+AActor 是作为游戏体验一部分的对象。AActor 将被设计师放置在关卡中，或通过游戏性系统在运行时创建。所有可放入关卡的对象均延展自此类。范例有 **AStaticMeshActor**、**ACameraActor** 和 **APointLight** actor。AActor 派生自 UObject，因此可使用上一部分列出的所有标准功能。可通过游戏性代码（C++ 或蓝图）显式销毁 AActor。拥有关卡从内存被卸载后，通过标准垃圾回收机制进行销毁。AActor 负责游戏对象的高级行为。AActor 还是可进行网络复制的基类。在网络复制中，AActor 还可分布 UActorComponent 的信息。UActorComponent 为需要网络支持的 AActor 所拥有。
+
+AActor 拥有其自身的行为（通过继承的特殊化），但它们仍作为 UActorComponent 层级的容器（通过合成的特殊化）。这通过 AActor 的 RootComponent 成员完成。此成员包含一个单一 UActorComponent，而这个组件又可依次包含其他组件。在 AActor 可被放入关卡之前，它必须包含至少一个 **USceneComponent**。此组件包含此 AActor 的平移、旋转和尺寸。 
+
+AActor 拥有一系列事件，可在生命周期中进行调用。以下列表是说明生命周期的简化事件集。
+
+* BeginPlay - 对象首次出现在游戏进程中时调用
+* Tick - 每帧调用一次，在一段时间内执行操作
+* EndPlay - 对象离开游戏进程时调用
+
+在 [](Programming/UnrealArchitecture/Actors) 中查看关于 AActor 的详细讨论。
+
+##### 运行时生命周期
+
+之前我们讨论了 AActor 生命周期的一个子集。对于放置在关卡中的 actor 而言，通过想象便可轻松理解生命周期：actor 加载，出现，随后关卡被卸载，actor 被销毁。运行时创建和销毁的过程是怎样的？虚幻引擎在运行时生成调用 AActor 的创建。较之于在游戏中创建一个普通对象，actor 的生成稍显复杂。原因是 AActor 需要通过各种运行时系统进行注册，以满足所有需要。需要设置 actor 的初始位置和旋转。物理可能需要知晓这些信息。负责告知 actor 进行 tick 的管理器需要知晓这些信息。诸如此类。因此，我们拥有一个用于 actor 生成的方法 - **UWorld::SpawnActor()**。一旦 actor 成功生成后，它的 **BeginPlay()** 方法将被调用，下一帧将出现 **Tick()**。
+
+一旦 actor 的生命期完结，即可调用 **Destroy()** 将其销毁。在此过程中将调用 **EndPlay()**，在此可设置自定义销毁逻辑。控制 actor 存在时长的另一个选项是使用寿命成员。可在对象的构建函数中设置时间段，或通过运行时的其他代码进行设置。时间量耗尽后，actor 将自动调用 **Destroy()**。
+
+如需了解 actor 生成的更多内容，请查阅 [](Programming/UnrealArchitecture/Actors/Spawning) 页面。
+
+#### UActorComponent
+
+UActorComponent 拥有其自身行为，通常负责在多种类型 AActor 之间共享的功能，如提供可视网格体、粒子效果、摄像机透视和物理互动。通常为 AActor 指定的是与其在游戏中全局作用相关的高级目标，而 UActorComponent 通常执行的是支持这些高级目标的单个任务。组件也可附着到其他组件，或为 Actor 的根组件。组件只能附着到一个父组件或 Actor，但可被多个子组件附着。想象一个组件树。子组件拥有与其父组件或 Actor 相对的位置、旋转和尺寸。
+
+使用 Actor 和组件的方法有多种，而理解 Actor - 组件关系的方式是 Actor 会提出问题“这是什么？”，而组件会回答“这由什么组成？”
+
+* RootComponent - 这是在 AActor 组件树中拥有顶层组件的 AActor 成员
+* Ticking - 组件作为拥有 AActor Tick() 的部分被点击
+
+##### 剖析第一人称角色
+
+之前的几个部分叙述较多，展示较少。为展示 AActor 和其 UActorComponent 之间的关系，我们一来研究基于第一人称模板创建新项目时创建的蓝图。下图是 **FirstPersonCharacter** Actor 的 **组件** 树。**RootComponent** 为 **CapsuleComponent**。附着到 **CapsuleComponent** 的是 **ArrowComponent**、**Mesh** 组件和 **FirstPersonCameraComponent**。叶最多的组件是以 **FirstPersonCameraComponent** 为父项的 Mesh1P 组件，意味着第一人称网格体与第一人称摄像机相对。 
+
+![image alt text](image_14.png)
+
+视觉外观而言，**组件** 树与下图相似，可看到除 **Mesh** 组件外的所有组件均在 3D 空间中。
+
+![image alt text](image_15.png)
+
+此组件树被附着到一个 actor 类。从此例中可了解到 - 使用继承和合成可构建复杂的游戏性对象。需要对现有 AActor 或 UActorComponent 进行自定义时使用继承。需要多个不同 AActor 类型共享功能时使用合成。
+
+#### UStruct
+
+使用 UStruct 时不必从任意特定类进行延展，只需要使用 USTRUCT() 标记结构体，编译工具将执行基础工作。和 UObject 不同，UStruct 不会被垃圾回收。如创建其动态实例，则必须自行管理其生命周期。UStruct 为纯旧式数据类型。它们拥有 UObject 反射支持，以便在虚幻编辑器、蓝图操作、序列化和网络通信中进行编辑。
+
+讨论完游戏性类构建中使用的基础层级后，即可再次选择路径。可在 [此处](Programming/UnrealArchitecture/Reference/Classes) 阅读关于游戏性类的内容、使用 launcher 中带有更多信息的样本、或进一步深入研究构建游戏的 C++ 功能。
+
+## 继续深入了解
+
+很高兴您能继续学习。让我们继续深入了解引擎的工作。
+
+### 虚幻反射系统
+
+[博客贴文：虚幻属性系统（反射）](https://www.unrealengine.com/blog/unreal-property-system-reflection)
+
+游戏性类使用特殊的标记。因此在开始了解它们之前，我们有必要了解虚幻属性系统的一些基础知识。UE4 使用其自身的反射实现，可启用动态功能，如垃圾回收、序列化、网络复制和蓝图/C++ 通信。这些功能为选择加入，意味着您需要为类型添加正确的标记，否则引擎将无视类型，不生成反射数据。以下是基础标记的快速总览：
+
+* **UCLASS() ** - 告知虚幻引擎生成类的反射数据。类必须派生自 UObject。 
+* **USTRUCT() ** - 告知虚幻引擎生成结构体的反射数据。
+* **GENERATED_BODY()** - UE4 使用它替代为类型生成的所有必需样板文件代码。
+* **UPROPERTY() ** - 使 UCLASS 或 USTRUCT 的成员变量可用作 UPROPERTY。UPROPERTY 用途广泛。它允许变量被复制、被序列化，并可从蓝图中进行访问。垃圾回收器还使用它们来追踪对 UObject 的引用数。
+* **UFUNCTION() ** - 使 UCLASS 或 USTRUCT 的类方法可用作 UFUNCTION。UFUNCTION 允许类方法从蓝图中被调用，并在其他资源中用作 RPC。
+
+以下是 UCLASS 的声明范例：
+
+	#include "MyObject.generated.h"
+
+	UCLASS(Blueprintable)
+	class UMyObject : public UObject
+	{
+		GENERATED_BODY()
+
+	public:
+		MyUObject();
+
+		UPROPERTY(BlueprintReadOnly, EditAnywhere)
+		float ExampleProperty;
+
+		UFUNCTION(BlueprintCallable)
+		void ExampleFunction();
+	};
+
+首先注意 - “MyClass.generated.h”文件已包含。虚幻引擎将生成所有反射数据并将放入此文件。必须在声明类型的头文件中将此文件作为最后的 include 包含。
+
+您还会注意到，可以在标记上添加额外的说明符。此处已添加部分常用说明符用于展示。通过说明符可对类型拥有的特定行为进行说明。
+
+* **Blueprintable** - 此类可由蓝图延展。
+* **BlueprintReadOnly ** - 此属性只可从蓝图读取，不可写入。
+* **Category** - 定义此属性出现在编辑器 Details 视图下的部分。用于组织。
+* **BlueprintCallable ** - 可从蓝图调用此函数。
+
+说明符太多，无法一一列举于此，以下链接可用作参考：
+
+[UCLASS 说明符列表](Programming/UnrealArchitecture/Reference/Classes/Specifiers)
+
+[UPROPERTY 说明符列表](https://docs.unrealengine.com/latest/INT/Programming/UnrealArchitecture/Reference/Properties/Specifiers/index.html)
+
+[UFUNCTION 说明符列表](https://docs.unrealengine.com/latest/INT/Programming/UnrealArchitecture/Reference/Functions/Specifiers/index.html)
+
+[USTRUCT 说明符列表](https://docs.unrealengine.com/latest/INT/Programming/UnrealArchitecture/Reference/Structs/Specifiers/index.html)
+
+### 对象/Actor 迭代器
+
+对象迭代器是非常实用的工具，用于在特定 UObject 类型和子类的所有实例上进行迭代。
+
+	// 将找到当前所有的 UObjects 实例
+	for (TObjectIterator<UObject> It; It; ++It)
+	{
+		UObject* CurrentObject = *It;
+		UE_LOG(LogTemp, Log, TEXT("Found UObject named:%s"), *CurrentObject.GetName());
+	}
+
+为迭代器提供更为明确的类型即可限制搜索范围。假设您有一个派生自 UObject，名为 UMyClass 的类。您会发现此类的所有实例（以及派生自此类的实例）与此相似：
+
+	for (TObjectIterator<UMyClass> It; It; ++It)
+	{
+		// ...
+	}
+[REGION:warning]
+在 PIE（Play In Editor）中使用对象迭代器可能出现意外后果。因为编辑器已被加载，除编辑器正在使用的对象外，对象迭代器还将返回为游戏世界实例创建的全部 UObject。
+[/REGION]
+Actor 迭代器与对象迭代器的工作方式非常相近，但只能用于派生自 AActor 的对象。Actor 迭代器不存在下列问题，只返回当前游戏世界实例使用的对象。
+
+创建 actor 迭代器时，需要为其赋予一个指向 **UWorld** 实例的指针。许多 UObject 类（如 **APlayerController**）会提供 **GetWorld** 方法，助您一臂之力。如不确定，可在 UObject 上检查 **ImplementsGetWorld** 方法，确认其是否应用 GetWorld 方法。
+
+	APlayerController* MyPC = GetMyPlayerControllerFromSomewhere();
+	UWorld* World = MyPC->GetWorld();
+
+	// 和对象迭代器一样，您可提供一个特定类，只获取为该类的对象
+	// 或从该类派生的对象
+	for (TActorIterator<AEnemy> It(World); It; ++It)
+	{
+		// ...
+	}
+
+[REGION:note]
+因 AActor 派生自 UObject，也可使用 **TObjectIterator** 找到 AActor 的实例。在 PIE 中操作时请小心谨慎！
+[/REGION]
+
+## 内存管理和垃圾回收
+
+此部分中，我们将了解到 UE4 中的基础内存管理和垃圾回收系统。
+
+[百科：垃圾回收和动态内存分配](https://wiki.unrealengine.com/Garbage_Collection_%26_Dynamic_Memory_Allocation)
+
+### UObject 和垃圾回收
+
+UE4 使用反射系统实现垃圾回收系统。通过垃圾回收便无需手动删除 UObjects，只需维持对它们的有效引用即可。类须派生自 UObject，方能启用垃圾回收。这是我们将要使用的简单范例类：
+
+	UCLASS()
+	class MyGCType : public UObject
+	{
+		GENERATED_BODY()
+	};
+
+在垃圾回收器中存在称为根集的概念。此根集是一个对象列表。回收器不会对这些对象进行垃圾回收。只要根集中的对象到讨论中的对象之间存在引用路径，对象便不会被垃圾回收。如对象到根集的此路径不存在，它便会被识别为无法达到，垃圾回收器下次运行时便会将其收集（删除）。引擎以特定间隔运行垃圾回收器。
+
+什么被视作“引用”？存储在 UPROPERTY 中的 UObject 指针。我们来看一个简单的例子：
+
+	void CreateDoomedObject()
+	{
+		MyGCType* DoomedObject = NewObject<MyGCType>();
+	}
+
+调用以上函数后便新建了一个 UObject，但我们不在 UPROPERTY 中保存指向它的指针，它也不是根集的一部分。垃圾回收器将逐步检测到此对象为无法达到，并将其销毁。
+
+### Actors 和垃圾回收
+
+Actors 通常不会被垃圾回收。Actors 生成后，必须在其上手动调用 **Destroy()**。它们不会被立即删除，而会在下个垃圾回收阶段被清理。
+
+常见情况下 actors 带有 UObject 属性。
+
+	UCLASS()
+	class AMyActor : public AActor
+	{
+		GENERATED_BODY()
+
+	public:
+		UPROPERTY()
+		MyGCType* SafeObject;
+
+		MyGCType* DoomedObject;
+
+		AMyActor(const FObjectInitializer& ObjectInitializer)
+			:Super(ObjectInitializer)
+		{
+			SafeObject = NewObject<MyGCType>();
+			DoomedObject = NewObject<MyGCType>();
+		}
+	};
+
+	void SpawnMyActor(UWorld* World, FVector Location, FRotator Rotation)
+	{
+		World->SpawnActor<AMyActor>(Location, Rotation);
+	}
+
+调用上述函数时，将在世界场景中生成一个 actor。Actor 的构建函数创建两个对象。一个指定到 UPROPERTY，另一个指定到裸指针。Actors 自动成为根集的一部分，SafeObject 将不会被垃圾回收，因为它从根集对象出到达。然而 DoomedObject 的进展不是十分顺利。我们未将其标为 UPROPERTY，因此回收器并不知道其正在被引用，而会将它逐渐销毁。
+
+UObject 被垃圾回收时，对其的所有 UPROPERTY 引用将被设为 nullptr。这可使您安全地检查一个对象是否已被垃圾回收。
+
+	if (MyActor->SafeObject != nullptr)
+	{
+		// 使用 SafeObject
+	}
+
+这十分重要，正如之前所述，已在自身上调用 Destroy() 的 actor 在垃圾回收器再次运行之前不会被移除。您可检查 **IsPendingKill()** 方法，确定 UObject 正等待被删除。如方法返回 true，则应将对象视为废弃物，不进行使用。
+
+### UStructs
+
+如之前所述，UStructs 是 UObject 的一个简化版本。就这点而言，UStructs 无法被垃圾回收。如必须使用 UStructs 的动态实例，应使用智能指针，稍后我们将谈到它。
+
+### 非 UObject 引用
+
+普通的非 UObject 也可添加到对象的引用，以防止被垃圾回收。对象必须派生自 **FGCObject** 并覆写它的 **AddReferencedObjects** 类。
+
+	class FMyNormalClass : public FGCObject
+	{
+	public:
+		UObject* SafeObject;
+
+		FMyNormalClass(UObject* Object)
+			:SafeObject(Object)
+		{
+		}
+
+		void AddReferencedObjects(FReferenceCollector& Collector) override
+		{
+			Collector.AddReferencedObject(SafeObject);
+		}
+	};
+
+我们可使用 **FReferenceCollector** 手动为需要的、不能被垃圾回收的 UObject 添加硬引用。对象被删除，其析构函数运行时，它将自动清除添加的所有引用。
+
+### 类命名前缀
+
+虚幻引擎为您提供在构建过程中生成代码的工具。这些工具拥有一些类命名规则。如命名与规则不符，将触发警告或错误。下方的类前缀列表说明了命名的规则。
+
+* 派生自 **Actor** 的类前缀为 **A**，如 AController。
+* 派生自 **对象** 的类前缀为 **U**，如 UComponent。
+* **枚举** 的前缀为 **E**，如 EFortificationType。
+* **接口** 类的前缀通常为 **I**，如 IAbilitySystemInterface。
+* **模板** 类的前缀为 **T**，如 TArray。
+* 派生自 **SWidget**（Slate UI）的类前缀为 **S**，如 SButton。
+* 其余类的前缀均为 [字母 F](https://forums.unrealengine.com/showthread.php?60061-Unreal-trivia-What-does-the-F-prefix-on-classes-and-structs-stand-for)，如 FVector。
+
+### 数字类型
+
+因为不同平台基础类型的尺寸不同，如 **short**、**int** 和 **long**，UE4 提供了以下类型，可用作替代品：
+
+* **int8**/**uint8 **：8 位带符号/不带符号 整数
+* **int16**/**uint16 **：16 位带符号/不带符号 整数
+* **int32**/**uint32 **：32 位带符号/不带符号 整数
+* **int64**/**uint64 **：64 位带符号/不带符号整数
+
+标准 **浮点 **（32-bit）** ** 和 **双倍**（64-bit）类型也支持浮点数。
+
+虚幻引擎拥有一个模板 **TNumericLimits<t>**，用于找到数值类型支持的最小和最大范围。如需了解详情，请查阅此 [链接](https://docs.unrealengine.com/latest/INT/API/Runtime/Core/Math/TNumericLimits/index.html)。
+
+### 字符串
+
+UE4 提供多个不同类使用字符串，可满足多种需求。
+
+[完整要点：字符串处理](Programming/UnrealArchitecture/StringHandling)
+
+#### FString
+
+**FString** 是一个可变字符串，类似于 std::string。FString 拥有许多方法，便于简单地使用字符串。使用 **TEXT()** 宏可新建一个 FString：
+
+FString MyStr = TEXT("Hello, Unreal 4!").
+
+[完整要点：FString API](https://docs.unrealengine.com/latest/INT/API/Runtime/Core/Containers/FString/index.html)
+
+#### FText
+
+**FText** 与 FString 相似，但用于本地化文本。使用 **NSLOCTEXT** 宏可新建一个 FText。此宏拥有默认语言的命名空间、键和一个数值。
+
+	FText MyText = NSLOCTEXT("Game UI", "Health Warning Message", "Low Health!")
+
+也可使用 **LOCTEXT** 宏，只需要在每个文件上定义一次命名空间。确保在文件底层取消它的定义
+
+	// 在 GameUI.cpp 中
+	#define LOCTEXT_NAMESPACE "Game UI"
+	
+	//...
+	FText MyText = LOCTEXT("Health Warning Message", "Low Health!")
+	//...
+	
+	#undef LOCTEXT_NAMESPACE
+	// 文件末端
+
+[完整要点：FText API](https://docs.unrealengine.com/latest/INT/API/Runtime/Core/Internationalization/FText/index.html)
+
+#### FName
+
+**FName** 将经常反复出现的字符串保存为辨识符，以便在对比时节约内存和 CPU 时间。FName 不会在引用完整字符串的每个对象间对其进行多次保存，而是使用一个映射到给定字符串的较小存储空间 **索引**。这会单次保存字符串内容，在字符串用于多个对象之间时节约内存。检查 **NameA.Index** 是否等于 **NameB.Index** 可对两个字符串进行快速对比，避免对字符串中每个字符进行相等性检查。
+
+[完整要点：FName API](https://docs.unrealengine.com/latest/INT/API/Runtime/Core/UObject/FName/index.html)
+
+#### TCHAR
+
+**TCHARs** 用于存储不受正在使用的字符集约束的字符。平台不同，它们也可能存在不同。UE4 字符串在后台使用 TCHAR 阵列将数据保存在 **UTF-16** 编码中。使用返回 TCHAR 的重载解引用运算符可以访问原始数据。  
+
+[完整要点：角色编码](Programming/UnrealArchitecture/StringHandling/CharacterEncoding)
+
+部分函数会需要它。如 **FString::Printf**，**‘%s’** 字符串格式说明符需要 TCHAR，而非 FString。
+
+	FString Str1 = TEXT("World");
+	int32 Val1 = 123;
+	FString Str2 = FString::Printf(TEXT("Hello, %s! You have %i points."), *Str1, Val1);
+
+**FChar** 类型提供一个静态效用函数集，以便使用单个 TCHAR。
+
+	TCHAR Upper('A');
+	TCHAR Lower = FChar::ToLower(Upper); // 'a'
+
+[REGION:note]
+FChar 类型被定义为 **TChar<TCHAR>**（因其列在 API 中）。
+[/REGION]
+
+[完整要点：TChar API](https://docs.unrealengine.com/latest/INT/API/Runtime/Core/Misc/TChar/index.html)
+
+### 容器
+
+容器也是类，它们的主要功能是存储数据集。常见的类有 **TArray**、**TMap** 和 **TSet**。它们的大小均为动态，因此可变为所需的任意大小。
+
+[完整要点：组件 API](https://docs.unrealengine.com/latest/INT/API/Runtime/Core/Containers/index.html)
+
+#### TArray
+
+在这三个容器中，虚幻引擎 4 使用的主要容器是 TArray。它的作用和 **std::vector** 相似，但却多出许多功能。以下是一些常规操作：
+
+	TArray<AActor*> ActorArray = GetActorArrayFromSomewhere();
+
+	// 告知当前 ActorArray 中保存的元素（AActors）数量。
+	int32 ArraySize = ActorArray.Num();
+
+	// TArrays 从零开始（第一个元素在索引 0 处）
+	int32 Index = 0;
+	// 尝试获取在给定索引处的元素
+	TArray* FirstActor = ActorArray[Index];
+
+	// 在阵列末端添加一个新元素
+	AActor* NewActor = GetNewActor();
+	ActorArray.Add(NewActor);
+
+	// 只有元素不在阵列中时，才在阵列末端添加元素
+	ActorArray.AddUnique(NewActor); // 不会改变阵列，因为 NewActor 已被添加
+
+	// 移除阵列中所有 NewActor 实例
+	ActorArray.Remove(NewActor);
+
+	// 移除特定索引处的元素
+	// 索引上的元素将被下调一格，以填充空出的位置
+	ActorArray.RemoveAt(Index);
+
+	// RemoveAt 的高效版，但无法保持元素的排序
+	ActorArray.RemoveAtSwap(Index);
+
+	// 移除阵列中的所有元素
+	ActorArray.Empty();
+
+TArray 还有一个额外好处 - 可使其元素被垃圾回收。这将假定 TArray 被标记为 UPROPERTY，并存储 UObject 派生的指针。
+
+	UCLASS()
+	class UMyClass :UObject
+	{
+		GENERATED_BODY();
+
+		// ...
+
+		UPROPERTY()
+		TArray<AActor*> GarbageCollectedArray;
+	};
+
+之后章节中我们将深度讨论垃圾回收。
+
+[完整要点：TArrays](Programming/UnrealArchitecture/TArrays)
+
+[完整要点：TArray API](https://docs.unrealengine.com/latest/INT/API/Runtime/Core/Containers/TArray/index.html)
+
+#### TMap
+
+**TMap** 是键值对的合集，与 **std::map** 相似。TMap 可基于元素的键快速寻找、添加、并移除元素。只要键拥有为其定义的 **GetTypeHash** 函数（稍后对此进行了解），即可使用任意类型的键。
+
+假设您创建了一个基于网格的桌面游戏，需要保存并询问每个方格上的块。通过 TMap 即可轻松完成。如棋盘尺寸较小且保持不变，还存在更加高效的处理方式。但出于范例的缘故，暂且谈到这里吧！
+
+	enum class EPieceType
+	{
+		King,
+		Queen,
+		Rook,
+		Bishop,
+		Knight,
+		Pawn
+	};
+
+	struct FPiece
+	{
+		int32 PlayerId;
+		EPieceType Type;
+		FIntPoint Position;
+
+		FPiece(int32 InPlayerId, EPieceType InType, FIntVector InPosition) :
+			PlayerId(InPlayerId),
+			Type(InType),
+			Position(InPosition)
+		{
+		}
+	};
+
+	class FBoard
+	{
+	private:
+
+		// 使用 TMap 时可通过块的位置对其进行查阅
+		TMap<FIntPoint, FPiece> Data;
+
+	public:
+		bool HasPieceAtPosition(FIntPoint Position)
+		{
+			return Data.Contains(Position);
+		}
+		FPiece GetPieceAtPosition(FIntPoint Position)
+		{
+			return Data[Position];
+		}
+
+		void AddNewPiece(int32 PlayerId, EPieceType Type, FIntPoint Position)
+		{
+			FPiece NewPiece(PlayerId, Type, Position);
+			Data.Add(Position, NewPiece);
+		}
+
+		void MovePiece(FIntPoint OldPosition, FIntPoint NewPosition)
+		{
+			FPiece Piece = Data[OldPosition];
+			Piece.Position = NewPosition;
+			Data.Remove(OldPosition);
+			Data.Add(NewPosition, Piece);
+		}
+
+		void RemovePieceAtPosition(FIntPoint Position)
+		{
+			Data.Remove(Position);
+		}
+
+		void ClearBoard()
+		{
+			Data.Empty();
+		}
+	};
+
+[完整要点：TMaps](Programming/UnrealArchitecture/TMap)
+
+[完整要点：TMap API](https://docs.unrealengine.com/latest/INT/API/Runtime/Core/Containers/TMapBase/index.html)
+
+#### TSet
+
+**TSet** 保存唯一值的合集，与 **std::set** 相似。TArray 通过 **AddUnique** 和 **Contains** 方法可用作集。然而 TSet 可更快实现这些操作，但无法像 TArray 那样将它们用作 UPROPERTY。TSet 不会像 TArray 那样将元素编入索引。
+
+	TSet<AActor*> ActorSet = GetActorSetFromSomewhere();
+
+	int32 Size = ActorSet.Num();
+
+	// 如集尚未包含元素，则将其添加到集
+	AActor* NewActor = GetNewActor();
+	ActorSet.Add(NewActor);
+
+	// 检查元素是否已包含在集中
+	if (ActorSet.Contains(NewActor))
+	{
+		// ...
+	}
+
+	// 从集移除元素
+	ActorSet.Remove(NewActor);
+
+	// 从集移除所有元素
+	ActorSet.Empty();
+
+	// 创建包含 TSet 元素的 TArray
+	TArray<AActor*> ActorArrayFromSet = ActorSet.Array();
+
+[完整要点：TSet API](https://docs.unrealengine.com/latest/INT/API/Runtime/Core/Containers/TSet/index.html)
+
+需注意：TArray 是当前唯一能被标记为 UPROPERTY 的容器类。这意味着无法复制、保存其他容器类，或对其元素进行垃圾回收。
+
+#### 容器迭代器
+
+使用迭代器可在容器的每个元素上进行循环。以下是使用 TSet 的迭代器语法范例。
+
+	void RemoveDeadEnemies(TSet<AEnemy*>& EnemySet)
+	{
+		// 从集的开头开始迭代到集的末端
+		for (auto EnemyIterator = EnemySet.CreateIterator(); EnemyIterator; ++EnemyIterator)
+		{
+			// * 运算符获得当前的元素
+			AEnemy* Enemy = *EnemyIterator;
+			if (Enemy.Health == 0)
+			{
+				// RemoveCurrent 由 TSets 和 TMaps 支持
+				EnemyIterator.RemoveCurrent();
+			}
+		}
+	}
+
+可结合迭代器使用的其他支持操作：
+
+	// 将迭代器移回一个元素
+	--EnemyIterator;
+
+	// 以一定偏移前移或后移迭代器，此处的偏移为一个整数
+	EnemyIterator += Offset;
+	EnemyIterator -= Offset;
+
+	// 获得当前元素的索引
+	int32 Index = EnemyIterator.GetIndex();
+
+	// 将迭代器重设为第一个元素
+	EnemyIterator.Reset();
+
+#### For-each 循环
+
+迭代器很实用，但如果只希望在每个元素之间循环一次，则可能会有些累赘。每个容器类还支持 for each 风格的语法在元素上进行循环。TArray 和 TSet 返回每个元素，而 TMap 返回一个键值对。
+
+	// TArray
+	TArray<AActor*> ActorArray = GetArrayFromSomewhere();
+	for (AActor* OneActor :ActorArray)
+	{
+		// ...
+	}
+
+	// TSet - 和 TArray 相同
+	TSet<AActor*> ActorSet = GetSetFromSomewhere();
+	for (AActor* UniqueActor :ActorSet)
+	{
+		// ...
+	}
+
+	// TMap - 迭代器返回一个键值对
+	TMap<FName, AActor*> NameToActorMap = GetMapFromSomewhere();
+	for (auto& KVP :NameToActorMap)
+	{
+		FName Name = KVP.Key;
+		AActor* Actor = KVP.Value;
+
+		// ...
+	}
+
+注意：**auto** 关键词不会自动指定指针/引用，需要自行添加。
+
+#### 通过 TSet/TMap（散列函数）使用您自己的类型
+
+TSet 和 TMap 需要在内部使用 *散列函数*。如要创建在 TSet 中使用或作为 TMap 键使用的自定义类，首先需要创建自定义散列函数。通常会放入这些类型的多数 UE4 类型已定义其自身的散列函数。
+
+散列函数接受到您的类型的常量指针/引用，并返回一个 uint64。此返回值即为对象的 *散列代码*，应该是对该对象唯一虚拟的数值。两个相等的对象固定返回相同的散列代码。
+
+	class FMyClass
+	{
+		uint32 ExampleProperty1;
+		uint32 ExampleProperty2;
+
+		// 散列函数
+		friend uint32 GetTypeHash(const FMyClass& MyClass)
+		{
+			// HashCombine 是将两个散列值组合起来的效用函数
+			uint32 HashCode = HashCombine(MyClass.ExampleProperty1, MyClass.ExampleProperty2);
+			return HashCode;
+		}
+
+		// 出于展示目的，两个对象为相等
+		// 应固定返回相同的散列代码。
+		bool operator==(const FMyClass& LHS, const FMyClass& RHS)
+		{
+			return LHS.ExampleProperty1 == RHS.ExampleProperty1
+				&& LHS.ExampleProperty2 == RHS.ExampleProperty2;
+		}
+	};
+
+现在， TSet<FMyClass> 和 TMap<FMyClass, ...> 在散列键时将使用适当的散列函数。如您使用指针作为键（即 `TSet<FMyClass*>`），也将实现 `uint32 GetTypeHash(const FMyClass* MyClass)`。
+
+[博客贴文：您应该了解的 UE4 库](https://www.unrealengine.com/blog/ue4-libraries-you-should-know-about)
+

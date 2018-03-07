@@ -1,0 +1,61 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title: 자세한 액터 리플리케이션 흐름
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking, Gameplay/Networking/Actors
+Description:로우 레벨 액터 리플리케이션에 대한 상세 설명입니다.
+Related: Gameplay/Networking/Actors
+Related: Gameplay/Networking/Actors/Properties
+Related: Gameplay/Networking/Actors/RPCs
+Related: Gameplay/Networking/Actors/ReplicationPerformance
+Version: 4.9
+
+액터 리플리케이션 대부분은 `UNetDriver::ServerReplicateActors` 안에서 일어납니다. 서버가 각 클라이언트에 연관성이 있다고 결정내린 액터 전부를 수집하고, 접속된 각 클라이언트가 지난 번 업데이트된 이후 변경된 프로퍼티가 있으면 전송하는 곳입니다.
+
+이 프로세스 도중 액터가 업데이트되는 방식, 호출되는 특정 프레임워크 콜백, 사용되는 특정 프로퍼티에는 이미 정의된 흐름이 있습니다:
+* `AActor::NetUpdateFrequency` - 액터가 얼마나 자주 리플리케이트되는지 결정하는 데 사용됩니다.
+* `AActor::PreReplication` - 리플리케이션 발생 전 호출됩니다.
+* `AActor::bOnlyRelevantToOwner` - 이 액터가 오너에게만 리플리케이트되는 경우 true 입니다.
+* `AActor::IsRelevancyOwnerFor` - bOnlyRelevantToOwner = true 일 때 연관성 결정을 위해 호출됩니다.
+* `AActor::IsNetRelevantFor` - bOnlyRelevantToOwner = false 일 때 연관성 결정을 위해 호출됩니다.
+
+하이 레벨 흐름은 이렇습니다:
+* 현재 리플리케이션중인 액터 각각에 대해 루프를 돌립니다 (`AActor::SetReplicates( true )`)
+	* 이 액터가 애초에 휴면 상태인지 (`DORM_Initial`) 알아낸 다음, 그렇다면 즉시 건너뜁니다.
+	* NetUpdateFrequency 값을 검사하여 이 액터를 업데이트해야 하는지 알아낸 다음, 아니면 건너뜁니다.
+	* `AActor::bOnlyRelevantToOwner` = true 면, 소유 접속의 뷰어에서 `AActor::IsRelevancyOwnerFor` 를 호출하여 이 액터의 소유 접속에 연관성 검사를 합니다. 연관성이 있다면, 접속에서 소유된 연관성 (owned relevant) 목록에 추가합니다.
+		* 이 경우, 이 액터는 하나의 접속에만 전송합니다.
+	* 이러한 초기 검사를 통과한 액터에 대해서, `AActor::PreReplication` 를 호출합니다.
+		* 접속에 대해 프로퍼티를 리플리케이트시킬지 결정할 수 있는 곳은 PreReplication 입니다. 여기에 `DOREPLIFETIME_ACTIVE_OVERRIDE` 를 사용하세요.
+	* 위를 통과하면, 고려된(considered) 목록에 추가합니다.
+* 각 접속에 대해:
+	* 위에서 고려된 액터 각각에 대해
+		* 휴면 상태인지 알아냅니다.
+		* 아직 채널이 없다면
+			* 액터가 들어있는 레벨을 클라이언트가 로드했는지 알아냅니다.
+				* 로드되지 않았다면, 건너뜁니다.
+			* 접속에 대해 `AActor::IsNetRelevantFor` 를 호출하여 액터가 연관성이 있는지 알아냅니다.
+				* 연관성이 없다면, 건너뜁니다.
+	* 위에서 접속의 소유된 연관성 목록에 있는 액터를 추가합니다.
+	* 이 시점에서, 이 접속에 연관성이 있는 액터 목록이 생겼습니다.
+	* 액터를 우선권 순으로 정렬합니다.
+	* 정렬된 각 액터에 대해:
+		* 접속이 이 액터가 들어있는 레벨을 로드하지 않은 경우, (있다면) 채널을 닫고 계속합니다.
+		* 1 초마다 AActor::IsNetRelevantFor 를 호출하여 액터가 접속에 연관성이 있는지 알아냅니다.
+		* 5 초 동안 연관성이 없다면, 채널을 닫습니다.
+		* 연관성이 있고 열린 채널이 없다면, 지금 엽니다.
+		* 일정 시점에 이 접속이 포화된다면
+			* 나머지 액터에 대해
+				* 1 초 미만 연관성이 있다면, 다음 틱에 강제 업데이트합니다.
+				* 1 초 이상 연관성이 있다면, `AActor::IsNetRelevantFor` 를 호출하여 다음 틱에 업데이트할지 알아냅니다.
+		* 위 모든 것을 통과한 액터에 대해, `UChannel::ReplicateActor` 를 호출하여 액터를 접속에 리플리케이트합니다.
+
+## 접속에 액터 리플리케이트하기
+
+액터와 그 모든 컴포넌트를 접속에 리플리케이트하는 주역은 `UChannel::ReplicateActor` 입니다. 그 흐름은 다음과 같습니다:
+* 액터 채널이 열린 이후 첫 번째 업데이트인지 알아냅니다.
+	* 그렇다면, 필요한 구체적인 정보를 (초기 위치, 회전 등) serialize 합니다.
+* 이 접속이 이 액터를 소유하는지 알아냅니다.
+	* 소유하지 않고, 이 액터의 롤이 `ROLE_AutonomousProxy` 라면, `ROLE_SimulatedProxy` 로 다운그레이드합니다.
+* 이 액터의 변경된 프로퍼티를 리플리케이트합니다.
+* 각 컴포넌트의 변경된 프로퍼티를 리플리케이트합니다.
+* 삭제된 컴포넌트에 대해, 특수한 삭제 명령을 전송합니다.

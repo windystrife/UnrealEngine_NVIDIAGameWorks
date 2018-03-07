@@ -1,0 +1,269 @@
+// @third party code - BEGIN HairWorks
+#if SM5_PROFILE
+
+#pragma once
+
+#include "NvHairShaderCommon.ush"
+#include "HairWorksCommon.ush"
+
+bool bHairDeferredRendering;
+Texture2D<float> HairNearestDepthTexture;
+Texture2D HairLightAttenuationTexture;
+Texture2DMS<float4> HairGBufferATextureMS;	// Check ComposeGBuffer() in HairWorks.usf for what these buffers are.
+Texture2DMS<float4> HairGBufferBTextureMS;
+Texture2DMS<float4> HairGBufferCTextureMS;
+Texture2DMS<float4> HairPrecomputeLightTextureMS;
+Texture2DMS<float> HairDepthTextureMS;
+Texture2DMS<uint2> HairStencilTextureMS;
+
+float3 GetHairWorksSimpleLighting(float3 ScreenVector, uint2 SamplePos, FHairScreenSpaceData HairScreenSpaceData, FSimpleDeferredLightData LightData)
+{
+	float3 WorldPosition = ScreenVector * HairScreenSpaceData.Depth + View.WorldCameraOrigin.xyz;
+
+	return GetSimpleDynamicLighting(WorldPosition, float3(0, 0, 0), HairScreenSpaceData.Normal, 1, PI, 0, 1, LightData) * HairScreenSpaceData.Color;
+}
+
+float3 GetHairWorksDynamicLighting(float3 ScreenVector, uint2 SamplePos, FHairScreenSpaceData HairScreenSpaceData, FDeferredLightData LightData)
+{
+	// Check lighting channels
+#if USE_LIGHTING_CHANNELS
+	if((HairScreenSpaceData.LightingChannelMask & DeferredLightUniforms.LightingChannelMask) == 0)
+		return 0;
+#endif
+
+	// Use 1 for diffuse blend for un-shadowed light, to darken hairs at back faces. 
+	if(!LightData.ShadowedBits)
+		HairScreenSpaceData.DiffuseBlend = 1;
+
+	// Disable shadow if hair doesn't receive shadow
+	LightData.ShadowedBits = LightData.ShadowedBits && HairScreenSpaceData.bReceiveShadow;
+
+	// Setup light
+	float3 WorldPosition = ScreenVector * HairScreenSpaceData.Depth + View.WorldCameraOrigin.xyz;
+
+	//float3 V = -CameraVector;
+	float3 N = HairScreenSpaceData.Normal;
+	float3 ToLight = LightData.LightDirection;
+	float3 L = ToLight;	// no need to normalize
+	float NoL = saturate(dot(N, L));
+	float DistanceAttenuation = 1;
+	float LightRadiusMask = 1;
+	float SpotFalloff = 1;
+
+	if(LightData.bRadialLight)
+	{
+		ToLight = LightData.LightPositionAndInvRadius.xyz - WorldPosition;
+
+		float DistanceSqr = dot(ToLight, ToLight);
+		L = ToLight * rsqrt(DistanceSqr);
+
+		if(LightData.bInverseSquared)
+		{
+			const float SourceLength = LightData.SpotAnglesAndSourceRadius.w;
+
+			BRANCH
+			if(SourceLength > 0)
+			{
+				// Line segment irradiance
+				float3 L01 = LightData.LightDirection * SourceLength;
+				float3 L0 = ToLight - 0.5 * L01;
+				float3 L1 = ToLight + 0.5 * L01;
+				float LengthL0 = length(L0);
+				float LengthL1 = length(L1);
+
+				DistanceAttenuation = rcp((LengthL0 * LengthL1 + dot(L0, L1)) * 0.5 + 1);
+				NoL = saturate(0.5 * (dot(N, L0) / LengthL0 + dot(N, L1) / LengthL1));
+			}
+			else
+			{
+				// Sphere irradiance (technically just 1/d^2 but this avoids inf)
+				DistanceAttenuation = 1 / (DistanceSqr + 1);
+				NoL = saturate(dot(N, L));
+			}
+
+			// TODO optimize
+			LightRadiusMask = Square(saturate(1 - Square(DistanceSqr * Square(LightData.LightPositionAndInvRadius.w))));
+		}
+		else
+		{
+			DistanceAttenuation = 1;
+			NoL = saturate(dot(N, L));
+
+			LightRadiusMask = RadialAttenuation(ToLight * LightData.LightPositionAndInvRadius.w, LightData.LightColorAndFalloffExponent.w);
+		}
+
+		if(LightData.bSpotLight)
+		{
+			SpotFalloff = SpotAttenuation(L, -LightData.LightDirection, LightData.SpotAnglesAndSourceRadius.xy);
+		}
+	}
+
+	if(LightRadiusMask <= 0 || SpotFalloff <= 0)
+		return 0;
+
+	// Setup shadow
+	float4 LightAttenuation = HairLightAttenuationTexture[SamplePos];
+	LightAttenuation = saturate((LightAttenuation - HairScreenSpaceData.ShadowAttenuation) / (1 - HairScreenSpaceData.ShadowAttenuation));
+	LightAttenuation = Square(LightAttenuation);
+
+	float SurfaceShadow = 1;
+	float SubsurfaceShadow = 1;
+
+	FGBufferData GBuffer = (FGBufferData)0;
+
+	if(LightData.ShadowedBits)
+	{
+		GBuffer.PrecomputedShadowFactors = 1;
+		GBuffer.Depth = HairScreenSpaceData.Depth;
+		GetShadowTerms(GBuffer, LightData, WorldPosition, LightAttenuation, SurfaceShadow, SubsurfaceShadow);
+
+		// greatly reduces shadow mapping artifacts
+		SurfaceShadow *= saturate(dot(N, L) * 6 - 0.2);
+	}
+	else
+	{
+		//float4 ScreenSpaceAO = Texture2DSampleLevel(ScreenSpaceAOTexture, ScreenSpaceAOTextureSampler, InUV, 0);
+		//ScreenSpaceData.AmbientOcclusion = ScreenSpaceAO.r;
+
+		//SurfaceShadow = ScreenSpaceData.AmbientOcclusion;
+	}
+
+	float SurfaceAttenuation = (DistanceAttenuation * LightRadiusMask * SpotFalloff) * SurfaceShadow;
+
+	// Diffuse
+	float HairDiffuse = NvHair_ComputeHairDiffuseShading(
+		L,
+		HairScreenSpaceData.Tangent,
+		HairScreenSpaceData.Normal,
+		1,
+		HairScreenSpaceData.DiffuseBlend
+		);
+
+	// Add glint
+	float GlintAmbient = 0;
+	if(HairScreenSpaceData.GlintStrength > 0)
+	{
+		float Luminance = dot(LightData.LightColorAndFalloffExponent.rgb, float3(0.3, 0.5, 0.2));	// Copied from HairWorks viewer.
+		GlintAmbient = HairScreenSpaceData.GlintStrength * HairScreenSpaceData.Glint * Luminance;
+	}
+
+	// Specular
+	float HairSpecular = 0;
+	{
+		float3 Ldir = L;
+		float3 V = -normalize(ScreenVector);
+		float3 T = HairScreenSpaceData.Tangent;
+		float3 N = HairScreenSpaceData.Normal;
+		float primaryScale = HairScreenSpaceData.SpecularPrimaryScale;
+		float primaryShininess = HairScreenSpaceData.SpecularPrimaryPower;
+		float secondaryScale = HairScreenSpaceData.SpecularSecondaryScale;
+		float secondaryShininess = HairScreenSpaceData.SpecularSecondaryPower;
+		float secondaryOffset = HairScreenSpaceData.SpecularSecondaryOffset;
+		float diffuseBlend = HairScreenSpaceData.DiffuseBlend;
+
+		float specPrimaryOffset = HairScreenSpaceData.SpecularPrimaryOffset;	// Get it from G buffer instead of computing.
+
+		// primary specular
+		float3 H = normalize(V + L);
+		float TdotH = clamp(dot(T, H), -1.0f, 1.0f);
+
+		float TdotHshifted = clamp(TdotH + specPrimaryOffset, -1.0f, 1.0f);
+		float specPrimary = sqrt(1.0f - TdotHshifted*TdotHshifted);
+
+		specPrimary = pow(max(0, specPrimary), primaryShininess);
+
+		// secondary
+		TdotH = clamp(TdotH + secondaryOffset, -1.0, 1.0);
+		float specSecondary = sqrt(1 - TdotH*TdotH);
+		specSecondary = pow(max(0, specSecondary), secondaryShininess);
+
+		// specular sum
+		float specularSum = primaryScale * specPrimary + secondaryScale * specSecondary;
+
+		// visibility due to diffuse normal
+		float visibilityScale = lerp(1.0f, saturate(dot(N, Ldir)), diffuseBlend);
+		specularSum *= visibilityScale;
+
+		HairSpecular = max(0, specularSum);
+	}
+
+	// Sum lighting
+	float3 OutColor = (HairDiffuse * HairScreenSpaceData.Color + HairSpecular * HairScreenSpaceData.Specular) * SurfaceAttenuation * LightData.LightColorAndFalloffExponent.rgb + GlintAmbient * SurfaceAttenuation * HairScreenSpaceData.Color;
+
+	// IES lighting
+	if(LightData.bRadialLight)
+		OutColor *= ComputeLightProfileMultiplier(WorldPosition, DeferredLightUniforms.LightPosition, DeferredLightUniforms.NormalizedLightDirection);
+
+	return OutColor;
+}
+
+FHairScreenSpaceData GetHairWorksScreenSpaceData(uint2 SamplePos, uint SubSample)
+{
+	FHairScreenSpaceData HairScreenSpaceData;
+
+	HairScreenSpaceData.Opaque = HairPrecomputeLightTextureMS.Load(SamplePos, SubSample).a;
+
+	float4 GBufferA = HairGBufferATextureMS.Load(SamplePos, SubSample);
+	float4 GBufferB = HairGBufferBTextureMS.Load(SamplePos, SubSample);
+	float4 GBufferC = HairGBufferCTextureMS.Load(SamplePos, SubSample);
+	uint Stencil = HairStencilTextureMS.Load(SamplePos, SubSample).g;
+
+	float4 HairInstance_Spec0_SpecPower0_Spec1_SpecPower1 = HairInstanceData.Spec0_SpecPower0_Spec1_SpecPower1[Stencil];
+	float4 HairInstance_Spec1Offset_DiffuseBlend_ReceiveShadows_ShadowSigma = HairInstanceData.Spec1Offset_DiffuseBlend_ReceiveShadows_ShadowSigma[Stencil];
+	float4 HairInstance_GlintStrength_LightingChannelMask = HairInstanceData.GlintStrength_LightingChannelMask[Stencil];
+
+	HairScreenSpaceData.Depth = ConvertFromDeviceZ(HairDepthTextureMS.Load(SamplePos, SubSample));
+	HairScreenSpaceData.Normal = OctahedronToUnitVector(mad(GBufferA.xy, 2, -1));
+	HairScreenSpaceData.Tangent = OctahedronToUnitVector(mad(GBufferA.zw, 2, -1));
+	HairScreenSpaceData.Color = GBufferB.rgb;
+	HairScreenSpaceData.Specular = GBufferC.rgb;
+	HairScreenSpaceData.Glint = GBufferB.w;
+	HairScreenSpaceData.SpecularPrimaryOffset = mad(GBufferC.w, 2, -1);
+	HairScreenSpaceData.SpecularPrimaryScale = HairInstance_Spec0_SpecPower0_Spec1_SpecPower1.x;
+	HairScreenSpaceData.SpecularPrimaryPower = HairInstance_Spec0_SpecPower0_Spec1_SpecPower1.y;
+	HairScreenSpaceData.SpecularSecondaryScale = HairInstance_Spec0_SpecPower0_Spec1_SpecPower1.z;
+	HairScreenSpaceData.SpecularSecondaryPower = HairInstance_Spec0_SpecPower0_Spec1_SpecPower1.w;
+	HairScreenSpaceData.SpecularSecondaryOffset = HairInstance_Spec1Offset_DiffuseBlend_ReceiveShadows_ShadowSigma.x;
+	HairScreenSpaceData.DiffuseBlend = HairInstance_Spec1Offset_DiffuseBlend_ReceiveShadows_ShadowSigma.y;
+	HairScreenSpaceData.bReceiveShadow = HairInstance_Spec1Offset_DiffuseBlend_ReceiveShadows_ShadowSigma.z != 0;
+	HairScreenSpaceData.ShadowAttenuation = HairInstance_Spec1Offset_DiffuseBlend_ReceiveShadows_ShadowSigma.w;
+	HairScreenSpaceData.GlintStrength = HairInstance_GlintStrength_LightingChannelMask.x;
+	HairScreenSpaceData.LightingChannelMask = asuint(HairInstance_GlintStrength_LightingChannelMask.y);
+
+	return HairScreenSpaceData;
+}
+
+float3 GetHairWorksDynamicLighting(float3 ScreenVector, uint2 SamplePos, FDeferredLightData LightData)
+{
+	// Clip none-hair pixels
+	const float HairNearestDepth = HairNearestDepthTexture[SamplePos];
+	if(HairNearestDepth == 0)
+		return 0;
+
+	// Do lighting for each sub pixel
+	float3 HairColor = 0;
+
+	uint2 Size;
+	uint SampleNum;
+	HairGBufferATextureMS.GetDimensions(Size.x, Size.y, SampleNum);
+
+	UNROLL
+	for(uint i = 0; i < min(SampleNum, 8); ++i)
+	{
+		// Load GBuffer
+		FHairScreenSpaceData HairScreenSpaceData = GetHairWorksScreenSpaceData(SamplePos, i);
+
+		// Do lighting
+		float3 HairColorPerSample = GetHairWorksDynamicLighting(ScreenVector, SamplePos, HairScreenSpaceData, LightData);
+
+		// Accumulate color
+		HairColor.rgb += HairColorPerSample;
+	}
+
+	HairColor /= SampleNum;
+
+	return HairColor;
+}
+
+#endif	// SM5_PROFILE
+// @third party code - END HairWorks

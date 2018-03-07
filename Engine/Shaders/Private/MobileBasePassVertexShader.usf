@@ -1,0 +1,209 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	MobileBasePassVertexShader.usf: Base pass vertex shader used with forward shading
+=============================================================================*/
+
+#define IS_MOBILE_BASEPASS_VERTEX_SHADER 1
+
+// @todo urban: branch was: #define FORCE_FLOATS 1
+#ifndef FORCE_FLOATS
+#define FORCE_FLOATS (COMPILER_METAL)
+#endif
+
+#include "Common.ush"
+#include "MobileBasePassCommon.ush"
+#include "/Engine/Generated/Material.ush"
+#include "/Engine/Generated/VertexFactory.ush"
+#include "HeightFogCommon.ush"
+
+#if MOBILE_MULTI_VIEW
+int MobileMultiViewMask;
+#endif
+
+struct FMobileShadingBasePassVSToPS
+{
+	FVertexFactoryInterpolantsVSToPS FactoryInterpolants;
+	FMobileBasePassInterpolantsVSToPS BasePassInterpolants;
+	float4 Position : SV_POSITION;
+};
+
+// NVCHANGE_BEGIN: Add VXGI
+#if VXGI_VOXELIZATION_SHADER
+
+#if USING_TESSELLATION	
+
+	struct FMobileShadingBasePassVSToDS
+	{
+		FVertexFactoryInterpolantsVSToDS FactoryInterpolants;
+		FMobileBasePassInterpolantsVSToPS BasePassInterpolants; //These are the same
+		float4 Position : VS_To_DS_Position;
+		OPTIONAL_VertexID_VS_To_DS
+	};
+	
+	#define FMobileShadingBasePassVSOutput FMobileShadingBasePassVSToDS
+	#define VertexFactoryGetInterpolants VertexFactoryGetInterpolantsVSToDS
+	#define FPassSpecificVSToDS FMobileShadingBasePassVSToDS
+	#define FPassSpecificVSToPS FMobileShadingBasePassVSToPS
+
+	
+	FMobileShadingBasePassVSToDS PassInterpolate(FMobileShadingBasePassVSToDS a, float aInterp, FMobileShadingBasePassVSToDS b, float bInterp)
+	{
+		FMobileShadingBasePassVSToDS O;
+	
+		O.FactoryInterpolants = VertexFactoryInterpolate(a.FactoryInterpolants, aInterp, b.FactoryInterpolants, bInterp);
+
+		#if NEEDS_BASEPASS_FOGGING
+			TESSELLATION_INTERPOLATE_MEMBER(BasePassInterpolants.VertexFog);
+		#endif
+
+		#if USE_WORLD_POSITION_EXCLUDING_SHADER_OFFSETS
+			TESSELLATION_INTERPOLATE_MEMBER(BasePassInterpolants.PixelPositionExcludingWPO);
+		#endif
+
+		return O;
+	}
+
+	FMobileShadingBasePassVSToPS PassFinalizeTessellationOutput(FMobileShadingBasePassVSToDS Interpolants, float4 WorldPosition, FMaterialTessellationParameters MaterialParameters)
+	{
+		FMobileShadingBasePassVSToPS O;
+	
+		O.FactoryInterpolants = VertexFactoryAssignInterpolants(Interpolants.FactoryInterpolants);
+
+		// Copy everything in the shared base class over to the pixel shader input
+		(FMobileBasePassInterpolantsVSToPS)O.BasePassInterpolants = (FMobileBasePassInterpolantsVSToPS)Interpolants.BasePassInterpolants;
+
+		// Transform position to clip-space
+		ISOLATE
+		{
+			O.Position = mul(WorldPosition, View.TranslatedWorldToClip);
+		}
+	
+		// Calc position-dependent interps
+		O.BasePassInterpolants.PixelPosition = WorldPosition;
+
+		#if USE_WORLD_POSITION_EXCLUDING_SHADER_OFFSETS
+			O.BasePassInterpolants.PixelPositionExcludingWPO = Interpolants.BasePassInterpolants.PixelPositionExcludingWPO;
+		#endif
+
+		return O;
+	}
+
+	// This gets us the MainHull and MainDomain shader definitions
+	#include "Tessellation.ush"
+
+#else
+	#define FMobileShadingBasePassVSOutput FMobileShadingBasePassVSToPS
+	#define VertexFactoryGetInterpolants VertexFactoryGetInterpolantsVSToPS
+#endif
+
+
+#else
+// NVCHANGE_END: Add VXGI
+
+#define FMobileShadingBasePassVSOutput FMobileShadingBasePassVSToPS
+#define VertexFactoryGetInterpolants VertexFactoryGetInterpolantsVSToPS
+
+// NVCHANGE_BEGIN: Add VXGI
+#endif
+// NVCHANGE_END: Add VXGI
+
+
+
+/** Entry point for the base pass vertex shader. */
+void Main(
+	FVertexFactoryInput Input
+	, out FMobileShadingBasePassVSOutput Output
+#if MOBILE_MULTI_VIEW
+	, in uint ViewId : SV_ViewID
+#endif
+	)
+{
+#if MOBILE_MULTI_VIEW
+	const int MultiViewId = int(ViewId);
+	// Early out with a degenerate vertex to be clipped if the view is masked
+	BRANCH
+	if (MultiViewId == MobileMultiViewMask)
+	{
+		Output.Position = vec4(0.0);	
+		return;
+	}
+
+	ResolvedView = ResolveView(uint(MultiViewId));
+	Output.BasePassInterpolants.MultiViewId = float(MultiViewId);
+#else
+	ResolvedView = ResolveView();
+#endif
+
+#if PACK_INTERPOLANTS
+	float4 PackedInterps[NUM_VF_PACKED_INTERPOLANTS];
+	UNROLL 
+	for(int i = 0; i < NUM_VF_PACKED_INTERPOLANTS; ++i)
+	{
+		PackedInterps[i] = 0;
+	}
+#endif
+
+	FVertexFactoryIntermediates VFIntermediates = GetVertexFactoryIntermediates(Input);
+	float4 WorldPositionExcludingWPO = VertexFactoryGetWorldPosition(Input, VFIntermediates);
+	float4 WorldPosition = WorldPositionExcludingWPO;
+
+	half3x3 TangentToLocal = VertexFactoryGetTangentToLocal(Input, VFIntermediates);	
+	FMaterialVertexParameters VertexParameters = GetMaterialVertexParameters(Input, VFIntermediates, WorldPosition.xyz, TangentToLocal);
+
+	half3 WorldPositionOffset = GetMaterialWorldPositionOffset(VertexParameters);
+	
+	WorldPosition.xyz += WorldPositionOffset;
+
+// NVCHANGE_BEGIN: Add VXGI
+#if VXGI_VOXELIZATION_SHADER && USING_TESSELLATION
+	// We let the Domain Shader convert to post projection when tessellating
+	Output.Position = WorldPosition;	
+	Output.BasePassInterpolants.PixelPosition = WorldPosition;
+
+	#if USE_WORLD_POSITION_EXCLUDING_SHADER_OFFSETS
+		Output.BasePassInterpolants.PixelPositionExcludingWPO = WorldPositionExcludingWPO;
+	#endif
+#else
+// NVCHANGE_END: Add VXGI
+
+	float4 RasterizedWorldPosition = VertexFactoryGetRasterizedWorldPosition(Input, VFIntermediates, WorldPosition);
+	Output.Position = mul(RasterizedWorldPosition, ResolvedView.TranslatedWorldToClip);
+	Output.BasePassInterpolants.PixelPosition = WorldPosition;
+
+#if USE_WORLD_POSITION_EXCLUDING_SHADER_OFFSETS
+	Output.BasePassInterpolants.PixelPositionExcludingWPO = WorldPositionExcludingWPO.xyz;
+#endif
+
+// NVCHANGE_BEGIN: Add VXGI
+#endif
+// NVCHANGE_END: Add VXGI
+
+#if USE_PS_CLIP_PLANE
+	Output.BasePassInterpolants.OutClipDistance = dot(ResolvedView.GlobalClippingPlane, float4(WorldPosition.xyz - ResolvedView.PreViewTranslation.xyz, 1));
+#endif
+
+#if USE_VERTEX_FOG
+#if PACK_INTERPOLANTS
+	PackedInterps[0] = CalculateHeightFog(WorldPosition.xyz - ResolvedView.TranslatedWorldCameraOrigin);
+#else
+	Output.BasePassInterpolants.VertexFog = CalculateHeightFog(WorldPosition.xyz - ResolvedView.TranslatedWorldCameraOrigin);
+#endif // PACK_INTERPOLANTS
+#endif
+
+#if LANDSCAPE_BUG_WORKAROUND
+	Output.BasePassInterpolants.DummyInterp = 0;
+#endif
+
+	Output.FactoryInterpolants = VertexFactoryGetInterpolants(Input, VFIntermediates, VertexParameters);
+
+	Output.BasePassInterpolants.PixelPosition.w = Output.Position.w;
+
+#if PACK_INTERPOLANTS
+	VertexFactoryPackInterpolants(Output.FactoryInterpolants, PackedInterps);
+#endif // PACK_INTERPOLANTS
+
+#if OUTPUT_GAMMA_SPACE && (COMPILER_GLSL_ES2 || COMPILER_GLSL_ES3_1 || COMPILER_GLSL_ES3_1_EXT)
+	Output.Position.y *= -1;
+#endif
+}

@@ -1,0 +1,150 @@
+//-----------------------------------------------------------------------------
+// File:		LPVDirectLightInject.usf
+//
+// Summary:		Compute shaders for injecting light directly into an LPV
+//				without using an RSM
+//
+// Created:		2013-03-01
+//
+// Author:		mailto:benwood@microsoft.com
+//
+//				Copyright (C) Microsoft. All rights reserved.
+//-----------------------------------------------------------------------------
+
+/*------------------------------------------------------------------------------
+	Compile time parameters:
+------------------------------------------------------------------------------*/
+
+#define SUPPORT_CONTACT_SHADOWS 0
+
+#include "Common.ush"
+#include "LPVWriteVplCommon.ush"
+#include "LPVGeometryVolumeCommon.ush"
+#include "DeferredLightingCommon.ush"
+
+//-------------------------------------------------------------------------------------------------
+
+#define DIRECT_LIGHT_INJECTION_STRENGTH 200.0f
+
+//-------------------------------------------------------------------------------------------------
+
+float ComputeAttenuation( float3 WorldPosition )
+{
+	float3 ToLight = LpvInject.LightPosition.xyz - WorldPosition;		
+	float DistanceSqr = dot( ToLight, ToLight );
+	float3 L = ToLight * rsqrt( DistanceSqr );
+	float Attenuation = 1.0f;
+
+	if (LpvInject.bLightInverseSquaredAttenuation > 0.0f )
+	{
+		// @TODO: From DeferredLightingCommon.usf GetDynamicLighting() - could refactor to avoid duplication
+		BRANCH
+		if( LpvInject.LightSourceLength > 0 )
+		{
+			// Line segment irradiance
+			float3 L01 = LpvInject.LightDirection.xyz * LpvInject.LightSourceLength;
+			float3 L0 = ToLight - 0.5 * L01;
+			float3 L1 = ToLight + 0.5 * L01;
+			Attenuation = rcp( ( length( L0 ) * length( L1 ) + dot( L0, L1 ) ) * 0.5 + 1 );
+		}
+		else
+		{
+			// Sphere irradiance (technically just 1/d^2 but this avoids inf)
+			Attenuation = 1 / ( DistanceSqr + 1 );
+		}
+		Attenuation *= Square( saturate( 1 - Square( DistanceSqr * Square(1.0f/LpvInject.LightRadius) ) ) );
+	}
+	else
+	{
+		Attenuation = RadialAttenuation( ToLight/LpvInject.LightRadius, LpvInject.LightFalloffExponent );
+	}
+
+#if SPOT_ATTENUATION
+	Attenuation *= SpotAttenuation(L, -LpvInject.LightDirection.xyz, LpvInject.LightSpotAngles);
+#endif 
+
+	return Attenuation;
+}
+
+[numthreads(4,4,4)]
+void CSLightInject_ListGenCS(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID ) 
+{
+	int index = GetGridAddress( DTid );
+
+	// TODO: optimise this. Don't read/write unless we need to. Requires read/write access to UAV, which requires
+	// aliasing for the textures... 
+	LPVCell cell = ReadLpvCell( index ); 
+
+	float3 GridPosition = float3( DTid );
+
+	float3 LightPos = LpvInject.LightPosition.xyz;
+
+	float3 WorldPosition = GridToWorld( GridPosition+0.5  );
+	float3 LightVector = float3( LightPos-WorldPosition );
+
+	float len = length( LightVector );
+	if ( len < LpvInject.LightRadius )
+	{
+		int gvOffset = 0;
+
+		// Gv is at a half cell offset to the LPV. Offset GV Lookup based on Light direction to avoid bias artifacts
+		const int xStride = 1;
+		const int yStride = 32;
+		const int zStride = 32*32;
+		if ( LightVector.x < 0 ) gvOffset += xStride;
+		if ( LightVector.y < 0 ) gvOffset += yStride;
+		if ( LightVector.z < 0 ) gvOffset += zStride;
+
+		int gvIndex = index + gvOffset;
+		GeometryVolumeEntry gvCell = ReadGvCell( gvIndex );
+
+		if ( gvCell.SH[0] > 0.1f )
+		{
+			float3 LightDirection = LightVector/len;
+
+			// TODO: Not ideal for thin walls! Use SH directly rather than approximating the normal?
+			float3 normal = -GvGetDominantDirectionApprox( gvCell );
+
+			float nDotL = saturate( dot( normal, LightDirection ) );
+			
+			if ( nDotL > 0.0f )
+			{
+				float distance = len;
+				float shadowValue = 1.0f;
+#if SHADOW_CASTING
+				//TODO: Could use shadow map to avoid artifacts with shadow casters outside the LPV volume
+				if ( distance > 100.0f )
+				{
+					float3 inc = LightVector / 16.0f;
+
+					float3 pos = WorldPosition + inc*2;
+
+					for ( int i=0; i<15; i++ )
+					{
+						int traceGvIndex = GetGridIndex( pos ) + gvOffset;
+						GeometryVolumeEntry sCell = ReadGvCell( traceGvIndex );
+
+						float s = 1-SHLookupGeometryVolume( sCell, -LightDirection );
+
+						shadowValue = min( shadowValue, s );
+						pos+=inc;
+					}
+					shadowValue = saturate( shadowValue );
+				}
+#endif
+
+				float3 flux = LpvInject.LightColor.rgb * gvCell.color * DIRECT_LIGHT_INJECTION_STRENGTH;
+
+				float Attenuation = ComputeAttenuation( WorldPosition );
+				Attenuation *= nDotL*shadowValue;
+				flux *= Attenuation;
+
+				WorldPosition += normal * LpvWrite.VplInjectionBias;
+
+				float solidAngle = 3.14;
+				AccumulateLighting( flux, -normal, solidAngle, cell );
+			}
+		}
+	}
+	WriteLpvCell( cell, index );
+}

@@ -1,0 +1,211 @@
+Availability:Public
+Title: Setting Up a Character
+Crumbs: %ROOT%, Engine, Engine/Animation
+Description:A high-level overview of how to set up a basic character or Skeletal Mesh in Unreal Engine 4.
+Related: Engine/Content/FBX/Animations
+Related: Engine/Content/Types/SkeletalMeshes
+Related: Engine/Animation/PhysicallyDrivenAnimation
+Related: Engine/Content/Tools/MayaRiggingTool
+Related: Engine/Animation/AnimBlueprints
+Related: Engine/Animation/AnimBlueprints/EventGraph
+Related: Engine/Animation/StateMachines
+Related: Gameplay/AI
+version: 4.9
+topic-image:SettingUpACharacter_topic.png
+
+[REGION:fullwidth]
+![](Character.png)
+[/REGION]
+
+[TOC(start:2 end:2)]
+
+
+
+No matter your game project or genre, it is likely that at some point you are going to need some kind of animated character to move around in your environment. This may be a character that the player controls, or may be some AI-driven entity that interacts with the world in some way. Regardless, you are going to need to know how to set such characters up so that they can properly animate in your world. The purpose of this document is to give you a very high-level overview of how this is done, while guiding you to dedicated documents and examples for specific details. For our purposes, we will assume that you want to create a character that is controllable by the player in some way.
+
+[REGION:note]
+Throughout this document, we will make references to various scripting operations that can be done with Blueprints. Anything that can be done in Blueprints can also be done in C++, so you should not feel restricted solely to Blueprint visual scripting. The final section of this document contains references to example content showing the setup in both C++ and in Blueprints.
+[/REGION]
+
+[REGION:tip]
+You can also find an example of the Playable Owen Character on the [Animation Content Examples](Resources\ContentExamples\Animation) page under section 1.10.
+[/REGION]
+
+
+## Workflow at a Glance
+
+The primary workflow for character setup in UE4 is as follows:
+
+1. Create your art assets (Skeletal Meshes) and animations, using a 3rd party digital content creation (DCC) package such as 3ds Max or Maya.
+1. Import your Skeletal Meshes and animations into UE4, either creating a new Skeleton asset for new Skeletal Meshes, or reusing an existing Skeleton asset for identical or similar Skeletal Meshes.
+1. Create a PlayerController script or Blueprint to handle inputs from the player.
+1. Create a Character or Pawn script or Blueprint to parse inputs and control the actual movement (not skeletal animation) of the character.
+1. Construct the Animation Blueprint for the character.
+1. Create a GameMode script or Blueprint that utilizes your custom PlayerController and any other custom script assets.
+1. Play your game!
+
+Each of these steps will generally require a wide variety of further sub-steps to be completely successful. This list just gives a general idea of the flow. In the following sections, we will go into further detail on exactly what each one of these steps means and how you can apply them.
+
+## Creating Art Assets
+
+![](ArtAssets.png)(w:600)
+
+In many ways, the creation of your art assets may be the most challenging part to the character development process. Generally, there is significant design, modeling, surfacing, rigging, and animation time that must take place long before you even touch the Unreal Engine. While we cannot teach you the nuances of character design and animation, we do have certain tools to help the process along. 
+
+### Maya Rigging Tool
+
+At Epic, many of our animation artists use Maya to animate their characters. As such, our team has developed an advanced rigging tool to simplify the rigging process, taking it from hours down to minutes.
+
+[INCLUDE:Engine/Content/Tools/MayaRiggingTool#intro]
+
+For more information, please see the [](Engine/Content\Tools\MayaRiggingTool) documentation.
+
+## Importing Skeletal Meshes
+
+![](CharacterViewport.png)(w:400)
+
+
+[INCLUDE:Engine/Content/FBX#intro]
+
+For more information, please see the [](Engine/Content\FBX) and [](Engine/Content\Types\SkeletalMeshes) documentation.
+
+
+Properly importing your Skeletal Meshes into UE4 is a vital step in the process of creating your animated characters. Unreal contains a robust importing system with a variety of options to speed up your import process.
+
+For more information on importing FBX files, please see [](Engine/Content\FBX\ImportOptions).
+
+## Creating a Player Controller
+
+![](PlayerController.png)
+
+The PlayerController is a special type of script or Blueprint whose primary purpose is to parse inputs from the player into events that can drive a character. For instance, it can control how moving the analog stick on a controller upward can cause an event which will eventually be used to push the character forward on the screen.
+
+A PlayerController is already an existing Class within Unreal. In the editor, you can create a new Blueprint with a parent class of PlayerController, and then use this to set up your own events that will take place upon inputs from the player.
+
+For an example of a custom Blueprint PlayerController, you can start a new project within the editor (**File > New Project**) and check out the **Blueprint Top Down** template. All of the Blueprint-based templates will contain a PlayerController of some sort (either the default Player Controller or a Player Controller Blueprint), though if you want to see a custom application of using a Player Controller, the **Blueprint Top Down** template is the most straight forward. 
+
+Once within the new project, you can search within the **Class Viewer** for PlayerController, turning off the filters in the **Class Viewer**. **Double-clicking** on this asset will open it up and you can see the setup for yourself.
+
+You can also see a PlayerController in C++ script by creating a new project (**File > New Project**) and choosing the **C++ Top Down** template. 
+
+
+## Creating a Pawn or Character Blueprint
+
+![](CharacterBP.png)(w:600)
+
+Once you have set up your PlayerController, your system is now prepared to handle inputs from the player. Now, however, you have to translate those inputs into something that can in turn drive a character around on the screen. That means those inputs need to be translated (or parsed) into actions. This is where the Pawn or Character classes come into play. 
+
+### Choosing Pawn or Character
+
+You will notice that we mention two potential classes here: Pawn and Character. Both are used for entities in the game that are either controlled by the player or by in-game AI. The key difference is that the Character class is an extension of the Pawn class, adding in player physics, support for a specific mesh, and the general types of handling needed when creating a playable in-game character. For our purposes, we will be using the Character class. For simpler elements that would just need to be driven around the scene by AI, for example, you can generally get away with using a Pawn.
+
+### Character Class Setup
+
+![](CharacterBPGraph.png)(w:800)
+
+Your Character Class is going to start with events that are triggered from the PlayerController, and use scripting (including Blueprint visual scripting) to control what to actually do with those inputs and how they can be used to control the character. For instance, where the PlayerController simply creates a basic event for moving the analog stick on a controller in an upward direction, the Character class is responsible for receiving that event and using it to drive the character forward.
+
+The Character Class also holds a reference to a Skeletal Mesh, which will be the basis for what the player sees while playing the game. In the case of a first-person game, this is often just a pair of floating arms, though there may be a full body if you need that body to shadow the environment properly. For third-person games, the mesh will be the Skeletal Mesh that represents the character. 
+
+Motion on a character is generally handled by applying some motion to the physics shape (typically a capsule). This motion also coincides with a MovementMode. This is an enumeration used to keep track of what a character is doing (i.e. walking, running, falling, swimming, etc.). This information will later be used to drive what animations are being played on the Skeletal Mesh.
+
+For an example of a custom Blueprint Character class, you should start a new project within the editor (**File > New Project**) and choose either of the Blueprint templates for First Person or Third Person. All of the Blueprint-based templates will contain a Character of some sort, though we recommend the First or Third Person templates due to their overall simplicity and the common use of those genres.
+
+Once within the new project, you can search within the **Class Viewer** for Character, filtering by Blueprints in the Game folder. **Double-clicking** on this asset will open it up and you can see the setup for yourself.
+
+You can also see a Character in C++ script by creating a new project (**File > New Project**) and choosing either the First or Third Person Code templates.
+
+
+## Animation Blueprint
+
+![](AnimBP.png)(w:600)
+
+You do most of the heavy lifting of hooking up animation to Characters in the Animation Blueprint.
+
+After you have defined the ways in which a Skeletal Mesh Actor moves around in the world in the Character Blueprint, you can start assigning specific animations based on those movements (such as velocity) in the Animation Blueprint.
+
+[INCLUDE:Engine/Animation/AnimBlueprints#graphs]
+
+Animation Blueprints are by far the most sophisticated aspect of character setup. This is where all of your data comes together to actually cause your Skeletal Meshes to perform the appropriate animations. In order to fully understand Animation Blueprints and their power, there are many different animation assets that you should know about, including:
+
+* [](Engine/Animation/StateMachines)
+* [](Engine/Animation/Blendspaces)
+* [](Engine/Animation/Sequences)
+
+These are just the tip of the iceberg. You would do well to look at the [](Engine/Animation/AnimBlueprints) documentation, and to also look at some of the Animation Blueprint included in some of our example content, such as the First and Third Person Templates and those found within the Content Examples project.
+
+Once you have created the Animation Blueprint that defines the motion of your character, you will need to make sure you assign it to the **Anim Blueprint Generated Class** property, found under the Mesh Component of the Character Blueprint. This is necessary because you may have multiple Animation Blueprints for each Skeletal Mesh, and the Character Blueprint needs to know the one into which it will be sending the necessary animation and variable data.
+
+## GameMode Setup
+
+![](GameMode.png)
+
+A GameMode is a special type of class that is used to define your game. Generally speaking, is it going to be just a collection of properties used to define what the essential classes for your game are going to be. The primary properties you will set up include:
+
+* **Default Pawn Class** - This will hold the Character class you set up for your in-game character.
+* **HUD Class** - This contains any special heads-up display (HUD) classes created, which are not covered in this document.
+* **PlayerController Class** - This will hold the custom PlayerController you set up for your in-game character.
+* **Spectator Class** - This holds any special classes used to control spectators, or passive players that just watch the action. These are not covered in this document.
+* **Replay Spectator Class** - This holds any special classes used to control spectators when in a replay. These are not covered in this document.
+* **Game State Class** - This class controls any special rules or setup for how your game will be played, but is not covered in this document.
+* **Player State Class** - This class defines any special rules for replicating relevant player information to all clients.
+
+For testing out your character, you need to at the very least set up the Default Pawn Class and the PlayerController Class properties.
+
+### World Settings
+
+![](button_Toolbar_WorldSettings.png)
+
+Once you have set up your GameMode, the last step to being able to play with your custom Character is to make sure that the current Level is using your GameMode. This is done using the **World Settings** tab, accessible from the **Settings** button located on the main toolbar.
+
+Within the **World Settings**, you will want to make sure you have set the **GameMode Override** to the name of your GameMode class. Once you have done that, you are ready to save and test out your new character!
+
+![](GameModeSettings.png)
+
+
+## Summary
+
+So, to summarize the flow of setup back up the chain:
+
+* Your Level's World Settings are used to set which GameMode you are using.
+* The GameMode specifies which Pawn (Character) Class and which PlayerController Class you will need to play the game.
+* The Character Class: 
+	* Contains the Skeletal Mesh that you imported via FBX.
+	* Takes in data from the PlayerController Class and converts it to movement (not animation).
+	* Stores which Animation Blueprint will be used to drive skeletal animation within its Mesh Component.
+* The Animation Blueprint:
+	* Takes data from the Character Class into its Event Graph.
+	* Uses that data to drive State Machines, Blend Spaces, and other assets.
+	* Those assets use Animation Sequences (skeletal animation data from an FBX files) to animate the character.
+* The final result of the Animation Blueprint is applied to your Skeletal Mesh so that you can see the in-game character animate.
+
+
+
+## Included Examples
+
+There are several examples you can check out in the engine to see how these setups are done and try them for yourself. We include both Templates, which are basic project genres you can use to make your own games, and Content Examples, which are pre-constructed examples of content created by artists and technicians here at Epic.
+
+### Templates
+
+[REGION:fullwidth]
+![](NewProject.png)
+[/REGION]
+
+
+
+When you create a new project in Unreal Engine (**File > New Project**), you are given the option to choose a Template. Virtually all of these will use their own GameModes, Character Blueprints, Animation Blueprints, and every asset mentioned in this document. For purposes of simplicity and clarity, we strongly recommend you check out the First Person or Third Person Templates. 
+
+Note that each of these Templates is available in a code form or a Blueprint form. This is so that you can choose to develop in the way that you are most comfortable. If you are a coder, you will probably want to use a Code Template. If you are a more artistic developer, you will likely be more comfortable exploring a Blueprint Template. Be aware that the two are not mutually exclusive; you can add code classes to a Blueprint Template project, just as you can add new Blueprint classes to a Code Template project!
+
+### Content Examples
+
+[REGION:fullwidth]
+![](AnimationCE.png)
+[/REGION]
+
+Content Examples are specialized versions of content designed by artists and technicians here at Epic. They are found within a project named **ContentExamples**, which can be downloaded by users via the **Marketplace**. Of particular importance would be the assets found within the Animation.umap level, which shows a variety of uses for Skeletal Mesh animation on a character.
+
+
+
+
+

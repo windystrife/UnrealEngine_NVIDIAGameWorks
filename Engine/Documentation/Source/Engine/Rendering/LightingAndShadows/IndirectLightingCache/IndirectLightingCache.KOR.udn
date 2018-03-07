@@ -1,0 +1,105 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title:간접광 캐시
+Crumbs: %ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description:빌드되지 않은 씬 미리보기와 다이내믹 오브젝트의 글로벌 일루미네이션에 간접광 샘플 캐시를 사용하는 법에 대한 글입니다.
+Versinon: 4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/IndirectLightingCache:title%](%ROOT%/Engine/Rendering/LightingAndShadows/IndirectLightingCache/indirectcache_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/ue4_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/IndirectLightingCache:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/IndirectLightingCache:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/IndirectLightingCache]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:banner]
+![](indirectcache_banner.png)
+[/REGION]
+
+[EXCERPT:LightCache001]
+[Lightmass](Engine/Rendering/LightingAndShadows/Lightmass) (라이트매스)는 스태틱 오브젝트 상의 간접광에 대한 라이트맵을 생성하지만, 캐릭터같은 다이내믹 오브젝트 역시도 
+간접광을 받을 수 있는 방법이 필요합니다. 여기에는 **Indirect Lighting Cache** (간접광 캐시)라는 기법이 도입되었는데, 
+다이내믹 오브젝트에 대한 간접광 계산을 실시간 처리하기 위해, 빌드 시간에 라이트매스가 생성한 샘플을 사용하는 기법입니다.
+[/EXCERPT:LightCache001]
+
+아래 이미지에서 보면, 간접광 캐시가 있고 없는 상태에서 렌더링되는 다이내믹 오브젝트의 차이를 
+확인할 수 있습니다:
+
+[REGION:fullwidth]
+![](diffuse_no_indirect.png)
+[/REGION]
+
+[REGION:caption]
+Indirect Lighting Cache (간접광 캐시)를 끈 Elemental 레벨의 디퓨즈 라이팅
+[/REGION]
+
+[REGION:fullwidth]
+![](diffuse_indirect.png)
+[/REGION]
+
+[REGION:caption]
+Indirect Lighting Cache (간접광 캐시)를 켠 디퓨즈 라이팅
+[/REGION]
+
+## 작동 방식
+
+[EXCERPT:LightCache002]
+하이 레벨 관점에서 보면:
+
+*	라이트매스가 레벨 전체적으로 라이팅 샘플을 놓은 다음 그에 대한 간접광을 라이팅 빌드 도중 계산합니다.
+*	다이내믹 오브젝트 렌더링 시간이 되면, **간접광 캐시** 는 거기에 사용할 수 있는 라이팅 정보가 있는지 확인한 다음, 
+	있다면 사용합니다.
+*	가용 라이팅이 없다면 (즉 오브젝트가 새로 들어왔거나 너무 멀리 이동했다면), **간접광 캐시** 는 미리계산된 
+	라이팅 샘플에서 라이팅을 보간해 냅니다.
+
+
+라이트매스가 라이팅 샘플을 놓는 방식은, 위쪽을 향하는 표면에는 촘촘하게, 그 외 다른 곳에는 성기게 놓습니다.
+샘플은 _LightmassImportanceVolume_ (라이트매스 임포턴스 볼륨) 안에만 있도록 제한되며, 정적인 표면에만 놓입니다.
+[/EXCERPT:LightCache002]
+
+[REGION:fullwidth]
+![](lighting_samples.png)
+[/REGION]
+
+[REGION:caption]
+`Show->Visualize->Volume Lighting Samples`, `표시->시각화->볼륨 라이팅 샘플` 로 라이트매스가 생성한 라이팅 샘플을 시각화시켜 본 모습.
+[/REGION]
+
+이러한 작업방식의 목표는 필수적인 콘텐츠 셋업 작업을 최소한으로 줄이기 위해서입니다. 그러나 가끔 이러한 배치 휴리스틱으로는 
+허공에 떠있는 영역, 이를테면 캐릭터가 타고 있는 엘리베이터나 날아다니는 부분에 충분한 디테일을 얻을 수 없는 경우가 있습니다. 
+그러한 영역 부근에는 _LightmassCharacterIndirectDetailVolumes_ (라이트매스 캐릭터 간접 디테일 볼륨)을 두어 디테일을 살릴 수 있습니다.
+
+실행시간에, **간접광 캐시** 는 각각의 무버블 오브젝트 주변으로 라이팅 샘플 위치를 보간해 줍니다. 무버블 오브젝트란, 모빌리티가 무버블로 설정된 컴포넌트를 말합니다.
+
+여기 토러스(꽈배기) 모양은 무버블 스태틱 메시로, 주변에 5x5x5 보간 위치가 표시되어 있습니다.
+
+[REGION:fullwidth]
+![](interpolation_points.png)
+[/REGION]
+
+이 보간은 오브젝트가 무효화될 만큼, 즉 캐시 이름을 벗어날 만큼 움직일 때만 일어납니다. 주목해 볼 부분은, 그 위치가 
+오브젝트의 바운드에서 꽤나 멀다는 점인데, 월드에서 오브젝트가 움직임에 따라 안정적이고 지속적인 라이팅을 내기 위함입니다.
+대부분의 오브젝트는 사실상 3x3x3 보간 해상도를 얻습니다. 볼륨 라이팅 샘플은 디렉셔널 간접광을 저장하여 노멀맵 작동이 가능합니다.
+
+## 빌드되지 않은 라이팅 미리보기
+
+간접광 캐시를 통해서는 라이팅이 빌드되지 않은 오브젝트의 미리보기도 가능합니다. 작은 오브젝트에는 효과가 매우 좋지만,
+빌딩이나 바닥처럼 커다란 메시에는 그다지 좋지 않습니다. 라이팅이 빌드되어 있는 스태틱 메시를 옮기면 다음 번 라이팅 빌드까지는 
+자동으로 간접강 캐시로 전환됩니다.
+
+여기 보시면 기둥을 하나 복제했는데도 미리보기에 까맣게 나오는 대신 간접광을 받고 있습니다.
+ 
+![](unbuilt.png)

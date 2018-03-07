@@ -1,0 +1,118 @@
+Availability:Epic
+Title:Crash Reporter
+Crumbs:%ROOT%
+Description:Application for collecting information from crashes in Unreal Engine.
+
+[TOC (start:2 end:3)]
+
+The Crash Reporter suite of programs is designed to capture and analyze application crashes both internal to the company, and externally from end users.
+
+## Requirements
+
+* Visual Studio 2012 with MVC3 installed
+* An IIS server with .NET40 support
+* A SQL database to serve the web site
+
+
+## Generic Overview
+
+* The application generates Windows Error Reporting style reports after a crash, queues them up for uploading, and then launches CrashReportUploader.
+* The CrashReportUploader then hijacks and uploads these reports to a desired server, but leaves them on the system so they are forwarded to Windows Error Reporting. It also optionally launches CrashReportInput so the user can input a description.
+* The CrashReportReceiver resides in the DMZ, and accepts these reports and writes them to a secure location.
+* The CrashReportProcessor monitors the secure location for new reports, processes crash reports as they come in.
+* The CrashReportWebsite then displays the processed reports for QA to analyse and take action.
+
+
+
+Detailed API documentation is stored in Perforce: /Engine/Source/Programs/CrashReporter/CrashReportHelp/bin/Development/CrashReportHelp.chm
+
+## Generating a Crash Report
+
+* NewReportCrash() creates the report and launches CrashReportUploader
+
+
+The report contains Windows Error Reporting meta data, a minidump of the crash, the current log, and optionally a video file of the most recent usage. Any arbitrary file can be added in AddMiscFiles() if desired, and no changes will be required except in the processor on the 
+server. This new style of Windows Error Reporting was added in Windows Vista, so care will be needed if XP support is desired.
+
+## Uploading a Crash Report
+
+* /Engine/Binaries/DotNET/CrashReportUploader.exe.config contains the configuration properties.
+    * 'CrashReportUploadURL' - the URL of the CrashReportReceiver to send crashes to.
+	* 'UploadHistory' - how many days to search back for crashes.
+	* 'LocalDomain' - the domain to assist with the local symbol lookup heuristic.
+
+
+This application searches for all relevant crashes in the past 'UploadHistory' days, and uploads them the the 'CrashReportUploadURL'. The application is stateless in that it does not require any direct input from the engine; it can be run as a standalone application and
+will discover and upload just the same. If the upload fails for any reason (such as the URL being unavailable), the next launch of the uploader will retry. No parameters required, but `-unattended` and `-logfolder=<folder name>` as commandline options are respected. 
+
+Crash reports are discovered in by searching for any folders matching the pattern `SpecialFolder.LocalApplicationData\Microsoft\Windows\WER\ReportQueue\AppCrash_UE4-*`. These folders have a Guid that is used to see if the report is already uploaded.
+
+To account for locally compiled binaries, the uploader checks to see if it has a pdb, and is running on the local domain. If both these conditions are met, MinidumpDiagnostics.exe will be run to generate a report (which includes a callstack). This is then uploaded as part
+of the report.
+
+The uploader program then optionally launches CrashReportInput.exe to allow the user to input a description of what they were doing when the crash happened. 
+
+## Receiving a Crash Report
+
+* /Engine/Binaries/DotNET/CrashReportReceiver.exe.config contains the configuration properties.
+    * 'CrashReportRepository' - the secure folder to store incoming crash reports.
+
+
+This is a web service that lives on a server in the DMZ, and is accessible from everywhere via 'CrashReportUploadURL'. As with all externally accessible servers, it is locked down hard with minimal access. It does basic rejection checks, then
+receives files to a temporary folder in a secure location. Once all files are received, the folder is renamed to be detectable by the processor. The secure location is currently an NFS drive which is also accessible on the intranet.
+
+The report folder has an embedded Guid (e.g. 'AppCrash_UE4-FortniteGame_a50cecbc1f087cac2543eb9f04823bbb548b119_cab_17bf8494') and this is used to prevent uploading of duplicate reports.
+
+The Windows Error Reporting meta data is parsed for more detailed culling. Currently, it rejects crashes from debug builds, and from MinidumpDiagnostics (as it cannot sync itself).
+
+## Processing a Crash Report
+
+* /Engine/Binaries/DotNET/CrashReportProcess.exe.config
+    * 'ReportLandingZone' - the secure folder where the new reports arrive.
+	* 'ProcessedReports' - the location the processed crash data goes for access by the web site.
+	* 'DaysToSunsetReport' - the number of days empty folders are kept around to suppress duplicate report uploads.
+	* 'DepotRoot' - we use Perforce as the symbol server, and call utilities that are stored in the regular depot (e.g. MinidumpDiagnostics). A clientspec containing the relevant binaries and symbols is rooted here.
+	* 'CrashReportWebSite' - the URL of the crash report website for calling web services.
+	* 'ProcessedVideos' - the location of processed videos. As these can be large, they are stored separately from the normal files in the processed reports.
+
+
+The Crash Report Processor is a service that monitors secure location ('ReportLandingZone') for new reports. As NFS does not support directory watching, this is done in a slow fashion. The service looks for the files it is interested in,
+calls MinidumpDiagnostics on the minidump if necessary, and then calls a web service to add the crash to the database. The returned id is used for naming the data files so the web site can access them easily. The remaining files are deleted, and
+just the folder name remains. The binary images are required for x64 call stack walking due to the nature of the architecture, and so syncing to the Microsoft Symbol Server is required to support call stack walking of x64 minidumps where the crash originates in a system dll.
+
+MinidumpDiagnostics extracts the version number from the module list in the minidump, and uses this to sync the correct binaries, symbols, and source from Perforce. The call stack is then evaluated using the same technology as WinDbg, and as much information as 
+possible is written to Diagnostics.txt.
+
+The clientspec does not need all the content for symbol lookup, but it does need binaries, symbols, and source. We use this template for the UE4 branch:
+
+	"//depot/UE4/Engine/... //CLIENT/UE4/Engine/..."
+	"//depot/UE4/*/Binaries/... //CLIENT/UE4/*/Binaries/..."
+	"//depot/UE4/*/Source/... //CLIENT/UE4/*/Source/..."
+
+## Displaying Crash Reports in the Web Site
+
+This is a web site that displays crashes and groups of crashes which can be sorted, searched, and filtered.
+
+The basic display is via a list of crashes per user group (e.g. 'EngineQA', 'GameQA', 'Coder'). The crash id can be selected to show details of the crash, the log, minidump, and video (if available).
+Clicking on the CrashGroups shows crashes grouped by callstack pattern. The crashgroup id can be selected to show details, and a list of all crashes associated with the crashgroup. The crashgroups are updated by running the stored procedure
+'UpdateCrashesByPattern' every ten minutes on the SQL server.
+ 
+## Setting up the Database
+
+Run the creation script /Engine/Source/Programs/CrashReporter/DatabaseDefinition/CreateCrashReporterDatabase.sql and set up a job on the SQL server to run the stored procedure 'UpdateCrashesByPattern' once every ten minutes. This is done via a SQL
+server agent job set up to run one 'Run Update Script' that executes the aforementioned stored procedure.
+
+## Setting up the Web Site
+
+The web site runs under IIS7.0 using MVC3 and .NET40. Add two virtual directories; one for the processed files, and another for the processed videos. These should be called 'CrashReporterFiles' and 'CrashReporterVideos', and map to the
+physical locations of 'ProcessedReports' and 'ProcessedVideos' in the Report Processor settings. The application pool needs to run as a user with permission to read files from the virtual directories.
+
+## Mapping 'In House' Users and Machines
+
+The RegisterPII application maps the anonymous machine Guid from the Windows Error Report to a known user and machine name. It should only be run for developers to ease tracking down of crashes, as collecting such data for end users is illegal.
+PII stands for Personally Identifiable Information which is described here http://en.wikipedia.org/wiki/Personally_identifiable_information
+
+
+
+
+

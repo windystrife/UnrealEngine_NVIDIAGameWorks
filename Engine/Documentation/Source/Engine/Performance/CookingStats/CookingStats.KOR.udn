@@ -1,0 +1,139 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title: 쿠킹 통계
+Crumbs: %ROOT%, Engine
+Description:퍼포먼스 문제를 알아내어 고치는 법입니다.
+
+프로젝트를 쿠킹할 때, 언리얼 엔진 4 는 여러가지 자세한 로그를 생성합니다. 그 중 하나가 **Stats.csv** 파일입니다. 여기서는 이 파일을 보는 법과 퍼포먼스 문제를 추적하는 법에 대해 알아보도록 하겠습니다.
+
+## 로그 보는 법
+
+프로젝트를 쿠킹하면 항상 통계가 생성됩니다. 저장 폴더는 다음과 같습니다:
+
+	<projectdirectory>\Saved\Stats\<datetime>Stats.csv
+
+**Stats.csv** 파일에는 쉼표로 구분되는 값(CSV) 줄이 다수 들어있습니다. 첫 값은 그 줄을 설명하는 고유 키이고, 있다라 그에 연관된 값을 가질 수 있는 태그를 = 로 구분해서 넣습니다. 예:
+
+	DDCTransactionId2154470643B07308C1979DA468F3EA48_0,StartTime=2015.07.14-17.09.19
+
+키가 첫 파라미터이므로, 이 예제에서 첫 파라미터는:
+
+	DDCTransactionId2154470643B07308C1979DA468F3EA48_0
+
+첫 태그는:
+
+	StartTime=2015.07.14-17.09.19
+
+그리고 이 첫 태그를 태그 이름과 값의 짝으로 나눌 수 있습니다:
+
+	TagName: StartTime
+	Value: 2015.07.14-17.09.19
+
+이 키와 태그를 통해 쿠킹 파이프라인 문제를 해결하는데 도움이 될 수 있습니다.
+
+
+## 쿠킹 퍼포먼스 문제 디버깅
+
+시간이 차이나는 이유는 대부분 **파생 데이터 캐시** (DDC) 가 무효화되어 
+플랫폼별로 텍스처를 다시 빌드하는 데서 발생합니다.
+
+쿠킹을 다시 해도 여전히 느리다면, 쿠킹되는 양이 많기 때문일 수 있습니다. (실험단계 기능인) 반복처리식(iterative) 쿠킹을 사용해 보거나, 테스팅/개발 목적 쿠킹이라면 필요한 것만 쿠킹해 보세요.
+
+
+
+## 파생 데이터 캐시 (DDC) 통계
+
+DDC 통계는 stats.CSV 파일에서 키가 DDCTransactionId 로 시작하는 부분입니다.
+
+DDC 통계는 DDC 가 캐시의 콘텐츠를 검색하는 방식을 반영하도록 계층형 포맷으로 되어 있습니다.
+
+아래 DDC 통계의 세 항목을 검토해 봅시다 (가독성을 위해 태그 줄을 편집했습니다):
+
+	DDCTransactionId2154470643B07308C1979DA468F3EA48_86
+	 GetCachedData
+	 CacheKey=MATSM_984afa3849534faa8491540b994bd32e_SF_PS4_15493__BC5N_DEV_SL_NoDBufF7646F9__526E4F887A3482CE276E9E40861788C0F9774343
+	 StartTime=2015.07.14-17.09.30
+	DDCTransactionId2154470643B07308C1979DA468F3EA48_87
+	 CachedDataProbablyExists
+	 Parent=DDCTransactionId2154470643B07308C1979DA468F3EA48_86
+	 StartTime=2015.07.14-17.09.30
+	DDCTransactionId2154470643B07308C1979DA468F3EA48_88 
+	 GetCachedData
+	 Parent=DDCTransactionId2154470643B07308C1979DA468F3EA48_86
+	 StartTime=2015.07.14-17.09.30
+
+둘째 이후 두 트랜잭션은 Parent 태그를 통해 첫째로 
+링크되어 있습니다.
+Parent 태그는 첫 트랜잭션을 DDC 요청의 소스로 
+지정합니다.
+첫 트랜잭션 역시 "GetCachedData" 태그를 지정하는데,
+트랜잭션의 도입점입니다. CacheKey 가 지정된 것도 볼 수 
+있습니다.
+각 트랜잭션에는 시작 시간과 지속기간(Duration)이 있습니다. 지속기간은 
+밀리초 단위로, 모든 지속기간은 포함 시간입니다.
+부모 트랜잭션의 제외 시간은 
+자손 트랜잭션 지속기간을 빼서 구할 수 있습니다.
+
+## 세이브 패키지 통계
+
+세이브 패키지는 쿠킹의 커다란 부분으로, 각 세이브 패키지 통계 키는 SavePackageTransactionId 로 시작합니다:
+
+	SavePackageTransactionId830D62FB4EE90050FDB33BBDAA57A9A7_124
+	 Filename=D:/Builds/UE4/QAGame/Saved/Cooked/PS4/Engine/Plugins/Runtime/LeapMotionController/Content/LM_SampleDistortion.uasset
+	 FlushAsyncLoading=0.019673ms  FlushStreamingFunc=0.007272ms
+	 BlockTillAllRequestsFinished=0.006843ms
+	 ResetLoadersForSaveUnMarkAllObjects=0.158671ms
+	 TagPackageExports=0.222396ms  BeginCacheForCookedPlatformData=0.086393ms
+	 SerializeImports=0.120610ms  GatherLocalizableTextData=0.005558ms
+	 MarkNames=0.007700ms  SerializeSummary=0.016678ms
+	 SerializeNames=0.027802ms  SerializeGatherableTextData=0.004277ms
+	 BuildExportMap=0.017535ms  SortExportsNonSeekfree=0.008553ms
+	 SortExportsSeekfreeConstructor=0.019245ms
+	 SortExportsSeekfreeInner=0.327609ms  SortExportsSeekfree=0.005133ms
+	 BuildDependencyMap=0.010692ms  SerializeImportMap=0.005562ms
+	 SerializeExportMap=0.004705ms  SerializeDependencyMap=0.004277ms
+	 SerializeStringAssetReferenceMap=0.004277ms
+	 SaveThumbNailsAssetRegistryDataWorldLevelInfo=0.022668ms
+	 SerializeExports=0.109062ms  SerializeBulkData=0.015821ms
+	 AsyncWrite=4.576687ms  UnaccountedTime=0.307079ms
+	 RunGuid=RunID7F4E40464DE38EF1DECAF5A385FBDB1E
+
+세이브 패키지의 태그는 저장의 섹션별로 나뉘어 있습니다.
+세이브 패키징의 문제 디버깅에는 세이브 패키지의 다양한 부분에 대한 
+구체적 지식을 요합니다.
+
+## 쿠킹 패키지 통계
+
+쿠킹 패키지 통계는 (쿠커 측면에서) 쿠커가 패키지를 어떻게 
+처리하는지를 알려줍니다. 각 패키지를 처리에 얼마만큼의 시간이 
+걸렸는지 파악할 수 있습니다.
+
+쿠킹 패키지 통계 키는 표준 패키지 이름입니다.
+
+	../../../Engine/Content/EditorMaterials/Cascade/CASC_Cross.uasset
+	 AllOfLoadPackage_Duration=0.115048ms  AllOfLoadPackage_HitCount=5
+	 ResolveRedirectors_Duration=0.001281ms  ResolveRedirectors_HitCount=5
+	 CacheForCookedPlatformData_Duration=5.137812ms
+	 CacheForCookedPlatformData_HitCount=1
+	 UnsolicitedMarkup_Duration=0.065863ms  UnsolicitedMarkup_HitCount=1
+	 SavePackageCacheForCookedPlatformData_Duration=0.146270ms
+	 SavePackageCacheForCookedPlatformData_HitCount=2
+	 SaveCookedPackage_Duration=1.683380ms  SaveCookedPackage_HitCount=1
+	 RunGuid=RunID2062A4FA4DBD3833D4A026A94B8970BB
+
+각 통계에는 히트 카운트와 아울러 지속기간이 기록됩니다.
+예:
+
+* **AllOfLoadPackage** 는 하나의 통계지만, 두 개의 태그가 연관되어 있습니다:
+	* **AllOfLoadPackage_Duration** 은 모든 패키지 로드 실행에 걸린 시간입니다.
+	* **AllOfLoadPackage_HitCount** 로드 패키지가 걸린 횟수입니다.
+
+쿠커의 쿠킹 프로세스 최적화 시도로 인해 
+쿠커의 다양한 섹션이 여러 번 걸릴 수 있습니다.
+가장 흔한 상황은 쿠커가 패키지를 로드했는데 
+콘텐츠가 DDC 에 없어 (느린 프로세스인) 재생성을 해야 하는 것입니다.
+이 경우 쿠커는 기회를 봐서 콘텐츠가 준비된 다른 패키지를 
+쿠킹한 다음 이 패키지로 돌아옵니다.
+그렇다고 패키지가 5 번 로드되었다는 뜻은 아니며, 
+패키지가 이미 로드되었다면 일찍 빠져나가고, 
+아직 저장되지 않았다면 패키지를 메모리에 유지해 두려 합니다.

@@ -1,0 +1,61 @@
+﻿INTSourceChangelist:2752314
+Availability:Public
+Title: Actor 复制流程详述
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking, Gameplay/Networking/Actors
+Description:关于底层 Actor 复制的详细介绍。
+Related: Gameplay/Networking/Actors
+Related: Gameplay/Networking/Actors/Properties
+Related: Gameplay/Networking/Actors/RPCs
+Related: Gameplay/Networking/Actors/ReplicationPerformance
+Version: 4.9
+
+大多数 actor 复制操作都发生在 `UNetDriver::ServerReplicateActors` 内。在这里，服务器将收集所有被认定与各个客户端相关的 actor，并发送那些自上次（已连接的）客户端更新后出现变化的所有属性。
+
+这里还定义了一个专门流程，指定了 actor 的更新方式、要调用的特定框架回调，以及在此过程中使用的特定属性。其中最重要的包括：
+* `AActor::NetUpdateFrequency` - 用于确定 actor 的复制频度
+* `AActor::PreReplication` - 在复制发生前调用
+* `AActor::bOnlyRelevantToOwner` - 如果此 actor 仅复制到所有者，则值为 true
+* `AActor::IsRelevancyOwnerFor` - 用于确定 bOnlyRelevantToOwner 为 true 时的相关性
+* `AActor::IsNetRelevantFor` - 用于确定 bOnlyRelevantToOwner 为 false 时的相关性
+
+相应的高级流程如下：
+* 循环每一个主动复制的 actor（`AActor::SetReplicates( true )`）
+	* 确定这个 actor 是否在一开始出现休眠（`DORM_Initial`），如果是这样，则立即跳过。
+	* 通过检查 NetUpdateFrequency 的值来确定 actor 是否需要更新，如果不需要就跳过
+	* 如果 `AActor::bOnlyRelevantToOwner` 为 true，则检查此 actor 的所属连接以寻找相关性（对所属连接的观察者调用 `AActor::IsRelevancyOwnerFor`）。如果相关，则添加到此连接的已有相关列表。
+		* 此时，这个 actor 只会发送到单个连接。
+	* 对于任何通过这些初始检查的 actor，都将调用 `AActor::PreReplication`。
+		* PreReplication 可以让您决定是否针对连接来复制属性。这时要使用 `DOREPLIFETIME_ACTIVE_OVERRIDE`。
+	* 如果同过了以上步骤，则添加到所考虑的列表
+* 对于每个连接：
+	* 对于每个所考虑的上述 actor
+		* 确定是否休眠
+		* 是否还没有通道
+			* 确定客户端是否加载了 actor 所处的场景
+				* 如未加载则跳过
+			* 针对连接调用 `AActor::IsNetRelevantFor`，以确定 actor 是否相关
+				* 如不相关则跳过
+	* 在归连接所有的相关列表上添加上述任意 actor
+	* 这时，我们拥有了一个针对此连接的相关 actor 列表
+	* 按照优先级对 actor 排序
+	* 对于每个排序的 actor：
+		* 如果连接没有加载此 actor 所在的关卡，则关闭通道（如存在）并继续
+		* 每 1 秒钟调用一次 AActor::IsNetRelevantFor，确定 actor 是否与连接相关
+		* 如果不相关的时间达到 5 秒钟，则关闭通道
+		* 如果相关且没有通道打开，则立即打开一个通道
+		* 如果此连接出现饱和
+			* 对于剩下的 actor
+				* 如果保持相关的时间不到 1 秒，则强制在下一时钟单位进行更新
+				* 如果保持相关的时间超过 1 秒，则调用 `AActor::IsNetRelevantFor` 以确定是否应当在下一时钟单位更新
+		* 对于通过了以上这几点的 actor，将调用 `UChannel::ReplicateActor` 将其复制到连接
+
+## 将 Actor 复制到连接
+
+`UChannel::ReplicateActor` 将负责把 actor 及其所有组件复制到连接中。其大致流程如下：
+* 确定这是不是此 actor 通道打开后的第一次更新
+	* 如果是，则将所需的特定信息（初始方位、旋转等）序列化
+* 确定该连接是否拥有这个 actor
+	* 如果没有，而且这个 actor 的角色是 `ROLE_AutonomousProxy`，则降级为 `ROLE_SimulatedProxy`
+* 复制这个 actor 中已更改的属性
+* 复制每个组件中已更改的属性
+* 对于已经删除的组件，发送专门的删除命令

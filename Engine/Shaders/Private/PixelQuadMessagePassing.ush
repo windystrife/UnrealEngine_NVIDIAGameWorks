@@ -1,0 +1,54 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	PixelQuadMessagePassing.usf: Contains functions to do pixel quad message passing within the pixel shaders.
+=========================================================================*/
+
+#pragma once
+
+
+// ddx/y_fine() are not supported in SM4.
+#define HAS_PIXEL_QUAD_MESSAGE_PASSING_SUPPORT ((FEATURE_LEVEL >= FEATURE_LEVEL_SM5) && !MOBILE_EMULATION && PIXELSHADER)
+
+
+// Pixel quad message passing in SM5 requires some thread informations.
+struct FPQMPContext
+{
+	// Position of the pixel within the 2x2 pixel quad.
+	float2 PixelPos;
+};
+
+
+// Returns a required thread context to perform pixel quad message passing in SM5.
+FPQMPContext PQMPInit(float2 SvPosition)
+{
+	FPQMPContext PQMP;
+#if HAS_PIXEL_QUAD_MESSAGE_PASSING_SUPPORT
+	PQMP.PixelPos = floor(2.0 * frac(SvPosition * 0.5));
+#else
+	PQMP.PixelPos = float2(0, 0);
+#endif
+	return PQMP;
+}
+
+
+// Get the average value of <v> across the pixel quad.
+float PQMPAverage(FPQMPContext PQMP, float v)
+{
+#if HAS_PIXEL_QUAD_MESSAGE_PASSING_SUPPORT
+	v = v + (0.5 - PQMP.PixelPos.x) * ddx_fine(v);
+	return v + (0.5 - PQMP.PixelPos.y) * ddy_fine(v);
+#else
+	return v;
+#endif
+}
+
+float2 PQMPAverage(FPQMPContext PQMP, float2 v)
+{
+#if HAS_PIXEL_QUAD_MESSAGE_PASSING_SUPPORT
+	v = v + (0.5 - PQMP.PixelPos.x) * ddx_fine(v);
+	return v + (0.5 - PQMP.PixelPos.y) * ddy_fine(v);
+#else
+	return v;
+#endif
+}

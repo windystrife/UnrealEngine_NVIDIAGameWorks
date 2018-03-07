@@ -1,0 +1,53 @@
+﻿INTSourceChangelist:3108692
+Title: 블루프린트 펑션 라이브러리
+Crumbs:
+Description:
+Availability:Public
+Version:4.9
+
+개발 도중 종종 프로젝트 개발을 수월하게 만들어 주는 함수 세트 필요성을 느끼게 됩니다. 이러한 함수는 전형적으로 상태 없이 다양한 게임플레이 코드에 재사용됩니다. 블루프린트로 만들 때도 동일한 필요성이 종종 대두됩니다. 이 매뉴얼의 여러 섹션에서, 게임 오브젝트의 함수와 프로퍼티를 블루프린트에 노출시키는 방법을 살펴봤습니다. 하지만 공유 유틸리티 함수를 노출시키려는 경우, 특정 게임플레이 오브젝트 유형에 굳이 묶지 않는 것이 좋습니다. 그러한 경우를 위해, 블루프린트 펑션 라이브러리가 있습니다.
+
+블루프린트 펑션 라이브러리는 특정 게임플레이 오브젝트에 묶이지 않은 유틸리티 함수성을 제공해 주는 정적인 함수 모음입니다. 이 라이브러리는 'AI 블루프린트 라이브러리'처럼 논리적 함수 세트 그룹으로 나누거나, '시스템 블루프린트 라이브러리'처럼 여러가지 다양한 기능적 영역에 접근할 수 있도록 해주는 유틸리티 함수가 들어있을 수도 있습니다.
+
+블루프린트 펑션 라이브러리 생성은 UFUNCTION() 매크로를 사용하여 함수를 블루프린트에 노출시키는 것과 매우 유사합니다. 액터나 UObject 에서 직접 파생하는 대신, 모든 블루프린트 라이브러리는 UBlueprintFunctionLibrary 를 상속합니다. 또한 정적인 메소드만 들어있습니다. 아래 코드는 애널리틱스 블루프린트 라이브러리에서의 스니펫으로, 라이브러리 클래스 구성법을 보여줍니다.
+
+	UCLASS()
+	class UAnalyticsBlueprintLibrary :
+		public UBlueprintFunctionLibrary
+	{
+		GENERATED_UCLASS_BODY()
+		/** 별도의 특정 지정 없이 애널리틱스 세션 시작 */
+		UFUNCTION(BlueprintCallable, Category="Analytics")
+		static bool StartSession();
+
+위 예제에서 볼 수 있듯이, 블루프린트 펑션 라이브러리는 간접적으로 UObject 파생되었기에 표준 UCLASS() 및 GENERATED_UCLASS_BODY() 매크로가 필요합니다. 블루프린트에서 호출가능하게 만들 함수를 UFUNCTION() 매크로로 장식해 주기도 합니다. 블루프린트 펑션 라이브러리의 함수는 호출에 부차적인 효과가 있는지 여부에 따라 BlueprintCallable 또는 BlueprintPure 지정이 가능합니다. 풀 소스 코드는 /UE4/Engine/Plugins/Runtime/Analytics/AnalyticsBlueprintLibrary 를 참고하세요. StartSession() 함수 구현은 이렇습니다:
+	bool UAnalyticsBlueprintLibrary::StartSession()
+	{
+		TSharedPtr<IAnalyticsProvider> Provider = FAnalytics::Get().GetDefaultConfiguredProvider();
+		if (Provider.IsValid())
+		{
+			return Provider->StartSession();
+		}
+		else
+		{
+			UE_LOG(LogAnalyticsBPLib, Warning, TEXT("StartSession: Failed to get the default analytics provider. Double check your [Analytics] configuration in your INI"));
+		}
+		return false;
+	}
+
+참고로 위 구현은 UObject 이외의 것에서 파생된 싱글톤 오브젝트와 상호작용합니다. 써드 파티 라이브러리 함수를 블루프린트에 노출시키거나, UObject 를 지원하지 않는 C++ 클래스와 상호작용하기에 좋은 방법입니다. 아래 코드는 제어되는 액터에 대한 AIController 를 찾는 데 흔히 쓰이는 작업을 하는 블루프린트 펑션 라이브러리 메소드 예제입니다:
+
+	AAIController* UAIBlueprintHelperLibrary::GetAIController(AActor* ControlledActor)
+	{
+		APawn* AsPawn = Cast<APawn>(ControlledActor);
+		if (AsPawn != nullptr)
+		{
+			return Cast<AAIController>(AsPawn->GetController());
+		}
+		return Cast<AAIController>(ControlledActor);
+	}
+
+이 함수는 여러 개의 블루프린트 노드가 될 것을 하나의 노드로 말아넣은 것입니다. 물론, 블루프린트로 이런 함수를 만들 수도 있지만, 자주 호출된다면 C++ 버전이 더 나은 퍼포먼스를 보일 것입니다.
+
+ 
+

@@ -1,0 +1,184 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	VisualizeTexture.usf: VisualizeTexture shader
+=============================================================================*/
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+
+
+// to visualize the content of a texture to the screen, useful for debugging
+// use "VisualizeTexture" in the console to activate
+Texture2D VisualizeTexture2D;
+SamplerState VisualizeTexture2DSampler;
+Texture3D VisualizeTexture3D;
+SamplerState VisualizeTexture3DSampler;  
+TextureCube VisualizeTextureCube;
+SamplerState VisualizeTextureCubeSampler;
+
+//default Texture2D type is <float4>, which won't read the X28_G8UINT format properly.
+Texture2D<uint4> VisualizeDepthStencilTexture; 
+
+Texture2D<uint> VisualizeUINT8Texture2D;
+
+#if FEATURE_LEVEL >= FEATURE_LEVEL_SM5
+Texture2DMS<float4> VisualizeTexture2DMS;
+TextureCubeArray VisualizeTextureCubeArray;
+SamplerState VisualizeTextureCubeArraySampler;
+#endif
+
+// [0]: r:RGBAdd, g:SingleChannelMul, b:Add, a:FracScale
+// [1]: r:BlinkState=0/1, g:Frac when 0, saturate when 1, b:array index, a:custom mip
+// [2]: r:0=normal 1=depth, 2=shadow depth, g:unwrapcubemap, b:singlechannel(0-3), a:unused
+float4 VisualizeParam[3];
+// x, y (0 for 2D textures), z(only !=0 if 3d texture), w unused
+float4 TextureExtent;
+
+void VisualizeTexturePS(
+	FScreenVertexOutput Input,
+	out float4 OutColor : SV_Target0)
+{
+	float2 UV = Input.UV;
+
+	// Longitude Latitude unwrapping
+	float3 SpherePos;
+	{
+		float2 Angles = float2(2 * PI * (UV.x + 0.5f), PI * (1 - UV.y));
+		float s = sin(Angles.y);
+		SpherePos = float3(s * sin(Angles.x), -s * cos(Angles.x), -cos(Angles.y));
+	}
+
+	// volume texture unwrapping
+	float3 VolumePos;
+	{
+		uint LayerCount = TextureExtent.z;
+		uint LayerUCount = (uint)sqrt(TextureExtent.z);
+		uint LayerVCount = LayerCount / LayerUCount;
+
+		uint LayerUId = (uint)(UV.x * LayerUCount);
+		uint LayerVId = (uint)(UV.y * LayerVCount);
+		uint LayerId = LayerUId + LayerUCount * LayerVId;
+
+		VolumePos.z = LayerId / (TextureExtent.z - 1);
+		VolumePos.x = frac(UV.x * LayerUCount);
+		VolumePos.y = frac(UV.y * LayerVCount);
+	}
+
+	float MipLevel = VisualizeParam[1].a;
+	float ArrayIndex = VisualizeParam[1].b;
+
+
+
+#if TEXTURE_TYPE == 0
+	float4 TexLookup = TextureCubeSampleLevel(VisualizeTextureCube, VisualizeTextureCubeSampler, SpherePos, MipLevel);
+#elif TEXTURE_TYPE == 2 || TEXTURE_TYPE == 6
+	float4 TexLookup = Texture2DSampleLevel(VisualizeTexture2D, VisualizeTexture2DSampler, UV, MipLevel);
+#elif TEXTURE_TYPE == 3
+	#if FEATURE_LEVEL < FEATURE_LEVEL_SM4
+		float4 TexLookup = float4(1.0f, 0.0f, 1.0f, 1.0f);
+	#else
+		float4 TexLookup = Texture3DSampleLevel(VisualizeTexture3D, VisualizeTexture3DSampler, VolumePos, MipLevel);
+	#endif
+#elif TEXTURE_TYPE == 4
+	#if FEATURE_LEVEL < FEATURE_LEVEL_SM5
+		float4 TexLookup = float4(1.0f, 0.0f, 1.0f, 1.0f);
+	#else
+		float4 TexLookup = TextureCubeArraySampleLevel(VisualizeTextureCubeArray, VisualizeTextureCubeArraySampler, SpherePos, ArrayIndex, MipLevel);
+	#endif
+#elif TEXTURE_TYPE == 5
+	float4 TexLookup = float4(1,1,0,0);	// yellow, not yet supported
+	
+	#if FEATURE_LEVEL >= FEATURE_LEVEL_SM5
+		TexLookup = VisualizeTexture2DMS.Load(int2(UV * TextureExtent.xy), 0);
+	#endif
+#elif TEXTURE_TYPE == 7
+    float IntTexLookup = float(VisualizeUINT8Texture2D.Load(int3(UV * TextureExtent.xy, 0)));
+	float4 TexLookup = IntTexLookup.xxxx;
+#endif
+	
+	// Normal = 0, SceneDepth = 1 and ShadowDepth = 2
+	int InputValueMapping = (int)VisualizeParam[2].r;
+	if(InputValueMapping != 0)
+	{
+		float Depth = TexLookup.r;
+		if (InputValueMapping == 1)  // SceneDepth 
+		{
+			// current z buffer is negated (1 is near, 0 is far)
+#if HAS_INVERTED_Z_BUFFER
+			Depth = 1 - Depth;
+#endif
+
+#if FEATURE_LEVEL >= FEATURE_LEVEL_SM4
+			// map depth to nice colors
+			float Scale = 64.0; // This 64 looks like a hardware limit.
+			Depth = (exp2(Depth * Scale) - 1.0) * (1.0 / (exp2(Scale) - 1.0));
+			Depth *= Depth;
+			Depth *= Depth;
+
+			float Value = Depth * Depth;
+			TexLookup = float4(pow(Value, 0.25f), pow(Value, 1), pow(Value, 4), 0);
+		} 
+		else if (InputValueMapping == 2) // ShadowDepth
+		{
+			// linearly blend from White (near) to Teal (far).
+			float3 TealBlue = float3(54.f/255.f, 117.f/255.f, 136.f/255.f);
+			float3 White = float3(1.0f, 1.0f, 1.0f);
+			TexLookup.rgb = lerp(White, TealBlue, Depth);
+		}
+#if TEXTURE_TYPE == 6
+		// inside #ifdef to avoid D3DDebug error:
+		//    The resource return type for component 0 declared in the shader code (UINT) is not compatible with the Shader Resource View format bound to slot 1 of the Pixel Shader unit (UNORM).  This mismatch is invalid if the shader actually uses the view (e.g. it is not skipped due to shader code branching). [ EXECUTION ERROR #361: DEVICE_DRAW_RESOURCE_RETURN_TYPE_MISMATCH]
+		float fStencil = VisualizeDepthStencilTexture.Load(int3(UV * TextureExtent.xy, 0)).g;
+		fStencil /= 255.0f;
+		TexLookup.a = fStencil;
+#endif
+
+#else
+		}
+		TexLookup.r = Depth;
+#endif
+	}
+
+	float4 RGBAMask = 0;
+	int SingleChannel = (int)VisualizeParam[2].z;
+	switch (SingleChannel)
+	{
+		case 0: RGBAMask = float4(1,0,0,0); break;
+		case 1: RGBAMask = float4(0,1,0,0); break;
+		case 2: RGBAMask = float4(0,0,1,0); break;
+		case 3: RGBAMask = float4(0,0,0,1); break;
+		default: RGBAMask = float4(0,0,0,0); break;
+	}
+	float Add = dot( TexLookup, RGBAMask ) * VisualizeParam[0].y + VisualizeParam[0].z;
+
+
+	OutColor.rgb = TexLookup.rgb * VisualizeParam[0].xxx + Add.xxx;
+
+	float3 ScaledColor = OutColor.rgb * VisualizeParam[0].w;
+	float3 FracOutColor = lerp(ScaledColor, saturate(ScaledColor), VisualizeParam[1].y);
+
+	float3 AlternateColor = FracOutColor;
+	
+	// blink red if <0
+	if(OutColor.r < 0.0f || OutColor.g < 0.0f || OutColor.b < 0.0f)
+	{
+		AlternateColor = float3(1, 0, 0);
+	}
+	
+	// blink blue if not finite
+#if FEATURE_LEVEL >= FEATURE_LEVEL_SM4
+	if (isfinite(OutColor.rgb).x == false)
+	{
+		AlternateColor = float3(0, 0, 1);
+	}
+#endif
+	OutColor.rgb = lerp(FracOutColor, AlternateColor, VisualizeParam[1].x);	
+	OutColor.a = 0;
+}
+
+
+void PresentPS(float4 InUV : TEXCOORD0, out float4 OutColor : SV_Target0)
+{
+	OutColor = Texture2DSample(VisualizeTexture2D, VisualizeTexture2DSampler, InUV.xy);	
+}

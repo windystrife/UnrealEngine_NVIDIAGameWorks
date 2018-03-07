@@ -1,0 +1,135 @@
+﻿INTSourceChangelist:2632102
+Availability:Public
+Title:烘焙统计信息
+Crumbs:%ROOT%, Engine
+Description:如何识别性能问题并加以解决。
+
+烘焙项目时，总是会创建统计信息。您可在以下位置找到这些信息：
+
+	<projectdirectory>\Saved\Stats\<datetime>Stats.csv
+
+**Stats.csv** 文件包含多行内容，其中每一行都包含一组以逗号分隔的值。第一个值是描述该行的唯一键。接着，跟着一个标记，该标记可具有相关联的值，并以 '=' 进行分隔。示例：
+
+	DDCTransactionId2154470643B07308C1979DA468F3EA48_0,StartTime=2015.07.14-17.09.19
+
+键是第一个参数，因此，在本示例中，第一个参数是：
+
+	DDCTransactionId2154470643B07308C1979DA468F3EA48_0
+
+第一个标记是：
+
+	StartTime=2015.07.14-17.09.19
+
+第一个标记可拆分为“标记名/值”对
+
+	标记名：StartTime
+	值：2015.07.14-17.09.19
+
+这些键和标记可帮助您解决烘焙流水线中的问题。
+
+
+## 调试烘焙性能问题
+
+在大多数情况下，偏差是由于 **派生数据缓存** 失效以及需要为平台重建纹理
+而导致。
+
+如果重复执行的烘焙仍然很慢，这可能表明正在烘焙大量数据。请考虑使用迭代烘焙（试验性），或者，如果是为测试/开发目的而进行烘焙，可以仅烘焙所需内容。
+
+
+
+## 派生数据缓存 (DDC) 统计信息
+
+DDC 统计信息在 stats.CSV 文件中可识别，因为它们的键都以 DDCTransactionId 开头。
+
+DDC 统计信息采用分层格式，以反映 DDC 如何搜索缓存中的内容。
+
+请查看 3 个条目以获取 DCC 统计信息（为了清晰明了，对标记行作了编辑）
+
+	DDCTransactionId2154470643B07308C1979DA468F3EA48_86
+	 GetCachedData
+	 CacheKey=MATSM_984afa3849534faa8491540b994bd32e_SF_PS4_15493__BC5N_DEV_SL_NoDBufF7646F9__526E4F887A3482CE276E9E40861788C0F9774343
+	 StartTime=2015.07.14-17.09.30
+	DDCTransactionId2154470643B07308C1979DA468F3EA48_87
+	 CachedDataProbablyExists
+	 Parent=DDCTransactionId2154470643B07308C1979DA468F3EA48_86
+	 StartTime=2015.07.14-17.09.30
+	DDCTransactionId2154470643B07308C1979DA468F3EA48_88 
+	 GetCachedData
+	 Parent=DDCTransactionId2154470643B07308C1979DA468F3EA48_86
+	 StartTime=2015.07.14-17.09.30
+
+这两个事务中的第二个事务通过 "Parent" 标记链接到
+第一个事务。
+Parent 标记指定第一个事务作为 DDC 请求的
+源。
+第一个事务还指定标记 "GetCachedData"，该标记是
+事务的入口点。您还可以看到指定的
+CacheKey。
+每个事务都有开始时间和持续时间。持续时间
+以毫秒为单位，所有持续时间都是包含性时间。
+父事务的排除性时间可以通过减去子事务的
+持续时间来确定。
+
+## 保存包统计信息
+
+保存包是烘焙过程的一大组成部分，并且每个保存包统计信息键都以 "SavePackageTransactionId" 开头：
+
+	SavePackageTransactionId830D62FB4EE90050FDB33BBDAA57A9A7_124
+	 Filename=D:/Builds/UE4/QAGame/Saved/Cooked/PS4/Engine/Plugins/Runtime/LeapMotionController/Content/LM_SampleDistortion.uasset
+	 FlushAsyncLoading=0.019673ms  FlushStreamingFunc=0.007272ms
+	 BlockTillAllRequestsFinished=0.006843ms
+	 ResetLoadersForSaveUnMarkAllObjects=0.158671ms
+	 TagPackageExports=0.222396ms  BeginCacheForCookedPlatformData=0.086393ms
+	 SerializeImports=0.120610ms  GatherLocalizableTextData=0.005558ms
+	 MarkNames=0.007700ms  SerializeSummary=0.016678ms
+	 SerializeNames=0.027802ms  SerializeGatherableTextData=0.004277ms
+	 BuildExportMap=0.017535ms  SortExportsNonSeekfree=0.008553ms
+	 SortExportsSeekfreeConstructor=0.019245ms
+	 SortExportsSeekfreeInner=0.327609ms  SortExportsSeekfree=0.005133ms
+	 BuildDependencyMap=0.010692ms  SerializeImportMap=0.005562ms
+	 SerializeExportMap=0.004705ms  SerializeDependencyMap=0.004277ms
+	 SerializeStringAssetReferenceMap=0.004277ms
+	 SaveThumbNailsAssetRegistryDataWorldLevelInfo=0.022668ms
+	 SerializeExports=0.109062ms  SerializeBulkData=0.015821ms
+	 AsyncWrite=4.576687ms  UnaccountedTime=0.307079ms
+	 RunGuid=RunID7F4E40464DE38EF1DECAF5A385FBDB1E
+
+保存包中的标记分为几个保存部分。
+调试保存包的问题需要您明确了解
+保存包的不同部分。
+
+## 烘焙包统计信息
+
+烘焙包统计信息可让您从烘焙程序角度了解
+烘焙程序处理包的情况。它们可让您大致了解
+处理每个包所花费的时间。
+
+烘焙包统计信息键是标准包名。
+
+	../../../Engine/Content/EditorMaterials/Cascade/CASC_Cross.uasset
+	 AllOfLoadPackage_Duration=0.115048ms  AllOfLoadPackage_HitCount=5
+	 ResolveRedirectors_Duration=0.001281ms  ResolveRedirectors_HitCount=5
+	 CacheForCookedPlatformData_Duration=5.137812ms
+	 CacheForCookedPlatformData_HitCount=1
+	 UnsolicitedMarkup_Duration=0.065863ms  UnsolicitedMarkup_HitCount=1
+	 SavePackageCacheForCookedPlatformData_Duration=0.146270ms
+	 SavePackageCacheForCookedPlatformData_HitCount=2
+	 SaveCookedPackage_Duration=1.683380ms  SaveCookedPackage_HitCount=1
+	 RunGuid=RunID2062A4FA4DBD3833D4A026A94B8970BB
+
+每项统计信息都有命中计数，并且还记录了持续时间。
+例如：
+
+* **AllOfLoadPackage** 是单一统计信息，但是有两个标记与它相关联：
+	* **AllOfLoadPackage_Duration** 是运行所有载入包所花费的时间。
+	* **AllOfLoadPackage_HitCount** 是命中载入包的次数。
+
+因为烘焙程序会尝试优化烘焙过程，
+烘焙程序的不同部分可能会命中多次。
+最常见的情况是，烘焙程序装入一个包，但因为
+DDC 中缺失内容而需要重新生成（此过程的速度较慢）。
+在这种情况下，烘焙程序将尝试并伺机烘焙
+内容已就绪的其他包，然后返回到这个包。
+这不一定表示这个包已载入 5 次，
+如果包已载入，则烘焙程序会提前退出，并尝试将尚未保存的包
+保留在内存中。

@@ -1,0 +1,437 @@
+Availability: Public
+Crumbs: %ROOT%
+Title: Color Grading and Filmic Tonemapper
+Description: Tonemapping and color correction effects for adjusting scene colors.
+Type: Overview
+SkillLevel:Beginner
+Version:4.16
+Parent:Engine/Rendering/PostProcessEffects
+related:Engine/Rendering/PostProcessEffects/UsingLUTs
+Order:4
+Tags:Post Process
+Topic-image:ColorGrading_Overview.png
+Social-image:ColorGrading_Overview.png
+
+[VAR:spacer]![](%ROOT%/spacer.png)(w:150 convert:false)[/VAR]
+[VAR:spacer2]![](%ROOT%/spacer.png)(w:40 convert:false)[/VAR]
+[VAR:spacer3]![](%ROOT%/spacer.png)(w:0 convert:false)[/VAR]
+
+
+[TOC(start:2 end:2)]
+
+![](ColorGrading_Overview.png)
+[REGION:caption] The Color Grading tools enable you to change the look and tone of your scene, like with this example that is showing the scene using different Scene Colors. [/REGION]
+
+Within the Unreal Engine, the term **Color Grading** covers the Tone Mapping function (HDR to LDR transformation) that is used with [High Dynamic Range (HDR) display output](Engine/Rendering/HDRDisplayOutput)
+and further the color correction (LDR color to screen color transformation) processing of the image.
+
+## Tone Mapping
+
+[EXCERPT:ToneMapping_Desc]
+The purpose of the **Tone Mapping** function is to map the wide range of high dynamic range (HDR) colors into low dynamic range (LDR) that a display can output. This is the last stage of post processing
+that is done after the normal rendering during post processing. The process of tone mapping can be thought of as a way to simulate the response that film has to light. 
+[/EXCERPT:ToneMapping_Desc]
+
+### Academy Color Encoding System (ACES) Filmic Tone Mapper
+
+[REGION:note]
+As of Unreal Engine version 4.15, the filmic tone mapper was enabled as the default tone mapper. Any content that was previously developed may look different due to this change. To use the old tone mapper 
+you can enter the following console command:
+
+	r.TonemapperFilm 0
+	
+The Tone Mapper property values that closest match the "old" tone mapper can be used by entering:
+* **Slope:** 0.98
+* **Toe:** 0.3
+* **Shoulder:** 0.22
+* **Black Clip:** 0
+* **White Clip:** 0.025
+[/REGION]
+
+The Filmic Tone Mapper that is used in UE4 matches the industry standard set by the [Academy Color Encoding System (ACES)](http://www.oscars.org/science-technology/sci-tech-projects/aces) for television 
+and film. This ensures that consistent color is preserved across multiple formats and displays while also as a way to future proof the source material since it will not have to be adjusted for each medium 
+that comes along. The filmic tone mapper also uses the same global tone mapper that was previously used in UE4, with the exception that there is now a filmic response meaning that the S-curve shape now better
+simulates film stock for a better overall look. 
+
+Two places you'll immediately notice a difference is with Bloom and Exposure Levels.
+
+#### Physically Correct Emissive and Bloom
+
+Emissive values are now physically correct so that as the emissive power increases the color will become lighter, similarly to how colored lights work in the real world. As color gets tone mapped, if the final
+color is bright enough to start saturating the film / sensor, it will become white.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Filmic Tone Mapper | Emissive](Bloom_FilmicToneMapper.png)(w:700)
+	[/PARAM]
+	[PARAM:after]
+	![Old Tone Mapper | Emissive](Bloom_OldToneMapper.png)(w:700)
+	[/PARAM]
+[/OBJECT]
+
+
+
+In this example, the "old" tonemapper is compared to the new filmic tone mapper. With a high enough emissive power, the color will start to become white, unlike the old tone mapper where values would just
+become overly saturated causing areas of the material to lose its detail. With the filmic tone mapper, you can even see that the Bloom in this scene retains its physical correctness as well as it is never 
+overly saturated, thus retaining it's reflective primary color value.
+
+#### Exposure Levels
+
+Exposure levels are physically correct so that colors will continue to have shape to them rather than lose detail.
+
+![](Exposure_Default.png)(w:500)
+
+In this example, there are a variety of colors and material types with varying roughness and metalness. The Exposure Bias is also set to 0. 
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Filmic Tone Mapper | Exposure Bias: 3](Exposure_FilmicToneMapper.png)(w:700)
+	[/PARAM]
+	[PARAM:after]
+	![Old Tone Mapper | Exposure Bias: 3](Exposure_OldToneMapper.png)(w:700)
+	[/PARAM]
+[/OBJECT]
+
+In this comparison, the Exposure Bias has been increased to a value of 3 so really show the response of the Filmic tone mapper compared to the "old" tone mapper implementation. Also, a value of three means
+that the processed image will be eight times brighter than the default value of 0 shown in the previous example above.
+
+As the exposure level is increased, the difference between the filmic and the "old" tone mapper will become more apparent. The spheres in the filmic example will continue to have shape to their color
+and shading, even as they appear to look brighter. The sphere using the "old" tone mapper will start to have their colors blend with the shading. The spheres become really bright as a solid color, but 
+you can't necessarily tell that they have a high exposure value, whereas the filmic tone mapper takes this into account. The filmic response looks like a natural camera effect if you were to increase its
+exposure.
+
+### Settings
+
+In the **Tone Mapper** section of the Post Process Volume, you'll find the properties that match the ACES standardized film stock. You can adjust these tone mapper controls to emulate other types of 
+film stock for your project. 
+
+[REGION:note]
+It is recommended that changes to these properties be used project-wide for a specific look and not changed dynamically or on a shot-by-shot basis. Instead, you should use the 
+[Color Grading](#colorcorrectionproperties) properties for any artistic adjustments.
+[/REGION]
+
+![](ToneMapperProperties.png)(w:500)
+
+[REGION:raw]
+| Property | %spacer3% | Description |
+| -------- | -------- | ----------- |
+| [REGION:tablesection] Tonemapper [/REGION] |||
+| **Slope** || This will adjust the steepness of the S-curve used for the tone mapper, where larger values will make the slope steeper (darker) and lower values will make the slope less steep (lighter). Value is in the range of [0.0, 1.0]. [0.0, 1.0]. [INCLUDE:#slopetable]  |
+| **Toe** || This will adjust the dark color in the tone mapper. Value is in the range of [0.0, 1.0]. [0.0, 1.0]. [INCLUDE:#toetable] |
+| **Shoulder** || This will adjust the bright color in the tone mapper. Value is in the range of [0.0, 1.0] [INCLUDE:#shouldertable] |
+| **Black Clip** || This will set where the crossover happens where black's start to cut off their value. In general, this value should **NOT** be adjusted. Value is in the range of [0.0, 1.0] [INCLUDE:#blackcliptable] |
+| **White Clip** || This will set where the crossover happens where white's start to cut off their values. This will appear as a subtle change in most cases. Value is in the range of [0.0, 1.0] [INCLUDE:#whitecliptable] |
+[/REGION]
+
+[REGION:note]
+If you'd like to test different tone mapper values in a real-time grpah like the ones above, you can use the set up default [UE4 Tonemapper example](https://www.desmos.com/calculator/h8rbdpawxj) here.
+[/REGION]
+
+
+<!--- Tone Mapper Properties Excerpts ---
+
+
+[EXCERPT:slopetable]
+| [INCLUDE:#slopegraph] | [INCLUDE:#slopeimage] |
+| --- | --- |
+|||
+[/EXCERPT:slopetable]
+
+[EXCERPT:toetable]
+| [INCLUDE:#toegraph] | [INCLUDE:#toeimage] |
+| --- | --- |
+|||
+[/EXCERPT:toetable]
+
+[EXCERPT:shouldertable]
+| [INCLUDE:#shouldergraph] | [INCLUDE:#shoulderimage] |
+| --- | --- |
+|||
+[/EXCERPT:shouldertable]
+
+[EXCERPT:blackcliptable]
+| [INCLUDE:#blackclipgraph] | [INCLUDE:#blackclipimage] |
+| --- | --- |
+|||
+[/EXCERPT:blackcliptable]
+
+[EXCERPT:whitecliptable]
+| [INCLUDE:#whiteclipgraph] | [INCLUDE:#whiteclipimage] |
+| --- | --- |
+|||
+[/EXCERPT:whitecliptable]
+
+---------------------------------
+
+[EXCERPT:slopegraph]
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Slope: 0.88 (Default)](DefaultSettings_FilmicToneMapper.png)(w:450)
+	[/PARAM]
+	[PARAM:after]
+	![Slope: 0.6](Slope_0_6.png)(w:450)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:slopegraph]
+
+[EXCERPT:slopeimage]
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Slope: 0.88 (Default)](DefaultToneMapper.png)(w:450)
+	[/PARAM]
+	[PARAM:after]
+	![Slope: 0.6](SlopeToneMap.png)(w:450)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:slopeimage]
+
+------------------------------
+
+[EXCERPT:toegraph]
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Toe: 0.55 (Default)](DefaultSettings_FilmicToneMapper.png)(w:450)
+	[/PARAM]
+	[PARAM:after]
+	![Toe: 0.8](Toe_0_8.png)(w:450)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:toegraph]
+
+[EXCERPT:toeimage]
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Toe: 0.55 (Default)](DefaultToneMapper.png)(w:450)
+	[/PARAM]
+	[PARAM:after]
+	![Toe: 0.8](ToeToneMap.png)(w:450)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:toeimage]
+
+-----------------------------
+
+[EXCERPT:shouldergraph]
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Shoulder: 0.26 (Default)](DefaultSettings_FilmicToneMapper.png)(w:450)
+	[/PARAM]
+	[PARAM:after]
+	![Shoulder: 1](Shoulder_1.png)(w:450)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:shouldergraph]
+
+[EXCERPT:shoulderimage]
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Shoulder: 0.26 (Default)](DefaultToneMapper.png)(w:450)
+	[/PARAM]
+	[PARAM:after]
+	![Shoulder: 1](ShoulderToneMap.png)(w:450)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:shoulderimage]
+
+-----------------------------
+
+[EXCERPT:blackclipgraph]
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Black Clip: 0 (Default)](DefaultSettings_FilmicToneMapper.png)(w:450)
+	[/PARAM]
+	[PARAM:after]
+	![Black Clip: 0.1](BlackClip_0_1.png)(w:450)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:blackclipgraph]
+
+[EXCERPT:blackclipimage]
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Black Clip: 0 (Default)](DefaultToneMapper.png)(w:450)
+	[/PARAM]
+	[PARAM:after]
+	![Black Clip: 0.1](BlackClipToneMap.png)(w:450)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:blackclipimage]
+
+-----------------------------
+
+[EXCERPT:whiteclipgraph]
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![White Clip: 0.04 (Default)](DefaultSettings_FilmicToneMapper.png)(w:450)
+	[/PARAM]
+	[PARAM:after]
+	![White Clip: 0.2](WhiteClip_0_2.png)(w:450)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:whiteclipgraph]
+
+[EXCERPT:whiteclipimage]
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![White Clip: 0.04 (Default)](DefaultToneMapper.png)(w:450)
+	[/PARAM]
+	[PARAM:after]
+	![White Clip: 0.2](WhiteClipToneMap.png)(w:450)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:whiteclipimage]
+
+--- End Tone Mapper Properties Excerpts --->
+
+
+## Color Correction
+
+Color correction, or color grading, is used to alter or enhance the overall color of light in your scene. With the advent of HDR displays, the need to preserve color
+before it's processed is very important. It ensures that the color will be properly displayed.  
+
+In the past, the color correction would have been implemented through [Lookup Tables (LUTs)](Engine/Rendering/PostProcessEffects/UsingLUTs), which happens in LDR and on the final color that was output 
+to the monitor in sRGB color space. This presents a problem when working with HDR displays because the LUT is just a snapshot in time of the currently supported display it is
+being adjusted for and cannot be used to the same effect on an HDR display. To solve these types of issues, the [color correction controls](#colorcorrectioncontrols) do their work in Scene Referred Linear Space, 
+which means all colors are captured before they are tone mapped. This makes it possible to only adjust your colors on one HDR display for any color correction to look correct on all displays the image is being 
+outputted to, whether they are HDR or LDR.
+
+[REGION:note]
+You can learn more about the HDR pipeline and how this works for the benefit of your content in the [High Dynamic Range Display Output](Engine/Rendering/HDRDisplayOutput) page.
+[/REGION]
+
+### Color Correction Properties
+
+In the **Color Grading** section of the Post Process Volume, you'll find the properties that enable you to have the most artistic control over the scene. 
+
+#### Settings
+
+[REGION:imagetable]
+| ![](RGBColorWheel.png)(w:500) | ![](HSVColorWheel.png)(w:500) |
+| --- | --- |
+|RGB|HSV|
+[/REGION]
+
+Under each section, you can use the color wheel to select and drag the color values around. You also can choose between the following modes:
+
+* RGB - This will adjust the Red, Green, Blue values.
+* HSV - This will adjust the Hue and Saturation values.
+
+[REGION:tip]
+For more precise control over the slider values, you can hold the **Shift** key while dragging them.
+[/REGION]
+
+![](ColorGradingProperties.png)(w:500)
+
+[REGION:raw]
+| Property | %spacer2% | Description |
+| -------- | -------- | ----------- |
+| [REGION:tablesection] White Balance [/REGION] || The properties in this section are used to adjust the colors in the scene so that whites appear truly white. This allows for other colors in the scene to be correctly lit under the given lighting in the scene. |
+| **Temp** || This will adjust the white balance in relation to the temperature of the light in the scene. When the light temperature and this one match the light will appear white. When a value is used that is higher than the light in the scene it will yield a "warm" or yellow color, and, conversely, if the value is lower, it would yield a "cool" or blue color. |
+| **Tint** || This will adjust the white balance temperature tint for the scene by adjusting the cyan and magenta color ranges. Ideally, this setting should be used once you've adjusted the white balance **Temp**  property to get accurate colors. Under some light temperatures, the colors may appear to be more yellow or blue. This can be used to balance the resulting color to look more natural.  |
+| [REGION:tablesection] Global [/REGION] || The properties in this section are a global set of color corrections you can use for your scene. |
+| **Saturation** || This will adjust the intensity (purity) of the colors (hue) that are being represented. A higher saturation intensity will result in colors appearing more like their purest forms (red, green, blue) and when saturation is lowered colors will appear more gray or washed-out. |
+| **Contrast** || This will adjust the tonal range of light and dark color values in your scene. Lowering the intensity will remove highlights and lighten the image resulting in a washed-out appearance, whereas a higher intensity will tighten the highlights and darken the overall image. |
+| **Gamma** || This will adjust the luminance intensity of the image's mid-tones to accurately reproduce colors. Lowering or raising this value will result in the image being washed-out or too dark. |
+| **Gain** || This will adjust the luminance intensity of the image's whites (highlights) to accurately reproduce colors. Raising or lowering this value will result in the image highlights being washed-out or too dark. |
+| **Offset** || This will adjust the luminance intensity of the image's blacks (shadows) to accurately reproduce colors. Raising or lowering this value will result in the image shadows being washed-out or too dark. |
+| **Scene Color Tint** || This is a multiplier for color that is a filter color applied to the HDR scene color. |
+| **Color Grading LUT Intensity** || A scaling factor that controls the effect of the color correction. |
+| **Color Grading LUT** || The LUT texture to use as a lookup table for color correction. [INCLUDE:Engine/Rendering/PostProcessEffects/ColorGrading#ColorGradingLUT] |
+| [REGION:tablesection] Shadows [/REGION] || The properties in this section are used to adjust the color correction values for shadows in the scene. |
+| **Saturation** || This will adjust the intensity (purity) of the colors (hue) that are being represented. A higher saturation intensity will result in colors appearing more like their purest forms (red, green, blue) and when saturation is lowered colors will appear more gray or washed-out. |
+| **Contrast** || This will adjust the tonal range of light and dark color values in your scene. Lowering the intensity will remove highlights and lighten the image resulting in a washed-out appearance, whereas a higher intensity will tighten the highlights and darken the overall image. |
+| **Gamma** || This will adjust the luminance intensity of the image to accurately reproduce colors. Raising or lowering this value will result in the image mid-tones being washed-out or too dark. |
+| **Gain** || This will adjust the luminance intensity of the image's whites (highlights) to accurately reproduce colors. Raising or lowering this value will result in the image highlights being washed-out or too dark. |
+| **Offset** || This will adjust the luminance intensity of the image's blacks (shadows) to accurately reproduce colors. Raising or lowering this value will result in the image shadows being washed-out or too dark. |
+| **Shadows Max** || This is a multiplier of the properties that affect the color correction properties that have been adjusted in the **Shadows** section. |
+| [REGION:tablesection] Mid-tones [/REGION] || The properties in this section are used to adjust the color correction values for mid-tones in the scene. |
+| **Saturation** || This will adjust the intensity (purity) of the colors (hue) that are being represented. A higher saturation intensity will result in colors appearing more like their purest forms (red, green, blue) and when saturation is lowered colors will appear more gray or washed-out. |
+| **Contrast** || This will adjust the tonal range of light and dark color values in your scene. Lowering the intensity will remove highlights and lighten the image resulting in a washed-out appearance, whereas a higher intensity will tighten the highlights and darken the overall image. |
+| **Gamma** || This will adjust the luminance intensity of the image to accurately reproduce colors. Raising or lowering this value will result in the image mid-tones being washed-out or too dark. |
+| **Gain** || This will adjust the luminance intensity of the image's whites (highlights) to accurately reproduce colors. Raising or lowering this value will result in the image highlights being washed-out or too dark. |
+| **Offset** || This will adjust the luminance intensity of the image's blacks (shadows) to accurately reproduce colors. Raising or lowering this value will result in the image shadows being washed-out or too dark. |
+| [REGION:tablesection] Highlights [/REGION] || The properties in this section are used to adjust the color correction values for Highlights in the scene. |
+| **Saturation** || This will adjust the intensity (purity) of the colors (hue) that are being represented. A higher saturation intensity will result in colors appearing more like their purest forms (red, green, blue) and when saturation is lowered colors will appear more gray or washed-out. |
+| **Contrast** || This will adjust the tonal range of light and dark color values in your scene. Lowering the intensity will remove highlights and lighten the image resulting in a washed-out appearance, whereas a higher intensity will tighten the highlights and darken the overall image. |
+| **Gamma** || This will adjust the luminance intensity of the image to accurately reproduce colors. Raising or lowering this value will result in the image mid-tones being washed-out or too dark. |
+| **Gain** || This will adjust the luminance intensity of the image's whites (highlights) to accurately reproduce colors. Raising or lowering this value will result in the image highlights being washed-out or too dark. |
+| **Offset** || This will adjust the luminance intensity of the image's blacks (shadows) to accurately reproduce colors. Raising or lowering this value will result in the image shadows being washed-out or too dark. |
+| **HighLights Min** || This is a multiplier of the properties that affect the color correction properties that have been adjusted in the **Highlights** section.  |
+[/REGION]
+
+
+### Workflow for Good Color Correction
+
+These are some good habits that should be used when working with the color grading tools in your Post Process Volume. 
+
+* The **Tone Mapper** controls should be set for a project-wide look. Ideally, these properties should not be adjusted and certainly should not be adjusted dynamically or on a shot-by-shot basis. 
+Use the [Color Grading](#colorcorrectionproperties) properties for this.
+
+* Start by using the **Global** color correction properties and doing an initial pass on your scene before touching any of the other properties. The majority of your color grading changes should be 
+done with these properties.
+
+* You should not try to use the **Gain** property to adjust exposure for your scene. This should be used for fine tweaks for different colors. Instead use the **Exposure Bias** in the **Lens** > 
+**Auto-Exposure** section.
+
+* Use **Offset** in minor amounts to make your shadowed or darkened areas a little lighter. If you want things to look a little hazy or have more bloom, then you can set a higher value, conversely 
+if your scene is overly hazy or has too much bloom you can lower the value to subtract color from the scene.
+
+* Instead of using a [Lookup Table (LUT)](Engine/Rendering/PostProcessEffects/UsingLUTs) for coloring the scene, since that happens after tone mapping, you should use the Color Grading properties 
+to get the look you want so that it's consistent on all displays you output to (LDR and HDR). However, it can be a good practice to quickly get a look to set the tone with a LUT and then adjust the 
+color correction to get a similar look.
+
+
+## Training Streams
+
+[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:videoid]
+	A-wectYNfRQ
+	[/PARAMLITERAL]
+	[PARAMLITERAL:width]
+	50
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	56.25
+	[/PARAMLITERAL]
+	[PARAMLITERAL:units]
+	%
+	[/PARAMLITERAL]
+	[PARAMLITERAL:type]
+	simple
+	[/PARAMLITERAL]
+[/OBJECT]
+
+
+
+
+
+<!--
+[EXCERPT:ColorGradingLUT]
+[REGION:imagetable]
+| [INCLUDE:#colorgradingnone] | [INCLUDE:#colorgradinggreen] | [INCLUDE:#colorgradingred] |
+| ------ | ------ | ------ |
+| ![Neutral LUT](RGBTable16x1.png) | ![Greenish LUT](LUT_Greenish.png) | ![Reddish LUT](LUT_Reddish.png) |
+[/REGION:imagetable]
+[/EXCERPT:ColorGradingLUT]
+
+[EXCERPT:colorgradingnone]
+[REGION:lightbox]
+[![Natural Scene](lut_none.png)(w:300)](lut_none.png)
+[/REGION]
+[REGION:caption]Click image for full size view.[/REGION]
+[/EXCERPT:colorgradingnone]
+
+[EXCERPT:colorgradinggreen]
+[REGION:lightbox]
+[![Greenish Scene](lut_green.png)(w:300)](lut_green.png)
+[/REGION]
+[REGION:caption]Click image for full size view.[/REGION]
+[/EXCERPT:colorgradinggreen]
+
+[EXCERPT:colorgradingred]
+[REGION:lightbox]
+[![Reddish Scene](lut_red.png)(w:300)](lut_red.png)
+[/REGION]
+[REGION:caption]Click image for full size view.[/REGION]
+[/EXCERPT:colorgradingred]
+-->

@@ -1,0 +1,202 @@
+﻿INTSourceChangelist:2621701
+Availability:Public
+Title:2.对编辑器公开变量和函数
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/VariablesTimersEvents
+Description:使用 UPROPERTY 和 UFUNCTION 宏对编辑器公开变量和函数
+version:4.9
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[Previous Step](Programming\Tutorials\VariablesTimersEvents\1 "%Programming\Tutorials\VariablesTimersEvents\1:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[](Programming\Tutorials\VariablesTimersEvents)
+	[/PARAM]
+	[PARAM:next]
+		[Next Step](Programming\Tutorials\VariablesTimersEvents\3 "%Programming\Tutorials\VariablesTimersEvents\3:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+1. 我们的倒计时定时器当前被硬编码为 3 秒。在编辑器中将倒计时设为任意数值十分实用，也很容易实现。在 **Visual Studio** 中，我们打开 Countdown.h 可以找到拥有以下代码的行：
+
+		int32 CountdownTime;
+
+	为将此变量对 **虚幻引擎** 公开，需要将其转换为一个 **UPROPERTY**。这将使引擎在启动游戏或加载保存的关卡时保存变量值。带空括号的 UPROPERTY 标签被添加到其所影响变量的正上方。
+
+		UPROPERTY()
+		int32 CountdownTime;
+
+	UPROPERTY 支持参数变更 **虚幻引擎** 使用此变量的方式。因为需要将变量保持为可编辑，所以添加 **EditAnywhere** 参数：
+
+		UPROPERTY(EditAnywhere)
+		int32 CountdownTime;
+
+	[![](ExposingVariable.png)](ExposingVariable.png)
+
+	还可在 C++ 中为变量添加一个注释。这个注释将成为 **虚幻编辑器** 中变量的描述，如下：
+
+		//倒计时运行时长，按秒计
+		UPROPERTY(EditAnywhere)
+		int32 CountdownTime;
+
+	[![](CommentingVariable.png)](CommentingVariable.png)
+
+	[REGION:tip]对 UPROPERTY 还可进行更多操作，之后可继续研究其它参数，如 **BlueprintReadWrite** 和 **Category**。但现在可暂告一段落。[/REGION]
+	
+	返回 **虚幻编辑器** 按下 **Compile**，之前放置的 ACountdown 的变量将出现在 **Details 面板** 中。变更该数字并按下 **Play** 按钮即可对不同的定时器数值进行测试。
+
+1. 除变更定时器数值外，还可进行设置，使非编程开发者能够改变倒计时结束后出现的效果。在 **Visual Studio** 中，打开 Countdown.h 并找到以下行：
+
+		void CountdownHasFinished();
+
+	将此函数以如下方式设为一个 **UFUNCTION**，即可将其对 **虚幻引擎** 公开：
+
+		UFUNCTION()
+		void CountdownHasFinished();
+
+	[REGION:note]
+	和 UPROPERTY 宏一样，我们需要提供可使用它进行何种操作的信息，以便为非编程开发者启用更多功能和访问权。可以考虑三种选择：
+	
+	1. **BlueprintCallable** 函数在 C++ 中进行编写，可从 **蓝图图表** 进行调用。但必须编辑 C++ 代码方可对其进行变更和覆写。以这种方式进行标记的函数通常是非程序员使用的功能，但这些功能不应被改变，或改变后不存在实际意义。简单的例子就是任意类型的数学函数。
+
+	1. **BlueprintImplementableEvent** 函数在 C++ header (.h) 文件中进行设置，但函数主体完全在蓝图图表中进行编写，而非 C++ 中。它们创建的目的是使非程序员可针对特殊情况（这些情况不存在默认操作或标准行为）创建自定义响应。范例：在宇宙飞船游戏中玩家飞船获得强化道具时发生的事件。
+
+	1. **BlueprintNativeEvent** 函数就像是 BlueprintCallable 和 BlueprintImplementableEvent 函数的组合。它们的默认行为已在 C++ 中完成编程，但通过蓝图图表中的覆写即可对它们进行补充或替换。对它们进行编程时，C++ 代码始终将进入命名尾部添加有 _Implementation 的虚拟函数，如下所示。这是灵活性最高的选项，因此我们将在此教程中使用。
+	[/REGION]
+
+	如需使非程序员能够调用 C++ 函数并使用 **蓝图** 对其进行覆写，则须对 Countdown.h 进行以下修改：
+
+		UFUNCTION(BlueprintNativeEvent)
+		void CountdownHasFinished();
+		virtual void CountdownHasFinished_Implementation();
+
+	然后我们需要在 Countdown.cpp 中将拥有以下代码的行：
+
+		void ACountdown::CountdownHasFinished()
+
+	改为：
+
+		void ACountdown::CountdownHasFinished_Implementation()
+
+----
+
+我们现在便成功创建了非程序员可进行访问和修改的变量和函数，同时在 C++ 中提供自己的默认数值和功能。创建一个 ACountdown 类的蓝图扩展并自行修改，即可确定非程序员能进行的使用。
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    code
+    [/PARAMLITERAL]
+    [PARAM:heading]
+	    完成代码
+    [/PARAM]
+    [PARAM:content]
+		**Countdown.h**
+			// 版权所有 1998-2017 Epic Games, Inc. 保留所有权利。
+
+			#pragma once
+
+			#include "GameFramework/Actor.h"
+			#include "Countdown.generated.h"
+
+			UCLASS()
+			class HOWTO_VTE_API ACountdown : public AActor
+			{
+				GENERATED_BODY()
+	
+			public:	
+				// 设置该 actor 属性的默认值
+				ACountdown();
+
+				// 游戏开始时或生成时调用
+				virtual void BeginPlay() override;
+	
+				// 每帧调用
+				virtual void Tick( float DeltaSeconds ) override;
+
+				//倒计时运行时长，按秒计
+				UPROPERTY(EditAnywhere)
+				int32 CountdownTime;
+
+				UTextRenderComponent* CountdownText;
+
+				void UpdateTimerDisplay();
+
+				void AdvanceTimer();
+
+				UFUNCTION(BlueprintNativeEvent)
+				void CountdownHasFinished();
+				virtual void CountdownHasFinished_Implementation();
+
+				FTimerHandle CountdownTimerHandle;
+			};
+
+
+		**Countdown.cpp**
+			// 版权所有 1998-2017 Epic Games, Inc. 保留所有权利。
+
+			#include "HowTo_VTE.h"
+			#include "Countdown.h"
+
+			// 设置默认值
+			ACountdown::ACountdown()
+			{
+ 				// 将此 actor 设为每帧调用 Tick()。不需要时可将此关闭，以提高性能。
+				PrimaryActorTick.bCanEverTick = false;
+	
+				CountdownText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("CountdownNumber"));
+				CountdownText->SetHorizontalAlignment(EHTA_Center);
+				CountdownText->SetWorldSize(150.0f);
+				RootComponent = CountdownText;
+
+				CountdownTime = 3;
+			}
+
+			// 游戏开始时或生成时调用
+			void ACountdown::BeginPlay()
+			{
+				Super::BeginPlay();
+	
+				UpdateTimerDisplay();
+				GetWorldTimerManager().SetTimer(CountdownTimerHandle, this, &ACountdown::AdvanceTimer, 1.0f, true);
+			}
+
+			// 每帧调用
+			void ACountdown::Tick( float DeltaTime )
+			{
+				Super::Tick( DeltaTime );
+
+			}
+
+			void ACountdown::UpdateTimerDisplay()
+			{
+				CountdownText->SetText(FString::FromInt(FMath::Max(CountdownTime, 0)));
+			}
+
+			void ACountdown::AdvanceTimer()
+			{
+				--CountdownTime;
+				UpdateTimerDisplay();
+				if (CountdownTime < 1)
+				{
+					// 倒计时结束，停止运行定时器。
+					GetWorldTimerManager().ClearTimer(CountdownTimerHandle);
+					//在定时器结束时按需要执行特殊操作。
+					CountdownHasFinished();
+				}
+			}
+
+			void ACountdown::CountdownHasFinished_Implementation()
+			{
+				//改为一个特殊的读出
+				CountdownText->SetText(TEXT("GO!"));
+			}
+
+    [/PARAM]
+[/OBJECT]
+
+%Steps%

@@ -1,0 +1,256 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+#include "Common.ush"
+
+float2 InvSize;
+float4 InputUvFactorAndOffset;
+float2 InputViewportMaxBound;
+
+Texture2D		Texture;
+SamplerState	TextureSampler;
+
+void HZBBuildPS(noperspective float4 RenderTargetUVAndScreenPos : TEXCOORD0, out float4 OutColor : SV_Target0)
+{
+	float4 Depth;
+	float2 UV[4];
+
+#if STAGE == 0
+	const float2 ViewUV = RenderTargetUVAndScreenPos.zw * float2(0.5f, -0.5f) + 0.5f;
+	const float2 InUV = ViewUV * InputUvFactorAndOffset.xy + InputUvFactorAndOffset.zw;
+	
+	// min(..., InputViewportMaxBound) because we don't want to sample outside of the viewport
+	// when the view size has odd dimensions on X/Y axis.
+	UV[0] = min(InUV + float2(-0.25f, -0.25f) * InvSize, InputViewportMaxBound);
+	UV[1] = min(InUV + float2( 0.25f, -0.25f) * InvSize, InputViewportMaxBound);
+	UV[2] = min(InUV + float2(-0.25f,  0.25f) * InvSize, InputViewportMaxBound);
+	UV[3] = min(InUV + float2( 0.25f,  0.25f) * InvSize, InputViewportMaxBound);
+
+	Depth.x = SceneDepthTexture.SampleLevel( SceneDepthTextureSampler, UV[0], 0 ).r;
+	Depth.y = SceneDepthTexture.SampleLevel( SceneDepthTextureSampler, UV[1], 0 ).r;
+	Depth.z = SceneDepthTexture.SampleLevel( SceneDepthTextureSampler, UV[2], 0 ).r;
+	Depth.w = SceneDepthTexture.SampleLevel( SceneDepthTextureSampler, UV[3], 0 ).r;
+#else
+	const float2 InUV = RenderTargetUVAndScreenPos.xy;
+	
+	UV[0] = InUV + float2(-0.25f, -0.25f) * InvSize;
+	UV[1] = InUV + float2( 0.25f, -0.25f) * InvSize;
+	UV[2] = InUV + float2(-0.25f,  0.25f) * InvSize;
+	UV[3] = InUV + float2( 0.25f,  0.25f) * InvSize;
+
+	Depth.x = Texture.SampleLevel( TextureSampler, UV[0], 0 ).r;
+	Depth.y = Texture.SampleLevel( TextureSampler, UV[1], 0 ).r;
+	Depth.z = Texture.SampleLevel( TextureSampler, UV[2], 0 ).r;
+	Depth.w = Texture.SampleLevel( TextureSampler, UV[3], 0 ).r;
+#endif
+
+	OutColor = min( min(Depth.x, Depth.y), min(Depth.z, Depth.w) );
+}
+
+Texture2D		HZBTexture;
+SamplerState	HZBSampler;
+
+Texture2D		BoundsCenterTexture;
+SamplerState	BoundsCenterSampler;
+Texture2D		BoundsExtentTexture;
+SamplerState	BoundsExtentSampler;
+
+float3 HZBUvFactor;
+float4 HZBSize;
+
+void HZBTestPS(float2 InUV : TEXCOORD0, out float4 OutColor : SV_Target0)
+{
+	float4 BoundsCenter = BoundsCenterTexture.SampleLevel( BoundsCenterSampler, InUV, 0 );
+	float4 BoundsExtent = BoundsExtentTexture.SampleLevel( BoundsExtentSampler, InUV, 0 );
+	BoundsCenter.xyz += View.PreViewTranslation.xyz;
+
+#if 1
+	BRANCH
+	if( BoundsExtent.w == 0 )
+	{
+		OutColor = float4( 1, 0, 0, 0 );
+		return;
+	}
+#endif
+	
+	// Could frustum cull here
+
+	float3 BoundsMin = BoundsCenter.xyz - BoundsExtent.xyz;
+	float3 BoundsMax = BoundsCenter.xyz + BoundsExtent.xyz;
+	float3 Bounds[2] = { BoundsMin, BoundsMax };
+	
+	// Screen rect from bounds
+	float3 RectMin = float3( 1, 1, 1 );
+	float3 RectMax = float3( -1, -1, -1 );
+	UNROLL for( int i = 0; i < 8; i++ )
+	{
+		float3 PointSrc;
+		PointSrc.x = Bounds[ (i >> 0) & 1 ].x;
+		PointSrc.y = Bounds[ (i >> 1) & 1 ].y;
+		PointSrc.z = Bounds[ (i >> 2) & 1 ].z;
+
+		float4 PointClip = mul( float4( PointSrc, 1 ), View.TranslatedWorldToClip );
+		float3 PointScreen = PointClip.xyz / PointClip.w;
+
+		RectMin = min( RectMin, PointScreen );
+		RectMax = max( RectMax, PointScreen );
+	}
+
+#if 0
+	BRANCH
+	if( RectMax.z >= 1 )
+	{
+		// Crosses near plane
+		OutColor = 1;
+		return;
+	}
+#endif
+
+	// FIXME assumes DX
+	float4 Rect = saturate( float4( RectMin.xy, RectMax.xy ) * float2( 0.5, -0.5 ).xyxy + 0.5 ).xwzy;
+	float4 RectPixels = Rect * HZBSize.xyxy;
+	float2 RectSize = ( RectPixels.zw - RectPixels.xy ) * 0.5;	// 0.5 for 4x4
+	float Level = max(ceil( log2( max( RectSize.x, RectSize.y ) ) ), HZBUvFactor.z);
+
+	// Check if we can drop one level lower
+	float LevelLower = max( Level - 1, 0 );
+	float4 LowerRect = RectPixels * exp2( -LevelLower );
+	float2 LowerRectSize = ceil( LowerRect.zw ) - floor( LowerRect.xy );
+	if( all( LowerRectSize <= 4 ) )
+	{
+		Level = LevelLower;
+	}
+
+#if 0
+	float3 ToView = View.TranslatedWorldCameraOrigin - BoundsCenter.xyz;
+	float3 Sign = ToView > 0 ? float3( 1, 1, 1 ) : float3( -1, -1, -1 );
+
+#if 0
+	float3 ClosestCorner = ToView > 0 ? BoundsMax : BoundsMin;
+	float4 FrontPlaneX = Sign.x * float4( 1, 0, 0, -ClosestCorner.x );
+	float4 FrontPlaneY = Sign.y * float4( 0, 1, 0, -ClosestCorner.y );
+	float4 FrontPlaneZ = Sign.z * float4( 0, 0, 1, -ClosestCorner.z );
+
+	float3 FarthestCorner = ToView > 0 ? BoundsMin : BoundsMax;
+	float4 BackPlaneX = -Sign.x * float4( 1, 0, 0, -FarthestCorner.x );
+	float4 BackPlaneY = -Sign.y * float4( 0, 1, 0, -FarthestCorner.y );
+	float4 BackPlaneZ = -Sign.z * float4( 0, 0, 1, -FarthestCorner.z );
+#else
+	float4 FrontPlaneX = float4( Sign.x, 0, 0, -Sign.x * BoundsCenter.x - BoundsExtent.x );
+	float4 FrontPlaneY = float4( 0, Sign.y, 0, -Sign.y * BoundsCenter.y - BoundsExtent.y );
+	float4 FrontPlaneZ = float4( 0, 0, Sign.z, -Sign.z * BoundsCenter.z - BoundsExtent.z );
+
+	float4 BackPlaneX = float4( -FrontPlaneX.xyz, -FrontPlaneX.w - 2 * BoundsExtent.x );
+	float4 BackPlaneY = float4( -FrontPlaneY.xyz, -FrontPlaneY.w - 2 * BoundsExtent.y );
+	float4 BackPlaneZ = float4( -FrontPlaneZ.xyz, -FrontPlaneZ.w - 2 * BoundsExtent.z );
+#endif
+
+	// TODO put on CPU
+	float4 NearPlane = float4(
+		View.TranslatedWorldToClip[0][3] - View.TranslatedWorldToClip[0][2],
+		View.TranslatedWorldToClip[1][3] - View.TranslatedWorldToClip[1][2],
+		View.TranslatedWorldToClip[2][3] - View.TranslatedWorldToClip[2][2],
+		View.TranslatedWorldToClip[3][3] - View.TranslatedWorldToClip[3][2]
+	);
+	
+	// Backface cull. Can't avoid evaluating the plane so replace it with the near plane.
+	FrontPlaneX = dot( FrontPlaneX, float4(View.TranslatedWorldCameraOrigin, 1) ) > 0.0 ? FrontPlaneX : NearPlane;
+	FrontPlaneY = dot( FrontPlaneY, float4(View.TranslatedWorldCameraOrigin, 1) ) > 0.0 ? FrontPlaneY : NearPlane;
+	FrontPlaneZ = dot( FrontPlaneZ, float4(View.TranslatedWorldCameraOrigin, 1) ) > 0.0 ? FrontPlaneZ : NearPlane;
+	// Back planes don't need culling.
+
+	// Transform to post projective space. Inverse transpose for plane projection.
+	FrontPlaneX = mul( View.ClipToTranslatedWorld, FrontPlaneX );
+	FrontPlaneY = mul( View.ClipToTranslatedWorld, FrontPlaneY );
+	FrontPlaneZ = mul( View.ClipToTranslatedWorld, FrontPlaneZ );
+	BackPlaneX = mul( View.ClipToTranslatedWorld, BackPlaneX );
+	BackPlaneY = mul( View.ClipToTranslatedWorld, BackPlaneY );
+	BackPlaneZ = mul( View.ClipToTranslatedWorld, BackPlaneZ );
+	
+	// 2D planes in screen space
+	float3 FrontPlaneX2 = -FrontPlaneX.xyw / FrontPlaneX.z;
+	float3 FrontPlaneY2 = -FrontPlaneY.xyw / FrontPlaneY.z;
+	float3 FrontPlaneZ2 = -FrontPlaneZ.xyw / FrontPlaneZ.z;
+	float3 BackPlaneX2 = -BackPlaneX.xyw / BackPlaneX.z;
+	float3 BackPlaneY2 = -BackPlaneY.xyw / BackPlaneY.z;
+	float3 BackPlaneZ2 = -BackPlaneZ.xyw / BackPlaneZ.z;
+	
+	// FIXME assumes DX
+	// Bake UV to ScreenPos transform into planes to pull outside of loop
+	// float2 ScreenPos = UV * float2( 2, -2 ) + float2( -1, 1 );
+	// TODO put in matrix?
+	FrontPlaneX2 = float3( FrontPlaneX2.xy * float2( 2, -2 ), dot( FrontPlaneX2, float3( -1, 1, 1 ) ) );
+	FrontPlaneY2 = float3( FrontPlaneY2.xy * float2( 2, -2 ), dot( FrontPlaneY2, float3( -1, 1, 1 ) ) );
+	FrontPlaneZ2 = float3( FrontPlaneZ2.xy * float2( 2, -2 ), dot( FrontPlaneZ2, float3( -1, 1, 1 ) ) );
+	BackPlaneX2 = float3( BackPlaneX2.xy * float2( 2, -2 ), dot( BackPlaneX2, float3( -1, 1, 1 ) ) );
+	BackPlaneY2 = float3( BackPlaneY2.xy * float2( 2, -2 ), dot( BackPlaneY2, float3( -1, 1, 1 ) ) );
+	BackPlaneZ2 = float3( BackPlaneZ2.xy * float2( 2, -2 ), dot( BackPlaneZ2, float3( -1, 1, 1 ) ) );
+
+	float2 PixelSize = exp2( Level ) * HZBSize.zw;
+
+	// Sample from max depth corner (inverted z) for conservative depth over pixel. Sample positions aren't snapped so they can be
+	// anywhere in the pixel. This results in a max offset to corner = pixel size instead of the expected half pixel size.
+	// Snapping rect corners isn't good enough since we use fixed # of samples regardless of rect's aspect ratio.
+	FrontPlaneX2.z += dot( abs( FrontPlaneX2.xy ), PixelSize );
+	FrontPlaneY2.z += dot( abs( FrontPlaneY2.xy ), PixelSize );
+	FrontPlaneZ2.z += dot( abs( FrontPlaneZ2.xy ), PixelSize );
+	BackPlaneX2.z -= dot( abs( BackPlaneX2.xy ), PixelSize );
+	BackPlaneY2.z -= dot( abs( BackPlaneY2.xy ), PixelSize );
+	BackPlaneZ2.z -= dot( abs( BackPlaneZ2.xy ), PixelSize );
+
+	// 4x4 samples
+	float2 Scale = ( Rect.zw - Rect.xy ) / 3;
+	float2 Bias = Rect.xy;
+
+	bool Visible = false;
+	UNROLL for( int i = 0; i < 4; i++ )
+	{
+		UNROLL for( int j = 0; j < 4; j++ )
+		{
+			float3 UV = float3( float2( i, j ) * Scale + Bias, 1 );
+			
+			float HZBDepth = HZBTexture.SampleLevel( HZBSampler, UV.xy, Level ).r;
+			
+			float3 FrontPlaneDepth;
+			FrontPlaneDepth.x = saturate( dot( FrontPlaneX2, UV ) );
+			FrontPlaneDepth.y = saturate( dot( FrontPlaneY2, UV ) );
+			FrontPlaneDepth.z = saturate( dot( FrontPlaneZ2, UV ) );
+
+			float3 BackPlaneDepth;
+			BackPlaneDepth.x = saturate( dot( BackPlaneX2, UV ) );
+			BackPlaneDepth.y = saturate( dot( BackPlaneY2, UV ) );
+			BackPlaneDepth.z = saturate( dot( BackPlaneZ2, UV ) );
+			
+			// Inverted Z buffer
+			float FrontDepth = min( min( FrontPlaneDepth.x, FrontPlaneDepth.y ), min( FrontPlaneDepth.z, RectMax.z ) );
+			float BackDepth  = max( max( BackPlaneDepth.x,  BackPlaneDepth.y  ), max( BackPlaneDepth.z,  RectMin.z ) );
+			
+			bool PixelValid = FrontDepth >= BackDepth;
+			bool PixelInFront = FrontDepth >= HZBDepth;
+			//Visible = Visible || (PixelValid && PixelInFront);
+			Visible = Visible || FrontDepth >= max( BackDepth, HZBDepth );
+		}
+	}
+	
+	OutColor = Visible ? 1 : 0;
+#else
+	// 4x4 samples
+	float2 Scale = HZBUvFactor.xy * ( Rect.zw - Rect.xy ) / 3;
+	float2 Bias = HZBUvFactor.xy * Rect.xy;
+
+	float4 MinDepth = 1;
+	UNROLL for( int i = 0; i < 4; i++ )
+	{
+		// TODO could vectorize this
+		float4 Depth;
+		Depth.x = HZBTexture.SampleLevel( HZBSampler, float2( i, 0 ) * Scale + Bias, Level ).r;
+		Depth.y = HZBTexture.SampleLevel( HZBSampler, float2( i, 1 ) * Scale + Bias, Level ).r;
+		Depth.z = HZBTexture.SampleLevel( HZBSampler, float2( i, 2 ) * Scale + Bias, Level ).r;
+		Depth.w = HZBTexture.SampleLevel( HZBSampler, float2( i, 3 ) * Scale + Bias, Level ).r;
+		MinDepth = min( MinDepth, Depth );
+	}
+	MinDepth.x = min( min(MinDepth.x, MinDepth.y), min(MinDepth.z, MinDepth.w) );
+
+	// Inverted Z buffer
+	OutColor = RectMax.z >= MinDepth.x ? 1 : 0;
+#endif
+}

@@ -1,0 +1,298 @@
+Availability:Public
+Title:Plugins
+Crumbs:
+Description:How to create Unreal Engine plugins.
+Version: 4.16
+Parent:Programming/UnrealArchitecture/Reference
+
+[TOC(start:2)]
+
+
+This page describes how to develop your own plugins to use with the Unreal Engine tools and runtime. 
+
+Many Unreal Engine subsystems were designed to be extensible, allowing you to add entire new features and to 
+modify built-in functionality without modifying the engine code directly. You can create new file types, add 
+new menu items and tool bar commands to the editor, or even add entire new features and editor sub-modes!
+
+If you want to jump right in and try out plugins now, please see the [Plugin Examples](#PluginExamples) section.
+ 
+
+
+## Plugins Editor UI
+
+You can see which plugins are currently installed by opening the **Plugins** editing interface from the **Edit** menu. 
+
+![PluginsEditor.png](PluginsEditor.png)
+
+The Plugins editor is accessible from the main 'Window' menu. This interface displays all of the plugins that are 
+currently installed and allows you to enable or disable plugins individually.
+
+You can browse categories of plugins using the tree interface on the left. Selecting a category will show all 
+plugins in that category as well as plugins in any sub-category. As you navigate through categories, a "bread crumb" 
+trail displayed at the top of the UI will allow you to jump quickly to higher-level categories. A number displayed 
+next to a category indicates how many plugins are available in that category.
+
+![PluginCategories.png](PluginCategories.png)
+
+Plugins are displayed in the main list, along with their name and icon, the current version of the plugin, a helpful 
+description, the plugin's author (and optional web hyperlink), as well as whether the plugin is currently enabled or not.
+
+The search control at the top will allow you to search plugins displayed in the list by name.
+
+![SearchingPlugins.png](SearchingPlugins.png)
+
+You can enable or disable a plugin for use with your active project by toggling the **Enable** check box under the 
+plugin's description. You may need to restart the editor for the change to take effect.
+
+
+
+## Anatomy of a Plugin
+
+Plugins with code will have a Source folder. This folder will contain one or more directories with module source code 
+for the plugin. Note that plugins will often contain code, but they do not have to contain code. See the [Code in Plugins](#CodeInPlugins) 
+section for more information.
+
+For plugins with code modules, the plugin will have its own Binaries folder that contains compiled code for that plugin. 
+Also, temporary build product files will be stored to an Intermediate folder under the plugin's directory. 
+
+Plugins can have their own Content folder that contains asset files specific to that plugin.  See the [Content in Plugins](#ContentInPlugins) 
+section for more information.
+
+[REGION:warning]
+Plugins do not support config files yet. This is something we are considering to add at a later date. 
+
+Also, plugins do not yet support their own Derived Data cache distribution. This is something we are looking 
+into adding at a later date.
+[/REGION]
+
+
+## Plugin Folders
+
+Plugins are always located in your plugin's directory. In order for plugins to be found, they must be located in one of 
+the valid search paths for plugins in Unreal Engine. 
+
+| Plugin Type          | Search Path                                        |
+| -------------------- | -------------------------------------------------- |
+| **Engine**           | /UE4 Root/Engine/Plugins/My Engine Plugin/         |
+| **Game**             | /My Project/Plugins/My Game Plugin/                |
+
+You can also organize plugins into subdirectories under the base Plugins folder. The engine will scan all of your sub-folders 
+under the base Plugins folder for plugins to load, but it will never scan into subdirectories beneath where a plugin was already found.
+
+Unreal Engine finds your plugin by searching for .uplugin files on disk. We call these files plugin descriptors. They are text 
+files that provide basic information about your plugin. Plugin descriptors are discovered and loaded automatically by Unreal Engine, 
+Unreal Editor and Unreal Build Tool, whenever those programs are run. See the section on [plugin descriptors](#PluginDescriptorfiles) 
+to learn about creating and customizing these files.
+
+
+
+(#CodeInPlugins)
+## Code in Plugins
+
+When generating project files for Visual Studio or Xcode, any plugins that have Source folders (with *.Build.cs files) will be 
+added to your project files to make it easier to navigate to their source code. These plugins will automatically be compiled by 
+Unreal Build Tool when compiling your game project.
+
+Plugins are allowed to have any number of module source directories. Most plugins will only have one module, but it is possible 
+to create multiple, for example, if you had some functionality that was designed to be compiled only for the editor, and other code 
+that was necessary for a runtime game. 
+
+For the most part, plugin source file layout is the same as any other C++ module in Unreal Engine.
+
+Plugins are allowed to declare new UObject types (UCLASS, USTRUCT, etc) in header files in a Classes subdirectory in their module 
+code folders. The Unreal Engine build system will detect these files and generate code as needed to support these UObjects. You will 
+need to follow the normal rules for using UObjects within C++ modules, such as including the generated header file and the module's 
+generated.inl file in one of your module's source files.
+
+One thing with plugin modules that is a bit different, is Public source file headers. Most plugin modules have no business exporting 
+public APIs in header files in a Public source folder, because they will never be a direct dependency (statically linked against) by 
+engine or game code. So usually your Public source folder will be empty. There are a few exceptions to this rule:
+
+* If your plugin contains multiple C++ modules, code in a Public folder can be shared between modules within your plugin.
+* If you are creating a game plugin (not engine plugin), and you want to allow the game to statically link against one of your plugin 
+modules. This breaks the concept of a plugin a little bit, but is often useful for plugins that want to declare new UObject types 
+that game classes can inherit from or use directly. The engine itself has no dependencies on this plugin, but the game project code 
+and content may very well have direct dependencies.
+* If you want to distribute public interface headers with your plugin in order to allow game code or other plugins to access types 
+implemented in that plugin's modules. This is very uncommon and generally discouraged, as we do not currently intend to support plugins 
+that are directly dependent on other plugins.
+ 
+
+
+(#ContentInPlugins)
+## Content in Plugins
+
+Unreal Engine supports plugins that contain Content as well as binary code. This feature is a work in progress.
+
+In order to use Content in a plugin, the 'CanContainContent' setting within the plugin's descriptor must be set to 'true'. Content in 
+plugins is a work-in-progress feature that is not recommended to use yet. More information about this will be available at a later date.
+
+We intend to support allowing content to be included in distributed plugins. This feature is not fully implemented yet, so we do not 
+recommend using it.
+
+
+## Plugins in your Game Project
+
+Plugins live under a Plugins subfolder in your game project's directory, and will be detected and loaded at startup by the game engine and editor. 
+
+If the plugin contains modules that have Source folders (and *.Build.cs files), plugin code will be automatically added to generated 
+C++ project files, so that you can work on developing the plugin alongside your game project easily. Whenever you compile your game 
+project, any plugins that have Source available will also be compiled as a synthetic dependency of your game. 
+
+Plugins that do not have a Source sub-folder are ignored by the project generator and will not appear in your C++ project files, but 
+they will still be loaded at startup by the game as long as binary files exist.
+
+
+## Engine Plugins
+
+Unreal Engine 4 has some built-in plugins included under the Engine directory. Engine plugins are just like plugins you would have in 
+your game project, except they are available for all game projects. Typically, these plugins are created by engine and tools programmers 
+to provide baseline functionality in a plugin-like way. This can enable the user to remove or override whole engine features without 
+modifying any of the engine code. 
+
+By default, engine plugins are loaded before any of the game modules or game project plugins are loaded.
+
+Engine plugins have a special requirement:  The engine code modules must never statically link against engine plugin module libraries. 
+That is, the engine plugins must remain compartmentalized from the engine itself -- plugin modules must never be "dependency modules" 
+for engine modules. This is a philosophical choice that allows the engine to function even when the plugins are not available to be loaded.
+
+
+## Distributing a Plugin
+
+Here are the steps required to distribute a plugin.
+
+1. Make sure the modules list in your .uplugin file has a correct list of whitelisted and blacklisted platforms.
+1. Find your plugin in the editor's plugin browser, and click the '**Edit...**' link to update the metadata associated with your plugin
+   (description, link to documentation, and so on).
+1. Click the '**Package...*' link to package your plugin into a folder for distribution.
+
+By default, only source code, binaries and content will be packaged with your plugin. If you have additional files you need to include,
+create a file called Config/FilterPlugin.ini in your plugin folder which lists additional paths to include, like this:
+
+	[FilterPlugin]
+	/ThirdParty/...
+	/MyOtherFolder/...
+
+[REGION:warning]
+Important notes:
+
+* For plugins with Content, you may want to generate Derived Data to include with your plugin, to avoid having to require it 
+to be generated on demand by an end-user. This feature is not yet available, but will be added at a later date. Stay tuned.
+* Including an EULA or other documentation with distributed plugins is not yet supported. We may provide support for this at a later date.
+[/REGION]
+
+
+
+## Plugin Descriptor files
+
+Plugin descriptors are files that end in a **.uplugin** extension. The first part of the file name is always the name of your plugin. 
+Plugin descriptor files are always located in your plugin's directory, where the engine will discover them at startup time.
+
+Plugin descriptors are in the Json ([JavaScript Object Notation](http://www.json.org/)) file format.
+
+### Descriptor File Example
+
+This example plugin descriptor is from the **UObjectPlugin** [example](#PluginExamples) above.
+
+	{
+		"FileVersion" : 3,
+		"Version" : 1,
+		"VersionName" : "1.0",
+		"FriendlyName" : "UObject Example Plugin",
+		"Description" : "An example of a plugin which declares its own UObject type.  This can be used as a starting point when creating your own plugin.",
+		"Category" : "Examples",
+		"CreatedBy" : "Epic Games, Inc.",
+		"CreatedByURL" : "http://epicgames.com",
+		"DocsURL" : "",
+		"MarketplaceURL" : "",
+		"SupportURL" : "",
+		"EnabledByDefault" : true,
+		"CanContainContent" : false,
+		"IsBetaVersion" : false,
+		"Installed" : false,
+		"Modules" :
+		[
+			{
+				"Name" : "UObjectPlugin",
+				"Type" : "Developer",
+				"LoadingPhase" : "Default"
+			}
+		]
+	}
+
+
+### Descriptor File Format
+
+| Field name						| Info			| Description |
+| ---------------------------------	| -------------	| ----------- |
+| **FileVersion**					| _Required_	| Version of this plugin descriptor file itself. It is used for backwards compatibility as new features are added to the plugin system. You should usually set this to the latest version that is allowed by the version of the engine you are using. The latest version is currently **3**, and is the version of format that is documented here. We do not expect this version to change very frequently. In source code, you can look at **EProjectDescriptorVersion** to see the actual value. If you require maximum compatibility with older versions of the engine, then you can use an older version of the format, but it is not recommended.
+| **Version**						| _Optional_    | Current version number of this build of your plugin. This value should always increase with future versions. This version number is not usually displayed to end-users. |
+| **VersionName**					| _Optional_    | Version of the plugin displayed in the editor UI. This is never used for any versioning checks and can be in whatever format you would like, however we suggest a simple Major.Minor format. You should always update the VersionName whenever the Version number has increased. |
+| **FriendlyName**					| _Optional_	| Name of the plugin displayed in the editor UI. If not specified, the name will default to the .uplugin file name. |
+| **Description**					| _Optional_	| A paragraph of text that describes what this plugin is used for. This will be displayed in the editor's plugin window. |
+| **Category**						| _Optional_	| This is a special dot-separated path string that allows you to assign your plugin to a category in the editor UI. It is purely for organizational purposes. An example of a category path is **"Editor Features.Level Editing.Mesh Painting"**. Each category is separated by a period character and represents a deeper level in the tree. |
+| **CreatedBy**						| _Optional_	| The individual or company name that created this plugin. This may be displayed in the plugin UI or in other locations. |
+| **CreatedByURL**					| _Optional_	| A web link to the individual or company that created this plugin. If specified, the editor UI may display a hyperlink that allows the user to browse to this web page. |
+| **DocsURL**						| _Optional_	| A web link to the plugin's documentation. If specified, the editor's plugin browser will display a hyperlink that allows the user to browse to this web page. |
+| **MarketplaceURL**				| _Optional_	| A link to the plugin's Marketplace page. If specified, the editor's plugin browser will display a hyperlink that allows the user to browse to this web page. |
+| **SupportURL**					| _Optional_	| Link to the support page for the plugin. Will be shown on the editor's plugin browser if specified. |
+| **EnabledByDefault**				| _Optional_	| If set to true, this plugin will be enabled by default when it is present. |
+| **CanContainContent**				| _Optional_	| When specified and set to **true**, enables Content support for this plugin. The default setting is **false**. See the section on [Content in Plugins](#ContentInPlugins) for more info. |
+| **IsBetaVersion**					| _Optional_	| Marks the content as a beta version. In the list of Plugins, "Version" will be replaced with "BETA Version" for this entry. |
+| **Installed**						| _Optional_	| If set to `true`, the Plugin will be listed under the "Installed" section in the list of Plugins, instead of the "Project" or "Built-in" sections. |
+| **Modules**						| _Optional_	| For plugins that contain source code (and binaries), this is the list of modules that should be loaded at startup. See below for more info. |
+
+
+#### Module Descriptors
+
+For plugins that contain code, the descriptor file will contain at least one module descriptor. 
+
+	{
+		"Name" : "UObjectPlugin",
+		"Type" : "Developer"
+		"LoadingPhase" : "Default"
+	}
+
+| Field name				| Info			| Description |
+| -------------------------	| -------------	| ----------- |
+| **Name**					| _Required_	| Unique name of this plugin module that will be loaded with the plugin. At runtime, the engine will expect appropriate plugin binaries to exist in the plugin's Binaries folder with the module name as specified here. For modules that have a Source directory, a matching *.Build.cs file is expected to exist within the module's subfolder tree. |
+| **Type**					| _Required_	| Sets the type of module. Valid options are **Runtime**, **RuntimeNoCommandlet**, **Developer**, **Editor**, **EditorNoCommandlet**, and **Program**. This type determines which types of applications this plugin's module is suitable for loading in. For example, some plugins may include modules that are only designed to be loaded when the editor is running. Runtime modules will be loaded in all cases, even in shipped games. Developer modules will only be loaded in development runtime or editor builds, but never in shipping builds. Editor modules will only be loaded when the editor is starting up. Your plugin can use a combination of modules of different types. |
+| **LoadingPhase**			| _Optional_	| If specified, controls when the plugin is loaded at startup. This is an advanced option that should not normally be required. The valid options are **Default** (which is used when no LoadingPhase is specified), **PreDefault**, and **PostConfigInit**. **PostConfigInit** allows the module to be loaded before the engine has finished starting up key subsystems. PreDefault loads just before the normal phase. Typically, this is only needed if you expect game modules to depend directly on content within your plugin, or types declared within your plugin's code. |
+| **WhitelistPlatforms**	| _Optional_	| If specified, gives a list of platforms which this module will be compiled for. If not specified, the module will be compiled for all platforms. |
+| **BlacklistPlatforms**	| _Optional_	| If specified, gives a list of platforms which this this module will not be compiled for. If not specified, the module will be compiled for all platforms. |
+	 
+
+## Icon Files
+
+Along with the descriptor file, plugins usually have an icon file that is used when displaying the plugin in the editor UI.
+
+| File name						| Info			| Format		   | Description |
+| ----------------------------	| -------------	| ---------------- | ----------- |
+| **/Resources/Icon128.png**	| _Required_	| 128x128 PNG file | This icon represents this plugin in the editor UI. It will be displayed in the 'Plugins' user interface accessible from the main Window menu. |
+
+
+
+(#PluginExamples)
+## Plugin Examples
+
+We have created a few example plugins that do not really do anything, but serve as an empty shell that you can use when starting to create your own plugin.  These are included with the engine source code.
+
+| Example name  | Info |
+| ------------- | ---- |
+| BlankPlugin   | This plugin is an empty shell that shows the bare minimal files needed to setup a new code plugin module. |
+| UObjectPlugin | A simple empty plugin that demonstrates how to declare your own UObject class. | 
+
+To use these examples as a starting point for your plugin:
+1. Copy an example plugin to a new folder and rename directories, files and code contents to match your new plugin name.  You do not want to leave the existing names because they will collide with the built-in plugins included with the engine.
+1. **Make a "Plugins" folder** under your game project directory, then copy your plugin to any subdirectory under "Plugins".
+	
+	![ExamplePlugins.png](ExamplePlugins.png)
+1. **Rebuild your C++ project files**. The plugin modules and source code will appear in directories under your project's directory in the project file. 
+1. **Compile your game project** normally. Unreal Build Tool will detect the plugins and compile them as dependencies to your game!
+1. **Launch the editor** (or the game.)  Your plugin will be initially disabled, but you can turn it on in the editor UI.
+1. **Open the Plugins Editor** (Window -> Plugins), search for your plugin and enable it by clicking the check box.
+1. **Restart the Editor**.  Your plugin will be automatically loaded at startup.
+
+You can see that the plugins have loaded by opening the **Modules** viewer under the **Window -> Developer Tools** menu. 
+Another way is to use the code debugger to place a breakpoint in the plugin's startup code, such as in *FBlankPlugin::StartupModule()*.
+

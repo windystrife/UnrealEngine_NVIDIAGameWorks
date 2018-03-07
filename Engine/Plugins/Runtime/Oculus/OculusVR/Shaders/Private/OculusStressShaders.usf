@@ -1,0 +1,51 @@
+#include "/Engine/Private/Common.ush"
+
+#define Zoom 2
+#define Pan float2(0.5, 0)
+#define Aspect 1
+#define Iterations int(128*PSVariables.IterationsMultiplier)
+#define JuliaSeed float2(0.39, 0.2)
+#define ColorScale float3(4, 5, 6)
+
+float ComputeValue(float2 v, float2 offset)
+{
+	float vxsquare = 0;
+	float vysquare = 0;
+
+	int iteration = 0;
+	int lastIteration = Iterations;
+
+	do
+	{
+		vxsquare = v.x * v.x;
+		vysquare = v.y * v.y;
+
+		v = float2(vxsquare - vysquare, v.x * v.y * 2) + offset;
+
+		iteration++;
+
+		if ((lastIteration == Iterations) && (vxsquare + vysquare) > 4.0)
+		{
+			lastIteration = iteration + 1;
+		}
+	} while (iteration < lastIteration);
+
+	return (float(iteration) - (log(log(sqrt(vxsquare + vysquare))) / log(2.0))) / float(Iterations);
+}
+
+float4 Mandelbrot_Func(float2 texCoord : TEXCOORD0) : COLOR0
+{
+	float2 v = (texCoord - 0.5) * Zoom * float2(1, Aspect) - Pan;
+
+	float val = ComputeValue(v, v);
+
+	return float4(sin(val * ColorScale.x), sin(val * ColorScale.y), sin(val * ColorScale.z), 1);
+}
+
+void MainPixelShader(
+	in float2 uv : TEXCOORD0,
+	out float4 OutColor : SV_Target0
+	)
+{
+	OutColor = Mandelbrot_Func(uv);
+}

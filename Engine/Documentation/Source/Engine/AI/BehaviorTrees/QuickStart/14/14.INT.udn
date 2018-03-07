@@ -1,0 +1,170 @@
+Availability:Public
+Title: 14. Build the Behavior Tree
+Crumbs:%ROOT%, Engine, Gameplay, Engine/AI/BehaviorTrees, Engine/AI/BehaviorTrees/QuickStart
+Description:Step 14. Build the Behavior Tree
+version: 4.9
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[Previous Step](Engine/AI/BehaviorTrees/QuickStart/13 "%Engine/AI/BehaviorTrees/QuickStart/13:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[Quick Start Home](Engine/AI/BehaviorTrees/QuickStart)
+	[/PARAM]
+	[PARAM:next]
+		[Next Step](Engine/AI/BehaviorTrees/QuickStart/15 "%Engine/AI/BehaviorTrees/QuickStart/15:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+
+You should now have all the pieces needed to build this Behavior Tree:
+
+![](DoneBehaviorTree.jpg)
+
+Let's break down what's going on.
+
+* The AI will just stand around if it hasn't detected a Pawn that isn't an AI Character.
+* The AgroCheck Service is constantly looking for a suitable target.
+* Once it finds one, the left most branch is open, and the AI runs towards the targeted Pawn.
+* Once it gets in range of that Pawn the branch is prevented from executing, thusly returning it to the top of the graph
+* If the desired Pawn hides, then the right most branch will be able to run, which causes the AI to move to the last know location of the desired Pawn.
+* Once there, it waits, then returns home.
+* At any time, if a suitable target is found, the right most branch will be forced to stop executing, and the left most branch will be opened.
+
+Let us step through the creation of this tree.
+
+## Steps
+
+### Basic Setup
+
+You may have already done this back in part 8 of this guide, but just in case you did not save those changes, here are the steps for creating the basic structure of the Behavior Tree:
+
+1. If the Behavior Tree is not open for editing, **Double-click** it in the **Content Browser** to open it for editing.
+1. Switch to Behavior Tree Mode
+
+	![](btMode.png)
+
+1. When you first edit a Behavior Tree, it will only have the Root Node:
+
+	![](Engine/AI/BehaviorTrees/QuickStart/10/root.png)
+
+1. You can **Right-click** in the Graph Editor to create nodes
+	1. Add a **Composites** -> **Sequence** Node.
+
+		![](sequence.jpg)
+
+	1. Add two (2) **Composites** -> **Selector** Nodes.
+
+		![](selector.jpg)
+
+1. Connect the Root Node to one of the Selector Nodes
+
+	![](connectNodes.jpg)
+
+1. Connect the newly connected Sequence Node to the Selector Node and the other Sequence Node. Then arrange them like so:
+
+	![](connectNodes2.jpg)
+
+	_2nd Selector Node on the left, Sequence Node on the right._
+
+### Add the Service
+
+1. Using the **Right-click** context menu on the top selector node, add a **Services** -> **Agro Check** Node.
+
+	![](addAgro.png)
+
+1. Select the **Agro Check** box on the **Selector** Node, and using the **Details** panel, set the **Target to Follow** property to **TargetToFollow**, set **Target Location** to **TargetLocation**, adjust the **Interval** to 0.5 and the **Random Deviation** to 0.0
+
+	[REGION:raw]
+	![](setAgroCheck1.jpg)
+	[/REGION]
+
+### Add the Tasks
+
+1. **Right-click** in the Graph area to bring up the context menu, and add the 4 **Tasks**: 1 **Rapid Move To** Node, 1 **Wait** Node, and 2 Move To Nodes:
+
+	![](addTaskNodes.png)
+
+1. Connect the lower Selector Node to the **Rapid Move To** Node.
+1. Connect the Sequence node to the Move To Nodes, and the Wait Node.
+1. Arrange the nodes like so:
+
+	![](connectedTasks.png)
+
+	_From left to right: **Rapid Move To**, **Move To**, **Wait**, **Move To**._
+
+1. Select the left-most **Move To** Node, and using the **Details** Panel, set the **Blackboard Key** property on the to **TargetLocation**
+1. Set the **Blackboard Key** property on the right-most **Move To** Node to **HomeLocation**
+
+	[REGION:raw]
+	![](adjustMoveTo.jpg)
+	[/REGION]
+
+1. Select the **Wait** Node, and using the **Details** panel, set its **Wait Time** property to `2.5`
+
+	[REGION:raw]
+	![](adjustWait.jpg)
+	[/REGION]
+
+1. Select the **RapidMoveTo** node, and using the **Details** panel, set its **Target to Follow** property to **TargetToFollow**.
+
+### Add the Decorators
+
+1. **Right-click** the lower **Selector** node and select **Add Decorators..** -> **Blackboard** .
+1. **Right-click** the lower **Selector** node and select **Add Decorators..** -> **Close Enough**.
+
+	[REGION:raw]
+	![](addDecorator1.jpg)
+	[/REGION]
+
+1. Set the **Observer Aborts** property on the **Blackboard** decorator to **Both**, **Key Query** to **Is Set**, and the **Blackboard Key** to **TargetToFollow**
+1. Set the **Acceptable Distance** property on the **Close Enough** decorator to 100.0, and **Target to Follow** property to **TargetToFollow**.
+
+	[REGION:raw]
+	![](setBB1.jpg)
+	[/REGION]
+
+1. **Right-click** the **Sequence** node and select **Add Decorators..** -> **Blackboard**.
+1. **Right-click** the **Sequence** node and select **Add Decorators..** -> **Is At Location**.
+1. **Right-click** the **Sequence** node and select **Add Decorators..** -> **Blackboard**.
+
+	After adding all those decorators, the full node block should look like this:
+
+	![](addToSeqNode.png)
+
+1. On the first **Blackboard** decorator, set the **Key Query** to **Is Not Set**, and the **Blackboard Key** to **TargetToFollow**
+1. On the second **Blackboard** decorator, set the **Key Query** to **Is Set**, and the **Blackboard Key** to **TargetLocation**
+1. On the **Is At Location** decorator, enable the **Inverse Condition** property and set the **Blackboard Key** to **HomeLocation**.
+
+	After setting those properties, the full node block should look like this:
+
+	![](propsSet.png)
+
+
+And that is it! Leave the **Behavior Tree** editor open while using **Play in Editor** and you will be able to see how the tree is operating. If you get close enough to the AI and it has line of sight to you, it will begin to chase you. If you are able to break line of sight, he will go to your last known location, wait, then return to where he started.
+
+
+[OBJECT:EmbeddedVideo]
+[PARAMLITERAL:width]
+640
+[/PARAMLITERAL]
+[PARAMLITERAL:height]
+360
+[/PARAMLITERAL]
+[PARAMLITERAL:videoid]
+q6vTg2roI6k
+[/PARAMLITERAL]
+[/OBJECT]
+
+%Steps%
+
+
+
+
+

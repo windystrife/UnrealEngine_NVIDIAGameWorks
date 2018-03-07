@@ -1,0 +1,250 @@
+﻿INTSourceChangelist:3482475
+Availability:Public
+Crumbs:
+Title:블룸
+Description:광륜을 통해 라이트처럼 밝은 오브젝트를 밝게 빛나게 만드는 글로우 이펙트입니다.
+Type:reference
+Version:4.16
+Parent:Engine/Rendering/PostProcessEffects
+Order:1
+Tags:Post Process
+Topic-image:bloom_Topic.png
+
+[VAR:spacer]![](%ROOT%/spacer.png)(w:150 convert:false)[/VAR]
+[VAR:spacer2]![](%ROOT%/spacer.png)(w:40 convert:false)[/VAR]
+
+[TOC(start:2 end:2)]
+
+
+[EXCERPT:Bloom_Desc]
+**Bloom** (블룸)이란 중간 정도의 렌더링 퍼포먼스 비용으로 이미지 렌더링에 사실감을 크게 더해줄 수 있는, 현실에서도 볼 수 있는 광학 현상입니다. 
+블룸 현상은 훨씬 어두운 배경에 있는 매우 밝은 물체를 맨눈으로 바라볼 때 목격할 수 있습니다. 그보다 밝아지면 (빛줄기나 렌즈 플레어같은) 다른 현상도 생길 수 있지만, 
+고전적인 블룸 효과에서는 다루지 않습니다. 보통 쓰는 (TV, TFT 등의) 디스플레이에서는 HDR(High Dynamic Range)이 지원되지 않기에, 너무 밝은 오브젝트는 렌더링할 수가 없습니다. 
+대신 빛이 필름에 내리쬐거나(필름 피하산란) 카메라 앞에 내리쬘 때(유윳빛 유리 필터) 눈에서 벌어지는 (망막 피하산란) 현상을 흉내냅니다. 
+그 효과가 물리적으로야 항상 옳지는 않겠지만, 오브젝트의 상대적 밝기를 살려주거나 화면에 표시되는 LDR(Low Dynamic Range) 이미지에 사실감을 더하는 데 도움이 될 수는 있습니다.
+[/EXCERPT:Bloom_Desc]
+
+[REGION:fullwidth]
+![Bloom Effect](bloom.png)
+[/REGION]
+
+블룸은 하나의 가우시안 블러(Gaussian blur)로 구현할 수 있습니다. 품질을 높이기 위해서는, 반경이 다른 가우시안 블러 여럿을 합칩니다. 퍼포먼스를 높이기 위해서는, 매우 넓은 
+블러를 훨씬 낮은 해상도로 합니다. UE3 에서는 1/4, 1/8, 1/16 해상도의 가우시안 블러 셋을 썼었습니다. 현재는 Blur1 부터 5 까지, 1/2 (Blur1) 에서 1/32 (Blur5) 해상도의 블러를 씁니다. 
+
+제어할 수 있는 폭과 품질을 높이기 위해 블러를 합치는 방식을 다양화시킬 수 있습니다. 최적의 퍼포먼스를 위해서는, 고해상도 (낮은 번호) 블러는 좁게, 
+넓은 블러에는 주로 저해상도 (높은 번호) 블러를 사용해야 할 것입니다.
+
+[REGION:raw]
+| 프로퍼티 | %spacer2% | 설명 |
+| -------- | --------- | ----------- |
+| **Intensity** || 블룸 강도 - 전체 블룸 이펙트의 (선형) 색 스케일입니다. 시간에 따른 페이드 인이나 아웃, 어둡게 만드는 데 사용할 수 있습니다. [INCLUDE:#Intensity] |
+| **Threshold** || 블룸 한계치 - 블룸을 적용하기 시작할 색의 휘도를 정의합니다. 한계치 이외에 색이 블룸에 부분적으로만 영향을 끼치는 (1 유닛 폭) 선형 부분이 있습니다. 씬의 모든 색이 블룸에 공헌하게 하려면, -1 볼륨을 사용해야 합니다. 일부 비현실적인 HDR 콘텐츠, 몽환적인 부분 트윅에 사용할 수 있습니다. [INCLUDE:#Threshold] |
+| **#1/#2/#3/#4/#5 Tint** || 블룸 #1/#2/#3/#4/#5 색조 - 각 블룸의 밝기와 색을 변경합니다. 검정색을 사용한다고 그 패스가 빨라지지는 않지만, 가능은 합니다. |
+| **#1/#2/#3/#4/#5 Size** || 블룸 #1/#2/#3/#4/#5 크기 - 화면 폭을 기준으로 한 백분율 크기입니다. 일정 수치로 제한됩니다. 큰 수치가 필요하다면 한 단계 낮은 해상도 (높은 번호) 블러를 대신 사용하세요. [INCLUDE:#Size] |
+[/REGION]
+
+<!--
+[EXCERPT:Intensity]
+[REGION:imagetable]
+| ![Bloom Intensity - 0](bloom_intensity_0_small.png)(w:250) | ![Bloom Intensity - 1](bloom_intensity_1_small.png)(w:250) | ![Bloom Intensity - 5](bloom_intensity_5_small.png)(w:250) |
+| ------ | ------ | ------ |
+| 0.0 | 1.0 | 5.0 |
+[/REGION]
+[/EXCERPT:Intensity]
+
+[EXCERPT:Threshold]
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Threshold - 0.0](bloom_threshold_0_small.png)
+	[/PARAM]
+	[PARAM:after]
+	![Threshold - 10.0](bloom_threshold_10_small.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:Threshold]
+
+[EXCERPT:Size]
+[REGION:imagetable]
+| ![Bloom Tint 1](bloom_tint_1_small.png)(w:145) | ![Bloom Tint 2](bloom_tint_2_small.png)(w:145) | ![Bloom Tint 3](bloom_tint_3_small.png)(w:145) | ![Bloom Tint 4](bloom_tint_4_small.png)(w:145) | ![Bloom Tint 5](bloom_tint_5_small.png)(w:145) |
+| --- | --- | --- | --- | --- |
+| #1 | #2 | #3 | #4 | #5 |
+[/REGION]
+[/EXCERPT:Size]
+-->
+
+## 블룸 컨볼루션
+
+블룸 **Convolution** (컨볼루션)은 물리적으로 사실적인 블룸 이펙트를 표현하는 텍스처와 함께 커스텀 블룸 커널 모양을 추가할 수 있도록 해주는 이펙트로, 
+카메라나 눈 내부 빛의 산란이나 굴절이 블룸 효과를 일으킬 때 소스 이미지와 커널 이미지의 컨볼루션(합성곱) 수학 연산으로 모델링해 내는 기법입니다.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Convolution for Bloom: Enabled](FFTBloom_Enabled.png)
+	[/PARAM]
+	[PARAM:after]
+	![Convolution for Bloom: Disabled](FFTBloom_disabled.png)
+	[/PARAM]
+[/OBJECT]
+[REGION:caption]
+[/REGION]
+[REGION:caption]
+이 예제에서는 블룸 기법으로 별모양 광채에서부터 디퓨즈 글로우 구역에 이르기까지 다양한 반응 연속체 효과를 만들어내고 있습니다.
+[/REGION]
+
+커널은 시야 중심의 단일 지점 소스에 대한 광학 기기의 반응을 나타냅니다. 그 소스의 각 픽셀은 그 밝기 일부를 커널 이미지에 미리 정해진 대로 인접 픽셀에 기여합니다.
+소스 픽셀이 밝을 수록 거기서 만들어 내는 블룸도 더욱 잘 보이게 됩니다. 내부적으로 이러한 에너지 보존 산란 공식은 
+컨볼루션(합성곱) 연산과 고속 푸리에 변환(Fast Fourier Transform, FFT) 가속으로 이루어집니다.
+
+[REGION:warning]
+블룸 컨볼루션은 고사양 하드웨어에서의 게임내 또는 오프라인 시네마틱에 사용하도록 의도된 것이며, **대부분의 게임 어플리케이션에서는 표준 블룸을 사용해야 할 것입니다**.
+득실을 따져보자면, _표준_ 블룸은 퍼포먼스가 크게 뛰어나지만 보존적이지 않(이미지가 전반적으로 밝아질 수 있)으며 
+블룸 컨볼루션의 시작적인 복잡도를 따라가지는 못합니다.
+[/REGION]
+
+블룸 컨볼루션을 켜려면, Post Process Volume 의 **Lens** 섹션에서 **Method** 옆 선택 박스에서 **Convolution** 을 선택합니다.
+
+![](ConvolutionBloomSettings.png)(w:450)
+
+[REGION:raw]
+| 프로퍼티 | %spacer2% | 설명 |
+| -------- | --------- | ----------- |
+| **Convolution Kernel** || 컨볼루션 커널 - 커널을 정의하는 텍스처를 선택합니다. |
+| [REGION:tablesection] 고급 프로퍼티 [/REGION] |||
+| **Convolution Scale**  || 컨볼루션 스케일 - 컨볼루션 커널 이미지의 상대적 크기를 뷰포트 유닛 단위로 나타낸 것으로, 기본값은 1 입니다. 블룸 크기를 줄이는 데 주로 사용됩니다. |
+| **Convolution Center** || 컨볼루션 중심 - UV 좌표로 기본값은 (1/2, 1/2) 입니다. Convolution Kernel 이미지는 보다 밝은 소소에 대해 완벽히 중심 위치인 것이 이상적이지만, 일반적으로 약간의 트윅이 필요합니다. 여기서 오프셋은 블룸 이미지에 풀 오프셋을 주게 됩니다. |
+| **Convolution Boost** || 컨볼루션 부스트 - 컨볼루션 블룸 필터 적용 전 선택 픽셀 밝기를 증폭시킵니다. 최소, 최대값과 배수로 이루어집니다. 최소값 이상의 밝기 델타에 배수만큼 증폭시킵니다. 기본적으로 이 부스트는 꺼져있으며, 조심해서 사용해야 합니다. |
+| **Convolution Buffer** || 컨볼루션 버퍼 - 화면 크기의 일정 비율로 정하는 암묵적 버퍼 구역으로, 블룸이 이미지를 감싸지(wrap around) 않도록 하기 위함입니다. 이 값을 올리면 퍼포먼스에 안좋은 영향을 줍니다. |
+[/REGION]
+
+### 커널 이미지 실전 사례
+
+이미지 기반 컨볼루션으로 추가되는 사실적 느낌은 시각적으로 흥미로운 비대칭 커널 이미지를 사용할 수 있기 때문에 발생하는 결과입니다.
+커널 이미지를 만들어 블룸 컨볼루션에 사용하도록 구성할 때, 몇 가지 염두에 두어야 할 점이 있습니다.
+
+* 커널 이미지는 GPU 에 온전히 존재해야 하며, 전체 해상도로 사용가능해야 합니다. 그렇지 않으면 커널 저해상도 버전이 사용되어 심각한 퀄리티 저하로 이어집니다.
+텍스처 에디터에서 커널 이미지에 대해 다음과 같은 프로퍼티 설정을 해주면 됩니다:
+	[INCLUDE:#cbtextureproperties]
+* 블룸은 전체 이미지 필터로, 컨볼루션 블룸은 이미지의 가장 핫한 부분을 나머지 부분보다 현저히 밝게 만들거나 (.exr 포맷이 여기에 좋습니다), 
+아니면 필터로 인해 화면에 강력한 블러 이펙트가 생길 것입니다.
+* 시스템에서는 가장 핫한 지점이 커널 이미지 중심일 것으로 기대합니다만, **Convolution Center** 컨트롤로 제어할 수 있습니다.
+* 블룸 커널 스트럭쳐가 괜찮으면 대부분의 커널 이미지를 채울 것입니다. Photoshop 에서 기본 커널 이미지를 살펴보면, 중심에서 이미지 상당 부분까지 뻗어나가는 방사선이 
+보일 것입니다.
+	[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![커널 이미지 원본](KernelImage1.png)(w:400)
+	[/PARAM]
+	[PARAM:after]
+	![데모용 커널 이미지 변경](KernelImage2.png)(w:400)
+	[/PARAM]
+	[/OBJECT]
+* 블룸 컨볼루션 고급 프로퍼티로 커널 이미지에 약간의 트윅 작업을 하는 것으로 컨볼루션 작동방식을 크게 바꿀 수 있을 것입니다.
+
+<!--- Excerpt ----
+
+[EXCERPT:cbtextureproperties]
+[REGION:simpletable]
+|||
+|---|---|
+|  [INCLUDE:#cbtexturepropertiesimage] | [INCLUDE:#cbtexturepropertieslist] |
+[/REGION]
+[/EXCERPT:cbtextureproperties]
+
+[EXCERPT:cbtexturepropertiesimage]
+![](CB_TextureProperties.png)(w:475)
+[/EXCERPT:cbtexturepropertiesimage]
+
+[EXCERPT:cbtexturepropertieslist]
+* Mips Gen Setting: **No Mipmaps**
+* Never Stream:  **Enabled**
+[/EXCERPT:cbtexturepropertieslist]
+
+----->
+
+## 블룸 더트 마스크
+
+**Bloom Dirt Mask** (블룸 더트 마스크) 이펙트는 텍스처를 사용해서 일부 정의된 화면 영역의 블룸을 밝게 만드는 것을 말합니다. 전장의 카메라, 더욱 인상깊은 HDR 이펙트, 카메라 결함 등의 효과를 내는 데 
+사용할 수 있습니다.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Dirt Mask Enabled](DirtMaskEnabled.png)(w:600)
+	[/PARAM]
+	[PARAM:after]
+	![Dirt Mask Disabled](DirtMaskDisabled.png)(w:600)
+	[/PARAM]
+[/OBJECT]
+
+Bloom Dirt Mask (블룸 더트 마스크)를 켜려면, Post Process Volume 의 **Lens** 섹션에서 **Dirt Mask Texture** 옵션을 켜면 됩니다. 텍스처 선택을 통해 더트 마스크에 텍스처를 적용하면 됩니다.
+
+![](DirtMaskProperties.png)(w:450)
+
+[REGION:raw]
+| 프로퍼티 | %spacer2% | 설명 |
+| -------- | --------- | ----------- |
+| **Dirt Mask Texture** || 더트 마스크 텍스처 - 선택 박스로 더트 마스크에 사용할 Texture2D 를 할당합니다. 이 프로퍼티는 다른 Post Process Volume 과 블렌딩할 수 없다는 점 유념하세요. |
+| **Dirt Mask Intensity** || 블룸 더트 마스크 강도 - 블룸 더트 마스크의 (선형) 색 스케일입니다. 이 프로퍼티는 더트 마스크의 밝기를 조정하는 데 사용됩니다. |
+| **Dirt Mask Tint Color** || 블룸 더트 마스크 색조 - 더트 마스크 텍스처에 색을 입히거나 어둡게 만듭니다. 더트 마스크 밝기와 색을 조정하는 데 사용할 수 있습니다.|
+[/REGION]
+### 더트 마스크 이미지 실전 사례
+
+더트 마스크 텍스처를 생성하여 블룸 더트 마스크에 사용하도록 구성할 때, 몇 가지 유념해야 하는 것이 있습니다.
+
+* 텍스처는 GPU 에 온전히 존재해야 하며 전체 해상도로 사용 가능해야 합니다. 그러기 위해서는 텍스처 에디터에서 다음 프로퍼티를 설정해 줍니다:
+	[INCLUDE:#dirtmasktextureproperty]
+* 이 Post Process 프로퍼티는 레벨의 다른 Post Process Volume 과 블렌딩할 수 없습니다.
+* 더트 마스크 텍스처 구성 시 유념해야 할 점은 다음과 같습니다:
+	[INCLUDE:#dirtmaskexample]
+	* 이미지 크기가 2 제곱이 아닌 것을 사용할 것을 추천합니다. 밉 생성과 스트리밍을 하지 않아 자동 설정될 것이지만, 2 제곱 크기 텍스처를 사용한다면 텍스처 에디터 프로퍼티에서 설정해 줘야 합니다.
+	* 저해상도 텍스처를 사용해도 되는데, 보통 카메라의 먼지나 긁힘을 표현하기에 충분할 뿐만 아니라, 어쨌든 초점을 흐려 뿌옇게 만들 것이기 때문입니다. 압축 부작용이 생기는 경우 더욱 높은 해상도의 이미지를 사용해 보면 됩니다.
+	* Photoshop (이나 기타 이미지 편집 소프트웨어)의 렌즈 블러를 사용하여 텍스처를 만들면 됩니다.
+	* 텍스처에 색수차(chromatic aberration, 컬러 프린지)를 사용하면 더트 마스크 느낌을 살리는 데 도움이 될 수 있습니다.
+
+
+<!--- Excerpt ----
+
+[EXCERPT:dirtmasktextureproperty]
+[REGION:simpletable]
+|||
+|---|---|
+|  [INCLUDE:#dirtmasktexturepropertyimage] | [INCLUDE:#dirtmasktexturepropertylist] |
+[/REGION]
+[/EXCERPT:dirtmasktextureproperty]
+
+[EXCERPT:dirtmasktexturepropertyimage]
+![](DirtMaskTextureProperties.png)(w:475)
+[/EXCERPT:dirtmasktexturepropertyimage]
+
+[EXCERPT:dirtmasktexturepropertylist]
+* Mips Gen Setting: **No Mipmaps**
+* Never Stream:  **Enabled**
+[/EXCERPT:dirtmasktexturepropertylist]
+
+[EXCERPT:dirtmaskexample]
+[REGION:lightbox]
+[![](DirtMaskTextureExample.png)(w:500)](DirtMaskTextureExample.png)
+[/REGION]
+[REGION:caption] 비히클 게임에서 더트 마스크 텍스처를 사용한 예제입니다.[/REGION]
+[/EXCERPT:dirtmaskexample]
+
+----->
+
+
+## 교육 자료
+
+[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:videoid]
+	SkJgopq-JQA
+	[/PARAMLITERAL]
+	[PARAMLITERAL:width]
+	100
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	56.25
+	[/PARAMLITERAL]
+	[PARAMLITERAL:units]
+	%
+	[/PARAMLITERAL]
+	[PARAMLITERAL:type]
+	simple
+	[/PARAMLITERAL]
+[/OBJECT]

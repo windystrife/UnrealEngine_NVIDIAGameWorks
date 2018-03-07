@@ -1,0 +1,293 @@
+Availability: Public
+Title:Console Variables in C++
+Crumbs:%ROOT%, Engine, Programming, Programming/Basics
+Description:Overview of the Console Manager and implementation details for creating console variables.
+Version: 4.16
+Parent:Programming/Development/Tools
+Order:
+topic-image:consoleVar_topicImage.png
+
+[TOC(start:2)]
+
+
+
+
+A **console command** is a user input string that is sent to the engine and the engine can react is some way (e.g. console/log response, changing internal state).
+A **console variable** additionally stores some state that can be changed through the console. By registering console commands and variables in the console manager you get
+auto completion and enumeration to get a list of all console objects (console command Help or DumpConsoleVariables). Because of this, you should avoid the old Exec
+interface. The console manager in the central point to control all those things and more (e.g. user input history).
+
+
+## What is a console variable?
+
+A console variable is some simple data type (e.g. float, int, string) that has an engine wide state and the user can read and set the state.
+The console variable has a name and the user gets auto completion when he starts typing the name into the console. e.g.
+
+|**User console input**|**Console output**|**Description**|
+| --- | --- | --- |
+|`MyConsoleVar`|`MyConsoleVar = 0`|The current state of the variable is printed into the console.| 
+|`MyConsoleVar 123`|`MyConsoleVar = 123 LastSetBy: Constructor`|The state of the variable is changed and the new state printed into the console.| 
+|`MyConsoleVar ?`|`Possibly multi line help text.`|Print the console variable help text into the console.|
+
+
+
+## Creating / registering a console variable
+
+The variable needs to be registered early when the engine is created. This example shows the best way of doing that (in any C++ file):
+
+	static TAutoConsoleVariable<int32> CVarRefractionQuality(
+		TEXT("r.RefractionQuality"),
+		2,
+		TEXT("Defines the distortion/refraction quality, adjust for quality or performance.\n")
+		TEXT("<=0: off (fastest)\n")
+		TEXT("  1: low quality (not yet implemented)\n")
+		TEXT("  2: normal quality (default)\n")
+		TEXT("  3: high quality (e.g. color fringe, not yet implemented)"),
+		ECVF_Scalability | ECVF_RenderThreadSafe);
+
+Here we register a console variables of the type int32, with the name r.RefractionQuality, the default value of 2 and some multi line help text and some flags.
+There are many flags, the most important one is ECVF_Cheat. That is explained in detail in IConsoleManager.h.
+The help text is shown when the user uses "?" after the console variable.
+
+If needed you also can generate a console variable inside a function:
+
+	IConsoleManager::Get().RegisterConsoleVariable(TEXT("r.RefractionQuality"),
+       2,
+       TEXT("Defines the distortion/refraction quality, adjust for quality or performance.\n")
+		TEXT("<=0: off (fastest)\n")
+		TEXT("  1: low quality (not yet implemented)\n")
+		TEXT("  2: normal quality (default)\n")
+		TEXT("  3: high quality (e.g. color fringe, not yet implemented)"),
+       ECVF_Scalability | ECVF_RenderThreadSafe);
+    
+`IConsoleManager::Get()` is the global access point. There you can register a console variable or find an existing one. The first parameter is the name of the console variable.
+The second parameter is the default value, and depending on the type of this constant, a different console variable type is created: int, float, or string (!FString).
+The next parameter defines the console variable help text.
+
+It is also possible to register a reference to an existing variable. This is convenient and fast but bypasses multiple features (e.g. thread safety, callback, sink, cheat) so we suggest to avoiding this method. Here is an example:
+
+	FAutoConsoleVariableRef CVarVisualizeGPUSimulation(
+		TEXT("FX.VisualizeGPUSimulation"),
+		VisualizeGPUSimulation,
+		TEXT("Visualize the current state of GPU simulation.\n")
+		TEXT("0 = off\n")
+		TEXT("1 = visualize particle state\n")
+		TEXT("2 = visualize curve texture"),
+		ECVF_Cheat
+		);
+
+Here they type is deducted from the variable type.
+
+
+
+## Getting the state of a console variable
+
+Getting the state of console variables created with **RegisterConsoleVariableRef** can be done efficiently by using the variable that it was registered with. e.g.
+
+	// only needed if you are not in the same cpp file
+	extern TAutoConsoleVariable<int32> CVarRefractionQuality;
+	// get the value on the game thread
+	int32 MyVar = CVarRefractionQuality.GetValueOnGameThread();
+
+Using Getter functions (ie. !GetInt(), !GetFloat(), !GetString()) to determine a console variables state results in a slightly slower implementation (virtual function call, possibly cache miss, etc.).
+For best performance you should use same type the variable was registered with. In order to get the pointer to the variable, you can either store the return
+argument of the register function or call **FindConsoleVariable** just before you need the variable. Example:
+
+    static const auto CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("TonemapperType")); 
+	int32 Value = CVar->GetInt();
+   
+The static there ensures the name search (implemented as map) is only done the first time this code is called.
+This is correct as the variable will never move and only gets destructed on engine shutdown.
+
+
+## How to track console variable changes
+
+If you want to execute some custom code if a console variable changes, you have 3 methods you can choose from. 
+
+Often the simplest method is the best: You can store the old state in your subsystem and check each frame if they differ. Here you control when this happens very freely e.g. render thread or game thread, streaming thread, before/after tick or rendering. When you detect the difference, you copy
+the console variable state and do your custom code. e.g.
+
+	void MyFunc()
+	{
+		int GBufferFormat = CVarGBufferFormat.GetValueOnRenderThread();
+
+		if(CurrentGBufferFormat != GBufferFormat)
+		{
+			CurrentGBufferFormat = GBufferFormat;
+
+			// custom code
+		}
+	}
+
+You also can register a console variable sink e.g. 
+
+	static void MySinkFunction()
+	{
+		bool bNewAtmosphere = CVarAtmosphereRender.GetValueOnGameThread() != 0;
+
+		// by default we assume the state is true
+		static bool GAtmosphere = true;
+
+		if (GAtmosphere != bNewAtmosphere)
+		{
+			GAtmosphere = bNewAtmosphere;
+
+			// custom code
+		}
+	}
+
+	FAutoConsoleVariableSink CMyVarSink(FConsoleCommandDelegate::CreateStatic(&MySinkFunction));
+
+The sink is called at a specific point on the main thread before rendering. The function does not get the console variable name/pointer as this often would lead to the wrong behavior.
+If multiple console variables (e.g. r.SceneColorFormat, r.GBufferFormat) should all trigger the change, it is best to call the code after all have been changed, not one after another.
+
+The last method, using the callback, you should avoid as it can cause problems if not used carefully:
+
+* A cycle can cause a deadlock (We could prevent the deadlock but which callback to favour is not clear).
+* The callback can come back at any point in time whenever **!Set()** is getting called. You code has to work in all cases (during init, during serialization).
+  You can assume it is always on the main thread side.
+
+We suggest to not use this method unless you cannot solve it with the other methods mentioned. 
+
+Example:
+
+	void OnChangeResQuality(IConsoleVariable* Var)
+	{
+		SetResQualityLevel(Var->GetInt());
+	}
+
+	CVarResQuality.AsVariable()
+		->SetOnChangedCallback(FConsoleVariableDelegate::CreateStatic(&OnChangeResQuality));
+
+
+
+## Intended console variable behavior and style
+
+* Console variable should reflect the user input, not necessarily the state of the system (e.g. !MotionBlur 0/1, some platforms might not support it).
+  The variable state should not be changed by code. Otherwise the user might wonder if he mistyped because the variable does not have the state he specified
+  or he might not be able to change a console variable because of the state of some other variable.
+* Always provide a good help explaining what the variable is used for and what values make sense to specify.
+* Most console variables are intended for development only so specifying the `ECVF_Cheat` flag early would be a good idea.
+  Even better might be to compile out the feature using defines (e.g. #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)).
+* The variable name should be as minimal as possible while being descriptive, negating meaning should be avoided
+  (e.g. bad names would be !EnableMotionBlur, !MotionBlurDisable, MBlur, !HideMotionBlur).
+  Use upper and lower case to make the name easier to read and consistent (e.g. !MotionBlur).
+* For indentation, you can assume fixed width font (non proportional) output.
+* It is important to register the variable during engine initialization so that auto completion and !DumpConsoleCommands and !Help can work. 
+
+Please read `IConsoleManager.h` for find more details on this.
+
+
+## Loading console variables
+
+On engine startup, the state of console variables can be loaded from the file **Engine/Config/ConsoleVariables.ini**. This place is reserved for the local developer - it should not be used for project settings.
+More details can be found in the file itself:
+
+    ; This file allows you to set console variables on engine startup (In undefined order).
+    ; Currently there is no other file overriding this one.
+    ; This file should be in the source control database (for the comments and to know where to find it)
+    ; but kept empty from variables.
+    ; A developer can change it locally to save time not having to type repetitive
+    ; console variable settings. The variables need to be in the section called [Startup].
+    ; Later on we might have multiple named sections referenced by the section name.
+    ; This would allow platform specific or level specific overrides.
+    ; The name comparison is not case sensitive and if the variable does not exist, it is ignored.
+    ;
+    ; Example file content:
+    ;
+    ; [Startup]
+    ; FogDensity = 0.9
+    ; ImageGrain = 0.5
+    ; FreezeAtPosition = 2819.5520 416.2633 75.1500 65378 -25879 0
+    
+    [Startup]
+    
+You also can put the settings **Engine/Config/BasEngine.ini** e.g.
+
+	[SystemSettings]
+	r.MyCvar = 2
+
+	[SystemSettingsEditor]
+	r.MyCvar = 3
+
+Setting also can come from **Script/Engine.RendererSettings**. These project settings are exposed like this:
+
+	UPROPERTY(config, EditAnywhere, Category=Optimizations, meta=(
+		ConsoleVariable="r.EarlyZPassMovable",DisplayName="Movables in early Z-pass",
+		ToolTip="Whether to render movable objects in the early Z pass. Need to reload the level!"))
+		uint32 bEarlyZPassMovable:1;
+
+Those settings can be changed in the editor UI. Project settings should not intermix with scalability settings (to prevent priority issues).
+
+Other settings can come from the Scalability feature. Look at **Config/BaseScalability.ini** or the Scalability documentation for more info.
+
+## Command line
+
+The command line allows to set console variables, call console commands or exec commands. This an example:
+
+	UE4Editor.exe GAMENAME -ExecCmds="r.BloomQuality 12;vis 21;Quit"
+
+Here we execute 3 commands. Note that setting a console variable this way requires you to omit the '=' you would need in an ini file.
+
+## Priority
+
+Console variables can be overridden from various sources e.g. user/editor/project settings, command line, consolevariables.ini, ...
+In order to be able to reapply some settings (e.g. project settings can be changed in editor UI) while keeping the specified overrides (e.g. from command line),
+we introduced a priority. Now all settings can be applied in any order. 
+
+see IConsoleManager.h:
+
+	// lowest priority (default after console variable creation)
+	ECVF_SetByConstructor =			0x00000000,
+	// from Scalability.ini
+	ECVF_SetByScalability =			0x01000000,
+	// (in game UI or from file)
+	ECVF_SetByGameSetting =			0x02000000,
+	// project settings
+	ECVF_SetByProjectSetting =		0x03000000,
+	// per device setting
+	ECVF_SetByDeviceProfile =		0x04000000,
+	// per project setting
+	ECVF_SetBySystemSettingsIni =	0x05000000,
+	// consolevariables.ini (for multiple projects)
+	ECVF_SetByConsoleVariablesIni = 0x06000000,
+	// a minus command e.g. -VSync 
+	ECVF_SetByCommandline =			0x07000000,
+	// least useful, likely a hack, maybe better to find the correct SetBy...
+	ECVF_SetByCode =				0x08000000,
+	// editor UI or console in game or editor
+	ECVF_SetByConsole =				0x09000000,
+
+In some cases, you might see this log printout:
+
+	Console variable 'r.MyVar' wasn't set (Priority SetByDeviceProfile < SetByCommandline)
+
+It might be intended (e.g. command line forces a user setting) or caused by some code issue.
+The priority is also helpful to see who set the variable the last time. You can get this information when getting the console variable state. e.g.
+
+	> r.GBuffer
+	
+	r.GBuffer = "1"      LastSetBy: Constructor
+
+
+
+
+## Future
+
+* Currently console variables can only be created in C++ but that might change.
+* We thought about adding an enum and bool type but there are many problems attached to it. For now we suggest to use int, or if needed, strings.
+* The help text is convenient but to save executable size or to make it harder for cheaters, we consider adding a define to prevent the help text to go into the executable.
+
+
+## Unregistering console variables
+
+The **UnregisterConsoleVariable** method allows you to remove the console variable. At least this is what is happening from the user's perspective.
+The variable is still kept (with the unregistered flags) to not crash when pointers access the data. If a new variable is registered with the same name,
+the old variable is restored and flags get copied from the new variable. This way DLL loading and unloading can work even without losing the variable state.
+Note that this will not work for console variable references. 
+<!--Sentence below deprecated for clarification.-->
+<!--This can be fixed by giving up on one: do not store pointers, do not unregistered or not use references.-->
+
+
+
+

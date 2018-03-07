@@ -1,0 +1,122 @@
+<?xml version='1.0' ?>
+<BuildGraph xmlns="http://www.epicgames.com/BuildGraph" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.epicgames.com/BuildGraph ../Schema.xsd" >
+
+	<Agent Name="Agent 1" Type="CompileWin64">
+		<Node Name="Manipulate Some Files">
+			<Log Message="Here are all the files in Engine/Build/..." Files="Engine/Build/..."/>
+
+			<!-- Clean up all the test output folders for when we're running locally (note wildcard for matching directories!). We're just filtering files to delete here, empty folders will be deleted automatically. -->
+			<Delete Files="Engine/TestNumber?/..."/>
+
+			<!-- Test #1: Copy all the files in Engine/Build to Engine/TestNumber1, and delete all the batch files and contents of the Android folder -->
+			<Copy From="Engine/Build" Files="..." To="Engine/TestNumber1"/>
+			<Delete Files="Engine/TestNumber1/.../*.bat;Engine/TestNumber1/.../*.sh;Engine/TestNumber1/Android/..."/>
+			<Log Message="Here are all the files in Engine/TestNumber1/..." Files="Engine/TestNumber1/..."/>
+
+			<!-- Test #2: Copy all the files in Engine/Build except for batch files and the Android folder to Engine/TestNumber2 -->
+			<Tag Files="Engine/Build/..." Except="*.bat;*.sh;.../Android/..." With="#AllFilesExceptBatchFiles"/>
+			<Copy From="Engine/Build" Files="#AllFilesExceptBatchFiles" To="Engine/TestNumber2"/>
+			<Log Message="Here are all the files in Engine/TestNumber2/..." Files="Engine/TestNumber2/..."/>
+
+			<!-- Test #3: Copy all the text files and batch files to Engine/TestNumber3 -->
+			<Tag Files="Engine/Build/..." Filter="*.txt;*.md" With="#TextFilesAndBatchFiles"/>
+			<Tag Files="Engine/Build/..." Filter="*.bat;*.sh" With="#TextFilesAndBatchFiles"/>
+			<Copy From="Engine/Build" Files="#TextFilesAndBatchFiles" To="Engine/TestNumber3"/>
+			<Log Message="Here are all the files in Engine/TestNumber3/..." Files="Engine/TestNumber3/..."/>
+
+		</Node>
+	</Agent>
+	<Agent Name="Agent 2" Type="CompileWin64">
+		<Node Name="First Downstream Node" Requires="Manipulate Some Files">
+			<!-- Test that we have all the side-effects of tests 1-3 from the 'Manipulate Some Files' node -->
+			<Log Message="Here are all the files in Engine/TestNumber1/..." Files="Engine/TestNumber1/..."/>
+			<Log Message="Here are all the files in Engine/TestNumber2/..." Files="Engine/TestNumber2/..."/>
+			<Log Message="Here are all the files in Engine/TestNumber3/..." Files="Engine/TestNumber3/..."/>
+		</Node>
+		<Node Name="Create A Named Output" Requires="First Downstream Node" Produces="#OutputForTestNumber5">
+			<!-- Node that node dependencies are recursive - we get all the build products from 'Manipulate Some Files' because we're dependent on 'First Downstream Node'. -->
+			<Log Message="Here are all the files in Engine/TestNumber1/..." Files="Engine/TestNumber1/..."/>
+			<Log Message="Here are all the files in Engine/TestNumber2/..." Files="Engine/TestNumber2/..."/>
+			<Log Message="Here are all the files in Engine/TestNumber3/..." Files="Engine/TestNumber3/..."/>
+
+			<!-- Test #4: Just a copy of test #3 -->
+			<Copy From="Engine/TestNumber3" Files="..." To="Engine/TestNumber4"/>
+
+			<!-- Test #5: Copy them somewhere else and tag them as an output -->
+			<Copy From="Engine/TestNumber4" Files="..." To="Engine/TestNumber5"/>
+			<Tag Files="Engine/TestNumber5/..." With="#OutputForTestNumber5"/>
+			<Log Message="Produced files:" Files="#OutputForTestNumber5"/>
+		</Node>
+	</Agent>
+	<Agent Name="Agent 3" Type="CompileWin64">
+		<Node Name="Consume a Single Named Output" Requires="#OutputForTestNumber5">
+			<!-- Show that we ONLY have the #OutputForTestNumber5 output -->
+			<Log Message="Here are all the files in Engine/TestNumber1/..." Files="Engine/TestNumber1/..."/>
+			<Log Message="Here are all the files in Engine/TestNumber2/..." Files="Engine/TestNumber2/..."/>
+			<Log Message="Here are all the files in Engine/TestNumber3/..." Files="Engine/TestNumber3/..."/>
+			<Log Message="Here are all the files in Engine/TestNumber4/..." Files="Engine/TestNumber4/..."/>
+			<Log Message="Here are all the files in Engine/TestNumber5/..." Files="Engine/TestNumber5/..."/>
+		</Node>
+	</Agent>
+	<Agent Name="Agent 4" Type="CompileWin64">
+		<Node Name="Create Three Named Outputs" Produces="#First Named Output;#Second Named Output;#Third Named Output">
+			<!-- Start again by creating three named outputs, two containing different files and one containing files from each -->
+			<Copy From="Engine/Build" Files="*" To="Engine/TestNumber5" Tag="#First Named Output;#Third Named Output"/>
+			<Copy From="Engine/Build" Files="*" To="Engine/TestNumber6" Tag="#Second Named Output;#Third Named Output"/>
+			<Copy From="Engine/Build" Files="*" To="Engine/TestNumber7" Tag="#Third Named Output"/>
+			
+			<Log Message="All outputs from this node ('#Create Three Named Outputs'):" Files="#Create Three Named Outputs"/>
+			<Log Message="Created '#First Named Output' with:" Files="#First Named Output"/>
+			<Log Message="Created '#Second Named Output' with:" Files="#Second Named Output"/>
+			<Log Message="Created '#Third Named Output' with:" Files="#Third Named Output"/>
+		</Node>
+	</Agent>
+	<Agent Name="Agent 5" Type="CompileWin64">
+		<Node Name="Add Additional Files" Requires="#Second Named Output" Produces="#Fourth Named Output">
+			<!-- Add some more files to '#Second Named Output' -->
+			<Tag Files="#Second Named Output" With="#Fourth Named Output"/>
+			<Copy From="Engine/Build" Files="*" To="Engine/TestNumber6/More" Tag="#Fourth Named Output"/>
+		</Node>
+	</Agent>
+	<Agent Name="Agent 6" Type="CompileWin64">
+		<Node Name="List Named Outputs" Requires="Create Three Named Outputs;Add Additional Files">
+			<!-- List all the outputs. -->
+			<Log Message="'#Create Three Named Outputs' contains:" Files="#Create Three Named Outputs"/>
+			<Log Message="'#Add Additional Files' contains:" Files="#Add Additional Files"/>
+			<Log Message="'#First Named Output' contains:" Files="#First Named Output"/>
+			<Log Message="'#Second Named Output' contains:" Files="#Second Named Output"/>
+			<Log Message="'#Third Named Output' contains:" Files="#Third Named Output"/>
+			<Log Message="'#Fourth Named Output' contains:" Files="#Fourth Named Output"/>
+		</Node>
+	</Agent>
+	<Agent Name="Agent 7" Type="CompileWin64">
+		<Node Name="Copy Syntax">
+			<Copy Files="..." From="Engine/Build" To="Engine/TestNumber6/Output0" />
+			<Copy From="Engine/Build/Build.version" To="Engine/TestNumber6/Output1/Output.version" /> <!-- single file -->
+			<Copy From="Engine/Build/.../*.txt" To="Engine/TestNumber6/Output2" /> <!-- output treated as directory -->
+			<Copy From="Engine/Build/.../*.txt" To="Engine/TestNumber6/Output3/" /> <!-- output treated as directory -->
+			<Copy From="Engine/Build/....txt" To="Engine/TestNumber6/Output4" /> <!-- output treated as directory -->
+			<Copy From="Engine/Build/....txt" To="Engine/TestNumber6/Output5/....old" /> <!-- with rename -->
+			<Copy From="Engine/Build/*/....txt" To="Engine/TestNumber6/Output6/" /> <!-- only subdirectories -->
+			<Copy From="Engine/Build/bat...txt" To="Engine/TestNumber6/Output7" /> <!-- match bat*/.../*.txt -->
+			<Copy From="Engine/Build/.../ps4/..." To="Engine/TestNumber6/Output8" /> <!-- mirror ps4 folders -->
+		</Node>
+	</Agent>
+
+	<Trigger Name="Test Trigger">
+		<Agent Name="Trigger Group" Type="CompileWin64">
+			<Node Name="Print all Output Folders" Requires="Manipulate Some Files;Create A Named Output;Copy Syntax">
+				<!-- Test that we have all the side-effects of the upstream node -->
+				<Log Message="Here are all the files in Engine/TestNumber1/..." Files="Engine/TestNumber1/..."/>
+				<Log Message="Here are all the files in Engine/TestNumber2/..." Files="Engine/TestNumber2/..."/>
+				<Log Message="Here are all the files in Engine/TestNumber3/..." Files="Engine/TestNumber3/..."/>
+				<Log Message="Here are all the files in Engine/TestNumber4/..." Files="Engine/TestNumber4/..."/>
+				<Log Message="Here are all the files in Engine/TestNumber5/..." Files="Engine/TestNumber5/..."/>
+				<Log Message="Here are all the files in Engine/TestNumber6/..." Files="Engine/TestNumber6/..."/>
+			</Node>
+		</Agent>
+	</Trigger>
+
+	<!-- Aggregates for the build process -->
+	<Aggregate Name="Tag and File Examples" Requires="Print all Output Folders;Consume a Single Named Output;List Named Outputs"/>
+</BuildGraph>

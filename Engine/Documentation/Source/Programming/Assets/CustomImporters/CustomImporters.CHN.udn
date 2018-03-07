@@ -1,0 +1,190 @@
+INTSourceChangelist:2033300
+Availability:Docs
+Title:自定义导入器技术指南
+Crumbs: %ROOT%, Engine, Engine/UI, Programming
+Description:为程序员撰写特殊组件类型导入工具的指南。
+
+[REGION:todo]
+	本页面的内容从虚幻引擎3的文档检查并转化而来，有些信息可能已经过期。
+[/REGION]
+
+[TOC(start:2)]
+
+
+
+## 概述
+
+在编辑器中使用 UFactory 创建新资源，最常见的是以外部文件为基础。
+
+UFactory 的同类型类是 UExporter，可以使用它导出资源进行复制操作，也可以将资源导出到文件中。请参阅[编写自定义导出器] 了解有关如何编写导出器的信息。
+
+
+
+## 添加新的 UFactory 类
+
+您将需要创建您自己的 UFactory 类，可能是在您的游戏编辑器项目中创建。在基础虚幻引擎 3 中定义的 UFactory 类是'固有类'，表示它们是由 UObject 衍生而来的，但是没有对应的 .uc 文件。您可能恰好想要按照这种模式创建；参照 UnEdFact.cpp 中的 EditorPrivate.h 及相关函数执行，例如随虚幻引擎 3 发行的 UFactory 衍生类型。需要注意的一件事情是，如果工厂类型是固有的，那么您必须手动将您的新 UFactory 类添加到 AUTO_INITIALIZE_REGISTRANTS_UNREALED 代码块中的自动生成的 C++ 头文件中。如果您没有这样做，编辑器将无法找到您的新类，将其作为导入选项。
+
+
+
+## UFactory 成员的主意事项
+
+工厂希望从那些一般是通过在他们的 InitializeIntrinsicPropertyValues() 覆盖函数中声明 UProperty 封装类将成员发布给用户的用户开始输入。 然后可以使用这些 UProperty 对象填充导入/创建对话框上的属性窗口。
+
+接下来是 UFactory 成员的列表，通常由 UFactory 衍生类型在其 UFactory::InitializeIntrinsicPropertyValues() 覆盖函数中进行设置。
+
+
+### SupportedClass
+
+可以表示这个工厂创建的对象的类型。NULL 表示工厂支持多个类型，而且必须执行 ResolveSupportedClass 消除歧义，下面会提供更多相关信息。
+
+
+### 描述
+
+描述该工厂支持的类型。假设用户在编辑器界面中。
+
+
+### bText
+
+如果该属性为 true，表示工厂可以通过 FactoryCreateText 导入文本。 如果为 false，表示工厂可以通过 FactoryCreateBinary 导入二进制数据。
+
+
+### bCreateNew
+如果该属性为 true，工厂可以通过执行 FactoryCreateNew 创建对象，而不是通过 FactoryCreateText 或 FactoryCreateBinary 导入数据。
+
+
+### bEditorImport
+
+如果该属性为 true，表示 UI 会将该工厂作为可以导入数据的工厂 -- 换句话说，工厂可以在外部数据的基础上创建资源类型。
+
+
+### AutoPriority
+
+可选项；整数型，可以用来划分支持相同类型的工厂的优先顺序。
+
+
+
+## 工厂支持单一类型
+
+大多数 UFactory 衍生类型可以导入或创建单一类型对象，由工厂通过在您的工厂类 StaticConstructor() 覆盖函数中设置 SupportedClass 成员指定。 下面是一个简单工厂的实现过程示例，可以使用它创建新的 UDecalMaterial 对象。
+
+
+    
+    void UDecalMaterialFactoryNew::StaticConstructor()
+    {
+        // 不需要对用户显示 UObject 的属性。
+        new(GetClass()->HideCategories) FName(TEXT("Object"));
+    }
+    
+    /**
+     * 初始化固有类的属性值。 根据原始状态初始化类默认对象后立即调用，
+     * 但是要再创建这个类的任何对象之前。
+     */
+    void UDecalMaterialFactoryNew::InitializeIntrinsicPropertyValues()
+    {
+        // 指定该工厂创建的对象的类型。
+        SupportedClass      = UDecalMaterial::StaticClass();
+    
+        // 表示这个类会覆盖 UFactory::FactoryCreateNew(...)。
+        bCreateNew          = true;
+    
+        // 为该工厂创建的类型提供描述文本。
+        Description         = TEXT("Decal Material");
+    }
+    
+    UObject* UDecalMaterialFactoryNew::FactoryCreateNew(UClass* Class,
+                                                        UObject* InParent,
+                                                        FName Name,
+                                                        EObjectFlags Flags,
+                                                        UObject* Context,
+                                                        FFeedbackContext* Warn)
+    {
+       return StaticConstructObject( Class, InParent, Name, Flags );
+    }
+    
+    IMPLEMENT_CLASS(UDecalMaterialFactoryNew);
+    
+
+
+
+
+
+## 工厂支持多个类型
+
+通过声明 SupportedClass 为 NULL 实现执行可以支持返回多个类型的工厂，然后执行 ResolveSupportedClass() 在导入之前分解这个类。
+
+例如，下面一段工厂代码使用的是虚拟 .ABC 文本文件格式，而且会根据用户的选择使用它创建类型 A 或类型 B 对象：
+
+
+    
+    class UYourFactory : public UFactory
+    {
+        DECLARE_CLASS( UYourFactory, UFactory, 0, Editor )
+    
+        // 表示是否应该是输入文件的标志
+        // 视作类型 A 或类型 B。它将由
+        // 导入对话框中的用户进行设置，并在
+        // ResolveSupportedClass() 中进行检查，确定
+        // 要创建的对象类型。
+        bool bTreatAsTypeA;
+    
+        UYourFactory()
+        {
+            // 表示该工厂应该由"导入" UI 考虑。
+            bEditorImport = true;
+        }
+    
+        void StaticConstructor()
+        {
+            // 声明没有支持的类表示导入
+            // 声明没有支持的类表示导入路径应该在关闭导入对话框中选中'确定'后
+            // 调用 ResolveSupportedClass()。
+            SupportedClass = NULL;
+    
+            // 记录该工厂对 .ABC 文件感兴趣。
+            new(Formats) FString( TEXT("abc;Ye Olde ABC Type") );
+    
+            bCreateNew = false;
+            bText = true;          // 表示 ABC 是文本文件格式。
+    
+            // 创建要显示在导入对话框属性窗口中
+            // 的 bool 属性。
+            new(GetClass(), TEXT("bTreatAsTypeA"), RF_Public)
+            UBoolProperty(CPP_PROPERTY(bTreatAsTypeA), TEXT(""), CPF_Edit);
+        }
+    
+        // 在 SupportedClass 为 NULL 时导入对话框会调用它。
+        UClass* ResolveSupportedClass()
+        {
+            UClass* UserSpecifiedClass = bTreatAsTypeA ? UTypeA::StaticClass() : UTypeB::StaticClass();
+            return UserSpecifiedClass;
+        }
+    
+        UObject* FactoryCreateText(UClass* Class, /* more args */, FFeedbackContext* Warn)
+        {
+            UObject* NewObject;
+            if ( bTreatAsTypeA )
+            {
+                NewObject = CreateTypeA( Class, /* more args */, Warn );
+            }
+            else
+            {
+                NewObject = CreateTypeB( Class, /* more args */, Warn );
+            }
+            return NewObject;
+        }
+    
+        UObject* CreateTypeA(UClass* Class, /* more args */, FFeedbackContext* Warn)
+        { ... }
+        UObject* CreateTypeB(UClass* Class, /* more args */, FFeedbackContext* Warn)
+        { ... }
+    }
+    
+    
+
+
+
+ 
+
+
+
+

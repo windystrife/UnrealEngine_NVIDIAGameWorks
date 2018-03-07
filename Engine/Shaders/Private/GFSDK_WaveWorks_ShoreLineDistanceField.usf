@@ -1,0 +1,174 @@
+/*
+ * This code contains NVIDIA Confidential Information and is disclosed 
+ * under the Mutual Non-Disclosure Agreement. 
+ * 
+ * Notice 
+ * ALL NVIDIA DESIGN SPECIFICATIONS AND CODE ("MATERIALS") ARE PROVIDED "AS IS" NVIDIA MAKES 
+ * NO REPRESENTATIONS, WARRANTIES, EXPRESSED, IMPLIED, STATUTORY, OR OTHERWISE WITH RESPECT TO 
+ * THE MATERIALS, AND EXPRESSLY DISCLAIMS ANY IMPLIED WARRANTIES OF NONINFRINGEMENT, 
+ * MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE. 
+ * 
+ * NVIDIA Corporation assumes no responsibility for the consequences of use of such 
+ * information or for any infringement of patents or other rights of third parties that may 
+ * result from its use. No license is granted by implication or otherwise under any patent 
+ * or patent rights of NVIDIA Corporation. No third party distribution is allowed unless 
+ * expressly authorized by NVIDIA.  Details are subject to change without notice. 
+ * This code supersedes and replaces all information previously supplied. 
+ * NVIDIA Corporation products are not authorized for use as critical 
+ * components in life support devices or systems without express written approval of 
+ * NVIDIA Corporation. 
+ * 
+ * Copyright © 2008- 2016 NVIDIA Corporation. All rights reserved.
+ * 
+ * NVIDIA Corporation and its licensors retain all intellectual property and proprietary
+ * rights in and to this software and related documentation and any modifications thereto.
+ * Any use, reproduction, disclosure or distribution of this software and related
+ * documentation without an express license agreement from NVIDIA Corporation is
+ * strictly prohibited.
+ */
+
+#include "Common.ush"
+
+ /** Origin Shoreline Texture */
+Texture2D OriginDistanceFieldTexture;
+
+/** Output Shoreline Texture */
+RWTexture2D<float4> OutputDistanceFieldTexture;
+
+// Preprocess 
+[numthreads(32, 32, 1)]
+void Preprocess_Main(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	uint2 distanceFieldTexSize;
+	OutputDistanceFieldTexture.GetDimensions(distanceFieldTexSize.x, distanceFieldTexSize.y);
+
+	if (DispatchThreadId.x < distanceFieldTexSize.x && DispatchThreadId.y < distanceFieldTexSize.y)
+	{
+		float4 orginTexData = OriginDistanceFieldTexture[DispatchThreadId.xy];
+
+		float r = orginTexData.r;
+		float g = orginTexData.g;
+		if (orginTexData.b < 0.5)
+		{
+			r = g = -100;
+		}
+		else if (orginTexData.r <= 0.0)
+		{
+			g = -orginTexData.g;
+		}
+
+		OutputDistanceFieldTexture[DispatchThreadId.xy] = float4(r, g, 0, 0);
+	}
+}
+
+// Get nearest pixel
+bool checkPixel(const int kTopDownDataResolution, const int cx, const int cy, const int dx, const int dy)
+{
+	const int x = (cx + dx) < 0 ? 0 : (cx + dx) >= kTopDownDataResolution ? (kTopDownDataResolution - 1) : (cx + dx);
+	const int y = (cy + dy) < 0 ? 0 : (cy + dy) >= kTopDownDataResolution ? (kTopDownDataResolution - 1) : (cy + dy);
+
+	uint2 pos = uint2(x, y);
+	return OriginDistanceFieldTexture[pos] > 0.0f;
+}
+
+float FindNearestPixel(const int kTopDownDataResolution, const int cx, const int cy)
+{
+	const int kMaxDistance = WaveWorksShorelineDFParam.MaxPixelsToShoreline;
+	float minDistance = kMaxDistance;
+	bool originPositive = checkPixel(kTopDownDataResolution, cx, cy, 0, 0);
+	bool resultPositive;
+	for (int dx = -kMaxDistance; dx <= kMaxDistance; dx++)
+	{
+		for (int dy = -kMaxDistance; dy <= kMaxDistance; dy++)
+		{
+			resultPositive = checkPixel(kTopDownDataResolution, cx, cy, dx, dy);
+			float pixelDistance = sqrt((float)(dx * dx + dy * dy));
+			if ((originPositive != resultPositive) && (pixelDistance < minDistance))
+			{
+				minDistance = pixelDistance;
+			}
+		}
+	}
+	return originPositive ? -minDistance / kMaxDistance : minDistance / kMaxDistance;
+}
+
+[numthreads(32, 32, 1)]
+void GetNearestPixel_Main(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	uint2 distanceFieldTexSize;
+	OutputDistanceFieldTexture.GetDimensions(distanceFieldTexSize.x, distanceFieldTexSize.y);
+
+	if (DispatchThreadId.x < distanceFieldTexSize.x && DispatchThreadId.y < distanceFieldTexSize.y)
+	{
+		float distanceToNearestPixel = FindNearestPixel(distanceFieldTexSize.x, DispatchThreadId.x, DispatchThreadId.y);
+		float4 originValue = OriginDistanceFieldTexture[DispatchThreadId.xy];
+		OutputDistanceFieldTexture[DispatchThreadId.xy] = float4(distanceToNearestPixel, originValue.yzw);
+	}
+}
+
+// Blur
+[numthreads(32, 32, 1)]
+void Blur_Main(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	uint2 distanceFieldTexSize;
+	OutputDistanceFieldTexture.GetDimensions(distanceFieldTexSize.x, distanceFieldTexSize.y);
+
+	if (DispatchThreadId.x < distanceFieldTexSize.x && DispatchThreadId.y < distanceFieldTexSize.y)
+	{
+		int count = 1;
+		float data = OriginDistanceFieldTexture[DispatchThreadId.xy].r;
+		if ((DispatchThreadId.x + 1) < distanceFieldTexSize.x)
+		{
+			data += OriginDistanceFieldTexture[DispatchThreadId.xy + int2(1, 0)].r;
+			count++;
+		}
+		if (DispatchThreadId.x >= 1)
+		{
+			data += OriginDistanceFieldTexture[DispatchThreadId.xy + int2(-1, 0)].r;
+			count++;
+		}
+		if (DispatchThreadId.y >= 1)
+		{
+			data += OriginDistanceFieldTexture[DispatchThreadId.xy + int2(0, -1)].r;
+			count++;
+		}
+		if ((DispatchThreadId.y + 1) < distanceFieldTexSize.y)
+		{
+			data += OriginDistanceFieldTexture[DispatchThreadId.xy + int2(0, 1)].r;
+			count++;
+		}
+
+		float4 orginTexData = OriginDistanceFieldTexture[DispatchThreadId.xy];
+		OutputDistanceFieldTexture[DispatchThreadId.xy] = float4(data / count, orginTexData.yzw);
+	}
+}
+
+// Get Gradient
+[numthreads(32, 32, 1)]
+void GetGradient_Main(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	uint2 distanceFieldTexSize;
+	OutputDistanceFieldTexture.GetDimensions(distanceFieldTexSize.x, distanceFieldTexSize.y);
+
+	if (DispatchThreadId.x < distanceFieldTexSize.x && DispatchThreadId.y < distanceFieldTexSize.y)
+	{
+		if (DispatchThreadId.x == 0 || DispatchThreadId.y == 0 || DispatchThreadId.x == distanceFieldTexSize.x - 1 || DispatchThreadId.y == distanceFieldTexSize.y - 1)
+		{
+			OutputDistanceFieldTexture[DispatchThreadId.xy] = float4(OriginDistanceFieldTexture[DispatchThreadId.xy].rg, 0, 0);
+		}
+		else
+		{
+			float value_left = OriginDistanceFieldTexture[DispatchThreadId.xy + int2(0, -1)].r;
+			float value_right = OriginDistanceFieldTexture[DispatchThreadId.xy + int2(0, 1)].r;
+			float value_bottom = OriginDistanceFieldTexture[DispatchThreadId.xy + int2(-1, 0)].r;
+			float value_top = OriginDistanceFieldTexture[DispatchThreadId.xy + int2(1, 0)].r;
+			float gdx = value_right - value_left;
+			float gdy = value_top - value_bottom;
+			float length = sqrt(gdx*gdx + gdy*gdy + 0.001f);
+			gdx /= length;
+			gdy /= length;
+
+			OutputDistanceFieldTexture[DispatchThreadId.xy] = float4(OriginDistanceFieldTexture[DispatchThreadId.xy].rg, -gdy, gdx);
+		}
+	}
+}

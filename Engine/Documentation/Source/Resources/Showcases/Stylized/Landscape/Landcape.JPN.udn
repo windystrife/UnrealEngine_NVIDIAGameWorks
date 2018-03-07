@@ -1,0 +1,132 @@
+﻿INTSourceChangelist:2726448
+Availability:Public
+Title:スタイライズド レンダリング ランドスケープ
+Crumbs:%ROOT%, Resources, Resources/Showcases/Stylized
+Description:UE4 に同梱のスタイライズド レンダリング ショーケースに使用したランドスケープ エフェクトの概要
+Related:Engine/Landscape
+Related:Engine/Landscape/Editing/Splines
+Related:Engine/Landscape/Materials
+Version:4.9
+
+
+
+[REGION:fullwidth]
+![](StylizedTerrain.png)
+[/REGION]
+
+ランドスケープは、今回紹介する例の中でより重要なレベル機能の 1 つです。アニメーションのようなシェーディングを作成することが主な理由です。これはランドスケープ マテリアルを用いて処理しています。ランドスケープの設定および作成に関する情報は [ランドスケープ ドキュメント](Engine/Landscape) を参照してください。
+
+[REGION:warning]
+このランドスケープに適用されているマテリアルはかなり専門的です。初心者の方は若干圧倒されるかもしれません。 
+[/REGION]
+
+[INCLUDE:Resources/Showcases/Stylized#InstanceNote]
+
+
+まず、使用している Material 式を理解するために、マテリアル エディタでマテリアルを開きます。以下の手順に従ってください。
+
+1. **コンテンツ ブラウザ** で **M_Terrain_Gound_A** マテリアルを検索します。検索は、アセットツリーの「**Game**」フォルダ内で行っていることを確認してください。マテリアルのみでフィルタリングすると検索に役立つかもしれません。
+
+	![](M_Terrain_GroundCB.png)
+
+1. マテリアルを **ダブルクリック** して、マテリアルエディタで開きます。
+
+
+マテリアルが、以下のようなコメントブロックの配列で分かれていることにすぐに気づかれると思います。 
+
+![](DistanceColorizeComment.png)
+
+Material 式ネットワークの主要領域の役割を表示することが目的です。以下にその内訳を示します。
+
+* **Rock and Grass Diffuse** - 岩と草のテクスチャ間のブレンドとランドスケープの表面への配置を処理します。
+* **Controls height blend of Rock Diffuse** - 草に覆われた平面な領域と岩のテクスチャを傾斜に配置するための、表面の角度チェックを実行するセクションです。
+* **Path Diffuse** - ランドスケープ上の歩道にテクスチャをオーバーレイします。
+* **Beach color and Mask** - 水際と陸の間のビーチ領域を処理します。
+* **Splotches** - マスクテクスチャを受け取ってチャンネル毎にタイルを張りなおす領域です。その後テレインに沿って色がランダム化される領域を作成するために使用します。
+* **Distance Colorize** - テレインから遠ざかると単一カラーの濃く霧がかった色へ変化します。マテリアルのこのセクションでは、このような遷移の表現を作成します。
+
+
+
+
+### 岩と草のブレンド
+
+
+
+このマテリアルは形が整えられると、テレインの表面の角度に基づいて最後の 2 つの外観をブレンドします。より平面な領域は絵画調の草のテクスチャに覆われて、坂がある全ての表面は岩壁のテクスチャで覆われます。テクスチャの最終結果は以下となります。
+
+
+
+
+[REGION:imagetable]
+|![](GrassColor.png)(%GrassSize%)|![](RockCliff.png)(%GrassSize%)|![](GrassBlendResult.png)(%GrassSize%)|
+|:---:|:---:|:---:|
+| 草 | 断崖 | 最終結果 |
+[/REGION]
+
+
+
+
+<!---
+[EXCERPT:SlopeDiagram]
+[REGION:raw]
+![](LandSlopeDiagram.png)
+[/REGION]
+[/EXCERPT:SlopeDiagram]
+--->
+
+
+[VAR:GrassSize]
+w:300
+[/VAR]
+
+このブレンド構造の重要な点は _World_Aligned_Blend_ マテリアル関数内部にあります。マテリアルは _Controls height blend_ コメントボックス内で見つかります。この関数はベクター値を受け取ってワールド空間の表面法線と比較します。この関数は 0-1 のアルファ出力値を提供します。 0 は垂直なベクターを表し、 1 は平行なベクターを表します。言い換えると、 _In World Vector_ 値として Z 軸 (0,0,1) を使用時、平面を表す白と傾斜を表す黒のテクスチャを出力します。この値はバイアスを掛けられて、アルファ値の間にきれいな線を設けるために鮮明化されます。 
+
+下記の例では World Aligned Blend を使用して赤と青を補間しています。ブレンドが発生する分析と共にマテリアルネットワークを理解することができます。結果をより明確に示すために多少鮮明化していることに留意してください。
+
+
+![](WorldAlignedBlendNetwork.png)(w:700)
+
+
+
+[REGION:imagetable]
+|![](InWorldVector.png)(%VecHeight%)|![](SurfaceComparison.png)(%VecHeight%)|![](Result.png)(%VecHeight%)|
+|:---:|:---:|:---:|
+|In World Vector| ワールドの表面法線 - 黄色のアルファ出力値です。| 結果 |
+[/REGION]
+
+
+[VAR:VecHeight]
+h:295
+[/VAR]
+
+
+表面間の境界を明確にするための岩と草の間のアウトラインにも留意してください。これは 2 つの World_Aligned_Blend 演算によって作成されています。 1 つには、よりきついバイアスが掛けられています。最初の演算は、アウトラインに使用している石のテクスチャと茶色間をブレンドしています。2 番目の演算は最初の結果と草の色をブレンドしています。
+
+![](OutlineExample.png)
+
+以下は同様のアウトラインを作成するために赤から緑、赤から青へのブレンドがされている簡単な例です。
+
+[REGION:imagetable]
+|![](OutlineBlendResult.png)(h:368)|[INCLUDE:#OutlineBlendNetwork]|
+|:---:|:---:|
+|結果 | ネットワーク (クリックして拡大)|
+[/REGION]
+
+
+<!--
+[EXCERPT:OutlineBlendNetwork]
+[REGION:lightbox]
+[![](OutlineBlend.png)(w:500)](Resources/Showcases/Stylized/Landscape/OutlineBlend.png)
+[/REGION]
+[/EXCERPT:OutlineBlendNetwork]
+-->
+
+###ランドスケープ スプライン
+
+海の水に沿った小道や海岸線はランドスケープ スプラインで作成しています。ランドスケープ スプラインはランドスケープ上に道や小道を作成するだけでなく、ランドスケープの表面に適合させる必要のあるあらゆるアセットタイプにとって最善の方法です。
+
+[REGION:fullwidth]
+![](Walkway.png)
+[/REGION]
+
+詳細は [ランドスケープ スプライン ドキュメント](Engine/Landscape/Editing/Splines) を参照してください。

@@ -1,0 +1,243 @@
+Availability:Public
+Title: Performance and Profiling Overview
+Crumbs: %ROOT%, Engine
+Description:How to identify performance problems and fix them.
+Navigation:topic
+version: 4.9
+parent:Engine/Performance
+order:1
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Performance/Overview:title%](performance_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/start_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Performance/Overview:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Performance/Overview:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Performance/Overview]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Performance/Overview:title%](performance_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/start_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Performance/Overview:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Performance/Overview:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Performance/Overview]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+
+[TOC (start:2 end:3)]
+
+This guide primarily covers rendering topics because this is the area is where most performance is needed. Adding more objects, increasing the resolution, adding lights, and improving materials all
+have a substantial impact on performance. Luckily in rendering, it is often easy to get back some performance. Many rendering features can be adjusted by console variables. 
+
+You can use the editor output log or the in-game console to:
+* Set console variables (**cvarname value**) 
+* Get the current state (**cvarname**) 
+* Get help for a variable **cvarname ?**. 
+
+If needed, you can put the settings in ConsoleVariables.ini with this syntax: **cvarname=value**. To find the right console variable, you can use **DumpConsoleVars** or the auto completion system. 
+Most rendering variables start with **r.**.
+
+* For more about console variables and toggling other engine options to improve performance, see the [](Engine/Performance\Options) reference page.
+
+## General Tips
+
+Ideally, you should profile as close to the target you care about as possible. For example, a good profiling case is testing your game in standalone form on the target hardware 
+with built lightmaps. 
+
+For good profiling, it is best to setup a reproducible case isolated from things that can add noise to the results. Even the editor adds some noise (e.g. an open **Content Browser** can add rendering cost) 
+so it is better to profile in a game directly. In some cases, it might be even useful to change code (e.g. to disable random number generators). The **Pause** command or **Slomo 0.001** can be very useful 
+to make things more stable.
+
+Measure a few times to know how accurate your profiling is. Stat commands such as **stat unit** and **stat fps** give you some numbers to start with. Accurate profiling should be done in milliseconds (ms), 
+not frames per second (fps). You easily can convert between the numbers but relative improvements have little meaning when measured in fps. When talking about individual features, we only speak about 
+milliseconds as it is not measuring the frame.
+
+If you see a limit on 30 fps (~33.3ms) or 60 fps (~16.6ms), you likely have VSync enabled. For more accurate timing, it is better if you profile without it.
+
+Do not expect an extremely high frame rate with a very simple scene. Many design choices pay off for complex scenes (e.g. deferred rendering) but have a higher base cost. You also might bump into a 
+frame rate limiter. If needed, such things can be adjusted (e.g. **t.MaxFPS**, **r.VSync**).
+
+* For tips and guidelines on setting up content and levels for performance, see the [](Engine/Performance\Guidelines) page.
+* For information on the stat commands, see the [](Engine/Performance\StatCommands) page.
+
+## Identify What You Are Bound By
+
+Modern hardware has many units that run in parallel (e.g. GPU: memory, triangle/vertex/pixel processing, etc. and CPU: multiple CPUs, memory, etc.). Often those units need to wait on each other.
+You first need to identify what you are bound by. Optimizing that is likely to improve performance. Optimizing the wrong thing is a waste of time and is likely to introduce new bugs or even performance 
+regressions in other cases. Once you improved that area, it is often good to profile again as this might reveal a new performance bottleneck that was formerly hidden.
+
+First you should check if you frame rate is limited by CPU or the GPU cost. As always you either can vary the workload (e.g. change the resolution) and see what has effect. Here it is easier to look at
+the engine build in feature **stat unit**.
+
+[REGION:imagetable]
+| ![](stat_unit.png)(w:160) |
+| :----: | 
+| CONSOLE: stat unit |
+[/REGION]
+
+The actual frame time is limited by one of the three: **Game** (CPU game thread), **Draw** (CPU render thread) or **GPU** (GPU). 
+Here we can see the **GPU** is the limiting factor (the largest of the three). In order to get a smaller **Frame** time, we have to optimize the GPU workload there.
+
+* [](Engine/Performance\CPU)
+* [](Engine/Performance\GPU)
+
+## Show Flags
+
+The engine show flags can be used to toggle a lot of rendering features. The editor lists all show flags in a convenient 2D UI. You can click on the checkbox to toggle multiple checkboxes without closing the menu.
+
+In-game, you can use the show command. Use show to get a list of all show flags and their state. Use **_show showflagname_** to toggle a feature. Note that this only works in game viewports, so in editor
+viewports, the editor UI needs to be used. You can use the console variables (e.g. **_showflag.Bloom_**) to override show flag values in-game or in the editor, but that also disables the UI.
+
+[REGION:note]
+Some features still consume performance even if the feature is not rendering any more, e.g. show particles hides the particles but simulation time is still
+required to support re-enabling them at a later time. The console variable **_fx.freezeparticlesimulation_** allows to you disable the update part as well (editor UI also exists).
+Another one: show tessellation disables triangle amplification but still uses the tessellation shaders.
+[/REGION:note]
+
+A good profiling starting point is with high-level features, such as show StaticMeshes or show tessellation.
+
+All show flags are also exposed as console variables, e.g. console show Bloom, **_showflag.Bloom 0_** or in configuration files: showflag.Bloom = 0
+Console variables require more typing but they also override the editor UI showflags and they can be put into configuration files like other console variables.
+
+The most useful ones for profiling:
+
+| Show Flag | Description |
+| -------- | ----------- |
+| **ScreenSpaceReflections** | Toggles screen space reflections, can cost a lot of performance, only affects pixels up to a certain roughness (adjusted with r.SSR.MaxRoughness or in postprocess settings).
+| **AmbientOcclusion** | Screen Space Ambient Occlusion (Some scenes only benfit very little, for static objects you bake AO in lightmass).
+| **AntiAliasing** | Toggle any antialiasing (TemporalAA and FXAA), use TemporalAA to switch to FXAA (faster, lower quality).
+| **Bloom** | Affects image based lens flares and the bloom feature.
+| **DeferredLighting** | Toggle all deferred lighting passes.
+| **DirectionalLights** **PointLights** **SpotLights** | Toggles the different light types (useful to see what kind of light type is having what effect and performance impact.
+| **DynamicShadows** | Toggles all dynamic shadows (shadowmap rendering and shadow filtering/projection).
+| **GlobalIllumination** | Toggles baked and dynamic indirect lighting (LPV).
+| **LightFunctions** | Toggles the light functions rendering.
+| **PostProcessing** | Toggles all post-processing passes.
+| **ReflectionEnvironment** | Toggles reflection environment passes.
+| **Refraction** | Toggles the refraction pass.
+| **Rendering** | Toggles rendering altogether.
+| **Decals** | Toggle decal rendering.
+| **Landscape** **Brushes** **StaticMeshes** **SkeletalMeshes** **Landscape** | Toggles what geometry is rendered.
+| **Translucency** | Toggles translucency rendering.
+| **Tessellation** | Toggles tessellation (still runs tessellation shaders but spawning more triangles).
+| **IndirectLightingCache** | Toggles if dynamic objects or static objects that have invalidated lightmaps are using the Indirect Lighting Cache.
+| **Bounds** | Show the bounding volume of the objects selected in the editor.
+| **Visualize SSR** | Renders all pixels affected by screen space reflections is bright orange (slow), see below.
+
+[REGION:imagetable]
+| ![](SSR.png)(w:794) |
+| :----: | 
+| CONSOLE: r.SSR.MaxRoughness 0.9 = best quality (left), r.SSR.MaxRoughness 0.1 = faster (right) |
+| Unlit (top), show VisualizeSSR (bottom) |
+[/REGION]
+
+
+### View Modes
+
+View modes are just a combination of show flags. The editor UI is separate from the show flags and you can use the ViewMode console command to switch between them.
+The most useful for performance are: **Wireframe**, **LightComplexity**, **ShaderComplexity**, and **Lit**.
+
+
+![](ViewModes.png)(w:794)
+
+_Various view modes (in reading order): Lit, LightCompexity (darker is better), Wireframe, Shader Complexity (green is good)_
+
+
+## How to Deal With a Wide Range of Hardware
+
+Unreal Engine has [scalability](Engine/Performance/Scalability) built into many graphics features. Different applications have different needs so customizing that system is advised.
+
+[REGION:note]
+Integrated graphics chips often have a slower memory subsystem but they also have less ALU and texture units. It is important to test on a wide range of hardware or identify the actual performance characteristics.
+The SynthBenchmark tool can help to identify groups of hardware that are worth testing. A number around 100 is normal for a modern GPU but if you see a disproportional change in some area, you know this GPU has a special
+characteristic and might need special attention.
+[/REGION]
+
+You can use the tool by typing SynthBenchmark into the console.
+
+
+    FSynthBenchmark (V0.92):
+    ===============
+    Main Processor:
+            ... 0.025383 s/Run 'RayIntersect'
+            ... 0.027685 s/Run 'Fractal'
+ 
+    CompiledTarget_x_Bits: 64
+    UE_BUILD_SHIPPING: 0
+    UE_BUILD_TEST: 0
+    UE_BUILD_DEBUG: 0
+    TotalPhysicalGBRam: 32
+    NumberOfCores (physical): 16
+    NumberOfCores (logical): 32
+    CPU Perf Index 0: 100.9
+    CPU Perf Index 1: 103.3
+  
+    Graphics:
+    Adapter Name: 'NVIDIA GeForce GTX 670'
+    (On Optimus the name might be wrong, memory should be ok)
+    Vendor Id: 0x10de
+    GPU Memory: 1991/0/2049 MB
+          ... 4.450 GigaPix/s, Confidence=100% 'ALUHeavyNoise'
+          ... 7.549 GigaPix/s, Confidence=100% 'TexHeavy'
+          ... 3.702 GigaPix/s, Confidence=100% 'DepTexHeavy'
+          ... 23.595 GigaPix/s, Confidence=89% 'FillOnly'
+          ... 1.070 GigaPix/s, Confidence=100% 'Bandwidth'
+ 
+    GPU Perf Index 0: 96.7
+    GPU Perf Index 1: 101.4
+    GPU Perf Index 2: 96.2
+    GPU Perf Index 3: 92.7
+    GPU Perf Index 4: 99.8
+    CPUIndex: 100.9
+    GPUIndex: 96.7
+
+
+## Generate a Chart Over a Period of Time
+
+It can be very useful to get the stat unit times over a longer period of time (e.g. in-game cutscene or a camera path set up to test many cases).
+
+The following chart was generated on an Android device (Streaming) from a cutscene. Before and after the cutscene, the console commands StartFPSChart and StopFPSChart were entered.
+The resulting .csv file (in [ProjectFolder]\Saved\Cooked\Android_ES31\SubwayPatrol\Saved\Profiling\FPSChartStats) was opened in Microsoft Excel.
+For this example, we removed the first 4 header lines, selected all, and inserted a Scatter With Straight Lines plot.
+
+[REGION:imagetable]
+| ![](fpschart.png)(w:837) |
+| :----: | 
+| CONSOLE: StartFPSChart, StopFPSChart |
+[/REGION]
+
+
+## More about Performance and Profiling
+* [](Engine/Performance/SystemSettings)
+* [](Engine/Performance/Profiler)
+* [](Engine/Performance/Scalability)
+* [VFX Optimization: Core Optimization Concepts](Engine/Rendering/ParticleSystems/Optimization/Concepts)
+
+
+
+
+

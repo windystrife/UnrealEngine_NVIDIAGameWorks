@@ -1,0 +1,512 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>NVIDIA Flow UE4 Documentation</title>
+        <link rel="stylesheet" href="nvflow.css">
+    </head>
+    <body>
+	    	<div class="content">
+	       	<table width="100%"><tr><td><h1>Flow - UE4 Manual</h1></td><td><img class="logo" width="250px" src="Images/nvidia.png"/></td></tr></table>
+	       	<!--<h2 margin="0">UE4 User Manual</h2>-->
+
+		    <!-- TOC -->
+		    <h2 id="toc">Table of Contents</h2>
+		    <ul>
+		    	<li><a href="#prereq">Prerequisites</a></li>
+		    	<li><a href="#introduction">Introduction</a></li>
+		    	<li><a href="#cellsize">Cell Size</a></li>
+		    	<li><a href="#grid">Grid</a></li>
+		    	<li><a href="#emitters">Emitters</a></li>
+		    	<li><a href="#console">Console Commands</a></li>
+		    	<li><a href="#stats">Stats</a></li>
+		    	<li><a href="#limitations">Limitations</a></li>
+		  	</ul>
+
+		    <h2 id="prereq">Prerequisites</h2>
+
+			<p>The information in this document applies to the following software versions:
+
+				<ul>
+					<li>NVIDIA Flow 0.1.1 Beta</li>
+					<li>EpicGames Unreal 4.12</li>
+				</ul>
+
+				<p>Flow requires a DX11 capable GPU and Windows.</p>
+
+				<p>The Unreal 4 integration of Flow is available to all Unreal licensed developers through the NVIDIA Github channel, please visit: <a href="https://github.com/NvPhysX/UnrealEngine/tree/Flow">https://github.com/NvPhysX/UnrealEngine/tree/Flow</a> for the latest distributions.</p>			
+
+				<p>This documentation is designed for technical artists and developers using the UE4 Flow integration. For more background on Flow see the SDK manual included in the developer library package available on NVIDIA DevZone:</p>
+			
+				<p><a href="https://developer.nvidia.com/nvidia-flow">https://developer.nvidia.com/nvidia-flow</a></p>
+				
+		    <h2 id="introduction">Introduction</h2>
+
+			<p>Nvidia Flow is a GPU-based dynamic grid fluid simulation library for real-time applications.</p>
+
+			<p>Flow leverages D3D11.3 Volume Tiled Resources (hardware sparse texture) when available to accelerate fluid simulation. Due to hardware limits, current tiles are 64 KB. With typical data formats, this means that Flow allocates simulation blocks consisting of 32x16x16 cells. These blocks are dynamically made active/resident in regions of interest, optimizing performance and allowing domains larger than possible with fully resident grids.</p>
+
+			<p>Volume rendering is used to visualize simulation results. In the current implementation, the density and temperature fields are ray marched. A color map is used to control color and opacity as a function of temperature. Density combines with the color map opacity result to determine final sample opacity.</p>
+
+		    <h2 id="cellsize">Cell Size</h2>
+
+		    <p>The grid cell size controls the resolution. Higher resolution means more detail, but also means more cells must be simulated for the same volume. For performance tuning, keep in mind volume is the cell size cubed (gridCellSize^3). This means small changes to the grid cell size will have a proportionally larger impact on performance.</p>
+
+		    <h2 id="grid">Grid</h2>
+
+		    <p>A grid forms the simulation domain with Flow. It is responsible for nearly all Flow memory allocation. It controls fundamental simulation behavior.</p>
+
+		    <h3>Creating a grid</h3>
+
+		    To create a grid, left-click Add New in the Content Browser, and choose <span class="menu">Create Advanced Asset->Physics->Flow Grid Asset</span>.
+
+	   	    <p class="screenshot"><img src="Images/CreateFlowGridAsset.png"/></p>
+
+			<h3>Grid Properties</h3>
+
+	   	    <p>Give the grid an appropriate name, e.g.: FlowGridFireAsset, and double click to open it's property sheet.</p>	
+
+		    <p class="screenshot"><img src="Images/FlowGridAsset.png"/></p>
+
+		    <p>The grid contains parameters controlling memory use and performance, along with simulation behavior and rendering settings.</p>
+				    
+			<table class="proptable">
+			    <tr>
+			        <th colspan="2">Grid
+					</th>
+			    </tr>
+			    <tr>
+			        <td width="160px"><i>Attribute</i></td>
+			        <td><i>Notes</i></td>
+			    </tr>
+			    <tr>
+			        <th>Grid Cell Size</th>			        
+			        <td>See <a href="#cellsize">Cell Size</a> section.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Virtual Grid Dimension
+					</th><td>The length in virtual cells of each axis. The combination of grid cell size and virtual grid dimension determines the extents of the grid address space. This is visualized in the editor by clicking on the flow grid actor. The ‘flowvis’ command will also visualize the grid extents.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Memory Limit Scale
+					</th><td>Controls the relative memory usage with respect to the default value. For higher cost effects, the default limit can be increased. This is likely necessary if the ‘flowvis’ visualization indicates that blocks expected to allocate are unable. This is often observed as a cube shaped clipping effect.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Simulation Rate
+					</th><td>Controls the grid update rate. Fixed time stepping is used for consistent behavior. The simulation rate can be increased to improve grid response time, at the cost of performance.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Multi Adapter Enabled
+					</th><td>Allows the grid to simulate on secondary GPUs when available, offering a potential performance increase. (currently win10 only)
+					</td>
+			    </tr>				
+			</table>
+		    <p>The velocity, density, temperature, and fuel weights and thresholds control what blocks the grid allocates beyond what emitters allocate. The default settings are targeted for flame with limited smoke, so only the temperature weight is nonzero. The temperature threshold needs to be greater than zero to be effective at deallocation. The threshold should be aligned with the color map alpha, so that the effect is visually faded before deallocation.</p>			
+			<table class="proptable">
+			    <tr>
+			        <th colspan="2">Block Allocation
+					</th>
+			    </tr>
+			    <tr>
+			        <td width="160px"><i>Attribute</i></td>
+			        <td><i>Notes</i></td>
+			    </tr>
+			    <tr>
+			        <th>Velocity Weight
+					</th><td>Relative importance of velocity for allocation, 0.0 means not important.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Density Weight
+					</th><td>Relative importance of density for allocation, 0.0 means not important.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Temp Weight
+					</th><td>Relative importance of temperature for allocation, 0.0 means not important.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Fuel Weight
+					</th><td>Relative importance of fuel for allocation, 0.0 means not important.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Velocity Threshold
+					</th><td>Minimum velocity magnitude that is considered relevant.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Density Threshold
+					</th><td>Minimum density magnitude that is considered relevant.
+					</td>
+			    </tr>	
+			    <tr>
+			        <th>Temp Threshold
+					</th><td>Minimum temperature magnitude that is considered relevant.
+					</td>
+			    </tr>	
+			    <tr>
+			        <th>Fuel Threshold
+					</th><td>Minimum fuel magnitude that is considered relevant.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Importance Threshold
+					</th><td>Global importance threshold, to scale quality/performance.
+					</td>
+			    </tr>					
+			</table>
+			<table class="proptable">
+			    <tr>
+			        <th colspan="2">Simulation
+					</th>
+			    </tr>
+			    <tr>
+			        <td width="160px"><i>Attribute</i></td>			        
+			        <td>
+			            <i>Notes</i>
+			        </td>
+			    </tr>
+			    <tr>
+			        <th>Gravity
+					</th>
+			        <td>Gravity vector for use by buoyancy. This specifies not only direction, but can be used to increase or decrease the buoyant force.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Velocity Damping
+					</th>
+			        <td>Higher values reduce velocity faster (exponential decay curve).
+					</td>
+			    </tr>
+				<tr>
+					<th>Density Damping
+					</th>
+					<td>Higher values reduce density faster (exponential decay curve).
+					</td>
+				</tr>
+			    <tr>
+			        <th>Velocity Fade
+					</th>
+			        <td>Fade velocity rate in units / sec. Compared to damping, fade reduces low values faster.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Density Fade
+					</th>
+			        <td>Fade density rate in units / sec. Compared to damping, fade reduces low values faster.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Velocity MacCormack Blend Factor
+					</th>
+			        <td>Higher values make a sharper appearance, but with more artifacts.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Density MacCormack Blend Factor
+					</th>
+			        <td>Higher values make a sharper appearance, but with more artifacts.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Vorticity Strength
+					</th>
+			        <td>Higher values increase rotation, reduce laminar flow.
+					</td>
+			    </tr>			    			    
+			    <tr>
+			        <th>Ignition Temperature
+					</th>
+					<td>Minimum temperature for combustion.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Cooling Rate
+					</th>			        
+					<td>Cooling rate, exponential.
+					</td>
+			    </tr>
+			</table>
+			<table class="proptable">
+			    <tr>
+			        <th colspan="2">Collision
+					</th>
+			    </tr>
+			    <tr>
+			        <td width="160px">
+			            <i>Attribute</i>
+			        </td>
+			        <td>
+			            <i>Notes</i>
+			        </td>
+			    </tr>				
+			    <tr>
+			        <th>Object Type
+					</th>			        
+					<td>Enum indicating what type of object this should be considered as. It is ideal to create a Flow collision channel, where the Flow grid is set to a Flow object type, allowing emitters to overlap/block against the Flow channel as desired.
+					</td>
+			    </tr>	
+			    <tr>
+			        <th>Response To Channels
+					</th>			        
+					<td>Controls which types of objects the Flow grid will consider when gathering collision/emitter shapes from the world. Setting a particular object type response to Ignore will disable all emitters/colliders with that object type.
+					</td>
+			    </tr>				
+			</table>
+			<table class="proptable">
+			    <tr>
+			        <th colspan="2">Rendering
+					</th>
+			    </tr>
+			    <tr>
+			        <td width="160px">
+			            <i>Attribute</i>
+			        </td>
+			        <td>
+			            <i>Notes</i>
+			        </td>
+			    </tr>
+			    <tr>
+			        <th>Rendering Alpha Scale.
+					</th>
+			        <td>Provides a convenient global opacity scale.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Color Map
+					</th>
+			        <td>Controls color and opacity as a function of temperature.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Color Map Min X
+					</th>
+			        <td>Color curve minimum X value. The color map is a 1D texture internally, this specifies the lower temperature properly described in the 1D texture. Lower values are clamped.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Color Map Max X
+					</th>
+			        <td>Color curve maximum X value. The color map is a 1D texture internally, this specifies the upper temperature properly described in the 1D texture. Higher values are clamped.
+					</td>
+			    </tr>
+				<tr>
+			        <th>Rendering mode
+					</th>
+			        <td>Provides access to useful visualizations, such as a density visualization (render mode 1) and a velocity field visualization (render mode 5). Render mode 0 is the default color map mode.
+					</td>
+			    </tr>
+				<tr>
+			        <th>Adaptive Screen Percentage
+					</th>
+			        <td>Experimental VR feature. Allows ray march resolution to vary to manage total frame time.
+					</td>
+			    </tr>			    
+			    <tr>
+			        <th>Adaptive Target Frame Time.
+					</th>
+			        <td>Experimental VR feature. Target frame time for adaptive screen percentage.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Max Screen Percentage
+					</th>
+			        <td>Provides control of offscreen ray march resolution relative to main render target resolution. Is used even when Adaptive Screen Percentage is disabled.
+					</td>
+			    </tr>			    
+			    <tr>
+			        <th>Min Screen Percentage
+					</th>
+			        <td>Experimental VR feature. Minimum ScreenPercentage when Adaptive is enabled.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Debug Wireframe
+					</th>
+			        <td>If enabled, visualizes the grid extents and the active grid blocks.
+					</td>
+			    </tr>
+			</table>
+			
+			<h3>Placing a grid</h3>
+			
+			<p>To place a grid, drag the asset into the level. The grid should be placed in the center of the region of interest. Left-clicking the placed grid actor will show the grid extents.</p>
+
+			<h2 id="emitters">Emitters</h2>
+			
+			<p>Emitters are the mechanism to create activity in a Flow grid. The shape of an emitter is currently established using PhysX collision shapes. Parameters for the emitter are set using a Flow emitter component.</p>
+			
+			<h3>Creating an Emitter</h3>
+			
+			To create a basic sphere emitter, drag a sphere into the level. Select that sphere, and in the details pane, click the Blueprint/Add Script button to create a blueprint that includes a sphere component.
+			
+			<p class="screenshot"><img src="Images/EmitterBlueprintCreate.png"/></p>
+			
+			Once the blueprint has been named, an editor window for the blueprint will open. In the Components pane, click Add Component and select Flow Emitter. Clicking on the new Flow Emitter component will show available parameters in the details pane.
+			
+			<p class="screenshot"><img src="Images/EmitterBlueprintAddComponent.png"/></p>
+			
+			In the blueprint editor, select the StaticMeshComponent (Inherited). In the details pane, go the collision section. Set the Collision Presets to Custom..., and set the Flow channel to Overlap in the Collision Response. 
+			
+			<p class="screenshot"><img src="Images/EmitterBlueprintSetCollision.png"/></p>
+			
+			Drag this new emitter blueprint into the level, inside the extents of a Flow grid.
+			
+			<h3>Tuning an Emitter</h3>
+			
+			<p>The emitter velocity, density, temperature, and fuel settings are all target values that the user would like grid cells to move towards. The rate at which the emitter moves a grid cell towards the target value is controlled by the product of the couple rate and per channel masks. Higher couple rates move towards the target values in a  shorter amount of time. This property is useful for moving objects. Lower couple rates can be very useful for stationary objects, since the weaker influence on the simulation allows simulation to happen naturally instead the emitter.</p>
+
+			<p>Due to the couple rate properties, in practice, good results are achieved by increasing couple rate via UE4 blueprints as function of velocity. Doing this in blueprints adds a bit more authoring, but allows the user to tune behavior. It resolves the ambiguity of whether or not an emitter should emit more or less when moving.</p>
+
+			<p>An important concept with emitters is understanding what setting, for example, temperature to zero means. In the temperature case, if the couple rate is nonzero and temperature mask is nonzero, then the emitter is configured to drive temperature in the grid cells to zero. This may not be the intended behavior. If the intention was to not modify the temperature, then the temperature mask should be set to zero. Alternatively, the couple rate could be set to zero, but this has the effect of disabling the emitter.</p>
+
+			<p>Emitters also influence grid block allocation. Allocation scale controls how much of the emitter bounding box should force allocate grid blocks. An allocation scale of 0.0 disables emitter allocation, which is useful for collision shapes, where the grid only needs to be active when visible fluid is present. A nonzero allocation scale on at least one emitter is required to get any activity in the grid, since grid self-allocation uses an active block to control the active block’s own allocation and the allocation of neighboring blocks.</p>
+
+			<p>Multiple frames are required to make a given block resident/active. This creates a need to predict allocation needs several frames into the future to avoid possible artifacts. Increasing allocation scale is a non-directional option to achieve this. Allocation predict is the directional option. It allocates in the direction of the emitter velocity, making it ideal for prediction along trajectories.</p>
+			
+			<table class="proptable">
+			    <tr>
+			        <th colspan="2">Emitter
+					</th>
+			    </tr>
+			    <tr>
+			        <td width="160px">
+			            <i>Attribute</i>
+			        </td>
+			        <td>
+			            <i>Notes</i>
+			        </td>
+			    </tr>
+			    <tr>
+			        <th>Linear Velocity
+					</th>
+			        <td>The target linear velocity. If Blend In Physical Velocity is nonzero, this target velocity is added to the physical velocity.
+					</td>
+			    </tr>		
+			    <tr>
+			        <th>Angular Velocity
+					</th>
+			        <td>The target angular velocity. If Blend In Physical Velocity is nonzero, this target velocity is added to the physical velocity.
+					</td>
+			    </tr>		
+			    <tr>
+			        <th>Blend In Physical Velocity
+					</th>
+			        <td>Factor between 0 and 1 to blend in physical velocity of actor. 0.0 means the physical velocity has no impact on the emitter's velocity target. 1.0 means the emitter uses the physical velocity as a base velocity, adding extra Linear Velocity or Angular Velocity as set.
+					</td>
+			    </tr>		
+			    <tr>
+			        <th>Density
+					</th>
+			        <td>The target density. Density influences visual opacity.
+					</td>
+			    </tr>	
+			    <tr>
+			        <th>Temperature
+					</th>
+			        <td>The target temperature. Temperature is an input to the color map and influences combustion rate and buoyancy.
+					</td>
+			    </tr>	
+			    <tr>
+			        <th>Fuel
+					</th>
+			        <td>The target fuel value. Fuel is converted to temperature and density when combustion is active. This fuel is treated as gaseous.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Fuel Release Temp
+					</th>
+			        <td>The threshold temperature to release Fuel Release additional fuel. Helps simulate solid fuels where heat must be applied for gaseous-like fuel to be released.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Fuel Release
+					</th>
+			        <td>The amount of additional fuel to release when Fuel Release Temp has been exceeded. Helps simulate solid fuels where heat must be applied for gaseous-like fuel to be released.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Allocation Predict
+					</th>
+			        <td>Directional block allocation prediction. Time factor used for pre-allocation of grid cells for fast emitters.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Allocation Scale
+					</th>
+			        <td>Controls emitter allocation behavior. 0.0 turns emitter allocation off. 1.0 is default. Values greater than 1.0 help pre-allocate, especially when direction is difficult to predict.
+					</td>
+			    </tr>		
+			    <tr>
+			        <th>Collision Factor
+					</th>
+			        <td>0.0 is pure emitter. 1.0 makes entire shape interior a collider.
+					</td>
+			    </tr>	
+			    <tr>
+			        <th>Emitter Inflate
+					</th>
+			        <td>Allows inflation of emitter outside of shape surface.
+					</td>
+			    </tr>	
+			    <tr>
+			        <th>Couple Rate
+					</th>
+			        <td>Rate at which grid cells move to emitter target values.
+					</td>
+			    </tr>
+			    <tr>
+			        <th>Velocity Mask
+					</th>
+			        <td>1.0 makes velocity change based on CoupleRate. 0.0 makes emitter have no effect on velocity.
+					</td>
+			    </tr>	
+			    <tr>
+			        <th>Density Mask
+					</th>
+			        <td>1.0 makes density change based on CoupleRate. 0.0 makes emitter have no effect on density.
+					</td>
+			    </tr>	
+			    <tr>
+			        <th>Temperature Mask
+					</th>
+			        <td>1.0 makes temperature change based on CoupleRate. 0.0 makes emitter have no effect on temperature.
+					</td>
+			    </tr>	
+			    <tr>
+			        <th>Fuel Mask
+					</th>
+			        <td>1.0 makes fuel change based on CoupleRate. 0.0 makes emitter have no effect on fuel.
+					</td>
+			    </tr>	
+			    <tr>
+			        <th>Num Substeps
+					</th>
+			        <td>Super sampling of emitter shape along it's path in the flow grid. Improves quality for fast moving emitters at the cost of performance.
+					</td>
+			    </tr>				
+			</table>
+			
+			<h2 id="console">Console Commands</h2>
+
+			<table class="proptable">
+				<tr class="header"><th width=230px>Command</th><th>Description</th></tr>
+				<tr><th>flowvis</th><td>Enables visualization of the Flow grid extents, visualizes the active grid blocks.</td></tr>
+			</table>
+
+			<h2 id="limitations">Limitations / Known Issues</h2>
+			<ul>
+			<li><p>The Flow UE4 integration does not currently expose all of the features in the Flow SDK, such as signed distance field support. These features will be added in a future release.</p></li>
+			<li><p>Flow block allocation is not deterministic. Allocation may behave differently between separate runs, GPUs, and versions. </p></li>					
+		</div>		
+
+		<p align="center"><br>Copyright (C) 2013-2016 NVIDIA Corporation, 2701 San Thomas Expressway, Santa Clara, CA 95050 U.S.A. All rights reserved. <a href="http://www.nvidia.com">www.nvidia.com</a></p>
+    </body>
+
+</html>

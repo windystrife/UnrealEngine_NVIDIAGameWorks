@@ -1,0 +1,394 @@
+Availability:Public
+Title:Details Panel Customization
+Crumbs:%ROOT%, Programming, Programming/Slate
+Description:Guide to customizing the display of properties in the Details panels within Unreal Editor.
+version: 4.9
+
+The **Details** panel is now fully customizable.  You can rearrange properties via a simple system, or you can fully customize them using [](Programming/Slate).   You can also add other UI to the details using Slate syntax.
+
+[TOC (start:2 end:3)]
+
+## Setup instructions
+
+1. Create a class for customizing properties in.  This must inherit from **ILayoutDetails**.
+    
+	* You implement one function: **void LayoutDetails( IDetailLayoutBuilder& )**.
+	* The purpose of this class is to encapsulate customization for a classes properties.  One instance of the class will be created for each **Details** panel that requires it. 
+
+2. Set up a delegate that will be called when the **Details** panel recognizes properties for a specific class.
+    
+	* The sole purpose of this delegate is to create an instance of your customization class for a specific **UObject** that has properties.  Remember that there often are multiple details views up at any point and each instance of the details view gets its own customization class instance.  This allows you to store per detail instance data on your layout class.  
+	* Example (more examples are located in DetailCustomizations.cpp):
+	
+			FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
+			PropertyModule.RegisterCustomPropertyLayout( ABrush::StaticClass(), FOnGetDetailLayoutInstance::CreateRaw( &FBrushDetails::MakeInstance ) );
+
+			...
+			static TSharedRef<ILayoutDetails> FBrushDetails::MakeInstance()
+			{
+				return MakeShareable( new FBrushDetails );
+			}
+
+3. Implement your customization in the LayoutDetails function of the class you made in step 1.
+    
+	* If this is an engine class, you should add your customization class (if it does not already exist) to the `DetailCustomizations` module.  This module can be recompiled and reloaded without restarting the editor, making it useful for  fast tweaking of properties.
+	* Bind your delegate in `FDetailCustomizationsModule.StartupModule` and unbind it in `FDetailCustomizationsModule.ShutdownModule`.
+	* Game specific classes should use a game specific module.
+	* See examples in this document and the `DetailCustomizations` module (such as PrimitiveComponentDetails.cpp and StaticMeshComponentDetails.cpp).
+
+
+## Customizing
+
+You handle all customization inside the LayoutDetails function of your customization class.  This function accepts an **IDetailLayoutBuilder**, which is your interface to properties and how you pass back customization widgets.
+
+The primary function of IDetailLayoutBuilder is to create categories where properties and other details reside.  There are some other minor functions on this class which are self explanatory (most of them you will not need). The documentation for those can be found in DetailLayoutBuilder.h.
+
+The first step in customizing is to edit a category:
+
+	virtual void LayoutDetails( IDetailLayoutBuilder& DetailBuilder ) override
+	{
+		// Edit the lighting category
+		IDetailCategory& LightingCategory = DetailBuilder.EditCategory("Lighting", TEXT("OptionalLocalizedDisplayName") );
+	}
+
+The **EditCategory** function takes an **FName** for the category where properties will reside and an optional localized display name.  If the display name is specified, it will override any existing display name.  The category name does not have to be the same category name specified in the `UPROPERTY` macro, although it will reuse the `UPROPERTY` category if the names are the same.  The macro category name is used as the default category if the property is not customized and in the tree view.
+
+EditCategory returns an **IDetailCategoryBuilder&** which is what you use to add properties to a category.  There are a two ways to do this:
+
+* Using simple [multibox style layout](#MultiboxStyleLayout), which is quick for rearranging properties.
+* Using [Slate syntax](#SlateLayout) which offers the most robust customization options.
+
+
+### Multibox Style Layout
+
+An easy example using the **LightingCategory** created above:
+		
+	// Add a property to the category.  The first param is the name of the property and the second is an optional display name override.
+	LightingCategory.AddProperty("bCastStaticShadow", TEXT("Static") );
+	LightingCategory.AddProperty("bCastDynamicShadow", TEXT("Dynamic") );
+	LightingCategory.AddProperty("bCastVolumetricTranslucentShadow", TEXT("Volumetric") );
+
+This is the most basic example.  It adds 3 properties stacked vertically and overrides their display names. (The text in the examples is not localized to save space, but should always be localized in general practice.)
+
+[REGION:note]
+	Note that customized properties and categories always appear above non-customized ones.  You can use this simple syntax to reorganize important properties which may otherwise be buried.
+[/REGION]
+	
+The result:
+
+![](multibox_layout_vertical.png)
+        
+A slightly more advanced example (located in `PrimitiveComponentDetails.cpp`):
+		
+	// Create a non-collapsible group with the display name "Shadows" which is only visible if the CastShadow property is enabled. All properties below this call will appear in the same group until EndGroup or another BeginGroup is called
+	LightingCategory.BeginGroup( TEXT("Shadows"), GroupImageName, "CastShadow" );
+        // Begin a new line.  All properties below this call will be added to the same line until EndLine() or another BeginLine() is called
+        LightingCategory.BeginLine();
+                // Add properties using their default look
+                LightingCategory.AddProperty("bCastStaticShadow", TEXT("Static") );
+                LightingCategory.AddProperty("bCastDynamicShadow", TEXT("Dynamic") );
+                LightingCategory.AddProperty("bCastVolumetricTranslucentShadow", TEXT("Volumetric") );
+        LightingCategory.BeginLine();
+                LightingCategory.AddProperty("bCastInsetShadow", TEXT("Inset") );
+                LightingCategory.AddProperty("bCastHiddenShadow", TEXT("Hidden") );
+                LightingCategory.AddProperty("bCastShadowAsTwoSided", TEXT("Two Sided") );
+	LightingCategory.EndGroup();
+
+* `BeginGroup` is used to create  a new group of properties.  It  takes a name to display for the group, an optional image name (Slate brush name) to display next to the name, and an optional edit condition property which if _false_ will hide the entire group from view so its properties cannot be changed.  These edit conditions are the same as the `UPROPERTY` macro style edit conditions except they operate on a group of properties instead of just one.  More things like this could be added in the future!
+* `AddProperty` adds a property using its default look.  It usually only needs one parameter which is the property name.  More complicated properties such as properties inside structs need additional information.  See the [Advanced Tips](#AdvancedTips) section or the documentation in `DetailCategoryBuilder.h` if you need this.
+* `BeginLine` creates a new line of properties.  By default, all properties added via `AddProperty` are created on a new line.  `BeginLine` ensures all properties added until the next `BeginLine` or `EndLine` are on the same line.
+
+
+The result:
+ 
+![](multibox_layout_horizontal.png)
+
+#### Notes About Multibox Style Layout
+
+* It is not very powerful, but more features will be added as needed.  It is currently designed to be for quick reorganization.
+* The slate layout will require more advanced access to properties, specifically property handles, especially if you need to customize their look.
+
+
+### Property Handles
+
+The two main functions of property handles are to read and write the value of a property and to identify the property to Slate customization widgets.  How properties are accessed by the details view/property tree is somewhat complicated, so property handles hide all that away and handles undo/redo, pre/post edit change, package dirtying, world switching etc., for you. 
+
+To get a property handle, you must ask the `IDetailCategory` where you want to customize it for one.  You do this by calling `IDetailCategory::GetProperty`.  Usually you simply pass in the name of the property as follows:
+
+	IDetailCategoryBuilder& LightingCategory = DetailBuilder.EditCategory( "Lighting" );
+	// Get a handle to the "bOverrideLightmapRes" property
+	TSharedPtr<IPropertyHandle> OverrideLightmapRes = LightingCategory.GetProperty( "bOverrideLightmapRes" );
+
+Now you have a handle to the bool property `bOverrideLightmapRes`.
+
+From here, you can read and write the value of that property and/or pass it to a slate widget for customization.  
+
+Useful property handle functions (For the complete documented list see PropertyHandle.h):
+
+| Function | Description |
+| -------- | ----------- |
+| `IPropertyHandle::SetValue(const ValueType& InValue)` and `IPropertyHandle::GetValue(ValueType& OutValue)` | Writes and reads property values. These are overloaded for many built in types (including vectors and rotators).  For complicated types like user structs, will need to get a child handle.  See the advanced section at the end of this document. |
+| `ResetToDefault()` | Resets a property to its default. |
+| `IsValidHandle()` | Returns whether or not you have a valid property handle. |
+| `AsArray()` | Array property values are special.  See the advanced section at the end of this document. |
+
+Other notes:
+
+* The handle returned from `GetProperty` may be invalid if the property could not be found or is not going to appear in the details view.  Check `IsValidHandle()` to be sure.  Calling functions on invalid handles will not crash.
+* You should not store property handles outside of your layout class unless they are weak pointers.  Internally the data they access is a weak pointer so it will not crash if you try to set or get a value on an invalid property but you have a reference to a useless object if you store it and it is not cleaned up.
+* If you try to read / write access a value type for an unsupported property (e.g., a `float` for a `String` property ), it will fail but no data will be corrupted.
+
+
+[REGION:warning]
+	[REGION:largetitle]
+		Handling failure cases when accessing values.
+	[/REGION]
+	
+	Remember that detail views can view multiple objects at once and it is not uncommon for users to select hundreds of Actors at once.  In cases like these, you will undoubtedly have multiple values for one property.  GetValue and SetValue return an `FPropertyAccess::Result` to help you determine whether or not accessing a value was successful. `FPropertyAccess::MultipleValues` will be a common return value.
+
+		/**
+		* Potential results from accessing the values of properties                   
+			*/
+		namespace FPropertyAccess
+		{
+				enum Result
+				{
+					/** Multiple values were found so the value could not be read */
+					MultipleValues,
+					/** Failed to set or get the value (Property is no longer available, is not a compatible type, or is edit const are the likely cases) */
+					Fail,
+					/** Successfully set or got the value */
+					Success,
+				};
+		}
+
+	If you are customizing a low level typed property like an `int` or `float`, you must handle the multiple values case somehow.
+
+			INT MyInteger;
+			// Get the value of the property
+			FPropertyAccess::Result MyResult = MyIntHandle->GetValue(MyInteger);
+
+	If MyResult is `FPropertyAccess::MultipleValues`, `MyInteger` will not be set.  Sending that to a widget that displays it will show garbage value and initializing it before hand is not much better because it is still not the correct value.  How this is handled is up to the customizer.  For numeric types, using `SNumericEntryBox` is recommended which allows you to optionally return no value in its value attribute.  It will then display a label you provide instead.  See `SNumericEntryBox.h`.
+[/REGION]
+
+### Slate Layout
+
+Slate layout allows you to completely customize the look and arrangement of properties.  You pass your layout back to a category via `IDetailCategoryBuilder::AddWidget` which takes an arbitrary widget from Slate.  To assist you in this, there are some customization widgets available to you:
+
+#### SProperty
+
+This is the customization widget.  You use this widget to customize a property and/or embed the property in other slate declarative syntax.  You create an `SProperty` using `SNew` but you also provide a handle to the property so it knows what to build.  The handle is a non-optional parameter to `SNew`:  `SNew( SProperty, HandleToTheProperty )`
+
+Example: 
+
+	// Edit the lighting category
+	IDetailCategoryBuilder& LightingCategory = DetailBuilder.EditCategory( "Lighting" );
+
+	// Get a handle to the bOverrideLightmapRes property
+	TSharedPtr<IPropertyHandle> OverrideLightmapRes = LightingCategory.GetProperty( "bOverrideLightmapRes" );
+
+	LightingCategory.AddWidget()
+	[
+		SNew( SHorizontalBox )
+		+ SHorizontalBox::Slot()
+		[
+			// Make a new SProperty
+			SNew( SProperty, EnableOverrideLightmapRes )
+		]
+		+ SHorizontalBox::Slot()
+		.Padding( 4.0f, 0.0f )
+		.MaxWidth( 50 )
+		[
+			SNew( SProperty, LightingCategory.GetProperty("OverriddenLightMapRes") )
+			.NamePlacement( EPropertyNamePlacement::Hidden ) // Hide the name
+		]
+	];
+
+The result:
+                 
+![](sproperty.png)
+
+`SProperty` by default will generate a widget for the property.  There are some basic customization attributes on `SProperty` for customizing the default look (such as the name).  If you want to customize a property, you use the `CustomWidget` slot.  Once you use the `CustomWidget` slot, `SProperty` no longer knows anything about how to set and get the value since you have made a custom widget.  You need to use your property handle to get and set the value.
+
+Example:
+
+      // Customizes the OverridenLightMapRes property to display some text and a spinbox 
+      TSharedPtr<IPropertyHandle> LightMapResValue = LightingCategory.GetProperty("OverriddenLightMapRes")
+      SNew( SProperty, LightMapResValue )
+      .CustomWidget()
+      [
+            SNew( SHorizontalBox )
+            + SHorizontalBox::Slot()
+            .VAlign( VAlign_Center )
+            .Padding( 2.0f )
+            [
+                  SNew( STextBlock )
+                  .Text( TEXT("Lightmap Res") )
+            ]
+            + SHorizontalBox::Slot()
+            [
+                  SNew( SSpinBox )
+                  .MinSliderValue( 0 )
+                  .MaxSliderValue( 1024 )
+                  .OnValueCommitted( &SetValueOnProperty )  
+                  .Value( &GetValueFromProperty
+            ]
+      ]
+      ...
+      FLOAT GetValueFromProperty()
+      {
+            // Using the property handle created above, get its value and send it to the spinbox
+            INT Value; // note lightmap res is an integer so it must be accessed as such.
+            LightMapResValue.GetValue( Value );
+            // Note HANDLE FAILURE CASES
+            return Value;
+      }
+
+      void SetValueOnProperty( FLOAT NewValue )
+      {
+            // Using the property handle, set its value
+            LightMapResValue.SetValue( NewValue )
+      }
+
+##### SProperty Notes
+
+* `SProperty` always displays reset to default even if you make a custom widget.  There is an argument on the `SProperty` which toggles this behavior.  For example, if you have a row of properties, you may want to tell it not to display a reset to default for each one but make a big menu at the end.  See [SResetToDefaultMenu](#SResetToDefaultMenu) below.
+* If you pass an invalid handle to `SProperty`, it will simply not show up.
+
+
+In addition to `SProperty` there are some other customization widgets that can be used.
+
+#### SAssetProperty
+
+`SAssetProperty` is an `SProperty` that displays a thumbnail of the asset as well as an entry box for changing the asset.  You can change the size of the thumbnail as well.  You can use this on `UObject` properties that have renderable thumbnails.  If you use this on other types, it will not display anything.
+
+![](sassetproperty.png)
+
+#### SFilterableDetail
+
+`SFilterableDetail` is a widget that does not draw anything but filters everything in its content slot when a user types in the search box of the details view.  This widget is useful for non-property based details. `SProperty` is already filtered so you do not need to set up an `SFilterableDetail` for those unless you want to group their filtering.
+
+	// Create a widget which will filter out everything in the content slot when "Create Blocking Volume" is not matched with a user's search term
+	// Note: The second parameter is the localized search term that matches the filter and the third parameter is the category where this filter should reside
+	SNew( SFilterableDetail, NSLOCTEXT("StaticMeshDetails", "BlockingVolumeMenu", "Create Blocking Volume"), &StaticMeshCategory )
+	.Content()
+	[
+		  // Create blocking volume menu
+		  SNew( SComboButton )
+		  .ButtonContent()
+		  [
+				SNew( STextBlock )
+				.Text( NSLOCTEXT("StaticMeshDetails", "BlockingVolumeMenu", "Create Blocking Volume") ) 
+				.Font( IDetailLayoutBuilder::GetDetailFont() )
+		  ]
+		  .MenuContent()
+		  [
+				BlockingVolumeBuilder.MakeWidget()
+		  ]
+	]
+
+
+
+#### SResetToDefaultMenu
+
+`SResetToDefaultMenu` is a menu which displays the yellow reset to default arrow.  By default, `SProperty` adds a reset to default menu, but sometimes it makes sense to group more than one property into the same menu. (e.g `Vector` properties).  You can add `SProperty` widgets to an `SResetToDefaultMenu` to handle this for you.  Simply call `AddProperty` on `SResetToDefaultMenu` and then place the menu in any declarative syntax!
+
+#### SArrayProperty
+
+This widget allows you to customize an array of properties.  You  create one just like `SProperty` and also hook up a delegate which is called each time a widget for an array element is needed.
+
+Example:
+
+	void FMeshComponentDetails::LayoutDetails( IDetailLayoutBuilder& DetailLayout )
+	{
+		  IDetailCategoryBuilder& DetailCategory = DetailLayout.EditCategory("Rendering");
+		  TSharedRef<IPropertyHandle> MaterialProperty = DetailCategory.GetProperty( "Materials" );
+
+		  DetailCategory.AddWidget()
+		  [
+				SNew( SArrayProperty, MaterialProperty )
+				// This delegate is called for each array element to generate a widget for it
+				.OnGenerateArrayElementWidget( this, &FMeshComponentDetails::OnGenerateElementForMaterials )
+		  ];
+	}
+	...
+	/**
+	* Generates a widget for a materials element
+	* 
+	 * @param ElementProperty     A handle to the array element we need to generate
+	* @param ElementIndex        The index of the element we are generating
+	*/
+	TSharedRef<SWidget> FMeshComponentDetails::OnGenerateElementForMaterials( TSharedRef<IPropertyHandle> ElementProperty, INT ElementIndex )
+	{
+		  return 
+				SNew( SAssetProperty, ElementProperty )
+				.ThumbnailSize( FIntPoint(32,32) );
+	}
+
+The result:
+ 
+![](sarrayproperty.png)
+
+### Customization Dos and Dont's
+
+* Do check error cases when customizing properties and reading/writing values.  Remember that details views can often be viewing multiple objects at once where each object has different values.  Customized properties should be able to handle the common case of multiple values.
+* Do store any data about the selection on your customization class.  Some non-property details will need the selected Actors for a customization.  You can get the selected Actors from `IDetailLayoutBuilder`.  You can store this selection set or anything selection sensitive on your customization class.  It is guaranteed to be around while the selection remains the same in its details view.
+* Do not use `FActorIterator`, `FSelectedActorIterator`, or `GEditor->GetSelectedActorIterator`.  Remember that the **Details** panel can be locked and these things operate on global selection sets or lists of Actors which is not the same as the selected Actors in a **Details** panel if it is locked!  Using these will access different data.  You can get the list of selected Actors valid for you from `IDetailLayoutBuilder`.
+* Do not hold a strong reference to your layout class or property handles (you should not need to anyway).  Remember that details views (especially level editor ones) can change at any time based on user selection so any references you have to layout classes can easily become invalid.  The shared pointers to layout classes are checked for uniqueness when customizing details to prevent this from happening.
+
+
+## Advanced Tips
+
+### Accessing complicated properties.
+
+A complicated property is defined as anything that cannot be resolved with just a property name.  Usually this involves properties inside structs.
+
+There are two ways to access complicated properties:
+
+* Functions that return a property handle or add a property to a category take optional parameters for resolving properties. 
+
+	Example:
+
+		TSharedPtr<IPropertyHandle> IDetailCategoryBuilder::GetProperty(  FName PropertyPath, UClass* ClassOutermost , FName InstanceName) 
+	
+	| Parameter | Description |
+	| --------- | ----------- | 
+	| Path | The path to the property.  Can be just a name of the property or a path in the format `outer.outer.value[optional_index_for_static_arrays]`. |
+	| ClassOutermost | Optional outer class if accessing a property outside of the current class being customized. |
+	| InstanceName | Optional instance name if multiple UProperty's of the same type exist (Such as two identical structs, the instance name is one of the struct variable names). |
+
+	Examples:
+
+		struct MyStruct
+		{ 
+			INT StaticArray[3];
+			FLOAT FloatVar;
+		}
+
+		class MyActor
+		{ 
+            MyStruct Struct1;
+            MyStruct Struct2;
+            FLOAT MyFloat
+		}
+                                
+	* To access `StaticArray` at index `2` from `Struct2` in `MyActor`, your path would be `"MyStruct.StaticArray[2]"` and your instance name is `"Struct2"`.
+	* To access the same `StaticArray` outside of `MyActor` customization functions you would do the same as above but `ClassOutermost` would be `MyActor::StaticClass()`.
+	* To access `MyFloat` in `MyActor` you can just pass in `"MyFloat"` because the name of the property is unambiguous.
+
+* If you have a property handle, you can get a child property handle by name from it:
+
+		TSharedPtr<IPropertyHandle> IPropertyHandle::GetChildHandle( FName ChildName )
+
+	| Parameter | Description |
+	| --------- | ----------- |
+	| ChildName | The property name of the child.  This will recurse until found.  Paths are not supported and children of arrays cannot be accessed in this way. |
+
+
+### Accessing Arrays
+
+You can access arrays via `IPropertyHandle::AsArray`.  If the property handle is an array, this will return an `IPropertyHandleArray` which has functions for adding, removing, inserting, duplicating, and getting the number of elements of an array.
+
+### Hiding properties
+
+You can hide properties altogether by calling `IDetailLayoutBuilder::HideProperty`.  It takes either a name/path or a property handle.

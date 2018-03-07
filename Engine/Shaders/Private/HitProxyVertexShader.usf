@@ -1,0 +1,133 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	HitProxyVertexShader.hlsl: Vertex shader for rendering hit proxies.
+=============================================================================*/
+
+// Some input nodes can't compute their output value at hit proxy rendering time, and so their implementation changes.
+#define HIT_PROXY_SHADER 1
+
+#include "Common.ush"
+#include "/Engine/Generated/Material.ush"
+#include "/Engine/Generated/VertexFactory.ush"
+
+struct FHitProxyVSToPS
+{
+	FVertexFactoryInterpolantsVSToPS FactoryInterpolants;
+#if USE_INSTANCING	
+	float4 InstanceHitProxyId : HIT_PROXY_ID;
+#endif
+	float4 PixelPosition : TEXCOORD6;
+	float4 Position : SV_POSITION;
+};
+
+#if USING_TESSELLATION	
+	struct FHitProxyVSToDS
+	{
+		FVertexFactoryInterpolantsVSToDS FactoryInterpolants;
+	    #if USE_INSTANCING	
+		    float4 InstanceHitProxyId : HIT_PROXY_ID;
+	    #endif
+		float4 Position : VS_To_DS_Position;
+		OPTIONAL_VertexID_VS_To_DS
+	};
+	
+	#define FHitProxyVSOutput FHitProxyVSToDS
+#else
+	#define FHitProxyVSOutput FHitProxyVSToPS
+#endif
+
+#if USING_TESSELLATION	
+	#define FPassSpecificVSToDS FHitProxyVSToDS
+	#define FPassSpecificVSToPS FHitProxyVSToPS
+	
+	FHitProxyVSToDS PassInterpolate(FHitProxyVSToDS a, float aInterp, FHitProxyVSToDS b, float bInterp)
+	{
+		FHitProxyVSToDS O;
+
+		O.FactoryInterpolants = VertexFactoryInterpolate(a.FactoryInterpolants, aInterp, b.FactoryInterpolants, bInterp);
+
+		#if USE_INSTANCING	
+			TESSELLATION_INTERPOLATE_MEMBER(InstanceHitProxyId);
+		#endif
+
+		return O;
+	}
+
+	FHitProxyVSToPS PassFinalizeTessellationOutput(FHitProxyVSToDS Interpolants, float4 WorldPosition, FMaterialTessellationParameters MaterialParameters)
+	{
+		FHitProxyVSToPS O;
+		
+		O.FactoryInterpolants = VertexFactoryAssignInterpolants(Interpolants.FactoryInterpolants);
+		
+		// Calc displacement mapping
+		float3 WorldDisplacement = GetMaterialWorldDisplacement(MaterialParameters);
+
+		WorldPosition.xyz += WorldDisplacement;
+
+		#if USE_INSTANCING	
+			O.InstanceHitProxyId = Interpolants.InstanceHitProxyId;
+		#endif
+
+		// Finally, transform position to clip-space
+		ISOLATE
+		{
+			O.Position = mul(WorldPosition, View.TranslatedWorldToClip);
+		}
+			
+		O.PixelPosition = WorldPosition;
+		
+		return O;
+	}
+	
+	#include "Tessellation.ush"
+#endif
+
+#if VERTEXSHADER
+
+void Main(
+	FVertexFactoryInput Input,
+	OPTIONAL_VertexID
+	out FHitProxyVSOutput Output
+#if USE_GLOBAL_CLIP_PLANE && !USING_TESSELLATION
+	, out float OutGlobalClipPlaneDistance : SV_ClipDistance
+#endif
+	)
+{
+	ResolvedView = ResolveView();
+
+	FVertexFactoryIntermediates VFIntermediates = GetVertexFactoryIntermediates(Input);
+	float4	WorldPosition = VertexFactoryGetWorldPosition(Input, VFIntermediates);
+	float3x3 TangentToLocal = VertexFactoryGetTangentToLocal(Input, VFIntermediates);
+
+	FMaterialVertexParameters VertexParameters = GetMaterialVertexParameters(Input, VFIntermediates, WorldPosition.xyz, TangentToLocal);
+	WorldPosition.xyz += GetMaterialWorldPositionOffset(VertexParameters);
+
+#if USE_INSTANCING
+	Output.InstanceHitProxyId = VertexFactoryGetInstanceHitProxyId(Input, VFIntermediates);
+#endif
+
+#if USING_TESSELLATION
+	Output.Position = WorldPosition;
+	Output.FactoryInterpolants = VertexFactoryGetInterpolantsVSToDS(Input, VFIntermediates, VertexParameters);
+#else
+
+	ISOLATE
+	{
+		float4 RasterizedWorldPosition = VertexFactoryGetRasterizedWorldPosition(Input, VFIntermediates, WorldPosition);
+		Output.Position = mul(RasterizedWorldPosition, View.TranslatedWorldToClip);
+	}
+
+#if USE_GLOBAL_CLIP_PLANE
+	OutGlobalClipPlaneDistance = dot(ResolvedView.GlobalClippingPlane, float4(WorldPosition.xyz - ResolvedView.PreViewTranslation.xyz, 1));
+#endif
+
+	Output.FactoryInterpolants = VertexFactoryGetInterpolantsVSToPS(Input, VFIntermediates, VertexParameters);
+	Output.PixelPosition = WorldPosition;
+	
+#endif
+
+	OutputVertexID( Output );
+}
+
+#endif // VERTEXSHADER

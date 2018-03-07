@@ -1,0 +1,205 @@
+﻿INTSourceChangelist:3599948
+Availability:Docs
+Title:크래시 리포트 셋업하기
+Crumbs:%ROOT%, Engine
+Description:언리얼 엔진 4용 크래시 리포트 인트라넷 어플리케이션 셋업하기입니다.
+
+[TOC (start:2 end:3)]
+
+
+CrashReport(크래시 리포트)는 유저가 크래시를 살펴보고 관리할 수 있는 인트라넷 어플입니다. 크래시 리포트는 Bugg 호출을 어느 콜스택 안에서 했는지에 따라 크래시를 그룹화시킵니다. Bugg는 유저의 코드 내 실제 버그 식별을 돕기 위해 둘 이상의 크래시를 그룹화시킵니다. 여기서는 인트라넷에서 크래시 리포트 셋업 방법을 상세히 알려 드리도록 하겠습니다.
+
+사용자가 크래시 리포트 툴을 써 보면 하나의 웹 어플처럼 느끼겠지만, 이 툴의 작동에는 다양한 요소가 필요합니다. 엔진 크래시가 발생하면 AutoReport.exe를 실행시켜 모든 크래시 데이터를 그러모아 http://AutoReportService로 전송하며, 이 서비스는 보고서를 크래시 리포트 데이터베이스에 등록하고 로그와 덤프 파일을 http://AutoReportFiles 에다 업로드하는 서비스이며, 또 이 사이트는 보고서를 단순히 저장했다가 나중에 볼라 치면 내 주는 역할을 합니다. 
+
+## 요구사항
+
+* Visual Studio 2008
+* 내부 웹 서버
+    * .Net 3.5 이상이 설치된 IIS 7 이상
+    * ASP MVC 2.0
+* 내부 SQL 서버
+* SQL Management Studio
+* Visual Web Developer 2008 또는 2010
+
+
+## 설치
+
+* 이 툴의 소스 코드는 퍼포스의 /UnrealEngine3/Development/Tools/CrashReport/ 에 있습니다.
+
+
+### 데이터베이스 만들기
+
+* 데이터베이스에 유저를 만듭니다. (IT 부서와 상의하세요.)
+* 데이터베이스에 우클릭 -> 새 데이터베이스
+    * 위자드에서 데이터베이스의 이름과 기타 옵션을 채우고 OK 클릭.
+* SQL 매니저에서 `<프로젝트 루트>Crashreport/Models/CreateDatabase.sql` 을 엽니다.
+    * 데이터베이스 이름을 방금 만든 데이터베이스 이름으로 변경
+    * "! Execute Script" 버튼 클릭
+* 유저가 이 데이터베이스로 접근(이나 가급적 소유) 권한이 있는지 확인합니다.
+
+
+### 웹 사이트 만들기
+
+이 서비스의 작동을 위해 웹사이트를 셋 만들 겁니다.
+
+* `http://CrashReport.yourdomain.com`
+    * 유저가 사용하게 될 메인 인트라넷 어플
+* `http://AutoReportService.yourdomain.com`
+    * 엔진이 발송한 크래시를 처리하는 웹서비스
+* `http://AutoReportFiles.yourdomain.com`
+    * 각 크래시에 대한 로그와 미니덤프를 담는 저장소
+
+
+#### http://CrashReport.yourdomain.com
+
+* IIS Manager를 엽니다.
+* Application Pools 우클릭 -> Add Application pool  
+	![](AddApplicationPool.JPG)
+    * Name: CrashReport 
+    * .Net Framework Version: 2.0 이상  
+		![](AddApplicationPoolWizard.JPG)
+* Sites 우클릭 -> Add Web Site
+	![](AddSite.JPG)
+    * Site Name: CrashReport
+    * Application Pool: CrashReport  
+		![](AddSiteWizard.JPG)
+    * Physical Path: <웹 루트>/CrashReport 공유  
+		![](AddSiteCreateDirectory.JPG)
+* 단순 배포 허용을 위해 네트워크에 <웹 루트>/CrashReport를 공유합니다.
+    * IIS에서 웹사이트 위에 우클릭 -> Explore
+    * 폴더에 우클릭 > Properties
+        * 최소한 사이트 액세스를 배포하는 사람은 허용해 주고서 적절히 권한을 설정합니다.
+        * OK를 클릭하고 나중의 배포를 위해 파일 경로를 적어 둡니다.
+
+
+#### http://AutoReportService.yourdomain.com
+
+* IIS Manager를 엽니다.
+* Application Pools 우클릭 -> Add Application pool
+    * Name: AutoReportService
+    * .Net Framework Version: 2.0 이상
+* Sites 우클릭 -> Add Web Site
+    * Site Name: AutoReportService
+    * Application Pool: AutoReportService
+    * Physical Path: `<웹 루트>/AutoReportService`
+* 파일 시스템에서 웹 루트 밖에다가 로그 파일용 폴더를 만듭니다.
+    * 예로 C:\AutoReportLog\
+* 단순 배포 허용을 위해 로컬 네트워크에 `<웹 루트>/AutoReportService`를 공유합니다.
+    * IIS에서 그냥 웹사이트 이름에 우클릭 -> Explore
+    * 폴더에 우클릭 > Properties
+        * 최소한 사이트 액세스를 배포하는 사람은 허용해 주고서 적절히 권한을 설정합니다.
+        * OK를 클릭하고 나중의 배포를 위해 파일 경로를 적어둡니다.
+
+
+#### http://AutoReportFiles.yourdomain.com
+
+* IIS Manager를 엽니다.
+* Application Pools 우클릭 -> Add Application pool
+    * Name: AutoReportFiles
+    * .Net Framework Version: 2.0 이상
+* Sites 우클릭 -> Add Web Site
+    * Site Name: AutoReportFiles
+    * Application Pool: AutoReportFiles
+    * Physical Path: <웹 루트>/AutoReportFiles
+* 리포트 파일용 디렉토리를 만듭니다.
+    * <웹 루트>/AutoReportFiles/ReportFiles/
+* 로그와 덤프에 대한 MIME 유형을 추가합니다.
+    * AutoReportFiles 사이트 선택
+    * MIME Types 더블클릭
+    * 우상단 구석의 Add 클릭
+        * File Name Extensions: ".log"
+        * MIME type: "application/octet-stream"  
+			![](AddMimeTypes.JPG)
+    * Add 다시 클릭
+        * File Name Extensions: ".dmp"
+        * MIME type: "application/octet-stream"
+
+
+## 서비스 배포하기
+
+VS 2008 내 CrashReport 솔루션을 엽니다. 위치는 /UnrealEngine3/Development/Tools/CrashReport/ 입니다.
+
+### http://CrashReport.yourdomain.com
+
+* Web.config 편집
+    * `<connectionStrings>` 아래 `<add name="CrashReportConnectionString"` 로 시작하는 줄을 찾습니다.
+    * 커넥션 세팅에 맞도록 Data Source, User ID, Password 를 편집합니다.
+* Settings.settings ( 또는 Properties->settings) 편집
+    * `http://AutoReportFiles.yourdomain.com` 용으로 만든 url을 적어둔 다음 여기에 그 url을 입력합니다.
+* Publish Site
+    * CrashReport Project 우클릭 -> Publish  
+		![](PublishProject.JPG)
+    * 세팅이 맞게 설정되었는지 확인합니다.  
+		![](PublishProjectWizard.JPG)
+    * OK 클릭
+
+
+### http://AutoReportService.yourdomain.com
+
+* Web.Config 편집
+    * `<add key="LogFileName" value=` 로 시작하는 줄을 편집합니다.
+        * 웹서버상의 AutoReportLog 디렉토리의 경로로 설정합니다.
+    *  `<add key="SaveFilesPath"` 로 시작하는 줄을 편집합니다.
+        * 웹서버상의 AutoReportFiles 디렉토리의 경로로 설정합니다.
+        * 예로 `<웹 루트>/AutoReportFiles/ReportFiles/`
+    * 크래시 리포트 Web.Config 으로부터 Connection String 을 복사합니다.
+        * 아니면 현재 파일을 편집해서 Server 및 Authentication 세팅을 일치시킵니다.
+        * 프로젝트가 파일 업데이트를 하는 데 크래시 리포트 dll을 사용하기에 필요한 작업입니다만, 수행시에는 자체 커넥션 스트링을 전달합니다.
+* Publish Site
+    * 프로젝트명 우클릭 -> Publish
+    * 세팅이 맞게 설정되었는지 확인합니다.
+    * OK 클릭.
+
+
+### AutoReporter.exe
+
+* Settings.setting 편집
+    * 모든 URL이 프로덕션 시스템의 URL을 제대로 가리키는지 확인합니다.
+    * URL 기본값은 이 문서에 지정된 대로입니다.
+* 웹 서비스 리퍼런스 동기화
+    * "Web References" 확장
+    * "ReportService" 우클릭 -> Update Web Reference
+    * 웹 리퍼런스를 퍼블리싱된 AutoReportService/RegisterReport.asmx 웹 서비스의 인스턴스에 일치시켜 줍니다.
+* 프로젝트명 우클릭 -> Build 
+
+
+### http://AutoReportFiles.yourdomain.com
+
+파일을 모아 제공해 주는 매우 간단한 웹 사이트입니다. 이 사이트가 제대로 돌아가는지 확인해 보려면, 그냥 크래시를 낸 다음 URL을 방문하여 Log 및 Dump 파일을 클릭해서 다운받을 수 있는지 보시면 됩니다.
+
+
+## 테스트하기
+
+### http://CrashReport.yourdomain.com
+
+* http://CrashReport.yourdomain.com 에 방문하면 빈 페이지가 뜰 겁니다.
+    [REGION:fullwidth]
+	![](WorkingWebsiteEmptyDatabase.JPG)
+	[/REGION]
+
+
+### AutoReporter.exe
+
+#### 크래시 내기
+
+* 에디터의 인스턴스를 엽니다.
+    * ExampleGame.exe 실행하면 빠르겠죠.
+    * 크래시를 내는 명령은: "~" -> "debug crash"
+* 대화창이 뜰 겁니다.
+    * 요약 및 설명은 대충 넣으시고
+    * OK 클릭
+* 다 잘 돌아가면 크래시 서버로의 URL이 찍힌 창이 또 하나 뜨게 됩니다.
+    * URL 클릭, 크래시 리포트에 제대로 크래시가 등록됐나 확인합니다.
+* 크래시 리포트 내의 크래시 ID를 클릭합니다.
+    * Log 하이퍼링크를 클릭합니다.
+        * 1_Launch.log 를 다운로드하겠냐는 창이 뜨면 성공!
+
+
+#### Bugg 만들기
+
+* 크래시를 또 한번 냅니다.
+    * 위 단계 반복
+* `http://CrashReport.yourdomain.com/Buggs` 를 방문합니다.
+    * Bugg 가 하나 보일겁니다.
+        * ID를 클릭하면 방금 두 테스트 크래시가 나열된 화면이 뜨게 됩니다.
+

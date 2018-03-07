@@ -1,0 +1,70 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	PostProcessVisualizeShadingModels.usf: PostProcessing shader to visualize ShadingModels
+=============================================================================*/
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+#include "PostProcessHistogramCommon.ush"
+#include "DeferredShadingCommon.ush"		// GBufferData
+
+// only the red channel is used, 1.0f for the bit to be on, 0..1 to get fade
+float4 ShadingModelMaskInView[16];
+
+void MainPS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
+{
+	float2 UV = UVAndScreenPos.xy;
+	int2 PixelPos = (int2)SvPosition.xy;
+
+	float3 SceneColor = Texture2DSample(PostprocessInput0, PostprocessInput0Sampler, UV).rgb;
+
+	FScreenSpaceData ScreenSpaceData = GetScreenSpaceData(UV);
+
+	float3 ShadingModelColor = GetShadingModelColor(ScreenSpaceData.GBuffer.ShadingModelID);
+
+	OutColor.xyz = ShadingModelColor * lerp(0.8f, 1.0f, Luminance(SceneColor));
+
+	{
+		const int2 LegendLeftTop = int2(32, 160);
+		const int YStep = 20;
+		const int ShadingModelCount = SHADINGMODELID_NUM;
+		const int2 LegendSize = int2(220, ShadingModelCount * YStep);
+
+		// (0, 0) .. (1, 1)
+		float2 InsetPx = PixelPos - LegendLeftTop;
+
+		float BorderDistance = ComputeDistanceToRect(PixelPos, LegendLeftTop, LegendSize);
+
+		float3 LegendColor = 0.25f;	// dark grey
+
+		int ShadingModelID = (InsetPx.y * ShadingModelCount) / LegendSize.y;
+
+		if(ShadingModelID < ShadingModelCount)
+		{
+			bool bValue = ShadingModelMaskInView[ShadingModelID].r == 1.0f;
+
+			float3 LegendShadingModelColor = GetShadingModelColor(ShadingModelID);
+
+			if(InsetPx.x < 20)
+			{
+				LegendColor = LegendShadingModelColor;
+			}
+			else
+			{
+				LegendColor = bValue ? 0.5f : 0.2f;
+			}
+		}
+
+		// thin black border around the legend
+		OutColor.xyz = lerp(float3(0, 0, 0), OutColor.xyz, saturate(BorderDistance - 20));
+		OutColor.xyz = lerp(LegendColor, OutColor.xyz, saturate(BorderDistance - 1));
+		OutColor.w = 1.0f;
+
+		// big solid border around the histogram
+//		OutColor.xyz = lerp(BorderColor, OutColor.xyz, saturate(BorderDistance - (HistogramOuterBorder + 1)));
+
+		// thin black border around the histogram
+//		OutColor.xyz = lerp(float3(0, 0, 0), OutColor.xyz, saturate(BorderDistance - 1));
+	}
+}

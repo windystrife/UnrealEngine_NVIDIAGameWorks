@@ -1,0 +1,60 @@
+﻿INTSourceChangelist:3151855
+Availability:Public
+Title:AsyncCompute
+Crumbs:%ROOT%, Programming, Programming/Rendering, Programming/Rendering/ShaderDevelopment
+Description:다양한 GPU 작업을 인터리브 방식으로 끼워넣어 효율을 향상시키는 하드웨어 기능인 AsyncCompute, 비동기 계산에 대한 글입니다.
+Version: 4.9
+tags:Rendering
+
+이제 Rendering Hardware Interface (RHI)는 엑스박스 원에 비동기 계산 (**AsyncCompute**) 을 지원합니다. 미사용 GPU 리소스(컴퓨트 유닛, 레지스터, 대역폭)를 활용하기 좋은 방식으로,
+렌더링과 함께 dispatch() 호출을 비동기 실행하는 것입니다. 비동기 계산은 별도의 맥락을 사용하며, 맥락 계산 및 렌더링 동기화를 위한 
+RHI 함수를 제공합니다.
+비동기 계산으로 이득을 볼 수 있는 영역을 확인하는 데는 Dr PIX 가 좋습니다. 예를 들어 특정 렌더링 패스에서 CU 절반이 미사용되는 경우, 
+그 CU 를 비동기 계산 작업에 활용 가능할 수도 있습니다.
+비동기 계산에는 몇 가지 제약이 있습니다:
+
+ * UAV 카운터가 있는 버퍼는 지원되지 않습니다 (이는 XDK 의 한계로, D3D 경고를 생성합니다).
+ * 비동기 계산 작업은 PIX GPU 캡처에 나타나지 않습니다 (타이밍 캡처에 나타나기는 합니다).
+   PIX 는 그래픽 즉시 맥락(graphics immediate context)만 캡처합니다 (플랫폼 한계입니다).
+ * 자동 파이프라인 플러시는 드라이버에 제공되지 않습니다. 플러시가 필요하면 **RHICSManualGpuFlush** 를 명시적으로 호출해 줘야 합니다.
+   (예: 한 디스패치가 기존 디스패치에 종속된 경우)
+
+## API
+
+ * **RHIBeginAsyncComputeJob_DrawThread** (EAsyncComputePriority Priority)
+   렌더링 스레드에서 비동기 계산 작업을 시작합니다. 우선순위를 사용하여 (ID3D11XComputeContext::SetLimits 를 통해)
+   잡에 할당할 셰이더 리소스 수를 결정합니다. 사용되는 우선순위는 AsyncComputePriority_High 와
+   AsyncComputePriority_Default, 두 가지입니다.
+ * **RHIEndAsyncComputeJob_DrawThread**
+   비동기 계산 작업을 끝냅니다. 동기화에 사용되는 32 비트 Fence Index 를 반환, 또는 계산이 꺼져있거나 활성화된 계산 작업이 없는 경우 
+   -1 을 반환합니다.
+ * **RHIGraphicsWaitOnAsyncComputeJob**
+   그래픽 즉시 맥락에 명령을 삽입하여 비동기 작업 완료시까지 블록합니다. -1 을 전달하면 일찍 빠져나옵니다.
+
+RHIBeginAsyncComputeJob_DrawThread 와 RHIEndAsyncComputeJob_DrawThread 호출 사이에 RHI 는 비동기 계산 상태가 됩니다.
+이 시간 도중, 비동기 계산 맥락을 통해 지원되는 RHI 명령이 실행됩니다. 지원되지 않는 함수는 어서트가 발생합니다.
+
+## 활성화/비활성화
+
+비동기 계산 기능의 활성화 내지 비활성화는 컴파일 시간에 #define USE_ASYNC_COMPUTE_CONTEXT 로 합니다. 실행시간에는 
+_r.AsyncCompute_ 콘솔 변수로 가능합니다. 비동기 계산이 비활성화되면, 비동기 계산 블록 내 디스패치는 그래픽 명령 버퍼에서 동기 실행됩니다.
+PC 에서는 USE_ASYNC_COMPUTE_CONTEXT 가 0 으로 정의되어 있는데, D3D11.1 에서는 지원되지 않기 때문입니다.
+
+## PIX
+
+비동기 계산 맥락 작업은 GPU 캡처에 캡처되지 않으므로, 이러한 캡처는 비동기 계산 활성화시 GPU 퍼포먼스를 잘못 파악하게 될 수 있습니다. 
+그래픽 디버깅이 목적이라면, 위의 콘솔 변수를 사용하여 비동기 계산을 꺼야 합니다.
+비동기 계산은 PIX 타이밍 캡처에 지원됩니다. 타임라인에 다음과 같이 나타납니다:
+
+![](PixTimingCapture.png)
+
+## 감사 인사 및 향후 계획
+
+이 기능은 라이온헤드 스튜디오가 구현한 것으로, 엑스박스 원 렌더링 최적화를 위한 툴로서 활용하고자 하고 있습니다.
+
+더욱 많은 API 가 하드웨어 기능을 노출함에 따라 시스템의 크로스 컴파일 대상도 늘리고자 합니다. 비동기 계산을 활용하는 기능은 
+(콘솔 변수 / 디파인) 없이도 다른 플랫폼에서의 실행, 편리한 디버깅 및 프로파일링을 위해 언제든 실행 가능합니다. 비동기 계산 사용시에는 주의를 기울여야 하는데,
+퍼포먼스를 더욱 예측할 수 없거나 동기화에 더욱 많은 코딩 노력이 필요할 수 있기 때문입니다.
+
+
+

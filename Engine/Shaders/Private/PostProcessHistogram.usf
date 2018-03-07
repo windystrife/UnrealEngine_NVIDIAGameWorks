@@ -1,0 +1,109 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	PostProcessHistogram.usf: PostProcessing histogram
+=============================================================================*/
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+#include "PostProcessHistogramCommon.ush"
+
+// xy:GatherExtent, zw : unused
+float4 HistogramParameters;
+
+// Output histogram texture (UAV)
+RWTexture2D<float4> HistogramRWTexture;
+
+
+//
+uint2 ThreadGroupCount;
+//
+uint2 LeftTopOffset;
+
+// THREADGROUP_SIZEX*THREADGROUP_SIZEY histograms of the size HISTOGRAM_SIZE
+groupshared float SharedHistogram[HISTOGRAM_SIZE][THREADGROUP_SIZEX][THREADGROUP_SIZEY];
+
+[numthreads(THREADGROUP_SIZEX, THREADGROUP_SIZEY, 1)]	// dimx,dimy,dimz
+void MainCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,	// DispatchThreadId = GroupId * int2(dimx,dimy) + GroupThreadId
+    uint3 GroupThreadId : SV_GroupThreadID,	// 0..THREADGROUP_SIZEX 0..THREADGROUP_SIZEY
+	uint GroupIndex: SV_GroupIndex) // SV_GroupIndex = SV_GroupThreadID.z*dimx*dimy + SV_GroupThreadID.y*dimx + SV_GroupThreadID.x
+{
+	// todo: can be cleared more efficiently
+	// clear all THREADGROUP_SIZEX*THREADGROUP_SIZEY histograms
+	UNROLL for(uint i = 0; i < HISTOGRAM_SIZE; ++i)
+	{
+		SharedHistogram[i][GroupThreadId.x][GroupThreadId.y] = 0.0f;
+	}
+	 
+	GroupMemoryBarrierWithGroupSync();
+
+	uint2 TileSize = uint2(LOOP_SIZEX, LOOP_SIZEY);
+	uint2 LeftTop = DispatchThreadId.xy * TileSize + LeftTopOffset;
+
+	uint2 GatherExtentInt = (uint2)HistogramParameters.xy + (uint2)LeftTopOffset.xy;
+
+	// accumulate all pixels into THREADGROUP_SIZEX*THREADGROUP_SIZEY histograms
+	{
+		LOOP for(uint y = 0; y < LOOP_SIZEY; ++y)
+		{
+			LOOP for(uint x = 0; x < LOOP_SIZEX; ++x)
+			{
+				uint2 Tile = uint2(x, y);
+				uint2 TexelPos = LeftTop + Tile;
+
+				if(TexelPos.x < GatherExtentInt.x && TexelPos.y < GatherExtentInt.y)
+				{
+					float4 SceneColor = PostprocessInput0.Load(int3(TexelPos, 0));
+					float LuminanceVal = max(SceneColor.r, max(SceneColor.g, SceneColor.b));
+					float LogLuminance = ComputeHistogramPositionFromLuminance(LuminanceVal);
+			
+					float fBucket = saturate(LogLuminance) * (HISTOGRAM_SIZE - 1) * 0.9999f;
+
+					uint Bucket0 = (uint)(fBucket);
+					uint Bucket1 = Bucket0 + 1;
+
+					float Weight1 = frac(fBucket);
+					float Weight0 = 1.0f - Weight1;
+			
+					// accumulate the weight to the nearby history buckets
+					if (Bucket0 != 0)
+					{
+						SharedHistogram[Bucket0][GroupThreadId.x][GroupThreadId.y] += Weight0;
+					}
+					SharedHistogram[Bucket1][GroupThreadId.x][GroupThreadId.y] += Weight1;
+				}
+			}
+		}
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
+	// accumulate all histograms into one
+	if(GroupIndex < HISTOGRAM_SIZE / 4) 
+	{
+		float4 Sum = 0;
+
+		LOOP for(uint y = 0; y < THREADGROUP_SIZEY; ++y)
+		{
+			LOOP for(uint x = 0; x < THREADGROUP_SIZEX; ++x)
+			{
+				Sum += float4(
+					SharedHistogram[GroupIndex * 4 + 0][x][y],
+					SharedHistogram[GroupIndex * 4 + 1][x][y],
+					SharedHistogram[GroupIndex * 4 + 2][x][y],
+					SharedHistogram[GroupIndex * 4 + 3][x][y]);
+			}
+		}
+
+		float2 MaxExtent = float2(THREADGROUP_SIZEX * LOOP_SIZEX, THREADGROUP_SIZEY * LOOP_SIZEY);
+		float Area = MaxExtent.x * MaxExtent.y;
+	
+		// doesn't take borders into account but the error should be minor
+		float NormalizeFactor = 1.0f / Area;
+
+		// output texture with one histogram per line, x and y unwrapped into all the lines
+		HistogramRWTexture[uint2(GroupIndex, GroupId.x + GroupId.y * ThreadGroupCount.x)] = Sum * NormalizeFactor;
+	}
+}

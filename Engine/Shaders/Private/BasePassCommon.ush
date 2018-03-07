@@ -1,0 +1,162 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	BasePassCommon.usf: Base pass definitions used by both vertex and pixel shader
+=============================================================================*/
+
+#undef NEEDS_LIGHTMAP_COORDINATE
+
+#define NEEDS_LIGHTMAP_COORDINATE		(HQ_TEXTURE_LIGHTMAP || LQ_TEXTURE_LIGHTMAP)
+// Translucent materials need to compute fogging in the forward shading pass
+// Materials that read from scene color skip getting fogged, because the contents of the scene color lookup have already been fogged
+// This is not foolproof, as any additional color the material adds will then not be fogged correctly
+#define TRANSLUCENCY_NEEDS_BASEPASS_FOGGING	(ENABLE_TRANSLUCENCY_FOGGING && MATERIALBLENDING_ANY_TRANSLUCENT && !MATERIAL_USES_SCENE_COLOR_COPY)
+#define OPAQUE_NEEDS_BASEPASS_FOGGING		(!MATERIALBLENDING_ANY_TRANSLUCENT && VERTEX_FOGGING_FOR_OPAQUE && FORWARD_SHADING)
+#define NEEDS_BASEPASS_VERTEX_FOGGING		(TRANSLUCENCY_NEEDS_BASEPASS_FOGGING && !COMPUTE_FOG_PER_PIXEL || OPAQUE_NEEDS_BASEPASS_FOGGING)
+#define NEEDS_BASEPASS_PIXEL_FOGGING		(TRANSLUCENCY_NEEDS_BASEPASS_FOGGING && COMPUTE_FOG_PER_PIXEL)
+
+#define NEEDS_LIGHTMAP						(NEEDS_LIGHTMAP_COORDINATE)
+
+#define USES_GBUFFER						(FEATURE_LEVEL >= FEATURE_LEVEL_SM4 && (MATERIALBLENDING_SOLID || MATERIALBLENDING_MASKED) && !SIMPLE_FORWARD_SHADING && !FORWARD_SHADING)
+
+// Only some shader models actually need custom data.
+#define WRITES_CUSTOMDATA_TO_GBUFFER		(USES_GBUFFER && (MATERIAL_SHADINGMODEL_SUBSURFACE || MATERIAL_SHADINGMODEL_PREINTEGRATED_SKIN || MATERIAL_SHADINGMODEL_SUBSURFACE_PROFILE || MATERIAL_SHADINGMODEL_CLEAR_COAT || MATERIAL_SHADINGMODEL_TWOSIDED_FOLIAGE || MATERIAL_SHADINGMODEL_HAIR || MATERIAL_SHADINGMODEL_CLOTH || MATERIAL_SHADINGMODEL_EYE))
+
+// Based on GetPrecomputedShadowMasks()
+// Note: WRITES_PRECSHADOWFACTOR_TO_GBUFFER is currently disabled because we use the precomputed shadow factor GBuffer outside of STATICLIGHTING_TEXTUREMASK to store UseSingleSampleShadowFromStationaryLights
+#define GBUFFER_HAS_PRECSHADOWFACTOR		(USES_GBUFFER && ALLOW_STATIC_LIGHTING)
+#define WRITES_PRECSHADOWFACTOR_ZERO		(!(STATICLIGHTING_TEXTUREMASK && STATICLIGHTING_SIGNEDDISTANCEFIELD) && (HQ_TEXTURE_LIGHTMAP || LQ_TEXTURE_LIGHTMAP))
+#define WRITES_PRECSHADOWFACTOR_TO_GBUFFER	(GBUFFER_HAS_PRECSHADOWFACTOR && !WRITES_PRECSHADOWFACTOR_ZERO)
+
+// If a primitive has static lighting, we assume it is not moving. If it is, it will be rerendered in an extra renderpass.
+#define WRITES_VELOCITY_TO_GBUFFER			(USES_GBUFFER && GBUFFER_HAS_VELOCITY && (!SELECTIVE_BASEPASS_OUTPUTS || !(STATICLIGHTING_TEXTUREMASK || STATICLIGHTING_SIGNEDDISTANCEFIELD || HQ_TEXTURE_LIGHTMAP || LQ_TEXTURE_LIGHTMAP)))
+
+// Use an extra interpolator for position
+#define WRITES_VELOCITY_TO_GBUFFER_USE_POS_INTERPOLATOR		(WRITES_VELOCITY_TO_GBUFFER && USING_TESSELLATION)
+
+#define TRANSLUCENCY_ANY_PERVERTEX_LIGHTING (TRANSLUCENCY_LIGHTING_VOLUMETRIC_PERVERTEX_NONDIRECTIONAL || TRANSLUCENCY_LIGHTING_VOLUMETRIC_PERVERTEX_DIRECTIONAL)
+#define TRANSLUCENCY_ANY_VOLUMETRIC (TRANSLUCENCY_LIGHTING_VOLUMETRIC_NONDIRECTIONAL || TRANSLUCENCY_LIGHTING_VOLUMETRIC_DIRECTIONAL || TRANSLUCENCY_ANY_PERVERTEX_LIGHTING)
+#define TRANSLUCENCY_PERVERTEX_LIGHTING_VOLUME (!FORWARD_SHADING && (TRANSLUCENCY_LIGHTING_VOLUMETRIC_PERVERTEX_DIRECTIONAL || TRANSLUCENCY_LIGHTING_VOLUMETRIC_PERVERTEX_NONDIRECTIONAL))
+#define TRANSLUCENCY_PERVERTEX_FORWARD_SHADING (FORWARD_SHADING && (TRANSLUCENCY_LIGHTING_VOLUMETRIC_PERVERTEX_DIRECTIONAL || TRANSLUCENCY_LIGHTING_VOLUMETRIC_PERVERTEX_NONDIRECTIONAL))
+
+struct FSharedBasePassInterpolants
+{
+	//for texture-lightmapped translucency we can pass the vertex fog in its own interpolator
+#if NEEDS_BASEPASS_VERTEX_FOGGING
+	float4 VertexFog		: TEXCOORD7;
+#endif
+
+#if !PC_D3D && !GL4_PROFILE && !SWITCH_PROFILE && !SWITCH_PROFILE_FORWARD && !METAL_TESSELLATION_PROFILE
+	// Note: TEXCOORD8 is unused
+
+	#if USE_WORLD_POSITION_EXCLUDING_SHADER_OFFSETS
+	float3 PixelPositionExcludingWPO : TEXCOORD9;
+	#endif
+#endif
+
+#if TRANSLUCENCY_PERVERTEX_LIGHTING_VOLUME
+	float3 AmbientLightingVector : TEXCOORD12;
+#endif
+
+#if TRANSLUCENCY_PERVERTEX_LIGHTING_VOLUME && TRANSLUCENCY_LIGHTING_VOLUMETRIC_PERVERTEX_DIRECTIONAL
+	float3 DirectionalLightingVector : TEXCOORD13;
+#endif
+
+#if TRANSLUCENCY_PERVERTEX_FORWARD_SHADING
+	float3 VertexDiffuseLighting : TEXCOORD12;
+#endif
+
+#if PRECOMPUTED_IRRADIANCE_VOLUME_LIGHTING
+	#if TRANSLUCENCY_LIGHTING_VOLUMETRIC_PERVERTEX_NONDIRECTIONAL
+		float3 VertexIndirectAmbient : TEXCOORD14;
+	#elif TRANSLUCENCY_LIGHTING_VOLUMETRIC_PERVERTEX_DIRECTIONAL
+		float4 VertexIndirectSH[3] : TEXCOORD14;
+	#endif
+#endif
+
+#if WRITES_VELOCITY_TO_GBUFFER
+	// .xy is clip position, pre divide by w; .w is clip W; .z is 0 or 1 to mask out the velocity output
+	float4 VelocityPrevScreenPosition : VELOCITY_PREV_POS;
+	#if WRITES_VELOCITY_TO_GBUFFER_USE_POS_INTERPOLATOR
+		float4 VelocityScreenPosition : VELOCITY_POS;
+	#endif
+#endif
+};
+
+#if PC_D3D || GL4_PROFILE || SWITCH_PROFILE || SWITCH_PROFILE_FORWARD || METAL_TESSELLATION_PROFILE
+
+/** Interpolants passed from the vertex shader to the pixel shader. */
+struct FBasePassInterpolantsVSToPS : FSharedBasePassInterpolants
+{
+	// Note: TEXCOORD8 is unused
+
+	#if USE_WORLD_POSITION_EXCLUDING_SHADER_OFFSETS
+	float3 PixelPositionExcludingWPO : TEXCOORD9;
+	#endif
+};
+
+/** Interpolants passed from the vertex shader to the domain shader. */
+struct FBasePassInterpolantsVSToDS : FSharedBasePassInterpolants
+{
+	#if USE_WORLD_POSITION_EXCLUDING_SHADER_OFFSETS
+	float3 WorldPositionExcludingWPO : TEXCOORD9;
+	#endif
+};
+
+#else
+
+// Only the PC shader compiler supports HLSL inheritance
+#define FBasePassInterpolantsVSToPS FSharedBasePassInterpolants
+
+#endif
+
+Texture3D TranslucencyLightingVolumeAmbientInner;
+Texture3D TranslucencyLightingVolumeAmbientOuter;
+Texture3D TranslucencyLightingVolumeDirectionalInner;
+Texture3D TranslucencyLightingVolumeDirectionalOuter;
+
+#if SUPPORTS_INDEPENDENT_SAMPLERS
+	#define TranslucencyLightingVolumeAmbientInnerSampler View.SharedBilinearClampSampler
+	#define TranslucencyLightingVolumeAmbientOuterSampler View.SharedBilinearClampSampler
+	#define TranslucencyLightingVolumeDirectionalInnerSampler View.SharedBilinearClampSampler
+	#define TranslucencyLightingVolumeDirectionalOuterSampler View.SharedBilinearClampSampler
+#else
+	SamplerState TranslucencyLightingVolumeAmbientInnerSampler;
+	SamplerState TranslucencyLightingVolumeAmbientOuterSampler;
+	SamplerState TranslucencyLightingVolumeDirectionalInnerSampler;
+	SamplerState TranslucencyLightingVolumeDirectionalOuterSampler;
+#endif
+
+void ComputeVolumeUVs(float3 WorldPosition, float3 LightingPositionOffset, out float3 InnerVolumeUVs, out float3 OuterVolumeUVs, out float FinalLerpFactor)
+{
+	// Apply a stable offset to the world position used for lighting, which breaks up artifacts from using a low res volume texture
+	InnerVolumeUVs = (WorldPosition + LightingPositionOffset - View.TranslucencyLightingVolumeMin[0].xyz) * View.TranslucencyLightingVolumeInvSize[0].xyz;
+	OuterVolumeUVs = (WorldPosition + LightingPositionOffset - View.TranslucencyLightingVolumeMin[1].xyz) * View.TranslucencyLightingVolumeInvSize[1].xyz;
+
+	// Controls how fast the lerp between the inner and outer cascades happens
+	// Larger values result in a shorter transition distance
+	float TransitionScale = 6;
+	// Setup a 3d lerp factor going to 0 at the edge of the inner volume
+	float3 LerpFactors = saturate((.5f - abs(InnerVolumeUVs - .5f)) * TransitionScale);
+	FinalLerpFactor = LerpFactors.x * LerpFactors.y * LerpFactors.z;
+}
+
+float4 GetAmbientLightingVectorFromTranslucentLightingVolume(float3 InnerVolumeUVs, float3 OuterVolumeUVs, float FinalLerpFactor)
+{
+	// Lookup the inner and outer cascade ambient lighting values
+	float4 InnerLighting = Texture3DSampleLevel(TranslucencyLightingVolumeAmbientInner, TranslucencyLightingVolumeAmbientInnerSampler, InnerVolumeUVs, 0);
+	float4 OuterLighting = Texture3DSampleLevel(TranslucencyLightingVolumeAmbientOuter, TranslucencyLightingVolumeAmbientOuterSampler, OuterVolumeUVs, 0);
+
+	// Lerp between cascades
+	return lerp(OuterLighting, InnerLighting, FinalLerpFactor);
+}
+
+float3 GetDirectionalLightingVectorFromTranslucentLightingVolume(float3 InnerVolumeUVs, float3 OuterVolumeUVs, float FinalLerpFactor)
+{
+	// Fetch both the ambient and directional values for both cascades
+	float3 InnerVector1 = Texture3DSampleLevel(TranslucencyLightingVolumeDirectionalInner, TranslucencyLightingVolumeDirectionalInnerSampler, InnerVolumeUVs, 0).rgb;
+	float3 OuterVector1 = Texture3DSampleLevel(TranslucencyLightingVolumeDirectionalOuter, TranslucencyLightingVolumeDirectionalOuterSampler, OuterVolumeUVs, 0).rgb;
+
+	// Lerp between cascades
+	return lerp(OuterVector1, InnerVector1, FinalLerpFactor);
+}

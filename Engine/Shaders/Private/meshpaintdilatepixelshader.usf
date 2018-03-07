@@ -1,0 +1,78 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*================================================================================
+	MeshPaintDilatePixelShader.usf: Mesh texture paint pixel shader
+================================================================================*/
+
+#include "Common.ush"
+
+/** BrushRenderTargetTexture - Texture that has our accumulated paint data */
+Texture2D Texture0;
+SamplerState Texture0Sampler;
+
+/** SeamMaskRenderTargetTexture - Texture that stores the UV seam mask */
+Texture2D Texture1;
+SamplerState Texture1Sampler;
+
+/** BrushMaskRenderTargetTexture - Texture that stores info about the area we incrementally painted */
+Texture2D Texture2;
+SamplerState Texture2Sampler;
+
+float WidthPixelOffset;
+float HeightPixelOffset;
+
+float Gamma;
+
+
+void Main(
+	in float2 InTextureCoordinates : TEXCOORD0,
+	in float3 InWorldSpaceVertexPosition : TEXCOORD1,
+	in float4 InPosition : SV_POSITION,
+	out float4 OutColor : SV_Target0 
+	)
+{
+
+	// Texture0 will be the brush texture
+	// Texture1 will be the seam mask
+	// Texture2 will be the brush mask
+
+	// First sample the source values from brush texture and seam mask
+	float4 OldColor0 = Texture2DSample( Texture0, Texture0Sampler, InTextureCoordinates );
+	float4 OldColor1 = Texture2DSample( Texture1, Texture1Sampler, InTextureCoordinates );
+
+	float4 CenterColor = OldColor0;
+
+	float2 OffsetConst = float2( WidthPixelOffset, HeightPixelOffset );
+
+	float2 OffsetIdx;
+
+	// Arbitrary large number that we will compare to against the squared sample distance.
+	//   The largest we will hit in 25 samples should be 8 (distance squared = x*x+y*y)
+	int LastValidDistance = 10;
+
+	// Sample pixel data from a 5x5 grid around our current pixel
+	for( OffsetIdx.y = 2; OffsetIdx.y >= -2; OffsetIdx.y-- )
+	{
+		for( OffsetIdx.x = -2; OffsetIdx.x <= 2; OffsetIdx.x++)
+		{
+			// Compute offset coordinates for the pixel and sample the color
+			float2 Coord = InTextureCoordinates + (OffsetIdx * OffsetConst);
+			float4 SampleColor = Texture2DSample( Texture0, Texture0Sampler, Coord );
+
+			// A sample is only valid when it falls in the white area of the brush mask and the current
+			//   pixel we are processing falls within the white area of the texture seam mask.
+			bool IsValid = all( Texture2DSample( Texture2, Texture2Sampler, Coord ).rgb != float3(0, 0, 0) ) && all( OldColor1.rgb != float3(0, 0, 0) );
+
+			// Calculate the squared sample distance from the center
+			int SampleDist = OffsetIdx.x * OffsetIdx.x + OffsetIdx.y * OffsetIdx.y;
+
+			// @todo MeshPaint:If needed, we can improve this by averaging the pixel colors at the same distance
+			if( IsValid && SampleDist < LastValidDistance)
+			{
+				CenterColor = SampleColor;
+				LastValidDistance = SampleDist;
+			}
+		}
+	} 
+	OutColor = CenterColor;
+}

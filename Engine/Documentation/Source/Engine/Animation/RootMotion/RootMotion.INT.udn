@@ -1,0 +1,296 @@
+Availability:Public
+Title:Root Motion
+Crumbs: %ROOT%, Engine, Engine/Animation
+Description:A look at how root-based animation is handled within Unreal Engine 4
+Related: Engine/Content/FBX/Animations
+Related: Engine/Content/Types/SkeletalMeshes
+Related: Engine/Animation/PhysicallyDrivenAnimation
+Related: Engine/Content/Tools/MayaRiggingTool
+Related: Engine/Animation/AnimBlueprints
+Related: Engine/Animation/AnimBlueprints/EventGraph
+version: 4.9
+topic-image:RootMotion_topic.png
+
+[TOC(start:2 end:2)]
+
+
+
+Typically in game animation, a character's collision capsule (or other shape) is driven through the scene by the controller. Data from this capsule is then used to drive animation. For instance, if the capsule is moving forward, the system then knows to play a running or walking animation on the character to give the appearance that the character is moving under its own power. However, this type of motion is not always ideal for every situation. In some cases, it makes sense for complex animations to actually drive the collision capsule, and not the other way around. This is where Root Motion handling becomes critical for your games.
+
+Consider, for example, a special attack from a player in which the mesh had been pre-animated to lunge forward. If all character motion was based off of the player capsule, such animations would cause the character to step outside the capsule, effectively losing collision. Once the animation had played out, the player would slide back to their collision location. This would be problematic, as the capsule is generally used as the center of all calculations. Characters outside their capsule will pass through geometry and would not react properly to their environment. Plus, the slide back to their capsule at the end of the animation would be unrealistic.
+ 
+For those new to the concept, it may not be readily apparent why proper Root Motion would be important from just reading a description. Below, we have a character that is performing a pre-animated attack in which he lunges forward and slams down a hammer. Be aware that the animation of the character moving forward was not handled in game - it was created that way by an animation artist.
+
+[OBJECT:EmbeddedVideo]
+[PARAMLITERAL:width]
+640
+[/PARAMLITERAL]
+[PARAMLITERAL:height]
+360
+[/PARAMLITERAL]
+[PARAMLITERAL:videoid]
+TKAcNubFOH8
+[/PARAMLITERAL]
+[/OBJECT]
+
+
+[REGION:tip]
+See the [Animation Content Examples](Resources\ContentExamples\Animation) page under section 1.9 for another example of Root Motion.
+[/REGION]
+
+
+## What Is Root Motion?
+
+Put simply, Root Motion is the motion of a character that is based off animation from the root bone of the skeleton. Most in-game animations are handled via cycles in which the character's root remains stationary. This cannot always be the case, however, as we can see in the example above. To handle this, we need to take the motion of the root away from the character and apply it to the character's capsule instead. That is the essence of what Root Motion does in UE4.
+
+[REGION:warning]
+In order to properly use Root Motion, it is important to note that the Root Bone of your character should be at the origin (0,0,0 with no rotation) as this allows the system to isolate physical movement (capsule) from animated movement (character). 
+[/REGION]
+
+
+The Root Motion of an animation can be visualized during playback. Simply open up any animation in which the root bone is moving, and in the viewport choose **Show > Bones**. If you have not selected **Enable Root Motion** in the animation properties, you will notice a red line that appears as the character's root moves. This illustrates the Root Motion of the animation.
+
+[REGION:fullwidth]
+![](RootMotionBone.png)
+[/REGION]
+
+When you enable Root Motion, this red line will disappear. Instead, the character will move in place. This is beacuse, the character's root will no longer move from its original position. In this image, we have enabled Root Motion on the character. Note that we are on the same frame as the image above, but that the character's position has not changed. 
+
+[REGION:fullwidth]
+![](RootMotionAppliedBone.png)
+[/REGION]
+
+So, what does this mean? Now that the system is taking the Root Motion of the character's animation into account, it is then able to reapply that same motion to the character's collision capsule. This means that it can still have the exact same motion that the animator intended, but it can also respond properly to in-game collisions and other physics and gameplay events. We will see this in action in the section below.
+
+
+## Enabling Root Motion
+
+Root Motion can be enabled inside the **Asset Details** panel in the **Animation Editor** for your [Animation Sequence](Engine\Animation\Sequences). 
+
+![](RootMotion.png)
+
+[REGION:warning]
+Early versions of the engine (Versions previous to 4.5) required the use of an [Animation Montage](https://docs.unrealengine.com/latest/INT/Engine/Animation/AnimMontage/index.html) to define Root Motion. Since version 4.6, Root Motion is now handled per Animation Sequence and can be toggled on/off in the animation's properties in Persona.
+For networked games however, Root Motion still requires the use of an Animation Montage, see [Root Motion from Montages Only](#rootmotionfrommontagesonly) below. 
+
+[/REGION]
+
+While defining if Root Motion is enabled in done inside the Animation Sequence, you will still need to determine how that sequence is handled inside of an [Animation Blueprint]( Engine/Animation/AnimBlueprints). There are several different ways in which you can handle Root Motion within Animation Blueprints. You can define this through the **Root Motion Mode** drop down in the **Details** panel of the **Anim Blueprint Editor**. 
+
+![](RootMotionMode.png)
+
+The options are as follows: 
+
+| **Property** | **Description** |
+| --- | --- |
+| **No Root Motion Extraction** | Root Motion is left as is (applied to the root bone). |
+| **Ignore Root Motion** | Root Motion is extracted (and removed from the root bone), but not applied to the character.  |
+| **Root Motion from Everything** | See Below. |
+| **Root Motion from Montages Only** | See Below. |
+
+### Root Motion from Everything
+
+When this option is set as the Root Motion Mode, each animation asset (AnimSequence, Blendspace, AnimMontage, etc.) that contributes to the final character pose has its Root Motion extracted (if it has been set as containing Root Motion). Each piece of extracted Root Motion is blended based on the weight of the source assets contributing to the pose. 
+
+For example:
+
+![](FromEverything.png)
+
+In the image above, the Root Motion of **Jog_Loop_Fwd_RM** and **Jog_Loop_Right_RM** would each be blended together with a weight of 0.5. The resulting animation in this case is a character running diagonally forwards and right across a map. 
+
+### Root Motion from Montages Only
+
+This method is intended for network games which is the reason for its more restricted functionally. Because **Root Motion from Everything** is designed to be unrestricted, it is recommended that it only be used in games where animation isn't replicated over a network.  
+
+
+
+## Root Motion in Action
+
+Below is a breakdown of the problems with not handling Root Motion, and the benefits Root Motion has on your animations. We will be using the lunging animation shown above.
+
+### Without Root Motion
+
+Without Root Motion, such animations would pull the character away from his capsule, as seen below. Note the unsightly snap back to the capsule location. This happens because once the animation is done playing, the character controller pulls the character back to their original position.
+
+[OBJECT:EmbeddedVideo]
+[PARAMLITERAL:width]
+640
+[/PARAMLITERAL]
+[PARAMLITERAL:height]
+360
+[/PARAMLITERAL]
+[PARAMLITERAL:videoid]
+Xu2bVQ4pg8M
+[/PARAMLITERAL]
+[/OBJECT]
+
+
+### Why Capsule Separation is Bad
+
+And the snap-back problem is not the only issue to fight in this case. Since the character is leaving the collision shape, it will pass through world objects and break overall continuity. In this example, we can see the character's attack makes him go through a wall and then jump back.
+
+
+[OBJECT:EmbeddedVideo]
+[PARAMLITERAL:width]
+640
+[/PARAMLITERAL]
+[PARAMLITERAL:height]
+360
+[/PARAMLITERAL]
+[PARAMLITERAL:videoid]
+ov9pyx4MAOo
+[/PARAMLITERAL]
+[/OBJECT]
+
+
+### How Root Motion Handling Solves the Problem
+
+Once your animation is set up to utilize Root Motion, then the movement that was set up by the animator temporarily becomes the driving force of the capsule. This allows us to continue playing from the end point of the animation. You can see that the second time we trigger the attack, we take off from the new position. Of course, we turned around first so we did not wander off camera.
+
+
+
+[OBJECT:EmbeddedVideo]
+[PARAMLITERAL:width]
+640
+[/PARAMLITERAL]
+[PARAMLITERAL:height]
+360
+[/PARAMLITERAL]
+[PARAMLITERAL:videoid]
+PWB_mqjz3iA
+[/PARAMLITERAL]
+[/OBJECT]
+
+
+### Root Motion and Physics
+
+Since the capsule comes along, this means that physics collisions can still be used and we solve the issue of characters passing through walls, as well as alleviating the problem of the character needing to snap back to the capsule position. In the image below, the animation is using Root Motion, which brings the capsule along, causing the character to collide with the wall, rather than passing through it. 
+
+You will note that it is not quite perfect, as the character's bending animation causes it to pass somewhat through the walls. However, this could be easily managed by either working with collision volumes on either the wall or the character. The important point is that the capsule is keeping up with the motion and preventing the character from passing all the way through the wall and having to snap back.
+
+[OBJECT:EmbeddedVideo]
+[PARAMLITERAL:width]
+640
+[/PARAMLITERAL]
+[PARAMLITERAL:height]
+360
+[/PARAMLITERAL]
+[PARAMLITERAL:videoid]
+YuD29-Xr7Oc
+[/PARAMLITERAL]
+[/OBJECT]
+
+The physics state of the Character is taken into account during Root Motion. For example, if the character physics is Walking or Falling, then the Z-axis of Root Motion will be ignored, and gravity will be applied. Characters will fall, go down slopes or up stairs. If the character physics is Flying, then the full Root Motion is applied and gravity is ignored.
+
+
+<!-- This should be a HowTo. It's actually a checkbox now instead of using AnimMontages
+## Setting Up Root Motion
+
+Setting up Root Motion in UE4 is very easy, however, the steps will be slightly different depending on what version of UE4 you are using. At a high level, the process pre-4.6 includes:
+
+1. (UE4 4.6 and above) - Open the Animation in which you would like to use and make sure that the **Enable Root Motion** property is checked
+1. Assign the animation which requires Root Motion control to an AnimMontage asset.
+1. Within that AnimMontage, be sure to name the slot that contains the motion.
+1. (If you are using UE4 Pre-4.6) Within the AnimMontage, make sure that the **Enable Root Motion Translation** and **Enable Root Motion Rotation** properties are checked.
+1. In the AnimGraph, make sure that the animation flows through a **Slot** node, and that the Slot node is assigned the same slot name as provided to your AnimMontage.
+1. Play your AnimMontage from the Animation Blueprint's Event Graph. 
+
+In the documention below, we will cover how we set up the example shown above to use Root Motion.
+
+### Setup Overview
+
+So, for starters, we simply have a basic third person character. This is actually a derivative of the Third-Person Character Template, available with UE4's project templates. The only special addition is that we will set up a special case where pressing the **R** key will play our animation of the hammer slam. There is no code to turn it into an attack, no damage dealing. It is just a way for us to play an animation that requires Root Motion.
+
+There are many ways to set this up; we will overview one approach and then focus on Root Motion setup.
+
+Our setup begins with a custom GameMode Blueprint, a custom PlayerController Blueprint, a custom Character Blueprint, and a custom Animation Blueprint. We use a Blueprint Interface to send an event from the Character into the Animation Blueprint. Here is a breakdown of each thing:
+
+* **GameMode** - Just determines the Controller and Pawn classes, which will be our custom PlayerController and Character Blueprints, respectively.
+* **PlayerController** - Just sets a few properties. This is the same as the one included in the Third Person template.
+* **Character** - This is where we set up the components for the Static Mesh and the camera, as well as input handling.
+* **Animation Blueprint** - This handles the states of our Character's animation.
+* **BlueprintInterface** - Used to send an event from our Character Blueprint into the Animation Blueprint. This is how we will trigger an AnimMontage.
+
+
+So, we start by creating a function within our BlueprintInterface. In our case, we named this function **UseHammer**. It has no inputs or outputs - it is simply going to be used to cause an event to happen.
+
+![](UseHammerFunction.png)
+
+Next, in the Character Blueprint, we set up the following special network. Note that handling for 3rd person control was already in place - we are just focusing on what we need to get the hammer animation working. In this case, we set up an input event such that when we press **R**, we call the UseHammer function on our interface.
+
+[REGION:fullwidth]
+![](PressRUseHammer.png)
+[/REGION]
+
+[REGION:note]
+Note the use of the **Get Anim Instance** node. This makes sure we are talking to the appropriate instance of the Animation Blueprint, which is vital if we are to send our function call to the proper object!
+[/REGION]
+
+
+Next, in the Animation Blueprint, we start by making sure that we have implemented our interface.
+
+![](ImplementedInterface_AnimBP.png)
+
+
+Now, still in the Animation Blueprint, we set up a simple event in the Event Graph for our function call. 
+
+![](UseHammerFunctionCall.png)
+
+We are now ready to set up the AnimMontage.
+
+
+### Establishing the AnimMontage
+
+Since Root Motion is handled within AnimMontage, creating one is necessary.  
+Before we do, we need to make sure Root Motion is enabled on our Animation. Double-click the Animation Sequence to open up Persona. Now in the animation properties (Which default location is in the bottom-left), make sure that Root Motion is enabled by clicking the checkbox.
+
+![](EnableRootTranslation.png)
+
+Once this is done, we need to create the AnimMontage.
+
+The easiest way to do this is to **Right-click** (**Ctrl + Left-click** on Mac) on the animation that requires Root Motion, and choose Create AnimMontage.
+
+ ![](CreateAnimMontage.png)
+
+Name your AnimMontage and then **Double-click** it to open it within Persona. In the center of the Editor, near the bottom you will see a SlotName dropdown. Select the eyeglass icon under it to bring up the Anim Slot Manager. Oress the **Add Slot** button and name the slot.  If this is part of a set of animations that will play together, you should choose that name. A common slot name is FullBody, which is what we will use.
+
+After that, select your new slot from the dropdown menu inside of the Montage.
+
+[REGION:fullwidth]
+![](SettingUpSlotinMontage.png)
+[/REGION]
+
+Next, we go back to the Animation Blueprint. Just after our UseHammer function event, we can now create a **Montage Play**. We need to make sure to associate this with the proper AnimMontage.
+
+![](PlayMontage.png)
+
+We are almost finished! Finally, we just need to make sure that our slot is being calculated in our final animation. Within the Animation Blueprint, we need to go into the AnimGraph tab. Create a **Slot** node, and give it the name you used for the slot within the AnimMontage. In our case, that would be FullBody. This needs to go between any existing State Machines or other animations and your Final Animation Pose node.
+
+![](InsertSlotNode.png)
+
+[REGION:note]
+There may be a warning displayed on the New State Machine node. This is due to it not being completely set up, but this warning is not important for the purposes of this tutorial.
+[/REGION]
+
+That is all there is to it! Now that your animation is playing back via an AnimMontage, with that Montage being set to utilize Root Motion, everything will just work!
+
+
+[OBJECT:EmbeddedVideo]
+[PARAMLITERAL:width]
+640
+[/PARAMLITERAL]
+[PARAMLITERAL:height]
+360
+[/PARAMLITERAL]
+[PARAMLITERAL:videoid]
+PWB_mqjz3iA
+[/PARAMLITERAL]
+[/OBJECT]
+
+-->
+
+
+
+
+
+

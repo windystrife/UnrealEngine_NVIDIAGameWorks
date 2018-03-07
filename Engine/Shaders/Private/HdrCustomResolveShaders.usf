@@ -1,0 +1,75 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	HdrCustomResolve.usf: Custom resolve for HDR color and box filter.
+=============================================================================*/
+
+#include "Common.ush"
+
+float4 HdrCustomResolveVS(uint Id : SV_VertexID) : SV_POSITION
+{
+	int x = Id &  1;
+	int y = Id >> 1;
+
+	return float4(x * 4 - 1, y * 4 - 1, 0, 1);
+}
+
+float4 Encode(float4 Color)
+{
+	return float4(Color.rgb * rcp(Color.r*0.299 + Color.g*0.587 + Color.b*0.114 + 1.0), Color.a);
+}
+
+float4 Decode(float4 Color)
+{
+	return float4(Color.rgb * rcp(Color.r*(-0.299) + Color.g*(-0.587) + Color.b*(-0.114) + 1.0), Color.a);
+}
+
+#if HDR_CUSTOM_RESOLVE_2X
+
+	Texture2DMS<float4,2> Tex;
+	float4 HdrCustomResolve2xPS(float4 Pos : SV_POSITION) : SV_Target0
+	{
+		uint2 P = uint2(Pos.xy);
+		float4 C0 = Encode(Tex.Load(P, 0));
+		float4 C1 = Encode(Tex.Load(P, 1));
+		return Decode(C0*0.5 + C1*0.5);
+	}
+	
+#endif
+
+#if HDR_CUSTOM_RESOLVE_4X
+
+	Texture2DMS<float4,4> Tex;
+	float4 HdrCustomResolve4xPS(float4 Pos : SV_POSITION) : SV_Target0
+	{
+		uint2 P = uint2(Pos.xy);
+		float4 C0 = Encode(Tex.Load(P, 0));
+		float4 C1 = Encode(Tex.Load(P, 1));
+		float4 C2 = Encode(Tex.Load(P, 2));
+		float4 C3 = Encode(Tex.Load(P, 3));
+		return Decode(C0*0.25 + C1*0.25 + C2*0.25 + C3*0.25);
+	}
+
+#endif
+
+#if HDR_CUSTOM_RESOLVE_8X
+
+	Texture2DMS<float4,8> Tex;
+	float4 HdrCustomResolve8xPS(float4 Pos : SV_POSITION) : SV_Target0
+	{
+		uint2 P = uint2(Pos.xy);
+		float4 C0 = Encode(Tex.Load(P, 0));
+		float4 C1 = Encode(Tex.Load(P, 1));
+		float4 C2 = Encode(Tex.Load(P, 2));
+		float4 C3 = Encode(Tex.Load(P, 3));
+		float4 C4 = Encode(Tex.Load(P, 4));
+		float4 C5 = Encode(Tex.Load(P, 5));
+		float4 C6 = Encode(Tex.Load(P, 6));
+		float4 C7 = Encode(Tex.Load(P, 7));
+		return Decode(C0*0.125 + C1*0.125 + C2*0.125 + C3*0.125 + C4*0.125 + C5*0.125 + C6*0.125 + C7*0.125);
+	}
+
+#endif
+
+
+

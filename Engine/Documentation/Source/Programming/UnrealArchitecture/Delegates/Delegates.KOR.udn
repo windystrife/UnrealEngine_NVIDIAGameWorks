@@ -1,0 +1,155 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title: 델리게이트 (Delegate)
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture/Reference, Programming/UnrealArchitecture/Reference/Functions
+Description:C++ 오브젝트 상의 멤버 함수를 가리키고 실행시키는 데이터 유형입니다.
+Version: 4.9
+
+[TOC(start:2)]
+
+[EXCERPT:Overview]
+델리게이트로 C++ 오브젝트 상의 멤버 함수 호출을 일반적이고 유형적으로 안전한 방식으로 할 수 있습니다. 델리게이트를 사용하여 임의 오브젝트의 멤버 함수에 동적으로 바인딩시킬 수 있으며, 
+그런 다음 그 오브젝트에서 함수를 호출할 수 있습니다. 호출하는 곳에서 오브젝트의 유형을 몰라도 말이지요.
+
+델리게이트 오브젝트는 복사해도 완벽히 안전합니다. 델리게이트는 값으로 전달 가능하나 보통 추천할 만 하지는 않는데, 
+heap 에 메모리를 할당해야 하기 때문입니다. **가급적이면 델리게이트는 항상 참조 전달해야 합니다.**
+
+델리게이트는 싱글-캐스트(형 변환)와 멀티-캐스트 모두 지원되며, 디스크에 안전하게 Serialize 시킬 수 있는 "다이내믹" 델리게이트도 물론입니다.
+
+* 싱글-캐스트
+* [멀티-캐스트](Programming/UnrealArchitecture/Delegates/Multicast)
+	* [이벤트](Programming/UnrealArchitecture/Delegates/Events)
+* [다이내믹 (UObject, Serialize 가능)](Programming/UnrealArchitecture/Delegates/Dynamic)
+
+
+[/EXCERPT:Overview]
+
+## 델리게이트 선언하기
+
+델리게이트의 선언은 제공되어 있는 선언 매크로 중 하나를 사용하여 이루어집니다. 사용되는 매크로는 델리게이트에 바인딩되는 함수의 시그너처에 따라 결정됩니다. 
+시스템에서는 델리게이트 유형을 선언해 낼 수 있는 범용 함수 시그너처의 다양한 조합을 미리 정의, 이를 통해 반환값과 파라미터에 대한 유형 이름을 필요한 대로 채워넣습니다. 
+현재 다음 항목들의 어떠한 조합에 대해서도 델리게이트 시그너처가 지원됩니다:
+
+* 값을 반환하는 함수
+* "페이로드"(payload, 유상) 변수 4 개 까지
+* 함수 파라미터 8 개 까지
+* 'const' 로 선언된 함수
+
+
+이 표에서 델리게이트 선언에 사용할 매크로를 찾을 수 있습니다.
+
+| 함수 시그너처 | 선언 매크로 |
+| --- | --- |
+| `void Function()` | `DECLARE_DELEGATE( DelegateName )` |
+| `void Function( <Param1> )` | `DECLARE_DELEGATE_OneParam( DelegateName, Param1Type )` |
+| `void Function( <Param1>, <Param2> )` | `DECLARE_DELEGATE_TwoParams( DelegateName, Param1Type, Param2Type )` |
+| `void Function( <Param1>, <Param2>, ... )` | `DECLARE_DELEGATE_<Num>Params( DelegateName, Param1Type, Param2Type, ... )` |
+| `<RetVal> Function()` | `DECLARE_DELEGATE_RetVal( RetValType, DelegateName )` |
+| `<RetVal> Function( <Param1> )` | `DECLARE_DELEGATE_RetVal_OneParam( RetValType, DelegateName, Param1Type )` |
+| `<RetVal> Function( <Param1>, <Param2> )` | `DECLARE_DELEGATE_RetVal_TwoParams( RetValType, DelegateName, Param1Type, Param2Type )` |
+| `<RetVal> Function( <Param1>, <Param2>, ... )` | `DECLARE_DELEGATE_RetVal_<Num>Params( RetValType, DelegateName, Param1Type, Param2Type, ... )` |
+
+
+멀티-캐스트, 다이내믹, 래핑된(wrapped) 델리게이트에 대한 변종 매크로도 제공됩니다:
+
+* DECLARE_MULTICAST_DELEGATE...
+* DECLARE_DYNAMIC_DELEGATE...
+* DECLARE_DYNAMIC_MULTICAST_DELEGATE...
+* DECLARE_DYNAMIC_DELEGATE...
+* DECLARE_DYNAMIC_MULTICAST_DELEGATE...
+
+
+델리게이트 시그너처 선언은 글로벌 영역에, 네임스페이스 안이나 심지어 (함수 본문은 제외한) 클래스 선언부 안에까지도 존재 가능합니다.
+
+이러한 델리게이트 유형 선언에 있어서의 자세한 정보는 [](Programming/UnrealArchitecture/Delegates/Dynamic), [](Programming/UnrealArchitecture/Delegates/Multicast) 페이지를 
+참고해 주시기 바랍니다.
+
+## 델리게이트 바인딩하기
+
+델리게이트 시스템은 특정 유형의 오브젝트를 이해하고 있으며, 이러한 오브젝트를 사용할 때는 추가적으로 사용할 수 있는 기능이 있습니다. UObject 나 공유 포인터 클래스 멤버에 델리게이트를 바인딩하는 경우, 
+델리게이트 시스템은 그 오브젝트에 대한 약한 레퍼런스를 유지할 수 있어, 델리게이트 치하에서 오브젝트가 소멸된 경우 `IsBound()` 나 `ExecuteIfBound()` 함수를 호출하여 
+처리해 줄 수 있습니다. 참고로 여러가지 지원되는 오브젝트 유형에 대해서는 특수한 바인딩 문법이 사용됩니다.
+
+| 함수 | 설명 |
+| ---- | ---- |
+| `Bind()` | 기존 델리게이트 오브젝트에 바인딩합니다. |
+| `BindStatic()` | raw C++ 포인터 글로벌 함수 델리게이트를 바인딩합니다.|
+| `BindRaw()` | 날(raw) C++ 포인터 델리게이트에 바인딩합니다. 날 포인터는 어떠한 종류의 레퍼런스도 사용하지 않아, 만약 오브젝트가 델리게이트 치하에서 삭제된 경우 호출하기가 안전하지 않을 수도 있습니다. Execute() 호출시에는 조심하세요! |
+| `BindSP()` | 공유 포인터-기반 멤버 함수 델리게이트에 바인딩합니다. 공유 포인터 델리게이트는 오브젝트로의 약한 레퍼런스를 유지합니다. `ExecuteIfBound()` 로 호출할 수 있습니다. |
+| `BindUObject()` | UObject 기반 멤버 함수 델리게이트를 바인딩합니다. UObject 델리게이트는 오브젝트로의 약한 레퍼런스를 유지합니다. `ExecuteIfBound()` 로 호출할 수 있습니다. |
+| `UnBind()` | 이 델리게이트 바인딩을 해제합니다. |
+
+이 함수들의 변종, 인수, 구현을 확인하시려면 (`..\UE4\Engine\Source\Runtime\Core\Public\Templates\` 에 있는) `DelegateSignatureImpl.inl` 파일을 확인해 주시기 바랍니다.
+
+### 페이로드 데이터
+
+델리게이트에 바인딩할 때, 페이로드 데이터를 같이 전해줄 수 있습니다. 페이로드 데이터란 바인딩된 함수를 불러낼(invoke) 때 직접 전해지는 임의의 변수를 말합니다. 
+바인딩 시간에 델리게이트 자체적으로 파라미터를 보관할 수 있게 되니 매우 유용합니다. ("다이내믹"을 제외한) 모든 델리게이트 유형은 페이로드 변수를 자동으로 지원합니다. 
+이 예제는 커스텀 변수 둘, 즉 bool 과 int32 를 델리게이트에 전달합니다. 그런 다음 델리게이트를 불러낼 때 이 파라미터가 바인딩된 함수에 전달됩니다. 
+여분의 변수 인수는 반드시 델리게이트 유형 파라미터 인수 이후에 받아야 합니다.
+
+	MyDelegate.BindRaw( &MyFunction, true, 20 );
+
+## 델리게이트 실행하기
+
+[EXCERPT:ExecutingDelegates]
+델리게이트에 바인딩된 함수는 델리게이트의 `Execute()` 함수를 호출하여 실행됩니다. 델리게이트를 실행하기 전 "바인딩" 되었는지 반드시 확인해야 합니다. 이는 코드 안전성을 도모하기 위함인데, 
+초기화되지 않은 상태로 접근이 가능한 반환값과 출력 파라미터가 델리게이트에 있을 수 있기 때문입니다. 바인딩되지 않은 델리게이트를 실행시키면 일부 인스턴스에서 메모리에 낙서를 해버릴 수가 있습니다. 
+델리게이트가 실행해도 안전한 지는 `IsBound()` 를 호출하여 검사해 볼 수 있습니다. 또한 반환값이 없는 델리게이트에 대해서는 `ExecuteIfBound()` 를 호출할 수 있으나, 
+출력 파라미터는 초기화되지 않을 수 있다는 점 주의하시기 바랍니다.
+
+| 실행 함수 | 설명 |
+| --- | --- |
+| `Execute()` |  |
+| `ExecuteIfBound()` |  |
+| `IsBound()` |  |
+
+멀티-캐스트 델리게이트 관련 자세한 내용은 [](Programming/UnrealArchitecture/Delegates/Multicast) 페이지를 확인하시기 바랍니다.
+[/EXCERPT:ExecutingDelegates]
+
+## 사용 예제
+
+아무데서나 호출했으면 하는 메소드를 가진 클래스가 있다고 쳐 봅시다:
+
+	class FLogWriter
+	{
+		void WriteToLog( FString );
+	};
+
+WriteToLog 함수를 호출하려면, 해당 함수의 시그너처에 맞는 델리게이트 유형을 생성해야 합니다. 그러기 위해서는 먼저 아래 매크로 중 하나를 사용하여 델리게이트를 선언해야 합니다. 
+여기 예제에서는 단순한 델리게이트 유형입니다:
+
+	DECLARE_DELEGATE_OneParam( FStringDelegate, FString );
+
+이는 'FStringDelegate' 라는 델리게이트 유형을 생성하며, 'FString' 유형 파라미터를 하나 받습니다.
+
+클래스에서 이 'FStringDelegate' 를 어떻게 사용하는가, 예제는 이렇습니다:
+
+	class FMyClass
+	{
+		FStringDelegate WriteToLogDelegate;
+	};
+
+이렇게 하여 위 클래스의 임의 클래스 안에 있는 메소드로의 포인터를 담을 수 있습니다. 위 클래스가 이 델리게이트에 대해 아는 것이라고는, 함수 시그너처 뿐입니다.
+
+이제 델리게이트 할당을 위해, 단순히 델리게이트 클래스의 인스턴스를 생성하고, 그 메소드를 소유하는 클래스와 함께 템플릿 파라미터로 전해줍니다. 자기 오브젝트의 인스턴스와 
+그 메소드의 실제 함수 주소 역시도 전해줘야 합니다. 그래서 여기서는 우리 'FLogWriter' 클래스의 인스턴스를 생성한 다음, 그 오브젝트 인스턴스의 'WriteToLog' 
+메소드에 대한 델리게이트를 생성하겠습니다.
+
+	FSharedRef< FLogWriter > LogWriter( new FLogWriter() );
+
+	WriteToLogDelegate.BindSP( LogWriter, &FLogWriter::WriteToLog );
+
+이렇게 하여 클래스의 메소드에 델리게이트를 동적으로 바인딩하였습니다! 차암 쉽죠?
+
+`BindSP` 의 `SP` 부분은 `shared pointer`, 공유 포인터를 뜻하는데, 공유 포인터에 소유된 오브젝트에 바인딩하고 있기 때문입니다. BindRaw(), BindUObject() 처럼 다양한 
+오브젝트 유형 버전도 있습니다.
+
+이제 'FLogWriter' 클래스에 대해 아무것도 모를지라도 FMyClass 를 통해 'WriteToLog' 메소드를 호출할 수 있습니다! 자신의 델리게이트를 호출하려면, 그냥 'Execute()' 메소드를 사용하면 됩니다:
+
+	WriteToLogDelegate.Execute( TEXT( "델리게이트 쥑이네!" ) );
+
+델리게이트에 함수를 바인딩하기 전 Execute() 를 호출하면 assert 가 발동됩니다. 그런 경우를 피하기 위해 대부분 이렇게 하는 것이 좋습니다:
+
+	WriteToLogDelegate.ExecuteIfBound( TEXT( "함수가 바인딩되었을 때만 실행!" ) );
+

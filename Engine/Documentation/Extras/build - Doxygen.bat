@@ -1,0 +1,1 @@
+start %~dp0\..\..\Binaries\DotNET\unrealdoctool.exe * -s=%~dp0\..\Source -o=%~dp0\..\Temp -lang=INT -publish=Licensee,Epic -v=info -outputFormat=HTML -rebuildDoxygenCache=%~dp0\..\..\Extras\NotForLicensees\Doxygen\bin\doxygen.exe -doxygenCache=%~dp0\..\XML

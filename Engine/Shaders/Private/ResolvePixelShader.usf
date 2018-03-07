@@ -1,0 +1,70 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	ResolvePixelShader.usf: Resolve pixel shader source.
+=============================================================================*/
+
+#include "Common.ush"
+
+#if FEATURE_LEVEL >= FEATURE_LEVEL_SM5
+
+Texture2DMS<float4> UnresolvedSurface;
+
+
+void MainDepth(
+	float2 InUV : TEXCOORD0,
+	out float OutDepth : SV_DEPTH
+	)
+{
+#ifndef DEPTH_RESOLVE_NUM_SAMPLES
+	float3 SurfaceDimensions;
+	UnresolvedSurface.GetDimensions(SurfaceDimensions.x, SurfaceDimensions.y, SurfaceDimensions.z);
+	int NumSurfaceSamples = (int)SurfaceDimensions.z;
+#else
+	int NumSurfaceSamples = DEPTH_RESOLVE_NUM_SAMPLES;
+#endif
+
+	int2 IntUV = trunc(InUV);
+	float ResolvedDepth = UnresolvedSurface.Load(IntUV, 0).r;
+
+	for (int SampleIndex = 1; SampleIndex < NumSurfaceSamples; ++SampleIndex)
+	{
+		float Sample = UnresolvedSurface.Load(IntUV, SampleIndex).r;
+
+		// Note that max depth actually means closest depth, since 1/depth is stored. 
+		ResolvedDepth = max(ResolvedDepth, Sample);
+	}
+
+	OutDepth = ResolvedDepth;
+}
+
+uint SingleSampleIndex;
+
+void MainSingleSample(
+	float2 InUV : TEXCOORD0,
+	out float4 OutColor : SV_Target0
+	)
+{
+	float3 SurfaceDimensions;
+	UnresolvedSurface.GetDimensions(SurfaceDimensions.x,SurfaceDimensions.y,SurfaceDimensions.z);
+	int NumSurfaceSamples = (int)SurfaceDimensions.z;
+
+	int2 IntUV = trunc(InUV);
+
+	OutColor = UnresolvedSurface.Load(IntUV,SingleSampleIndex);
+}
+
+#else
+
+Texture2D UnresolvedSurfaceNonMS;
+void MainDepthNonMS(
+	float2 InUV : TEXCOORD0,
+	out float OutDepth : SV_DEPTH
+	)
+{
+	int3 IntUV = int3(trunc(InUV),0);
+	float Sample = UnresolvedSurfaceNonMS.Load(IntUV).r;
+	OutDepth = Sample;
+}
+
+#endif

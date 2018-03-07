@@ -1,0 +1,282 @@
+﻿INTSourceChangelist:3375296
+Availability:Public
+Title:缆绳组件（Cable Component）
+Crumbs:%ROOT%
+Description:缆绳组件详解。
+version:4.15
+parent:Engine/Components/Rendering
+order:
+type:overview
+tags:Components
+tags:Rendering
+SkillLevel:Advanced
+
+![](CC_InGame.png)
+
+[TOC(start:1 end:2)]
+
+以较低的开销添加来回晃荡的缆绳、绳索或链条（类似被风吹动的效果）后，虚幻引擎 4（UE4）项目中便会拥有更加生动的效果。在以下文档中，我们将了解如何使用 **缆绳组件（Cable Component）** 插件创建、设置和控制缆绳的外观、响应，甚至使其和关卡中的物体发生碰撞。
+
+
+## 模拟和渲染
+
+实际执行缆绳模拟的是游戏开发界十分著名的技术 **韦尔莱算法（Verlet Integration）**。这种算法的概念是用一系列粒子代表缆绳，而粒子与粒子之间则拥有 **距离约束**。两端的粒子为 **固定**，随附着的物体进行移动。中间的粒子则为 **自由**，随重力而下垂。每一步均会更新每个粒子的速度和位置，并移动粒子满足约束。缆绳的 **刚性** 由迭代执行约束（每步）的次数而定。
+
+[REGION:lightbox]
+[![](CC_ParticleRope.png)(w:600)](CC_ParticleRope.png)
+[/REGION]
+
+[REGION:caption]
+点击查看全图。
+[/REGION]
+
+拥有完善的相连粒子链后，即可对其进行渲染。渲染缆绳时将创建一个名为 **FCableSceneProxy** 的类，代表缆绳的渲染。模拟粒子位置（在主线程上的 TickComponent 中执行）的每个端将通过 **SendRenderDynamicData_Concurrent** 函数传至此代理。接下来，更新将锁定在渲染线程上，之后将更新索引和顶点缓存，因此形成一个 **管道** 模型。我们需要对此管道模型上的每个顶点计算一个位置、一个纹理 UV 和三个切线基础矢量。执行此操作时，**X** 的朝向沿缆绳，**Z** 的朝向从缆绳（法线）向外，而 **Y** 则与 **X** 和 **Z** 垂直。这些属性已经对组件公开，以便用户控制面的数量，管道的半径，以及 UV 沿缆绳进行平铺的次数。
+
+[REGION:lightbox]
+[![](CC_RenderingGeo.png)(w:600)](CC_RenderingGeo.png)
+[/REGION]
+
+[REGION:caption]
+点击查看全图。
+[/REGION]
+
+
+## 启用插件
+
+缆绳组件插件默认启用。如未启用，可在主工具栏中选择 **Edit** > **Plugins**。然后在插件列表中选择 **Rendering**，将 **Cable Component** 的 **Enabled** 勾选框勾选。 
+
+[REGION:lightbox]
+[![](CC_PluginEnable.png)(w:505)](CC_PluginEnable.png)
+[/REGION]
+
+[REGION:caption]
+点击查看全图。
+[/REGION]
+
+## 使用缆绳组件
+
+可以两种不同方式将缆绳组件添加到项目关卡。在以下部分，我们将说明为项目关卡添加缆绳的两种不同方法。
+
+### 从 Modes 面板中使用缆绳组件 
+
+如从 Modes 面板中使用缆绳组件，需要执行以下操作：
+
+1. 首先确保 **Modes** 面板为显示状态，然后在 **Search Classes** 框中输入 `Cable`。
+
+    ![](CC_Find_In_Modes.png)
+
+1. 如要将缆绳 Actor 添加到世界场景，点击 Modes 面板中的缆绳 Actor 并将其拖入关卡。 
+
+    [REGION:lightbox]
+    [![](CC_Add_CC_From_Modes.png)(w:700)](CC_Add_CC_From_Modes.png)
+    [/REGION]
+
+    [REGION:caption]
+    点击查看全图。
+    [/REGION]
+
+1. 现在便可放置、旋转和缩放缆绳 Actor，使其满足关卡的需求。
+
+    [OBJECT:EmbeddedVideo]
+        [PARAMLITERAL:width]
+        640
+        [/PARAMLITERAL]
+        [PARAMLITERAL:height]
+        360
+        [/PARAMLITERAL]
+        [PARAMLITERAL:videoid]
+        8sAwYlKV_ao
+        [/PARAMLITERAL]
+    [/OBJECT]
+
+### 在蓝图中使用缆绳组件
+
+如要在蓝图中使用缆绳组件，需要执行以下操作：
+
+1. 首先新建一个名为 **BP_Cable** 的蓝图，使其以 **Actor** 用作父类。
+
+    ![](CC_MakeNewBP.png)
+
+1. 然后从 BP_Cable 蓝图的 **Components** 部分点击 **Add Component** 按钮，然后在列表中找到 **Cable** 组件。找到组件后，点击将其添加至组件列表。
+
+    ![](CC_Add_CC.png)
+
+1. 添加缆绳组件后，在组件列表中选择 **Cable** 组件，以便通过 **Details** 面板调整其属性。将其他设置保留为默认，然后编译并保存蓝图。
+
+    ![](CC_Cable_Options.png)
+
+    [region:note]
+    取消勾选缆绳组件 Details 面板中的 **Attach Start** 或 **Attach End** 选项即可使缆绳的任意一头下坠。此操作可在游戏运行时进行，以匹配效果。
+    [/region]
+
+1. 在 **Content Browser** 中找到缆绳蓝图，然后将其拖入关卡。放置后，即可使用移动和旋转工具根据需求调整位置。
+
+    [REGION:lightbox]
+    [![](CC_Add_BP_CC.png)(w:700)](CC_Add_BP_CC.png)
+    [/REGION]
+
+    [REGION:caption]
+    点击查看全图。
+    [/REGION]
+
+## 在缆绳末端附加物体
+
+可在缆绳的任意一端附加物体，使其沿缆绳晃动。需要执行以下步骤在 UE4 中实现此功能：
+
+1. 首先需要添加一个 **缆绳 Actor** 和一个 **静态网格体** 到关卡中。 
+
+    [REGION:lightbox]
+    [![](CC_Add_CC_And_SM.png)(w:500)](CC_Add_CC_And_SM.png)
+    [/REGION]
+
+    [REGION:caption]
+    点击查看全图。
+    [/REGION]
+
+    [region:note]
+    必须将附加到末端的静态网格体的 **Mobility** 设为 **Moveable**。
+    [/region]
+
+1. 在 World Outliner 中找到需要附加到缆绳 Actor 末端的静态网格体，然后将其拖至缆绳 Actor 的上方。执行此操作后将显示以下输入窗口。
+
+    [REGION:lightbox]
+    [![](CC_Attach_To_End.png)(w:500)](CC_Attach_To_End.png)
+    [/REGION]
+
+    [REGION:caption]
+    点击查看全图。
+    [/REGION]
+
+1. 选择 **Cable End** 选项，即可在视口中看到静态网格体附着到缆绳 Actor 的末端。
+
+    [OBJECT:ComparisonSlider]
+        [PARAM:before]
+        ![Before](CC_Attach_Before.png)
+        [/PARAM]
+        [PARAM:after]
+        ![After](CC_Attach_After.png)
+        [/PARAM]
+    [/OBJECT]
+
+1. 在关卡中选中缆绳 Actor。然后在 **Details** 面板的 **Cable** 部分中，取消勾选 **Attach End** 框。 
+
+    [REGION:lightbox]
+    [![](CC_Remove_ATE.png)(w:300)](CC_Remove_ATE.png)
+    [/REGION]
+
+    [REGION:caption]
+    点击查看全图。
+    [/REGION]
+
+    [region:note]
+    注意：**Attach Start** 和 **Attach End** 选项并非将缆绳附加到 Actor 的唯一方法。也可指定一个用作附着点的套接字。
+    [/region]
+
+1. 执行此操作后，缆绳便能在视口中自由回荡。
+
+    [OBJECT:EmbeddedVideo]
+        [PARAMLITERAL:width]
+        640
+        [/PARAMLITERAL]
+        [PARAMLITERAL:height]
+        360
+        [/PARAMLITERAL]
+        [PARAMLITERAL:videoid]
+        3auyPSMCGcE
+        [/PARAMLITERAL]
+    [/OBJECT]
+
+    [region:note]
+    注意：可在运行时开启/关闭 **Attach Start** 和 **Attach End** 布尔，制造出一些有趣的效果。
+    [/region]
+
+## 碰撞和刚性
+
+[region:warning]
+启用碰撞和刚性将极大增加缆绳 Actor 的开销。建议只在以下情况下启用：缆绳和世界场景中的物体发生碰撞，或需要为缆绳赋予刚性获得更佳效果。如无此类需求，则最好将这些选项禁用，以节约性能。
+[/region]
+
+缆绳组件拥有让缆绳和世界场景发生碰撞的选项，控制缆绳的刚度。为启用此功能，请按以下步骤操作。
+
+1. 首先，在缆绳组件 Details 面板的 Cable 部分下按下白色小三角形显示高级卷栏选项。
+
+    ![](CC_Advanced_Options.png)
+
+1. 勾选 **Enable Stiffness** 和 **Enable Collision** 选项启用这些功能。
+
+    [REGION:lightbox]
+    [![](CC_Added_CC.png)(w:700)](CC_Added_CC.png)
+    [/REGION]
+
+    [REGION:caption]
+    点击查看全图。
+    [/REGION]
+
+1. 现在，移动缆绳 Actor 或物体与缆绳 Actor 发生碰撞时，缆绳将和接触到的物体发生碰撞。
+
+    [OBJECT:EmbeddedVideo]
+        [PARAMLITERAL:width]
+        640
+        [/PARAMLITERAL]
+        [PARAMLITERAL:height]
+        360
+        [/PARAMLITERAL]
+        [PARAMLITERAL:videoid]
+        e18Kr8v-nNI
+        [/PARAMLITERAL]
+    [/OBJECT]
+
+## 属性详解
+
+下表详细说明了缆绳组件上的每个属性：
+
+#### Cable
+
+![](CC_Cable_Properties.png)
+
+| 属性名称 | 描述|
+|-------------|----------------|
+|**Attach Start**| 修复到物体的头端，或放任不管。如为 false，组件变形只用于缆绳头端的初始位置。|
+|**Attach End**| 修复到物体的末端（使用 AttachEndTo 和 EndLocation），或放任不管。如为 false，AttachEndTo 和 EndLocation 只用于缆绳末端的初始位置。|
+|**Attach End To**| 定义缆绳最终位置的 Actor 或组件。|
+|**Component Property**| 附加缆绳的组件属性的命名。|
+|**Attach End To Socket Name**| 进行附加的 AttachEndTo 组件上的套接字命名。|
+|**End Location**| 缆绳的最终位置，如经指定则相对于 AttachEndTo（或 AttachEndToSocketName），否则则相对于缆绳组件。|
+|**Cable Length**| 缆绳的静止长度。|
+|**Num Segments**| 缆绳拥有的分段数量。|
+|**Solver Iterations**| 解算器迭代的数量，控制缆绳的刚度。|
+|**Substep Time**| 控制缆绳的模拟分步时间。
+|**Enable Stiffness**| 为缆绳添加刚性约束。|
+|**Enable Collision**| 在每个分步为每个缆绳粒子执行清扫，避免与世界场景发生碰撞。使用组件上的 Collision Preset 决定碰撞的对象。这会极大提高缆绳模拟的开销。[REGION:note]这在当前版本中仍为实验性功能。[/REGION]|
+
+### Cable Forces
+
+![](CC_CableForces_Properties.png)
+
+| 属性名称 | 描述|
+|-------------|----------------|
+|**Cable Forces**|应用到缆绳中所有粒子的力矢量（世界空间）。|
+|**Cable Gravity Scale**|应用到此缆绳的世界重力比例。|
+
+### Cable Rendering
+
+![](CC_CableRendering_Options.png)
+
+| 属性名称 | 描述|
+|-------------|----------------|
+|**Cable Width**|缆绳几何体的宽度。|
+|**Num Sides**|缆绳几何体的面数。|
+|**Tile Material**|沿缆绳长重复材质的次数。|
+
+## 额外参考 
+
+以下部分为外部参考，可在此获得缆绳组件的更多灵感。阅读以下 Thomas Jakobsen 的文章，了解 **韦尔莱算法** 的更多详情。
+
+*	[http://graphics.cs.cmu.edu/nsp/course/15-869/2006/papers/jakobsen.htm](http://graphics.cs.cmu.edu/nsp/course/15-869/2006/papers/jakobsen.htm)
+
+
+
+
+
+
+

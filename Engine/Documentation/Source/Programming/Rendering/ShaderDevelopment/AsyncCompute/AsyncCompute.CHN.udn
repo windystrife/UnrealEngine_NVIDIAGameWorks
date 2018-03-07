@@ -1,0 +1,48 @@
+﻿INTSourceChangelist:2744667
+Availability:Public
+Title:异步计算（AsyncCompute）
+Crumbs:%ROOT%, Programming, Programming/Rendering, Programming/Rendering/ShaderDevelopment
+Description:异步计算（AsyncCompute） 是交错不同 GPU 工作、提高效率的硬件功能。
+Version:4.9
+
+渲染硬件接口（RHI）现支持 Xbox One 的异步计算（**AsyncCompute**）。此法可运行与渲染异步的 **dispatch()** 调用，有效利用未使用的 GPU 资源（计算单元（CU）、寄存器和带宽）。异步计算使用单独的上下文，我们通过 RHI 函数同步渲染和计算上下文。Dr PIX 可用于识别从异步计算获益的区域。例如，特定渲染通道中半数 CU 均未使用，这些 CU 则可能被异步计算任务所利用。异步计算存在一些限制：
+
+ * 不支持 UAV 计数器缓冲（这是 XDK 的限制，将生成 D3D 警告）
+ * 异步计算任务不显示在 PIX GPU 采集中（但它们会出现在定时采集中）
+   PIX 只采集图形直接上下文（这是平台限制）。
+ * 驱动器不提供自动管线强制清空。如需清空，需显式调用 RHICSManualGpuFlush。
+   （例如一个调度依赖于前一个调度）
+
+## API
+
+ * **RHIBeginAsyncComputeJob_DrawThread** (EAsyncComputePriority Priority)
+   从渲染线程开始异步计算任务。优先级用于确定分配任务（通过 ID3D11XComputeContext::SetLimits）的
+   着色器资源数量。当前有两个可用优先级：AsyncComputePriority_High、
+   AsyncComputePriority_Default。
+ * **RHIEndAsyncComputeJob_DrawThread**
+   完成异步计算任务。返回一个用于同步的 32 位栅栏指数；
+   如计算被禁用或无进行中的计算任务，则返回 -1。
+ * **RHIGraphicsWaitOnAsyncComputeJob**
+   在图形直接上下文中插入一个命令进行阻止，直到异步任务完成。传递 -1 会导致此进程提前结束。
+
+在 RHIBeginAsyncComputeJob_DrawThread 和 RHIEndAsyncComputeJob_DrawThread 调用之间，RHI 处于异步计算状态。
+这段时间中，支持的 RHI 命令将通过异步计算上下文执行。不支持的 RHI 函数将断言。
+
+## 启用/禁用
+
+编译时可通过 #define USE_ASYNC_COMPUTE_CONTEXT 启用或禁用异步计算。运行时可通过 r.AsyncCompute 控制台变量禁用。异步计算禁用后，异步计算块中的调度将在图形命令缓冲上同步执行。PC 上的 USE_ASYNC_COMPUTE_CONTEXT 被定义为 0，因 D3D11.1 不支持。
+
+## PIX
+
+异步计算上下文任务不在 GPU 采集中进行采集，因此异步计算启用时这些采集可能呈现出错误的 GPU 性能画面。为进行图形调试，应使用上述控制台变量禁用异步计算。异步计算由 PIX 定时采集支持。它们在时间轴中如下图所示：
+
+![](PixTimingCapture.png)
+
+## 鸣谢和未来更新
+
+此功能由 Lionhead Studios 实现。我们将其整合并用作 Xbox One 渲染的优化工具。
+
+随着更多 API 公开硬件功能，我们将使系统跨越更多平台。利用 AsyncCompute 的功能无需（控制器变量/定义）即可在其他平台上运行，进行调试和分析也十分简便。使用 AsyncCompute 时应谨慎，因为它可能导致性能出现更强的不可预测性，并需要更多代码工作进行同步。
+
+
+

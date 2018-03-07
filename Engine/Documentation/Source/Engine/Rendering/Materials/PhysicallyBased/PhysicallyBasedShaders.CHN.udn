@@ -1,0 +1,392 @@
+﻿INTSourceChangelist:3158648
+Availability:Public
+Title:基于物理的材质		
+Crumbs:%ROOT%, Engine
+Description:有关主要材质输入及如何加以善用的概述。
+Version: 4.9
+parent:Engine/Rendering/Materials
+order:13
+topic-image:physically_based_topic.png
+type:overview
+tags:Physically Based Shading
+tags:PBR
+
+[REGION:fullwidth]
+![](PhysMatHeader.png)
+[/REGION]
+
+
+本文旨在为那些需要快速开始了解虚幻引擎 4 中基于物理的材质系统的用户提供帮助。本文假定
+您至少在一定程度上熟悉虚幻引擎（至少虚幻引擎 3 或更高版本）中的材质创建。如果您完全不熟悉虚幻引擎中的材质，
+您可从 [](Engine/Rendering/Materials\IntroductionToMaterials) 页面入手。
+
+在这里，我们的目标只是“以普通语言”向您提供有关如何使用此系统建立标准材质的基本知识，因为
+即使是有先前虚幻引擎迭代经验的用户也可能会在这方面遇到困扰。我们仅将注意力放在
+基于物理的方法所涉及的材质方面。要获取可用输入的纲要，请参阅[](Engine/Rendering/Materials\MaterialInputs)。
+
+## “基于物理”有何含义？
+
+基于物理的明暗处理意味着我们估算光线的实际情况，而不是估算我们
+凭直觉认为它应该发生的情况。最终结果是，这样可产生更准确并且通常更加自然的外观。基于物理
+的材质在所有照明环境中都可以同样完美地工作。另外，材质值可以
+不那么复杂，相互依赖也可以少一些，从而产生更加直观的界面。这些益处甚至适用于非逼真
+渲染，您可在皮克斯 [[4]](#Smits) 和迪士尼 [[3]](#Burley) 的最新电影中找到证明。
+
+由于这些及其他原因，虚幻引擎 4 已采用基于物理的新材质和明暗处理模型。要了解
+有关 UE4 中基于物理的材质和明暗处理模型的深入技术说明，请参阅我的 SIGGRAPH 演示稿 [[2]](#Karis)。
+
+## 材质参数
+
+在材质系统的“基于物理”方面，只有 4 个您需要熟悉的不同属性。它们是：
+
+
+
+* **底色（Base Color）** 
+* **粗糙度（Roughness）** 
+* **金属色（Metallic）**
+* **高光（Specular）**
+
+
+[REGION:note]
+所有这些输入都设计成接收介于 0 与 1 之间的值。对于 _底色（Base Color）_，这表示 RGB 值介于 0 与 1 之间的颜色。
+[/REGION]
+
+基于物理的值可以从现实材质中测得。下面是一些示例。
+
+### 底色
+
+[EXCERPT:BaseColor] 
+**底色（Base Color）**无非定义材质的整体颜色。它接收 Vector3 (RGB) 值，并且每个通道都自动限制在 0 与 1 之间。
+
+如果是从现实世界获得的，那么这是使用偏振滤光器拍摄时获得的颜色 
+（偏振在校准时会消除非金属材质的镜面反射）。
+
+[REGION:fullwidth]
+![](BaseColor_QS.png)
+[/REGION]
+[/EXCERPT:BaseColor]
+
+[EXCERPT:MeasuredBaseColor] 
+**对于非金属材质测得的底色值（仅限强度）：**
+
+| 材质       | 底色强度 |
+| -------------- | ------------------- |
+| 木炭       | 0.02                |
+| 新鲜沥青  | 0.02                |
+| 老化沥青   | 0.08                |
+| 裸露土壤      | 0.13                |
+| 绿色草地    | 0.21                |
+| 沙漠沙子    | 0.36                |
+| 新鲜混凝土 | 0.51                |
+| 海冰         | 0.56                |
+| 新鲜雪         | 0.81                |
+
+**针对金属测得的底色：**
+
+| 材质 | 底色 (R, G, B)   |
+| -------- | --------------------- |
+| 铁     | (0.560, 0.570, 0.580) |
+| 银     | (0.972, 0.960, 0.915) |
+| 铝     | (0.913, 0.921, 0.925) |
+| 金     | (1.000, 0.766, 0.336) |
+| 铜     | (0.955, 0.637, 0.538) |
+| 铬     | (0.550, 0.556, 0.554) |
+| 镍     | (0.660, 0.609, 0.526) |
+| 钛     | (0.542, 0.497, 0.449) |
+| 钴     | (0.662, 0.655, 0.634) |
+| 铂     | (0.672, 0.637, 0.585) |
+[/EXCERPT:MeasuredBaseColor] 
+
+### 粗糙度
+
+[EXCERPT:Roughness]
+**粗糙度（Roughness）**输入实际控制材质的粗糙度。与平滑的材质相比，粗糙的材质将向更多方向散射所反射的光线。
+您可根据反射的模糊或清晰度或者镜面反射高光的广度或密集度加以 
+确定。粗糙度 0（平滑）是镜面反射，而粗糙度 1（粗糙）是完全无光泽或漫射。
+[/EXCERPT:Roughness]
+
+![](roughness_nonmetal.png)(convert:false)
+![](roughness_metal.png)(convert:false)
+[REGION:caption]
+粗糙度 0 到 1。上图为非金属，下图为金属。
+[/REGION]
+
+[INCLUDE:Engine/Rendering/Materials\PhysicallyBased#RoughnessSlider]
+
+
+#### 贴图粗糙度
+
+[EXCERPT:RoughnessMap]
+粗糙度是一个属性，它将频繁地在对象上进行贴图，以便向表面添加大部分物理变化。
+[/EXCERPT:RoughnessMap]
+
+[REGION:fullwidth]
+[INCLUDE:Engine/Rendering/Materials\PhysicallyBased#RoughBiasSlider]
+[/REGION]
+
+[EXCERPT:RoughnessTip]
+[REGION:tip]
+如果您已经在虚幻引擎的先前迭代中建立材质，并且不习惯基于物理的材质，请记住，粗糙度贴图是您处理大部分镜面反射纹理的位置。
+[/REGION]
+[/EXCERPT:RoughnessTip]
+
+
+### 金属色
+
+[EXCERPT:Metallic]
+**金属色（Metallic）**输入实际控制表面在多大程度上“像金属”。非金属的金属色（Metallic）值为 0，
+金属的金属色（Metallic）值为 1。对于纯表面，例如纯金属、纯石头、
+纯塑料等等，此值将是 0 或 1，而不是任何介于它们之间的值。创建受腐蚀、落满灰尘或生锈金属之类的混合表面时，
+您可能会发现需要 _介于_ 0 与 1 之间的值。 
+[/EXCERPT:Metallic]
+
+![](metallic.png)(convert:false)
+[REGION:caption]
+金属色 0 到 1
+[/REGION]
+
+[REGION:tip]
+最初，您可能会勉强将任何材质设置为完全金属。请忍住，不要这样做！
+[/REGION]
+
+您将注意到，我们在此示例中添加了少许粗糙度。这完全是艺术性选择。 
+
+[INCLUDE:Engine/Rendering/Materials\PhysicallyBased#MetallicSlider]
+
+
+### 高光
+
+[EXCERPT:Specular]
+不应连接 **高光（Specular）**输入，在大多数情况下，应将其保留为默认值 0.5。
+
+它是介于 0 与 1 之间的值，并用于调整 _非金属_ 表面上的当前镜面反射量。它在金属上没有效果。
+[/EXCERPT:Specular]
+
+[REGION:tip]
+对于漫射度非常大的材质，您可能倾向于将此值设置为零。请忍住，不要这样做！所有材质 
+都具有镜面反射，请参阅此帖子以获取示例 [[5]](#Hable)。对于漫射度非常大的材质，您真正想做的是 
+使它们粗糙。
+[/REGION]
+
+一般而言，通过修改“高光”（Specular），可添加轻微的吸着现象或小比例的遮蔽，例如在法线贴图中表示的裂缝。有时，将这些现象称为腔洞。
+比例较小的几何体，尤其是仅存在于高多边形中且并入法线贴图的细节，不会被渲染器的实时阴影拾取。为了捕获这种遮蔽，我们生成腔洞贴图，
+这通常是追踪距离非常短的 AO 贴图。此贴图先乘以最终的底色，然后输出并乘以 0.5（镜面反射默认值）以作为镜面反射输出。
+即，BaseColor = Cavity*OldBaseColor，Specular = Cavity*0.5。
+
+对于高级使用，这可用来控制折射率 (IOR)。我们发现对于 99% 的材质，这并非必要。以下是基于实测 IOR 的镜面反射值。
+
+**实测镜面反射值：**
+
+| 材质 | 镜面反射 |
+| -------- | -------- |
+| 玻璃    | 0.5      |
+| 塑料    | 0.5      |
+| 石英    | 0.570    |
+| 冰        | 0.224    |
+| 水        | 0.255    |
+| 牛奶    | 0.277    |
+| 皮肤    | 0.35     |
+
+
+[INCLUDE:Engine/Rendering/Materials\PhysicallyBased#SpecularSlider]
+
+
+
+![](measured_materials.png)(convert:false)
+[REGION:caption]
+实测材质示例。顶部：木炭、新鲜混凝土、老化沥青。底部：铜、铁、金、铝、银、镍、钛
+[/REGION]
+
+
+## 参考
+
+(#Lagarde)
+**1**.Lagarde：[Feeding a physically based shading model](http://seblagarde.wordpress.com/2011/08/17/feeding-a-physical-based-lighting-mode/)
+(#Karis)
+**2**.Karis：[Real Shading in Unreal Engine 4](https://de45xmedrsdbp.cloudfront.net/Resources/files/2013SiggraphPresentationsNotes-26915738.pdf)
+(#Burley)
+**3**.Burley：[Physically-Based Shading at Disney](http://blog.selfshadow.com/publications/s2012-shading-course/burley/s2012_pbs_disney_brdf_slides_v2.pdf)
+(#Smits)
+**4**.Smits：[Reflection Model Design for WALL-E and Up](http://blog.selfshadow.com/publications/s2012-shading-course/smits/s2012_pbs_pixar_model_slides_v2.pdf)
+(#Hable)
+**5**.Hable：[Everything is Shiny](http://filmicgames.com/archives/547)
+
+
+
+
+<!-------------
+
+* **底色（Base Color）** - 对象的颜色。类似于其他材质系统（包括 UE3）中的漫射。
+* **金属色（Metallic）** - 顾名思义，它控制表面在多大程度上像金属。对于纯表面，例如纯金属、纯石头、纯塑料等等，这将是 0 _或_ 1，而不能是任何介于它们之间的值。创建受腐蚀或生锈金属之类的表面时，您可能会发现需要 _介于_ 0 与 1 之间的值。
+* **粗糙度（Roughness）** - 在显微镜级别控制表面的粗糙度。镜子或有光泽的塑料之类的表面将具有非常低的粗糙度值，非常接近于 0。当您接近表面更粗糙的对象（例如粉笔或色泽暗沉的橡胶）时，粗糙度会增加。为了使效果逼真，表面很少会实际达到 0 和 1 这两端的粗糙度值，注意到这一点十分重要。通常，它们是介于这两者之间的值。
+
+
+
+
+[EXCERPT:MetallicSlider]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:max]
+	21
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	金属色（Metallic）
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	**拖动滑块可查看“金属色”（Metallic）值更新** 
+	[/PARAM]
+	[PARAM:image_list]
+	![](Metallic_1.png)
+	![](Metallic_2.png)
+	![](Metallic_3.png)
+	![](Metallic_4.png)
+	![](Metallic_5.png)
+	![](Metallic_6.png)
+	![](Metallic_7.png)
+	![](Metallic_8.png)
+	![](Metallic_9.png)
+	![](Metallic_10.png)
+	![](Metallic_11.png)
+	![](Metallic_12.png)
+	![](Metallic_13.png)
+	![](Metallic_14.png)
+	![](Metallic_15.png)
+	![](Metallic_16.png)
+	![](Metallic_17.png)
+	![](Metallic_18.png)
+	![](Metallic_19.png)
+	![](Metallic_20.png)
+	![](Metallic_21.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:MetallicSlider]
+
+
+
+
+[EXCERPT:RoughnessSlider]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:max]
+	21
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	粗糙度（Roughness）
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	**拖动滑块可查看“粗糙度”（Roughness）值更新**
+	[/PARAM]
+	[PARAM:image_list]
+	![](Roughness_1.png)
+	![](Roughness_2.png)
+	![](Roughness_3.png)
+	![](Roughness_4.png)
+	![](Roughness_5.png)
+	![](Roughness_6.png)
+	![](Roughness_7.png)
+	![](Roughness_8.png)
+	![](Roughness_9.png)
+	![](Roughness_10.png)
+	![](Roughness_11.png)
+	![](Roughness_12.png)
+	![](Roughness_13.png)
+	![](Roughness_14.png)
+	![](Roughness_15.png)
+	![](Roughness_16.png)
+	![](Roughness_17.png)
+	![](Roughness_18.png)
+	![](Roughness_19.png)
+	![](Roughness_20.png)
+	![](Roughness_21.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:RoughnessSlider]
+
+
+
+[EXCERPT:RoughBiasSlider]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:max]
+	21
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	粗燥偏差（RoughBias）
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	**拖动滑块可查看在纹理中有所偏差的“粗燥度”（Roughness）值更新。接近 0.5 时，可产生最有趣的效果。**
+	[/PARAM]
+	[PARAM:image_list]
+	![](RoughBias_1.png)
+	![](RoughBias_2.png)
+	![](RoughBias_3.png)
+	![](RoughBias_4.png)
+	![](RoughBias_5.png)
+	![](RoughBias_6.png)
+	![](RoughBias_7.png)
+	![](RoughBias_8.png)
+	![](RoughBias_9.png)
+	![](RoughBias_10.png)
+	![](RoughBias_11.png)
+	![](RoughBias_12.png)
+	![](RoughBias_13.png)
+	![](RoughBias_14.png)
+	![](RoughBias_15.png)
+	![](RoughBias_16.png)
+	![](RoughBias_17.png)
+	![](RoughBias_18.png)
+	![](RoughBias_19.png)
+	![](RoughBias_20.png)
+	![](RoughBias_21.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:RoughBiasSlider]
+
+
+[EXCERPT:SpecularSlider]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:max]
+	21
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	高光（Specular）
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	**拖动滑块可查看“高光”（Specular）值更新。**
+	[/PARAM]
+	[PARAM:image_list]
+	![](Specular_1.png)
+	![](Specular_2.png)
+	![](Specular_3.png)
+	![](Specular_4.png)
+	![](Specular_5.png)
+	![](Specular_6.png)
+	![](Specular_7.png)
+	![](Specular_8.png)
+	![](Specular_9.png)
+	![](Specular_10.png)
+	![](Specular_11.png)
+	![](Specular_12.png)
+	![](Specular_13.png)
+	![](Specular_14.png)
+	![](Specular_15.png)
+	![](Specular_16.png)
+	![](Specular_17.png)
+	![](Specular_18.png)
+	![](Specular_19.png)
+	![](Specular_20.png)
+	![](Specular_21.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:SpecularSlider]
+
+-->

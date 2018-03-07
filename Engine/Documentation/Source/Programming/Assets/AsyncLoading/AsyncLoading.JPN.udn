@@ -1,0 +1,85 @@
+﻿INTSourceChangelist:2721212
+Availability:Public
+Title:アセットの非同期ロード
+Crumbs:%ROOT%, Programming
+Description:ランタイム中にアセットをロードおよびアンロードするためのメソッド。
+Version:4.9
+
+[TOC(start:2)]
+
+以下はアンリアル エンジン 4 (UE4) のいくつかの新しいシステムです。こうしたシステムではアセット データをはるかに簡単に非同期でロード可能であり、アンリアル エンジン 3 (UE3) のシークフリーのコンテンツ パッケージにあった多くの機能に代わるものです。こうした新しいメソッドは開発と、デバイス上のクック データとで全く同じように機能します。そのため、オンデマンドでデータをロードするために 2 つのコード パスを維持する必要はありません。オンデマンドでデータを参照する、データをロードするために使用可能な一般的な方法として以下の 2 つがあります。
+
+## FStringAssetReferences と TAssetPtr
+
+アーティストやデザイナーにアセットを参照させる一番簡単な方法は、hard pointer の UProperty を作り、それにカテゴリを与えるものです。UE4 では、アセットを参照する hard UObject pointer のプロパティを持っている場合、そのプロパティを含むオブジェクトがロードされるとアセットがロードされます (マップに配置されるか、gameinfo のようなものから参照されるかのいずれかです)。気を付けないと、ゲームのスタートアップ時にアセットの 100% をロードすることになります。毎回参照したアセットをロードするのではなく、同じ UI を hard pointer として使用し、アーティスト / デザイナーが特定のアセットを参照できるようにしたい場合は、FStringAssetReference または TAssetPtr を使用します。
+
+FStringAssetReference は単純な構造体であり、アセットのフルネームを持つ文字列を含みます。このタイプのプロパティをクラスでつくると、`UObject *` プロパティであるかのようにエディタに表示されます。クッキングとリダイレクトも適切に処理します。そのため、StringAssetReference を持っていれば、デバイスで適切に機能することが保証されます。`TAssetPtr` は基本的に `TWeakObjectPtr` であり、FStringAssetReference をラップアラウンドし、特定クラスをテンプレートにするため、エディタ UI が特定のクラスだけを選択するように制限できます。参照したアセットがメモリにある場合、`TAssetPtr.Get()` がそれを戻します。参照したアセットがメモリになければ、`ToStringReference()` を呼び出して、それが参照するアセットを見つけて、以下で説明するメソッドを使用してロードします。次に、再度 `TAssetPtr.Get()` を呼び出してポインターの参照先の値を取得します。 
+
+`TAssetPtrs` と StringAssetReferences はアーティストやデザイナーが参照を手作業でセットアップしている場合には適しています。しかし、こうしたアセットのすべてをロードせずに、特定の要件を満たすアセットを見つけるようなクエリを行いたい場合は、アセット レジストリとオブジェクト ライブラリを使用します。
+
+## アセット レジストリとオブジェクト ライブラリ
+
+アセット レジストリはアセットに関するメタデータを保存するシステムであり、アセットの検索およびクエリを実行することができます。アセット レジストリはエディタが **コンテンツ ブラウザ** で情報を表示するために使用しますが、ゲームプレイ コードからゲームプレイ アセットに関するメタデータのクエリを実行するためにアセット レジストリを使用することもできます。アセットに関するデータを検索可能にするには、"AssetRegistrySearchable" タグをプロパティに追加する必要があります。アセット レジストリに対するクエリの実行は、オブジェクトの情報だけでなく、検索可能としてマーク付けされたプロパティを持つキー -> 値のペアのマップを含む FAssetData のタイプのオブジェクトを戻します。
+
+アンロードされたアセットのグループで作業する最も簡単な方法は、`ObjectLibrary` を使うものです。`ObjectLibrary` は、ロードされたオブジェクトまたはアンロードされたオブジェクトに対する FAssetData のいずれかのリストを含むオブジェクトであり、共有基本クラスから継承されたものです。検索するパスを与えることでオブジェクト ライブラリをロードし、オブジェクト ライブラリはすべてのアセットをそのパスに追加します。これは、非常に役立ちます。コンテンツ フォルダの一部を様々なタイプに指定し、アーティストやデザイナーはマニュアルのマスターリストを編集する必要なく、新規アセットを追加できるからです。以下は、オブジェクト ライブラリを使用して AssetData をディスクからロードする方法です。
+
+	if (!ObjectLibrary)
+	{
+		   ObjectLibrary = UObjectLibrary::CreateLibrary(BaseClass, false, GIsEditor);
+		   ObjectLibrary->AddToRoot();
+	}
+	ObjectLibrary->LoadAssetDataFromPath(TEXT("/Game/PathWithAllObjectsOfSameType");
+	if (bFullyLoad)
+	{
+		   ObjectLibrary->LoadAssetsFromAssetData();
+	}
+
+この例では、新規オブジェクト ライブラリを作成し、基本クラスを関連付けて、その後、特定のパスにあるすべてのアセット データをロードします。次に任意で実際のアセットをロードします。アセットが小さい場合、またはアセットをクッキングし、すべてがクッキングされたことを確認する必要がある場合は、アセットを完全にロードします。クッキング中にアセット レジストリのクエリを行い、戻されたアセットをロードしている限りは、オブジェクト ライブラリは開発中と同様にデバイス上でクックされたデータで機能します。`ObjectLibrary` に含まれるアセットデータがあれば、クエリを行い、特定のアセットを選択的にロードできます。以下は、クエリを行う方法の例です。
+
+	TArray<FAssetData> AssetDatas;
+	ObjectLibrary->GetAssetDataList(AssetDatas);
+
+	for (int32 i = 0; i < AssetDatas.Num(); ++i)
+	{
+		   FAssetData& AssetData = AssetDatas[i];
+
+		   const FString* FoundTypeNameString = AssetData.TagsAndValues.Find(GET_MEMBER_NAME_CHECKED(UAssetObject,TypeName));
+
+		   if (FoundTypeNameString && FoundTypeNameString->Contains(TEXT("FooType")))
+		   {
+				  return AssetData;
+		   }
+	}
+
+この例では、"FooType" を含む`TypeName` フィールドを持つものをオブジェクト ライブラリで検索します。続いて、見つけた最初のものを戻します。`AssetData` を得たら、`ToStringReference()` を呼び出してそれを `FStringAssetReference` に変換し、それを次のシステムを用いて非同期にロードできます。
+
+## StreamableManager と Asynchronous Loading
+
+ディスク上のアセットを参照する `FStringAssetReference` を持っているので、実際に非同期でロードしてみましょう。これを行うには、`FStreamableManager` が最も簡単な方法です。最初に、`FStreamableManager` を作成する必要があります。`DefaultEngine.ini` で `GameSingletonClassName` を用いて指定したものなど、何らかのグローバル ゲーム シングルトン オブジェクトに入れることをお勧めします。続いて、その中に `StringAssetReference` を渡して、ロードを開始します。`SynchronousLoad` は単純なブロッキング ロードを行い、オブジェクトを戻します。このメソッドは小さなオブジェクトには適しているかもしれませんが、メインのスレッドをかなり長い間、遅延させるおそれがあります。この場合、アセットのグループを非同期にロードし、完了後にデリゲートを呼び出す `RequestAsyncLoad` を使用する必要があります。以下は例です。
+
+	void UGameCheatManager::GrantItems()
+	{
+		   TArray<FStringAssetReference> ItemsToStream;
+		   FStreamableManager& Streamable = UGameGlobals::Get().StreamableManager;
+		   for(int32 i = 0; i < ItemList.Num(); ++i)
+		   {
+				  ItemsToStream.AddUnique(ItemList[i].ToStringReference());
+		   }
+		   Streamable.RequestAsyncLoad(ItemsToStream, FStreamableDelegate::CreateUObject(this, &UGameCheatManager::GrantItemsDeferred));
+	}
+
+	void UGameCheatManager::GrantItemsDeferred()
+	{
+		   for(int32 i = 0; i < ItemList.Num(); ++i)
+		   {
+				  UGameItemData* ItemData = ItemList[i].Get();
+				  if(ItemData)
+				  {
+						 MyPC->GrantItem(ItemData);
+				  }
+		   }
+	}
+
+この例では、ItemList は `TArray< TAssetPtr<UGameItem> >` でありエディタでデザイナーによって修正されました。このコードはリストを繰り返し、それを `StringReferences` に変換し、そのロードをキューに入れます。こうしたアイテムのすべてがロードされると (または、欠落しているためロードに失敗すると)、デリゲートで渡されたものを呼び出します。このデリゲートは次に同じアイテムのリストを繰り返し、参照先の値を取得し、それをプレイヤーに与えます。`StreamableManager` はデリゲートが呼び出されるまでロードするオブジェクトをハードリファレンスします。そのため、非同期にロードしたいオブジェクトが、デリゲートが呼び出される前にガーベジ コレクションされないことを安全に知ることができます。デリゲートが呼び出された後にこうした参照を解放します。そのため、こうした参照が確実に存在し続けるようにしたい場合は、どこか別の場所でハードリファレンスする必要があります。
+
+同じメソッドを使用して`FAssetData` を非同期にロードできます。FAssetData 上で `ToStringReference` を呼び出し、アレイに追加し、デリゲートで `RequestAsyncLoad` を呼び出します。デリゲートは必要なものなら何でも可能であるため、必要に応じてペイロード情報を渡すことができます。上記のメソッドを組み合わせることで、ゲームにアセットを効率的にロードできるシステムをセットアップできます。非同期のロードを処理するためにメモリに直接アクセスするゲームプレイ コードを変換するにはある程度時間がかかるでしょう。しかし、結局はゲームが停止することはかなり減り、メモリ消費も相当少なくなります。

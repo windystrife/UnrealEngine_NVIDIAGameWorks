@@ -1,0 +1,538 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+#pragma once
+
+#include "Common.ush"	
+
+// 0:reference (slower, potentially higher quality) 1:use mips of the HZB depth (better performance)
+#define USE_HZB		1
+
+#define SCALAR_BRANCHLESS		0
+#define VECTORIZED_BRANCHLESS	0
+#define VECTORIZED_EARLY_OUT	1
+
+#if USE_HZB
+#define HZB_LEVEL_OFFSET 1.0
+#else
+#define HZB_LEVEL_OFFSET 0.0
+#endif
+
+float4 HZBUvFactorAndInvFactor;
+
+float4 SampleDepthTexture( Texture2D Texture, SamplerState Sampler, float Level, float4 SampleUV0, float4 SampleUV1 )
+{
+	float4 SampleDepth;
+#if USE_HZB
+	// SampleUV{0,1}.{xy,zw} should already be in the HZB UV frame using HZBUvFactorAndInvFactor.xy
+	SampleDepth.x = Texture2DSampleLevel( Texture, Sampler, SampleUV0.xy, Level ).r;
+	SampleDepth.y = Texture2DSampleLevel( Texture, Sampler, SampleUV0.zw, Level ).r;
+	SampleDepth.z = Texture2DSampleLevel( Texture, Sampler, SampleUV1.xy, Level ).r;
+	SampleDepth.w = Texture2DSampleLevel( Texture, Sampler, SampleUV1.zw, Level ).r;
+#else
+	SampleDepth.x = Texture2DSampleLevel( SceneDepthTexture, SceneDepthTextureSampler, SampleUV0.xy, 0 ).r;
+	SampleDepth.y = Texture2DSampleLevel( SceneDepthTexture, SceneDepthTextureSampler, SampleUV0.zw, 0 ).r;
+	SampleDepth.z = Texture2DSampleLevel( SceneDepthTexture, SceneDepthTextureSampler, SampleUV1.xy, 0 ).r;
+	SampleDepth.w = Texture2DSampleLevel( SceneDepthTexture, SceneDepthTextureSampler, SampleUV1.zw, 0 ).r;
+#endif
+	return SampleDepth;
+}
+
+void RayCast(
+	Texture2D Texture, SamplerState Sampler, float2 TextureSize,
+	float3 RayOriginTranslatedWorld, float3 RayDirection,
+	float Roughness, float ConeAngleWorld, float SceneDepth,
+	int NumSteps, float StepOffset,
+	out float4 OutHitUVzTime,
+	out float OutLevelHCB
+)
+{
+	// TODO provide RayStartUVz
+	const float4 RayStartV = mul( float4( RayOriginTranslatedWorld, 1 ), View.TranslatedWorldToView );
+	const float4 RayDirV = mul(float4(RayDirection * SceneDepth, 0), View.TranslatedWorldToView);
+	const float4 RayEndV = RayStartV + RayDirV;
+
+	const float RayEndRadiusV = length(RayDirV.xyz) * tan(ConeAngleWorld * 0.4);
+	const float2 RayEndBorderV = RayEndV.xy + RayEndRadiusV / sqrt(2.0);
+
+	const float4 RayStartClip	= mul( RayStartV, View.ViewToClip );
+	const float4 RayEndClip		= mul( RayEndV, View.ViewToClip );
+	const float2 RayEndBorderClip = mul(float4(RayEndBorderV, RayEndV.zw), View.ViewToClip).xy;
+
+	const float3 RayStartScreen = RayStartClip.xyz / RayStartClip.w;
+	const float3 RayEndScreen = RayEndClip.xyz / RayEndClip.w;
+	const float2 RayEndBorderScreen = RayEndBorderClip.xy / RayEndClip.w;
+
+	float4 RayDepthClip	= RayStartClip + mul( float4( 0, 0, SceneDepth, 0 ), View.ViewToClip );
+	float3 RayDepthScreen = RayDepthClip.xyz / RayDepthClip.w;
+
+	float3 RayStepScreen = RayEndScreen - RayStartScreen;
+	float2 RayStepRadiusScreen = RayEndBorderScreen - RayEndScreen.xy;
+
+	{
+		// Computes the scale down factor for RayStepScreen required to fit on the X and Y axis in order to clip it in the viewport
+		const float RayStepScreenInvFactor = 0.5 * length( RayStepScreen.xy );
+		const float2 AbsRayStepScreen = abs(RayStepScreen.xy);
+		const float2 S = (AbsRayStepScreen - max(abs(RayStepScreen.xy + RayStartScreen.xy * RayStepScreenInvFactor) - RayStepScreenInvFactor, 0.0f)) / AbsRayStepScreen;
+
+		// Rescales RayStepScreen accordingly
+		const float RayStepFactor = min(S.x, S.y) / RayStepScreenInvFactor;
+
+		RayStepScreen *= RayStepFactor;
+		RayStepRadiusScreen *= RayStepFactor;
+	}
+
+	const float2 HzbSize = float2(1024, 512);
+#if USE_HZB
+	float3 RayStartUVz = float3( (RayStartScreen.xy * float2( 0.5, -0.5 ) + 0.5) * HZBUvFactorAndInvFactor.xy, RayStartScreen.z );
+	float3 RayStepUVz = float3( RayStepScreen.xy * float2( 0.5, -0.5 ) * HZBUvFactorAndInvFactor.xy, RayStepScreen.z );
+	float2 RayStepRadiusUV = RayStepRadiusScreen.xy * float2( 0.5, -0.5 ) * HZBUvFactorAndInvFactor.xy;
+#else
+	float3 RayStartUVz = float3( (RayStartScreen.xy * float2( 0.5, -0.5 ) + 0.5), RayStartScreen.z );
+	float3 RayStepUVz = float3( RayStepScreen.xy * float2( 0.5, -0.5 ), RayStepScreen.z );
+	float2 RayStepRadiusUV = RayStepRadiusScreen.xy * float2( 0.5, -0.5 );
+#endif
+	const float RayStepRadiusFactor = length(RayStepRadiusUV * TextureSize);
+	
+	const float Step = 1.0 / NumSteps;
+
+	const float CompareTolerance = max(abs( RayStepUVz.z ), ( RayStartScreen.z - RayDepthScreen.z ) * 4) * Step;
+
+	// avoid bugs with early returns inside of loops on certain platform compilers.
+	float4 Result = float4( 0, 0, 0, 1 );
+
+#if SCALAR_BRANCHLESS
+
+	float MinHitTime = 1;
+	float LastDiff = 0;
+
+	float SampleTime = StepOffset * Step + Step;
+
+	UNROLL
+	for( int i = 0; i < NumSteps; i++ )
+	{
+		float3 SampleUVz = RayStartUVz + RayStepUVz * SampleTime;
+		
+		// Use lower res for farther samples
+		float Level = Roughness * (i * 4.0 / NumSteps) + HZB_LEVEL_OFFSET;
+		float SampleDepth = Texture.SampleLevel( Sampler, SampleUVz.xy, Level ).r;
+
+		float DepthDiff = SampleUVz.z - SampleDepth;
+		bool Hit = abs( DepthDiff + CompareTolerance ) < CompareTolerance;
+
+		// Find more accurate hit using line segment intersection
+		float TimeLerp = saturate( LastDiff / (LastDiff - DepthDiff) );
+		float IntersectTime = SampleTime + TimeLerp * Step - Step;
+		float HitTime = Hit ? IntersectTime : 1;
+		MinHitTime = min( MinHitTime, HitTime );
+
+		LastDiff = DepthDiff;
+
+		SampleTime += Step;
+	}
+
+	float3 HitUVz = RayStartUVz + RayStepUVz * MinHitTime;
+
+	Result = float4( HitUVz, MinHitTime );
+
+#elif VECTORIZED_BRANCHLESS
+
+	float MinHitTime = 1;
+	float LastDiff = 0;
+	float Level = HZB_LEVEL_OFFSET;
+	
+	// Vectorized to group fetches
+	float4 SampleTime = ( StepOffset + float4( 1, 2, 3, 4 ) ) * Step;
+	float4 SampleUV0 = RayStartUVz.xyxy + RayStepUVz.xyxy * SampleTime.xxyy;
+	float4 SampleUV1 = RayStartUVz.xyxy + RayStepUVz.xyxy * SampleTime.zzww;
+	float4 SampleZ   = RayStartUVz.zzzz + RayStepUVz.zzzz * SampleTime;
+
+	LOOP
+	for( int i = 0; i < NumSteps; i += 4 )
+	{
+		// Use lower res for farther samples
+		float4 SampleDepth = SampleDepthTexture( Texture, Sampler, Level, SampleUV0, SampleUV1 );
+
+		#if 1
+			float4 DepthDiff = SampleZ - SampleDepth;
+			float4 IntersectTime = ( SampleDepth - RayStartUVz.zzzz ) / RayStepUVz.zzzz;
+		
+			bool4 Hit = abs( DepthDiff + CompareTolerance ) < CompareTolerance;
+	
+			// If hit set to intersect time. If missed set to 1, beyond end of ray
+			float4 HitTime = Hit ? IntersectTime : 1;
+
+			// Take closest hit
+			HitTime.xy = min( HitTime.xy, HitTime.zw );
+			MinHitTime = min( HitTime.x, HitTime.y );
+		#else
+			// Line segment intersection
+			float4 DepthDiff1 = SampleZ - SampleDepth;
+			float4 DepthDiff0 = float4( LastDiff, DepthDiff1.xyz );
+			float4 TimeLerp = saturate( DepthDiff0 / (DepthDiff0 - DepthDiff1) );
+			float4 IntersectTime = SampleTime + (TimeLerp - 1) / (NumSteps + 1);
+		
+			bool4 Hit = abs( DepthDiff1 + CompareTolerance ) < CompareTolerance;
+	
+			// If hit set to intersect time. If missed set to 1, beyond end of ray
+			float4 HitTime = Hit ? IntersectTime : 1;
+
+			// Take closest hit
+			HitTime.xy = min( HitTime.xy, HitTime.zw );
+			MinHitTime = min( MinHitTime, min( HitTime.x, HitTime.y ) );
+
+			LastDiff = DepthDiff1.w;
+		#endif
+		Level += Roughness * (16.0 / NumSteps);
+
+		SampleTime	+= 4.0 / (NumSteps + 1);
+		SampleUV0	+= RayStepUVz.xyxy * 4.0 / (NumSteps + 1);
+		SampleUV1	+= RayStepUVz.xyxy * 4.0 / (NumSteps + 1);
+		SampleZ		+= RayStepUVz.zzzz * 4.0 / (NumSteps + 1);
+	}
+
+	float3 HitUVz = RayStartUVz + RayStepUVz * MinHitTime;
+
+	Result = float4( HitUVz, MinHitTime );
+
+#elif 1
+
+	float LastDiff = 0;
+	float Level = HZB_LEVEL_OFFSET;
+
+	RayStepUVz *= Step;
+	float3 RayUVz = RayStartUVz + RayStepUVz * StepOffset;
+
+	LOOP
+	for( int i = 0; i < NumSteps; i += 4 )
+	{
+		// Vectorized to group fetches
+		float4 SampleUV0 = RayUVz.xyxy + RayStepUVz.xyxy * float4( 1, 1, 2, 2 );
+		float4 SampleUV1 = RayUVz.xyxy + RayStepUVz.xyxy * float4( 3, 3, 4, 4 );
+		float4 SampleZ   = RayUVz.zzzz + RayStepUVz.zzzz * float4( 1, 2, 3, 4 );
+		
+		// Use lower res for farther samples
+		float4 SampleDepth = SampleDepthTexture( Texture, Sampler, Level, SampleUV0, SampleUV1 );
+
+		float4 DepthDiff = SampleZ - SampleDepth;
+		bool4 Hit = abs( -DepthDiff - CompareTolerance ) < CompareTolerance;
+
+		BRANCH if( any( Hit ) )
+		{
+			float DepthDiff0 = DepthDiff[2];
+			float DepthDiff1 = DepthDiff[3];
+			float MinTime = 3;
+
+			FLATTEN if( Hit[2] )
+			{
+				DepthDiff0 = DepthDiff[1];
+				DepthDiff1 = DepthDiff[2];
+				MinTime = 2;
+			}
+			FLATTEN if( Hit[1] )
+			{
+				DepthDiff0 = DepthDiff[0];
+				DepthDiff1 = DepthDiff[1];
+				MinTime = 1;
+			}
+			FLATTEN if( Hit[0] )
+			{
+				DepthDiff0 = LastDiff;
+				DepthDiff1 = DepthDiff[0];
+				MinTime = 0;
+			}
+
+			// Find more accurate hit using line segment intersection
+			float TimeLerp = saturate( DepthDiff0 / (DepthDiff0 - DepthDiff1) );
+			float IntersectTime = MinTime + TimeLerp;
+			float3 HitUVz = RayUVz + RayStepUVz * IntersectTime;
+
+			Result = float4( HitUVz, 0.5 );
+			break;
+		}
+
+		LastDiff = DepthDiff.w;
+		Level += Roughness * (16.0 / NumSteps);
+
+		RayUVz += 4 * RayStepUVz;
+	}
+
+#elif 1
+
+	float Level = HZB_LEVEL_OFFSET;
+
+	RayStepUVz *= Step;
+	float3 RayUVz = RayStartUVz + RayStepUVz * StepOffset;
+
+	LOOP
+	for( uint i = 0; i < NumSteps; i += 4 )
+	{
+		// Vectorized to group fetches
+		float4 SampleUV0 = RayUVz.xyxy + RayStepUVz.xyxy * float4( 1, 1, 2, 2 );
+		float4 SampleUV1 = RayUVz.xyxy + RayStepUVz.xyxy * float4( 3, 3, 4, 4 );
+		float4 SampleZ   = RayUVz.zzzz + RayStepUVz.zzzz * float4( 1, 2, 3, 4 );
+		
+		// Use lower res for farther samples
+		float4 SampleDepth = SampleDepthTexture( Texture, Sampler, Level, SampleUV0, SampleUV1 );
+
+		float4 DepthDiff = SampleZ - SampleDepth;
+		bool4 Hit = abs( -DepthDiff - CompareTolerance ) < CompareTolerance;
+
+		BRANCH if( any( Hit ) )
+		{
+			float MinTime = 3;
+			MinTime = Hit[2] ? 2 : MinTime;
+			MinTime = Hit[1] ? 1 : MinTime;
+			MinTime = Hit[0] ? 0 : MinTime;
+
+			float3 HitUVz = RayUVz + RayStepUVz * MinTime;
+
+			Result = float4( HitUVz, 0.5 );
+			break;
+		}
+
+		Level += Roughness * (16.0 / NumSteps);
+		RayUVz += 4 * RayStepUVz;
+	}
+
+#else // VECTORIZED_EARLY_OUT
+
+	float LastDiff = 0;
+	float Level = HZB_LEVEL_OFFSET;
+
+	float4 SampleTime = ( StepOffset + float4( 1, 2, 3, 4 ) ) * Step;
+
+	LOOP
+	for( int i = 0; i < NumSteps; i += 4 )
+	{
+		// Vectorized to group fetches
+		float4 SampleUV0 = RayStartUVz.xyxy + RayStepUVz.xyxy * SampleTime.xxyy;
+		float4 SampleUV1 = RayStartUVz.xyxy + RayStepUVz.xyxy * SampleTime.zzww;
+		float4 SampleZ   = RayStartUVz.zzzz + RayStepUVz.zzzz * SampleTime;
+		
+		// Use lower res for farther samples
+		float4 SampleDepth = SampleDepthTexture( Texture, Sampler, Level, SampleUV0, SampleUV1 );
+
+		float4 DepthDiff1 = SampleZ - SampleDepth;
+		bool4 Hit = abs( -DepthDiff1 - CompareTolerance ) < CompareTolerance;
+
+		BRANCH if( any( Hit ) )
+		{
+			// Find more accurate hit using line segment intersection
+			float4 DepthDiff0 = float4( LastDiff, DepthDiff1.xyz );
+			float4 TimeLerp = saturate( DepthDiff0 / (DepthDiff0 - DepthDiff1) );
+			float4 IntersectTime = SampleTime + (TimeLerp - 1) / (NumSteps + 1);
+			float4 HitTime = Hit ? IntersectTime : 1;
+
+			// Take closest hit
+			HitTime.xy = min( HitTime.xy, HitTime.zw );
+			float MinHitTime = min( HitTime.x, HitTime.y );
+			
+			float3 HitUVz = RayStartUVz + RayStepUVz * MinHitTime;
+
+			Result = float4( HitUVz, MinHitTime );
+			break;
+		}
+
+		LastDiff = DepthDiff1.w;
+		Level += Roughness * (16.0 / NumSteps);
+
+		SampleTime += 4.0 / (NumSteps + 1);
+	}
+
+#endif
+	
+#if USE_HZB
+	Result.xy *= HZBUvFactorAndInvFactor.zw;
+	Result.xy = Result.xy * float2( 2, -2 ) + float2( -1, 1 );
+	Result.xy = Result.xy * View.ScreenPositionScaleBias.xy + View.ScreenPositionScaleBias.wz;
+#endif
+
+	OutHitUVzTime = Result;
+	OutLevelHCB = log2(OutHitUVzTime.w * RayStepRadiusFactor) + 1;
+}
+
+float4 RayCastCheap( Texture2D Texture, SamplerState Sampler, float3 R, float SceneDepth, float3 PositionTranslatedWorld, float StepOffset )
+{
+	// TODO provide RayStartUVz
+
+	// NOTE could clip ray against frustum planes
+
+	// TODO use screen position and skip matrix mul
+	float4 RayStartClip	= mul( float4( PositionTranslatedWorld, 1 ), View.TranslatedWorldToClip );
+	float4 RayEndClip	= mul( float4( PositionTranslatedWorld + R * SceneDepth, 1 ), View.TranslatedWorldToClip );
+
+	float3 RayStartScreen = RayStartClip.xyz / RayStartClip.w;
+	float3 RayEndScreen = RayEndClip.xyz / RayEndClip.w;
+
+	// Normalize 2D length
+	float3 RayStepScreen = ( RayEndScreen - RayStartScreen ) / length( RayEndScreen.xy - RayStartScreen.xy );
+	RayStepScreen *= 0.75;
+
+#if USE_HZB
+	float3 RayStartUVz = float3( RayStartScreen.xy * float2( 0.5, -0.5 ) + 0.5, RayStartScreen.z );
+	float3 RayStepUVz = float3( RayStepScreen.xy * float2( 0.5, -0.5 ), RayStepScreen.z );
+#else
+	float3 RayStartUVz = float3( RayStartScreen.xy * View.ScreenPositionScaleBias.xy + View.ScreenPositionScaleBias.wz, RayStartScreen.z );
+	float3 RayStepUVz = float3( RayStepScreen.xy * View.ScreenPositionScaleBias.xy, RayStepScreen.z );
+#endif
+	
+	const float Step = 1.0 / (4 + 1);
+
+	// *2 to get less morie pattern in extreme cases, larger values make object appear not grounded in reflections
+	const float CompareTolerance = abs( RayStepUVz.z ) * Step * 2;
+
+	// Vectorized to group fetches
+	float4 SampleTime = ( StepOffset + float4( 1, 2, 3, 4 ) ) * Step;
+	float4 SampleUV0 = RayStartUVz.xyxy + RayStepUVz.xyxy * SampleTime.xxyy;
+	float4 SampleUV1 = RayStartUVz.xyxy + RayStepUVz.xyxy * SampleTime.zzww;
+	float4 SampleZ   = RayStartUVz.zzzz + RayStepUVz.zzzz * SampleTime;
+
+	float4 SampleDepth;
+#if USE_HZB
+	SampleDepth.x = Texture2DSampleLevel( Texture, Sampler, SampleUV0.xy, 0 ).r;
+	SampleDepth.y = Texture2DSampleLevel( Texture, Sampler, SampleUV0.zw, 0 ).r;
+	SampleDepth.z = Texture2DSampleLevel( Texture, Sampler, SampleUV1.xy, 1 ).r;
+	SampleDepth.w = Texture2DSampleLevel( Texture, Sampler, SampleUV1.zw, 1 ).r;
+#else
+	SampleDepth.x = Texture2DSampleLevel( SceneDepthTexture, SceneDepthTextureSampler, SampleUV0.xy, 0 ).r;
+	SampleDepth.y = Texture2DSampleLevel( SceneDepthTexture, SceneDepthTextureSampler, SampleUV0.zw, 0 ).r;
+	SampleDepth.z = Texture2DSampleLevel( SceneDepthTexture, SceneDepthTextureSampler, SampleUV1.xy, 0 ).r;
+	SampleDepth.w = Texture2DSampleLevel( SceneDepthTexture, SceneDepthTextureSampler, SampleUV1.zw, 0 ).r;
+#endif
+
+	#if 1
+		float4 DepthDiff = SampleZ - SampleDepth;
+		float4 IntersectTime = ( SampleDepth - RayStartUVz.zzzz ) / RayStepUVz.zzzz;
+		
+		bool4 Hit = abs( DepthDiff + CompareTolerance ) < CompareTolerance;
+	
+		// If hit set to intersect time. If missed set to 1, beyond end of ray
+		float4 HitTime = Hit ? IntersectTime : 1;
+
+		// Take closest hit
+		HitTime.xy = min( HitTime.xy, HitTime.zw );
+		float MinHitTime = min( HitTime.x, HitTime.y );
+	#else
+		// Line segment intersection
+		float4 DepthDiff1 = SampleZ - SampleDepth;
+		float4 DepthDiff0 = float4( 0, DepthDiff1.xyz );
+		float4 TimeLerp = saturate( DepthDiff0 / (DepthDiff0 - DepthDiff1) );
+		float4 IntersectTime = SampleTime + (TimeLerp - 1) * Step;
+		
+		bool4 Hit = abs( DepthDiff1 + CompareTolerance ) < CompareTolerance;
+	
+		// If hit set to intersect time. If missed set to 1, beyond end of ray
+		float4 HitTime = Hit ? IntersectTime : 1;
+
+		// Take closest hit
+		HitTime.xy = min( HitTime.xy, HitTime.zw );
+		float MinHitTime = min( HitTime.x, HitTime.y );
+	#endif
+
+	float3 HitUVz = RayStartUVz + RayStepUVz * MinHitTime;
+
+	BRANCH
+	if( MinHitTime == 1 && RayStepUVz.z < 0 )
+	{
+		float4 RayInfClip	= mul( float4( PositionTranslatedWorld + R * 2000000, 1 ), View.TranslatedWorldToClip );
+		float3 RayInfScreen = RayInfClip.xyz / RayInfClip.w;
+		float3 RayInfUVz = float3( RayInfScreen.xy * float2( 0.5, -0.5 ) + 0.5, RayInfScreen.z );
+
+		HitUVz = RayInfUVz;
+		MinHitTime = 0.5;
+	}
+
+#if USE_HZB
+	HitUVz.xy = HitUVz.xy = HitUVz.xy * float2( 2, -2 ) + float2( -1, 1 );
+	HitUVz.xy = HitUVz.xy * View.ScreenPositionScaleBias.xy + View.ScreenPositionScaleBias.wz;
+#endif
+	return float4( HitUVz, MinHitTime );
+}
+
+float2 ReprojectHit( float3 HitUVz )
+{
+	// Camera motion for pixel (in ScreenPos space).
+	float4 ThisClip = float4( (HitUVz.xy - View.ScreenPositionScaleBias.wz) / View.ScreenPositionScaleBias.xy, HitUVz.z, 1 );
+	float4 PrevClip = mul( ThisClip, View.ClipToPrevClip );
+	float2 PrevScreen = PrevClip.xy / PrevClip.w;
+	float2 PrevUV = PrevScreen.xy * View.ScreenPositionScaleBias.xy + View.ScreenPositionScaleBias.wz;
+	return PrevUV;
+}
+
+float2 ReprojectHit( Texture2D Texture, SamplerState Sampler, float3 HitUVz )
+{
+	// Camera motion for pixel (in ScreenPos space).
+	float4 ThisClip = float4( (HitUVz.xy - View.ScreenPositionScaleBias.wz) / View.ScreenPositionScaleBias.xy, HitUVz.z, 1 );
+	float4 PrevClip = mul( ThisClip, View.ClipToPrevClip );
+	float2 PrevScreen = PrevClip.xy / PrevClip.w;
+
+	float2 Velocity = Texture.SampleLevel( Sampler, HitUVz.xy, 0 ).xy;
+	if( Velocity.x > 0.0 )
+	{
+		PrevScreen = ThisClip.xy - DecodeVelocityFromTexture( Velocity );
+	}
+
+	float2 PrevUV = PrevScreen.xy * View.ScreenPositionScaleBias.xy + View.ScreenPositionScaleBias.wz;
+	return PrevUV;
+}
+
+float4 SampleScreenColor( Texture2D Texture, SamplerState Sampler, float2 UV )
+{
+	float4 OutColor;
+
+	OutColor.rgb = Texture.SampleLevel( Sampler, UV, 0 ).rgb;
+	OutColor.a = 1;
+
+	// Off screen masking
+	float2 ScreenPos = ( UV - View.ScreenPositionScaleBias.wz ) / View.ScreenPositionScaleBias.xy;
+	float2 Vignette = saturate( abs( ScreenPos ) * 5 - 4 );
+		
+	//PrevScreen sometimes has NaNs or Infs.  DX11 is protected because saturate turns NaNs -> 0.
+	//Do a SafeSaturate so other platforms get the same protection.
+	OutColor *= SafeSaturate( 1.0 - dot( Vignette, Vignette ) );
+
+	// Transform NaNs to black, transform negative colors to black.
+	OutColor.rgb = -min(-OutColor.rgb, 0.0);
+
+	return OutColor;
+}
+
+float4 SampleHCBLevel( Texture2D Texture, SamplerState Sampler, float3 HitUVz, float Level )
+{
+	float4 OutColor;
+
+#if PREV_FRAME_COLOR
+	// Find previous screen position for hit since color buffer is from last frame
+	// TODO combine to single matrix
+	float4 HitClip = float4( (HitUVz.xy - View.ScreenPositionScaleBias.wz) / View.ScreenPositionScaleBias.xy, HitUVz.z, 1 );
+	float4 HitTranslatedWorld = mul( HitClip, View.ClipToTranslatedWorld );
+	HitTranslatedWorld /= HitTranslatedWorld.w;
+		
+	float3 PrevTranslatedWorld = HitTranslatedWorld.xyz + (View.PrevPreViewTranslation - View.PreViewTranslation);
+	float4 PrevClip = mul( float4( PrevTranslatedWorld, 1 ), View.PrevTranslatedWorldToClip );
+	float2 PrevScreen = PrevClip.xy / PrevClip.w;
+	float2 PrevUV = PrevScreen.xy * View.ScreenPositionScaleBias.xy + View.ScreenPositionScaleBias.wz;
+
+	OutColor.rgb = Texture.SampleLevel( Sampler, PrevUV * HZBUvFactorAndInvFactor.xy, Level ).rgb;
+	OutColor.a = 1;
+
+	// Off screen masking
+	float2 Vignette = saturate( abs( PrevScreen ) * 5 - 4 );
+#else
+	OutColor.rgb = Texture.SampleLevel( Sampler, HitUVz.xy * HZBUvFactorAndInvFactor.xy, Level ).rgb;
+	OutColor.a = 1;
+
+	// Off screen masking
+	float2 HitScreenPos = ( HitUVz.xy - View.ScreenPositionScaleBias.wz ) / View.ScreenPositionScaleBias.xy;
+	float2 Vignette = saturate( abs( HitScreenPos ) * 5 - 4 );
+#endif
+		
+	//PrevScreen sometimes has NaNs or Infs.  DX11 is protected because saturate turns NaNs -> 0.
+	//Do a SafeSaturate so other platforms get the same protection.
+	OutColor *= SafeSaturate( 1.0 - dot( Vignette, Vignette ) );
+
+	// Transform NaNs to black, transform negative colors to black.
+	OutColor.rgb = -min(-OutColor.rgb, 0.0);
+
+	return OutColor;
+}

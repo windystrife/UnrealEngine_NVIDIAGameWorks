@@ -1,0 +1,369 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	GlobalDistanceField.usf
+=============================================================================*/
+
+#include "Common.ush"
+#include "DeferredShadingCommon.ush"
+#include "DistanceFieldLightingShared.ush"
+#include "DistanceFieldAOShared.ush"
+#include "GlobalDistanceFieldShared.ush"
+#include "HeightfieldLightingShared.ush"
+
+#ifndef CULLOBJECTS_THREADGROUP_SIZE
+#define CULLOBJECTS_THREADGROUP_SIZE 1
+#endif
+
+float AOGlobalMaxSphereQueryRadius;
+
+groupshared uint NumGroupObjects;
+groupshared uint GroupBaseIndex;
+groupshared uint GroupObjectIndices[CULLOBJECTS_THREADGROUP_SIZE];
+
+float4 FetchObjectDataFloat4(uint SourceIndex)
+{
+	return float4(ObjectData[4 * SourceIndex + 0], ObjectData[4 * SourceIndex + 1], ObjectData[4 * SourceIndex + 2], ObjectData[4 * SourceIndex + 3]);
+}
+
+void CopyCulledObjectData(uint DestIndex, uint SourceIndex)
+{
+	RWCulledObjectBounds[DestIndex] = LoadGlobalObjectPositionAndRadius(SourceIndex);
+
+	UNROLL
+	for (uint VectorIndex = 0; VectorIndex < CULLED_OBJECT_DATA_STRIDE; VectorIndex++)
+	{
+		float4 Data = FetchObjectDataFloat4(SourceIndex * OBJECT_DATA_STRIDE + VectorIndex);
+
+		// Note: only copying the first CULLED_OBJECT_DATA_STRIDE of the original object data
+		RWCulledObjectData[DestIndex * CULLED_OBJECT_DATA_STRIDE + VectorIndex] = Data;
+	}
+}
+
+float4 VolumeBounds;
+// 0: accept only mostly static objects, 1: accept only often moving objects, 2: accept all objects
+uint AcceptOftenMovingObjectsOnly;
+
+[numthreads(CULLOBJECTS_THREADGROUP_SIZE, 1, 1)]
+void CullObjectsForVolumeCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint ObjectIndex = DispatchThreadId.x;
+
+// Warning: disabled path ignores AcceptOftenMovingObjectsOnly
+#define USE_FRUSTUM_CULLING 1
+#if USE_FRUSTUM_CULLING
+	if (GroupThreadId.x == 0)
+	{
+		NumGroupObjects = 0;
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
+	if (ObjectIndex < NumSceneObjects)
+	{
+		float4 ObjectBoundingSphere = LoadGlobalObjectPositionAndRadius(ObjectIndex);
+		float Distance = length(VolumeBounds.xyz - ObjectBoundingSphere.xyz);
+		uint OftenMoving = LoadGlobalObjectOftenMoving(ObjectIndex);
+
+		if (Distance < VolumeBounds.w + ObjectBoundingSphere.w + AOGlobalMaxSphereQueryRadius
+			&& (AcceptOftenMovingObjectsOnly == 2 || OftenMoving == AcceptOftenMovingObjectsOnly))
+		{
+			uint DestIndex;
+			InterlockedAdd(NumGroupObjects, 1U, DestIndex);
+			GroupObjectIndices[DestIndex] = ObjectIndex;
+		}
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
+	if (GroupThreadId.x == 0)
+	{
+		InterlockedAdd(RWObjectIndirectArguments[1], NumGroupObjects, GroupBaseIndex);
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
+	if (GroupThreadId.x < NumGroupObjects)
+	{
+		uint SourceIndex = GroupObjectIndices[GroupThreadId.x];
+		uint DestIndex = GroupBaseIndex + GroupThreadId.x;
+		CopyCulledObjectData(DestIndex, SourceIndex);
+	}
+
+#else
+
+	if (DispatchThreadId.x == 0)
+	{
+		// IndexCount, NumInstances, StartIndex, BaseVertexIndex, FirstInstance
+		RWObjectIndirectArguments[1] = NumSceneObjects;
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
+	if (ObjectIndex < NumSceneObjects)
+	{
+		uint SourceIndex = ObjectIndex;
+		uint DestIndex = ObjectIndex;
+
+		CopyCulledObjectData(DestIndex, SourceIndex);
+	}
+
+#endif
+}
+
+uint ClipmapIndex;
+float3 VolumeTexelSize;
+float3 UpdateRegionVolumeMin;
+uint3 CullGridDimension;
+
+RWBuffer<uint> RWCulledObjectGrid;
+
+#ifndef CULL_GRID_TILE_SIZE
+#define CULL_GRID_TILE_SIZE 1
+#endif
+
+#ifndef MAX_GRID_CULLED_DF_OBJECTS
+#define MAX_GRID_CULLED_DF_OBJECTS 0
+#endif
+
+#define GRID_CULL_THREADGORUP_TOTALSIZE 256
+
+uint ComputeGridBaseIndex(uint3 GridCoordinate)
+{
+	return ((GridCoordinate.z * CullGridDimension.y + GridCoordinate.y) * CullGridDimension.x + GridCoordinate.x) * (MAX_GRID_CULLED_DF_OBJECTS + 1);
+}
+
+[numthreads(GRID_CULL_THREADGORUP_TOTALSIZE, 1, 1)]
+void CullObjectsToGridCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint ThreadIndex = GroupThreadId.x;
+	uint GridBaseIndex = ComputeGridBaseIndex(GroupId);
+
+	if (ThreadIndex == 0 && all(GroupId < CullGridDimension))
+	{
+		// Clear array num to 0 for all cull grid cells
+		RWCulledObjectGrid[GridBaseIndex] = 0;
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
+	if (all(GroupId < CullGridDimension))
+	{
+		uint NumCulledObjects = GetCulledNumObjects();
+		float GlobalVolumeExtent = GlobalVolumeCenterAndExtent[ClipmapIndex].w;
+		float3 TileBoxExtent = .5f * CULL_GRID_TILE_SIZE * VolumeTexelSize * GlobalVolumeExtent * 2;
+		float3 TileBoxCenter = UpdateRegionVolumeMin + ((GroupId.xyz + .5f) * CULL_GRID_TILE_SIZE + .5f) * VolumeTexelSize * GlobalVolumeExtent * 2;
+
+		for (uint ObjectIndex = ThreadIndex; ObjectIndex < NumCulledObjects; ObjectIndex += GRID_CULL_THREADGORUP_TOTALSIZE)
+		{
+			float4 ObjectPositionAndRadius = LoadObjectPositionAndRadius(ObjectIndex);
+			//float BoxDistance = ComputeDistanceFromBoxToPoint(TileBoxCenter - TileBoxExtent, TileBoxCenter + TileBoxExtent, ObjectPositionAndRadius.xyz);
+			float BoxDistanceSq = ComputeSquaredDistanceFromBoxToPoint(TileBoxCenter, TileBoxExtent, ObjectPositionAndRadius.xyz);
+			float CombinedDistance = ObjectPositionAndRadius.w + AOGlobalMaxSphereQueryRadius;
+
+			if (BoxDistanceSq < CombinedDistance * CombinedDistance)
+			{
+				uint DestIndex;
+				// Allocate space in the array for one more object
+				InterlockedAdd(RWCulledObjectGrid[GridBaseIndex], 1U, DestIndex);
+
+				if (DestIndex < MAX_GRID_CULLED_DF_OBJECTS)
+				{
+					// Write the intersecting object index into the array
+					RWCulledObjectGrid[GridBaseIndex + 1 + DestIndex] = ObjectIndex;
+				}
+			}
+		}
+	}
+}
+
+uint3 UpdateRegionSize;
+Buffer<uint> CulledObjectGrid;
+Texture3D<float> ParentGlobalDistanceFieldTexture;
+RWTexture3D<float> RWGlobalDistanceFieldTexture;
+
+#ifndef COMPOSITE_THREADGROUP_SIZEX
+#define COMPOSITE_THREADGROUP_SIZEX 1
+#endif
+
+#ifndef COMPOSITE_THREADGROUP_SIZEY
+#define COMPOSITE_THREADGROUP_SIZEY 1
+#endif
+
+#ifndef COMPOSITE_THREADGROUP_SIZEZ
+#define COMPOSITE_THREADGROUP_SIZEZ 1
+#endif
+
+#define COMPOSITE_THREADGORUP_TOTALSIZE (COMPOSITE_THREADGROUP_SIZEX * COMPOSITE_THREADGROUP_SIZEY * COMPOSITE_THREADGROUP_SIZEZ)
+
+#define MAX_CULLED_DF_OBJECTS 512
+groupshared uint SharedCulledObjectList[MAX_CULLED_DF_OBJECTS];
+groupshared uint NumTileCulledObjects;
+
+#define USE_CULL_GRID 1
+
+[numthreads(COMPOSITE_THREADGROUP_SIZEX, COMPOSITE_THREADGROUP_SIZEY, COMPOSITE_THREADGROUP_SIZEZ)]
+void CompositeObjectDistanceFieldsCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint NumCulledObjects = GetCulledNumObjects();
+	float GlobalVolumeExtent = GlobalVolumeCenterAndExtent[ClipmapIndex].w;
+	 
+#define USE_OBJECT_COMPOSITING_TILE_CULLING 1
+#if USE_OBJECT_COMPOSITING_TILE_CULLING
+	if (all(GroupThreadId == 0))
+	{
+		NumTileCulledObjects = 0;
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
+	uint ThreadIndex = (GroupThreadId.z * COMPOSITE_THREADGROUP_SIZEY + GroupThreadId.y) * COMPOSITE_THREADGROUP_SIZEX + GroupThreadId.x;
+
+	float3 GroupSize = float3(COMPOSITE_THREADGROUP_SIZEX, COMPOSITE_THREADGROUP_SIZEY, COMPOSITE_THREADGROUP_SIZEZ);
+	float3 TileBoxExtent = .5f * GroupSize * VolumeTexelSize * GlobalVolumeExtent * 2;
+	float3 TileBoxCenter = UpdateRegionVolumeMin + ((GroupId.xyz + .5f) * GroupSize + .5f) * VolumeTexelSize * GlobalVolumeExtent * 2;
+
+#if USE_CULL_GRID
+	uint GridBaseIndex = ComputeGridBaseIndex(DispatchThreadId / CULL_GRID_TILE_SIZE);
+	uint NumGridCulledObjects = min(CulledObjectGrid[GridBaseIndex], (uint)MAX_GRID_CULLED_DF_OBJECTS);
+	NumCulledObjects = NumGridCulledObjects;
+#endif
+
+	for (uint ListObjectIndex = ThreadIndex; ListObjectIndex < NumCulledObjects; ListObjectIndex += COMPOSITE_THREADGORUP_TOTALSIZE)
+	{
+		#if USE_CULL_GRID
+			uint ObjectIndex = CulledObjectGrid[GridBaseIndex + 1 + ListObjectIndex];
+		#else
+			uint ObjectIndex = ListObjectIndex;
+		#endif
+
+		float4 ObjectPositionAndRadius = LoadObjectPositionAndRadius(ObjectIndex);
+		//float BoxDistance = ComputeDistanceFromBoxToPoint(TileBoxCenter - TileBoxExtent, TileBoxCenter + TileBoxExtent, ObjectPositionAndRadius.xyz);
+
+		// ComputeSquaredDistanceFromBoxToPoint is correct but adds a lot to the final cost
+		float BoxDistanceSq = ComputeSquaredDistanceFromBoxToPoint(TileBoxCenter, TileBoxExtent, ObjectPositionAndRadius.xyz);
+		float CombinedDistance = ObjectPositionAndRadius.w + AOGlobalMaxSphereQueryRadius;
+
+		if (BoxDistanceSq < CombinedDistance * CombinedDistance)
+		{
+			uint DestIndex;
+			InterlockedAdd(NumTileCulledObjects, 1U, DestIndex);
+			SharedCulledObjectList[DestIndex] = ObjectIndex;
+		}
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
+	NumCulledObjects = min(NumTileCulledObjects, (uint)MAX_CULLED_DF_OBJECTS);
+
+#endif
+
+	float3 WorldPosition = UpdateRegionVolumeMin + (DispatchThreadId.xyz + .5f) * VolumeTexelSize * GlobalVolumeExtent * 2;
+	float3 GlobalUV = ComputeGlobalUV(WorldPosition, ClipmapIndex);
+	uint3 IntCoordinate = (uint3)(frac(GlobalUV) * GlobalVolumeDimension);
+
+	float MinDistance = AOGlobalMaxSphereQueryRadius;
+
+#if USE_PARENT_DISTANCE_FIELD
+	MinDistance = ParentGlobalDistanceFieldTexture[IntCoordinate].r;
+#endif
+
+	LOOP 
+	for (uint ListObjectIndex = 0; ListObjectIndex < NumCulledObjects; ListObjectIndex++)
+	{
+		#if USE_OBJECT_COMPOSITING_TILE_CULLING
+			uint ObjectIndex = SharedCulledObjectList[ListObjectIndex];
+		#else
+			uint ObjectIndex = ListObjectIndex;
+		#endif 
+
+		float3 LocalPositionExtent = LoadObjectLocalPositionExtent(ObjectIndex);
+		float4x4 WorldToVolume = LoadObjectWorldToVolume(ObjectIndex);
+		bool bGeneratedAsTwoSided;
+		float4 UVScaleAndVolumeScale = LoadObjectUVScale(ObjectIndex, bGeneratedAsTwoSided);
+		float3 VolumePosition = mul(float4(WorldPosition, 1), WorldToVolume).xyz;
+		float BoxDistance = ComputeDistanceFromBoxToPoint(-LocalPositionExtent, LocalPositionExtent, VolumePosition) * UVScaleAndVolumeScale.w;
+		 
+		BRANCH
+		if (BoxDistance < AOGlobalMaxSphereQueryRadius)
+		{
+			float3 UVAdd = LoadObjectUVAddAndSelfShadowBias(ObjectIndex).xyz;
+			float2 DistanceFieldMAD = LoadObjectDistanceFieldMAD(ObjectIndex);
+
+			float3 ClampedSamplePosition = clamp(VolumePosition, -LocalPositionExtent, LocalPositionExtent);
+			float DistanceToClamped = length(VolumePosition - ClampedSamplePosition);
+
+			float3 StepVolumeUV = DistanceFieldVolumePositionToUV(ClampedSamplePosition, UVScaleAndVolumeScale.xyz, UVAdd);
+			float DistanceToOccluder = (SampleMeshDistanceField(StepVolumeUV, DistanceFieldMAD).x + DistanceToClamped) * UVScaleAndVolumeScale.w;
+
+			MinDistance = min(MinDistance, DistanceToOccluder);
+		}
+	}
+	
+	if (all(DispatchThreadId.xyz < UpdateRegionSize))
+	{
+		RWGlobalDistanceFieldTexture[IntCoordinate] = MinDistance;
+	}
+}
+
+#ifndef COMPOSITE_HEIGHTFIELDS_THREADGROUP_SIZE
+#define COMPOSITE_HEIGHTFIELDS_THREADGROUP_SIZE 1
+#endif
+
+[numthreads(COMPOSITE_HEIGHTFIELDS_THREADGROUP_SIZE, COMPOSITE_HEIGHTFIELDS_THREADGROUP_SIZE, 1)]
+void CompositeHeightfieldsIntoGlobalDistanceFieldCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+	uint3 GroupThreadId : SV_GroupThreadID)
+{
+	float GlobalVolumeExtent = GlobalVolumeCenterAndExtent[ClipmapIndex].w;
+	// We only dispatch one depth layer, so the z value is incorrect
+	float3 LookupWorldPosition = UpdateRegionVolumeMin + (DispatchThreadId.xyz + .5f) * VolumeTexelSize * GlobalVolumeExtent * 2;
+
+	// Search through all heightfields to find the one that encompases this UV
+	LOOP
+	for (uint HeightfieldIndex = 0; HeightfieldIndex < NumHeightfields; HeightfieldIndex++)
+	{
+		float3 LocalPosition = mul(float4(LookupWorldPosition, 1), GetWorldToLocal(HeightfieldIndex)).xyz;
+		float4 MinMaxHeightfieldUV;
+		float2 HeightfieldUV = GetHeightfieldUV(HeightfieldIndex, LocalPosition.xy, MinMaxHeightfieldUV);
+
+		BRANCH
+		if (all(HeightfieldUV > MinMaxHeightfieldUV.xy) && all(HeightfieldUV < MinMaxHeightfieldUV.zw))
+		{
+			float3 WorldHeightfieldNormal;
+			float3 WorldHeightfieldShadingPosition = GetHeightfieldWorldPositionAndNormal(HeightfieldIndex, LocalPosition.xy, HeightfieldUV, WorldHeightfieldNormal);
+
+			if (all(DispatchThreadId.xy < UpdateRegionSize.xy))
+			{
+				// Compute distance for all Z values of the update region
+				LOOP
+				for (uint ZIndex = 0; ZIndex < UpdateRegionSize.z; ZIndex++)
+				{
+					float3 WorldPosition;
+					WorldPosition.xy = LookupWorldPosition.xy;
+					WorldPosition.z = UpdateRegionVolumeMin.z + (ZIndex + .5f) * VolumeTexelSize.z * GlobalVolumeExtent * 2;
+
+					// Project the vertical height vector onto the normal of the heightfield directly below the point we are computing the distance field for, use the perpendicular distance
+					float DistanceToHeightfieldPlane = dot(WorldHeightfieldNormal, WorldPosition - WorldHeightfieldShadingPosition);
+					float MinDistance = clamp(DistanceToHeightfieldPlane, -AOGlobalMaxSphereQueryRadius, AOGlobalMaxSphereQueryRadius);
+
+					float3 GlobalUV = ComputeGlobalUV(WorldPosition, ClipmapIndex);
+					uint3 WriteCoordinate = (uint3)(frac(GlobalUV) * GlobalVolumeDimension);
+					RWGlobalDistanceFieldTexture[WriteCoordinate] = min(MinDistance, RWGlobalDistanceFieldTexture[WriteCoordinate]);
+				}
+			}
+
+			break;
+		}
+	}
+}

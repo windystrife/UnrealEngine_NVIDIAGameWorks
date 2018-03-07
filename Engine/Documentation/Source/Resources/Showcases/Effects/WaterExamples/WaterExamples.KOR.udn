@@ -1,0 +1,82 @@
+﻿INTSourceChangelist:3108692
+Availability: Public
+Title:물 예제
+Crumbs:%ROOT%, Resources, Resources/Showcases/Effects
+Description:UE4 에 포함된 이펙트 예제 중 물 이펙트에 대한 개요입니다.
+Related: Engine/Rendering/ParticleSystems/Reference/TypeData/GPUSprites
+Related: Resources/ContentExamples/EffectsGallery/1_E
+Related: Engine/Rendering/ParticleSystems/Optimization
+Version: 4.9
+
+[REGION:fullwidth]
+![](title_Water.png)
+[/REGION]
+
+[TOC (start:2)]
+
+
+
+다음 파티클 시스템은 이 예제용으로 만들어진 물 이펙트입니다. 캐스케이드에서 열어보고 각 이펙트가 어떻게 조립되었는지 확인해 보시기 바랍니다.
+
+캐스케이드 및 파티클 시스템 관련 상세 정보는 [](Engine/Rendering/ParticleSystems) 문서를 참고해 주시기 바랍니다.
+
+### 폭포
+
+![](WaterfallSection.png)(w:600)
+
+
+**콘텐츠 브라우저 위치:** _Game/Effects/Particles/Water/P_WaterFall_
+
+폭포 이펙트는 다수의 머티리얼과 파티클 시스템 세팅을 합쳐 바위 층을 흐르는 물 효과를 내고 있습니다. 이 이펙트에서 특히나 중요한 부분은, 카메라 정렬이 중요한 역할을 한다는 점입니다. 플레이어가 물 위를 직접 걷기 보다는, 약간의 거리를 두고 바라볼 뿐입니다.
+
+이러한 파티클은 반투명 머티리얼을 사용하고 있기에, 오버드로 비용이 있습니다. 즉 여러 방울이 서로 겹쳐 렌더링된다는 뜻입니다. 그러나 이들은 GPU 스프라이트라서 GPU 에 전달되는 부분이기 때문에, 실제 _시뮬레이션_ (틱) 비용은 매우 낮습니다. 이 방법을 통해서, 머티리얼과 스태틱 메시만을 사용해서 이펙트를 만들었을 때보다 훨씬 복잡한 상호작용 이펙트를 얻을 수 있습니다. 그런데 여기에 두 가지 기법을 조합하여, 이펙트를 한 층 더 다변화시킬 수 있습니다.
+
+### 콜리전
+
+![](CollisionWithRocks.png)(w:600) ![](ModuleStack.png)(h:366)
+
+물이 바위 표면에 떨어짐에 따라, 표면에 충돌하면서 물이 튀는 것을 볼 수 있습니다. 이는 Collision (Scene Depth) 연산자를 사용하여 이루어지는데, GPU 스프라이트에만 가능한 것입니다. 여기서는 Scene Depth G-Buffer 를 사용하여 최소한의 퍼포먼스 비용으로 충돌 표면을 계산합니다.
+
+
+### 파티클 컬러
+
+꼭 알아둬야 될 점 한가지, GPU 스프라이트는 다이내믹 파라미터를 지원하지 **않습니다.** 보통 파티클 시스템에서 머티리얼로 데이터를 전송할 때 사용되는 것 말이지요. 그때문에 약간 다른 방법을 썼습니다. 바로 머티리얼 안에서 Particle Color 노드를 사용하는 것이지요. 보통 이 노드는 수명에 따라 컬러와 알파 값에 애니메이션을 주는 식으로 파티클의 낙하에 따라 색을 바꾸는 데 사용됩니다. 그러나 여기서는 RGBA 데이터를 사용하여 추가적인 것들을 구동시켜 줍니다. 물의 실제 색이 바뀔 일은 없으니 (결국 물은 무색입니다) Particle Color 를 다음과 같이 사용합니다:
+
+* **Red** - 물의 굴절율, 즉 빛을 얼마나 휘어지게 만드는지를 돌립니다.
+* **Green** - 실제 색을 돌립니다. 즉 초록 채널은 색에 대한 모든 RGB 데이터를 돌려, 그레이스케일 결과가 납니다.
+* **Alpha** - 물의 불투명도를 돌립니다.
+
+
+
+머티리얼 (이름 _M_WaterDrop_SubUV_) 을 확인해 보면 Particle Color 노드가 이러한 값을 설명한 대로 돌리고 있는 것을 확인할 수 있습니다.
+
+
+
+**클릭하면 큰 크기로 볼 수 있습니다.**
+[REGION:lightbox]
+[![](WaterMaterial.png)(w:400)](WaterMaterial.png)
+[/REGION]
+
+캐스케이드에서 P_Waterfall 파티클 시스템을 열어보고, Scale Color/Life 모듈을 유심히 살펴 봅니다. 수명의 절반 동안은 컬러가 (1.0 보다 큰) 너무 밝은 색으로 변해가다가, 알파가 검정에서 하양으로 뚝 떨어진 뒤 다시 검정으로 차차 떨어집니다. 그 결과는 깔끔한 페이드 인 이후 다시 페이드 아웃 되는 것으로, 아래와 같습니다.
+
+![](ColorAlphaAnimated.png)
+
+
+## 스플래시와 물결 이펙트
+
+![](SplashRipple.png)(w:600)
+
+**콘텐츠 브라우저 위치:** _/Game/Effects/Particles/Water/P_Drips_Splash_Ripples_
+
+이 파티클 이펙트는 낙수 효과와 물방울이 표면에 떨어질 때의 스플래시/물결 효과 둘 다를 처리합니다. 파티클 시스템 내 여러가지 이미터 시리즈로 이루어집니다. 낙수 효과를 처리하는 이미터 시리즈, 물방울이 아래 웅덩이에 떨어질 때 위로 튕겨 올라오는 효과에 이미터 시리즈 또 한 줄, 물 표면을 따라 퍼져나가는 물결을 처리하는 이미터 시리즈 마지막 한 줄이 있습니다. 즉 이 이펙트를 고요한 물 표면 위에 떨궈 주기만 하면 사실적인 이펙트를 낼 수 있다는 뜻입니다.
+
+파티클 시스템은 Particle Color 노드를 활용하여 불투명도를 돌리는 Lit Translucency Material 을 사용하기도 합니다. 이를 통해 파티클 시스템은 Scale Color/Life 모듈을 통해 자신의 불투명도를 조절할 수 있습니다. 이 경우 알파는 파티클 수명 초기 부근에서 거의 불투명 상태로, 즉 빛 영향력을 크게 받는 상태로 변했습니다.
+
+![](FallingWaterDrops.png)(w:300)
+
+위의 스크린샷에서, 이미지 상단 부근에 떨어지는 파티클 다수의 색이 밝은 흰색인 것이 보입니다. 처음에는 파티클 근처의 하얀색 하이라이트 블루밍으로 인해 자연 현상인 것으로 보입니다. 그러나 그렇게 보이는 이유는, 단지 파티클 수명상 해당 지점에서 _불투명도를 높이도록_ 하여서, 레벨의 라이팅을 더욱 많이 받도록 한 것일 뿐입니다.
+
+
+
+
+[INCLUDE:Resources\Showcases\Effects#ParticleTopics]

@@ -1,0 +1,412 @@
+// @third party code - BEGIN HairWorks
+#include "../Common.ush"
+#include "../ReflectionEnvironmentShared.ush"
+#include "../BRDF.ush"
+#include "../SHCommon.ush"
+#include "../DeferredShadingCommon.ush"
+#include "../CubemapCommon.ush"
+struct FVertexFactoryInterpolantsVSToPS{};
+#include "../ShadowDepthCommon.ush"
+
+#define NV_HAIR_DECLARE_VELOCITY_ATTR
+
+#include "NvHairShaderCommon.ush"
+#include "HairWorksCommon.ush"
+
+bool bCubemapAmbient;
+
+NvHair_ConstantBuffer HairConstantBuffer;
+
+SamplerState TextureSampler;
+
+Texture2D RootColorTexture;
+Texture2D TipColorTexture;
+Texture2D SpecularColorTexture;
+Texture2D StrandTexture;
+
+NV_HAIR_INDICES_BUFFER_TYPE NvHair_resourceFaceHairIndices;
+NV_HAIR_TANGENT_BUFFER_TYPE NvHair_resourceTangents;
+NV_HAIR_NORMAL_BUFFER_TYPE NvHair_resourceNormals;
+NV_HAIR_POSITION_BUFFER_TYPE NvHair_resourceMasterPositions;
+NV_HAIR_POSITION_BUFFER_TYPE NvHair_resourceMasterPrevPositions;
+NV_HAIR_DECLARE_DEFAULT_SHADER_ATTRIBUTE_FUNC;
+
+float ShadowDepthMain(in float4 Position : SV_Position) : SV_Depth
+{
+	return Position.z * Position.w * ShadowParams.y + ShadowParams.x;
+}
+
+float CopyDepthPs(FScreenVertexOutput Input) : SV_Depth
+{
+	return SceneDepthTexture[Input.Position.xy].r;
+}
+
+Texture2DMS<float4> VelocityTexture;
+Texture2DMS<float> DepthTexture;
+Texture2DMS<uint2> StencilTexture;
+
+float4 CopyVelocityPs(FScreenVertexOutput Input): SV_Target0
+{
+	uint2 Size;
+	uint SampleNum;
+	VelocityTexture.GetDimensions(Size.x, Size.y, SampleNum);
+
+	float NearestDepth = 0;
+	uint NearestSample;
+	for(uint i = 0; i < SampleNum; ++i)
+	{
+		float Depth = DepthTexture.Load(Input.Position.xy, i);
+		if(Depth > NearestDepth)
+		{
+			NearestDepth = Depth;
+			NearestSample = i;
+		}
+	}
+
+	float4 Velocity = VelocityTexture.Load(Input.Position.xy, NearestSample);
+	if(!any(Velocity.xy))
+		discard;
+
+	return Velocity;
+}
+
+float CopyNearestDepthPs(FScreenVertexOutput Input) : SV_Depth
+{
+	uint2 Size;
+	uint SampleNum;
+	DepthTexture.GetDimensions(Size.x, Size.y, SampleNum);
+
+	float NearestDepth = 0;
+	for(uint i = 0; i < SampleNum; ++i)
+	{
+		// Skip non-hair depth using stencil
+		uint Stencil = StencilTexture.Load(Input.Position.xy, i).g;
+		if(Stencil == 0)
+			continue;
+
+		float Depth = DepthTexture.Load(Input.Position.xy, i);
+		if(Depth > NearestDepth)
+		{
+			NearestDepth = Depth;
+		}
+	}
+
+	return NearestDepth;
+}
+
+Texture2DMS<float4> HairColorTexture;
+
+void CopyOpaqueDepthPs(FScreenVertexOutput Input, out float Depth: SV_Depth, out float4 GBufferB: SV_Target0)
+{
+	uint2 Size;
+	uint SampleNum;
+	DepthTexture.GetDimensions(Size.x, Size.y, SampleNum);
+
+	float NearestDepth = 0;
+	for(uint i = 0; i < SampleNum; ++i)
+	{
+		float Opaque = HairColorTexture.Load(Input.Position.xy, i).a;
+		if(Opaque < 1)
+			discard;
+
+		float Depth = DepthTexture.Load(Input.Position.xy, i);
+		if(Depth > NearestDepth)
+		{
+			NearestDepth = Depth;
+		}
+	}
+
+	Depth = NearestDepth;
+	GBufferB = 0;
+}
+
+struct FBasePassOut
+{
+	float4 GBufferA : SV_Target0;
+	float4 GBufferB : SV_Target1;
+	float4 GBufferC : SV_Target2;
+	float4 PrecomputedLight : SV_Target3;
+	float2 Velocity : SV_Target4;
+};
+
+FBasePassOut ComposeGBuffer(FHairScreenSpaceData HairScreenSpaceData, float3 RecomputedLight, float2 Velocity)
+{
+	FBasePassOut Output;
+	Output.GBufferA.xy = mad(UnitVectorToOctahedron(HairScreenSpaceData.Normal), 0.5, 0.5);
+	Output.GBufferA.zw = mad(UnitVectorToOctahedron(HairScreenSpaceData.Tangent), 0.5, 0.5);
+
+	Output.GBufferB.rgb = Diffuse_Lambert(HairScreenSpaceData.Color);
+	Output.GBufferB.w = HairScreenSpaceData.Glint;
+
+	Output.GBufferC.rgb = Diffuse_Lambert(HairScreenSpaceData.Specular);
+	Output.GBufferC.w = mad(HairScreenSpaceData.SpecularPrimaryOffset, 0.5, 0.5);
+	
+	Output.PrecomputedLight.rgb = RecomputedLight * HairScreenSpaceData.Color;
+	Output.PrecomputedLight.a = HairScreenSpaceData.Opaque;
+
+	Output.Velocity.xy = EncodeVelocityToTexture(Velocity);
+
+	return Output;
+}
+
+FBasePassOut BasePassPs(NvHair_PixelShaderInput Input)
+{
+	// Shader attributes
+	NvHair_ShaderAttributes ShaderAttributes = NvHair_GetShaderAttributes(Input, HairConstantBuffer);
+
+	float3 HairColor = NvHair_SampleHairColorStrandTex(
+		HairConstantBuffer,
+		HairConstantBuffer.defaultMaterial,
+		TextureSampler,
+		RootColorTexture,
+		TipColorTexture,
+		StrandTexture,
+		ShaderAttributes.texcoords
+		);
+
+	// Hair Specular
+	if(HairConstantBuffer.useSpecularTexture)
+		HairConstantBuffer.defaultMaterial.specularColor.rgb = SpecularColorTexture.SampleLevel(TextureSampler, ShaderAttributes.texcoords.xy, 0).rgb;
+
+	// Hair opaque
+	float HairOpaque = NvHair_ComputeAlpha(
+		HairConstantBuffer,
+		HairConstantBuffer.defaultMaterial,
+		ShaderAttributes
+		);
+
+	// Glint
+	float Glint = 0;
+	if(HairConstantBuffer.defaultMaterial.glintStrength > 0)
+	{
+		Glint = NvHair_ComputeHairGlint(
+			HairConstantBuffer,
+			HairConstantBuffer.defaultMaterial,
+			ShaderAttributes
+			);
+
+		HairConstantBuffer.defaultMaterial.specularColor.rgb *= lerp(1.0, Glint, HairConstantBuffer.defaultMaterial.glintStrength);
+	}
+
+	// Sky light
+	float3 RecomputedLight = 0;
+	{
+		float SkyVisibility = 1;
+		float GeometryTerm = 1;
+		float3 SkyLightingNormal = ShaderAttributes.N;
+
+		if(View.SkyLightParameters.x > 0)
+		{
+			float3 NormalizedBentNormal = PrecomputedLightingBuffer.PointSkyBentNormal.xyz;
+			SkyVisibility = PrecomputedLightingBuffer.PointSkyBentNormal.w;
+
+			float BentNormalWeightFactor = 1 - (1 - SkyVisibility) * (1 - SkyVisibility);
+			float3 SkyLightingNormal = lerp(NormalizedBentNormal, ShaderAttributes.N, BentNormalWeightFactor);
+
+			float DotProductFactor = lerp(saturate(dot(NormalizedBentNormal, ShaderAttributes.N)), 1, BentNormalWeightFactor);
+			GeometryTerm = DotProductFactor;
+		}
+
+		RecomputedLight += GetSkySHDiffuse(SkyLightingNormal) * View.SkyLightColor.rgb * (SkyVisibility * GeometryTerm);
+	}
+
+	// Indirect light
+	{
+		FThreeBandSHVectorRGB PointIndirectLighting;
+		PointIndirectLighting.R.V0 = PrecomputedLightingBuffer.IndirectLightingSHCoefficients0[0];
+		PointIndirectLighting.R.V1 = PrecomputedLightingBuffer.IndirectLightingSHCoefficients1[0];
+		PointIndirectLighting.R.V2 = PrecomputedLightingBuffer.IndirectLightingSHCoefficients2[0];
+
+		PointIndirectLighting.G.V0 = PrecomputedLightingBuffer.IndirectLightingSHCoefficients0[1];
+		PointIndirectLighting.G.V1 = PrecomputedLightingBuffer.IndirectLightingSHCoefficients1[1];
+		PointIndirectLighting.G.V2 = PrecomputedLightingBuffer.IndirectLightingSHCoefficients2[1];
+
+		PointIndirectLighting.B.V0 = PrecomputedLightingBuffer.IndirectLightingSHCoefficients0[2];
+		PointIndirectLighting.B.V1 = PrecomputedLightingBuffer.IndirectLightingSHCoefficients1[2];
+		PointIndirectLighting.B.V2 = PrecomputedLightingBuffer.IndirectLightingSHCoefficients2[2];
+
+		FThreeBandSHVector DiffuseTransferSH = CalcDiffuseTransferSH3(ShaderAttributes.N.xyz, 1);
+		// Compute diffuse lighting which takes the normal into account
+		float3 IndirectLight = max(half3(0, 0, 0), DotSH3(PointIndirectLighting, DiffuseTransferSH));
+
+		IndirectLight *= View.IndirectLightingColorScale;
+
+		RecomputedLight += IndirectLight;
+	}
+
+	// Ambient light
+	if(bCubemapAmbient)
+	{
+		float3 DiffuseLookup = TextureCubeSampleLevel(AmbientCubemap, AmbientCubemapSampler, ShaderAttributes.N.xyz, AmbientCubemapMipAdjust.z).rgb;
+		RecomputedLight += AmbientCubemapColor.rgb * DiffuseLookup;
+	}
+
+	// Velocity
+	float2 Velocity = ShaderAttributes.wVel.xy;
+	Velocity.y = -Velocity.y;
+	Velocity = Velocity / (View.ViewSizeAndInvSize.xy / 2.0) - (View.ViewToClip[2].xy - View.PrevProjection[2].xy);
+	
+	// Specular breakup
+	uint	hash = asuint(ShaderAttributes.hairID * 17938401.0f);
+	float	noiseVal = float(hash % 1024) / 1024.0f;
+	float	signedNoise = noiseVal - 0.5f;
+	float SpecularPrimaryOffset = HairConstantBuffer.defaultMaterial.specularPrimaryBreakup * signedNoise;
+
+	// Visualization
+	float3 VisualizeColor;
+	bool bVisualize = NvHair_VisualizeColor(
+		HairConstantBuffer,
+		HairConstantBuffer.defaultMaterial,
+		ShaderAttributes,
+		VisualizeColor
+		);
+
+	// Output
+	FHairScreenSpaceData HairScreenSpaceData;
+	HairScreenSpaceData.Normal = ShaderAttributes.N;
+	HairScreenSpaceData.Tangent = ShaderAttributes.T;
+	HairScreenSpaceData.Color = HairColor;
+	HairScreenSpaceData.Glint = Glint;
+	HairScreenSpaceData.Specular = HairConstantBuffer.defaultMaterial.specularColor.rgb;
+	HairScreenSpaceData.SpecularPrimaryScale = HairConstantBuffer.defaultMaterial.specularPrimaryScale;
+	HairScreenSpaceData.SpecularPrimaryPower = HairConstantBuffer.defaultMaterial.specularPrimaryPower;
+	HairScreenSpaceData.SpecularPrimaryOffset = SpecularPrimaryOffset;
+	HairScreenSpaceData.SpecularSecondaryScale = HairConstantBuffer.defaultMaterial.specularSecondaryScale;
+	HairScreenSpaceData.SpecularSecondaryPower = HairConstantBuffer.defaultMaterial.specularSecondaryPower;
+	HairScreenSpaceData.SpecularSecondaryOffset = HairConstantBuffer.defaultMaterial.specularSecondaryOffset;
+	HairScreenSpaceData.Opaque = HairOpaque;
+	HairScreenSpaceData.DiffuseBlend = HairConstantBuffer.defaultMaterial.diffuseBlend;
+
+	// Override with visualization color
+	if(bVisualize)
+	{
+		HairScreenSpaceData.Color = 1;
+		HairScreenSpaceData.Specular = 0;
+		HairScreenSpaceData.Normal = 0;
+		HairScreenSpaceData.Tangent = 0;
+
+		RecomputedLight = VisualizeColor;
+	}
+
+	return ComposeGBuffer(HairScreenSpaceData, RecomputedLight, Velocity);
+}
+
+float4 ColorizePs(NvHair_PixelShaderInput Input): SV_Target0
+{
+	// Shader attributes
+	NvHair_ShaderAttributes ShaderAttributes = NvHair_GetShaderAttributes(Input, HairConstantBuffer);
+
+	float3 VisualizeColor;
+	NvHair_VisualizeColor(
+		HairConstantBuffer,
+		HairConstantBuffer.defaultMaterial,
+		ShaderAttributes,
+		VisualizeColor
+		);
+
+	return float4(VisualizeColor, 1);
+}
+
+Texture2D<float4> AccumulatedColorTexture;
+Texture2DMS<float4> PrecomputedLightTexture;
+
+float4 BlendLightingColorPs(FScreenVertexOutput Input): SV_Target0
+{
+	uint2 Size;
+	uint SampleNum;
+	PrecomputedLightTexture.GetDimensions(Size.x, Size.y, SampleNum);
+
+	float4 Color = 0;
+	for(uint SampleIdx = 0; SampleIdx < SampleNum; ++SampleIdx)
+	{
+		Color += PrecomputedLightTexture.Load(Input.Position.xy, SampleIdx);
+	}
+
+	if(Color.a <= 0)
+		discard;
+	
+	Color /= SampleNum;
+
+	float3 AccumulatedColor = AccumulatedColorTexture.Load(int3(Input.Position.xy, 0)).rgb;
+
+	Color.rgb += AccumulatedColor;
+
+	return Color;
+}
+
+float4 HitProxyId;
+
+float4 HitProxyPs(NvHair_PixelShaderInput Input): SV_Target0
+{
+	return HitProxyId;
+}
+
+uint HairId;
+
+float CopyStencilPs(float4 Position : SV_POSITION) : SV_Depth
+{
+	uint2 Size;
+	uint SampleNum;
+	DepthTexture.GetDimensions(Size.x, Size.y, SampleNum);
+
+	float NearestDepth = 0;
+	for(uint i = 0; i < SampleNum; ++i)
+	{
+		// Skip depth of other hair instances
+		uint Stencil = StencilTexture.Load(Position.xy, i).g;
+		if(Stencil != HairId)
+			continue;
+
+		// Store nearer depth
+		float Depth = DepthTexture.Load(Position.xy, i);
+		if(Depth > NearestDepth)
+		{
+			NearestDepth = Depth;
+		}
+	}
+
+	if(NearestDepth == 0)
+		discard;
+
+	return NearestDepth;
+}
+
+float4 BoundInfo;	// Position + radius
+
+float4 SphereVs(float3 InPosition : ATTRIBUTE0) : SV_Position
+{
+	InPosition *= BoundInfo.w;
+	InPosition += BoundInfo.xyz;
+
+	return mul(float4(InPosition, 1), View.WorldToClip);
+}
+
+int MorphVertexCount;
+
+Buffer<int> MorphIndexBuffer;
+Buffer<float> MorphVertexBuffer;
+RWStructuredBuffer<float3> MorphPositionDeltaBuffer;
+RWStructuredBuffer<float3> MorphNormalDeltaBuffer;
+
+[numthreads(256, 1, 1)]
+void CopyMorphDeltas(uint DispatchId : SV_DispatchThreadID)
+{
+	if (DispatchId >= MorphVertexCount)
+		return;
+
+	const uint SrcIndex = MorphIndexBuffer[DispatchId] * 6;
+
+	MorphPositionDeltaBuffer[DispatchId] = float3(
+		MorphVertexBuffer[SrcIndex],
+		MorphVertexBuffer[SrcIndex + 1],
+		MorphVertexBuffer[SrcIndex + 2]
+	);
+
+	MorphNormalDeltaBuffer[DispatchId] = float3(
+		MorphVertexBuffer[SrcIndex + 3],
+		MorphVertexBuffer[SrcIndex + 4],
+		MorphVertexBuffer[SrcIndex + 5]
+	);
+}
+
+// @third party code - END HairWorks

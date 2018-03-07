@@ -1,0 +1,109 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	PostProcessGBufferHints.usf: PostProcessing shader to show where material have performance issues or are unrealistic
+=============================================================================*/
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+#include "PostProcessHistogramCommon.ush"
+#include "DeferredShadingCommon.ush"
+
+// 0: good, 1: heavy performance cost, 2:warning (very uncommon material), 3:error (impossibele material attributes)
+uint ComputeAdvice(FGBufferData BufferData, float3 OriginalSceneColor)
+{
+	float SubsurfaceLum = 0;
+	const float OneThird = 1.0f / 3.0f;
+
+	FLATTEN if(BufferData.ShadingModelID != SHADINGMODELID_UNLIT)
+	{
+		FLATTEN if(BufferData.ShadingModelID == SHADINGMODELID_SUBSURFACE)
+		{
+			SubsurfaceLum = dot(OneThird.xxx, ExtractSubsurfaceColor(BufferData));
+		}
+
+		float DiffuseLum = dot(OneThird.xxx, BufferData.DiffuseColor);
+		float SpecularLum = dot(OneThird.xxx, BufferData.SpecularColor);
+
+		float TotalLum = DiffuseLum + SpecularLum + SubsurfaceLum;
+
+		float OriginalSceneColorLum = dot(OneThird.xxx, OriginalSceneColor);
+
+		/*FLATTEN if()
+		{
+			// heavy shading cost
+			return 1;
+		}*/
+
+		FLATTEN if(TotalLum < 0.01f && OriginalSceneColorLum < 0.001f)
+		{
+			// The material is very dark. 
+			// Such a material would be very unlikely (Maybe it can only be created in a lab).
+			return 2;
+		}
+
+		FLATTEN if(TotalLum > 1.2f)
+		{
+			// The diffuse and specular cause the material to emit more light than it receives.
+			return 3;
+		}
+	}
+
+	return 0;
+}
+
+uint ComputeAdvice(float2 UV)
+{
+	// Ideally without GI as we want the emissive, we should do that later.
+	float3 OriginalSceneColor = Texture2DSample(PostprocessInput1, PostprocessInput1Sampler, UV).rgb;
+	FGBufferData BufferData = GetGBufferData(UV);
+
+	return ComputeAdvice(BufferData, OriginalSceneColor);
+}
+
+// to highlight areas that have unrealistic materials
+void HighlightAdvice(inout float3 OutColor, float2 UV, uint2 PixelPos)
+{
+	uint AdviceInner = ComputeAdvice(UV);
+	uint AdviceOuter = 0;
+
+	bool SpecialDotInArea = ((PixelPos.x + PixelPos.y) % 6) == 0 && ((PixelPos.x - PixelPos.y) % 6) == 0;
+	
+	AdviceOuter = max(AdviceOuter, ComputeAdvice(UV + float2( 1,  0) * PostprocessInput0Size.zw));
+	AdviceOuter = max(AdviceOuter, ComputeAdvice(UV + float2( 0,  1) * PostprocessInput0Size.zw));
+	AdviceOuter = max(AdviceOuter, ComputeAdvice(UV + float2(-1,  0) * PostprocessInput0Size.zw));
+	AdviceOuter = max(AdviceOuter, ComputeAdvice(UV + float2( 0, -1) * PostprocessInput0Size.zw));
+
+	uint Advice = (AdviceInner == AdviceOuter && !SpecialDotInArea) ? 0 : AdviceOuter;
+
+	FLATTEN if(Advice)
+	{
+		 FLATTEN if(Advice == 1)
+		 {
+			 // heavy shading cost
+			 OutColor = float3(0, 0, 0.8f);
+		 }
+		 else
+		 FLATTEN if(Advice == 2)
+		 {
+			 // warning
+			 OutColor = float3(0.8f, 0.8f, 0);
+		 }
+		 else // if(Advice == 3)
+		 {
+			 // error
+			 OutColor = float3(1, 0, 0);
+		 }
+	}
+}
+
+void MainPS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
+{
+	float2 UV = UVAndScreenPos.xy;
+	int2 PixelPos = (uint2)SvPosition.xy;
+	
+	// background is the scene color
+	OutColor = Texture2DSample(PostprocessInput0, PostprocessInput0Sampler, UV);
+
+	HighlightAdvice(OutColor.rgb, UV, PixelPos);
+}

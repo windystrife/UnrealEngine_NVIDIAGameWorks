@@ -1,0 +1,62 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	RecomputeTangentsPerVertexPass.usf: Recompute Skin Tangents
+=============================================================================*/
+
+#include "RecomputeTangentsCommon.ush"
+
+// 0:fast and simple / 1:higher quality lighting with extreme mesh distortions
+#define ORTHOGONALIZE 1
+
+[numthreads(THREADGROUP_SIZEX, 1, 1)]
+void MainCS(
+	uint DispatchThreadId : SV_DispatchThreadID)	// DispatchThreadId = GroupId * int2(dimx,dimy) + GroupThreadId
+{
+	if(DispatchThreadId < NumVertices)
+	{
+		// -1..1 range, normalized
+		float3 TangentZ, TangentX;
+		// the sign defines the handyness of the tangent matrix
+		float Orientation;
+		{
+			// no start offset as we reuse the same buffer always from 0 on
+			uint Index = DispatchThreadId * INTERMEDIATE_ACCUM_BUFFER_NUM_INTS;
+
+			// we don't have to scale down as we normalize anyway
+			TangentZ = normalize(float3(IntermediateAccumBufferUAV[Index + 0], IntermediateAccumBufferUAV[Index + 1], IntermediateAccumBufferUAV[Index + 2]));
+			TangentX = normalize(float3(IntermediateAccumBufferUAV[Index + 3], IntermediateAccumBufferUAV[Index + 4], IntermediateAccumBufferUAV[Index + 5]));
+			
+#if ORTHOGONALIZE
+			// todo: can be optimized
+			// derive the new tangent by orthonormalizing the new normal against
+			// the base tangent vector (assuming these are normalized)
+			TangentX = normalize(TangentX - (dot(TangentX, TangentZ) * TangentZ));
+#endif
+
+			Orientation = IntermediateAccumBufferUAV[Index + 6];
+
+			// clear input UAV to 0 again to avoid another Dispatch() call
+			UNROLL for(int i = 0; i < INTERMEDIATE_ACCUM_BUFFER_NUM_INTS; ++i)
+			{
+				IntermediateAccumBufferUAV[Index + i] = 0;
+			}
+		}
+
+		uint FloatsPerVertex = InputStreamStride / 4;
+		uint BaseVertexIndex = InputStreamStart / FloatsPerVertex;
+
+		uint VertexIndex = DispatchThreadId;
+
+		uint TangentXCompressed = PackS8x3N(TangentX);
+		uint TangentZCompressed = PackS8x3N(TangentZ);
+		uint HandynessValue = (Orientation < 0) ? 0xff000000 : 0;
+
+		// debug (darken all affected vertices)
+//		TangentXCompressed = PackS8x3N(float3(0,0,0)); TangentZCompressed = PackS8x3N(float3(0,0,0)); HandynessValue = 0;		// do not checkin !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+		uint Offset = VertexIndex * GPUSKIN_RWBUFFER_NUM_FLOATS + SkinCacheStart;
+		SkinCacheBufferUAV[Offset + GPUSKIN_RWBUFFER_OFFSET_TANGENT_X] = asfloat(TangentXCompressed);
+		SkinCacheBufferUAV[Offset + GPUSKIN_RWBUFFER_OFFSET_TANGENT_Z] = asfloat(TangentZCompressed | HandynessValue);
+	}
+}

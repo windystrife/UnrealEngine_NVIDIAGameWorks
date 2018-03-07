@@ -1,0 +1,32 @@
+// NvFlow begin
+
+#include "/Engine/Public/Platform.ush"
+#include "/Engine/Generated/GeneratedUniformBuffers.ush" 
+
+/** Input buffer containing particle indices. */
+Buffer<float2> InParticleIndices;
+/** Texture containing particle positions. */
+Texture2D PositionTexture;
+
+RWTexture3D<uint> OutMask;
+
+[numthreads(THREAD_COUNT, 1, 1)]
+void ComputeMaskFromParticles(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	uint InputIndex = DispatchThreadId.x;
+	if ( InputIndex < NvFlowMaskFromParticles.ParticleCount )
+	{
+		// Read in the particle index and its position.
+		const float2 ParticleIndex = float2(InParticleIndices[InputIndex]);
+		int3 ParticleTexel = int3(ParticleIndex.xy * int2(NvFlowMaskFromParticles.TextureSizeX, NvFlowMaskFromParticles.TextureSizeY), 0);
+		const float4 ParticlePosition = PositionTexture.Load(ParticleTexel);
+		if ( ParticlePosition.w <= 1.0f )
+		{
+			float3 VolumePositon = mul(float4(ParticlePosition.xyz, 1), NvFlowMaskFromParticles.WorldToVolume).xyz;
+			int3 VolumeIndex = int3(floor(float3(NvFlowMaskFromParticles.MaskDim) * VolumePositon));
+			OutMask[VolumeIndex] = 1u;
+		}
+	}
+}
+
+// NvFlow end

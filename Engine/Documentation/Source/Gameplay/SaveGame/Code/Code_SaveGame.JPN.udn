@@ -1,0 +1,122 @@
+﻿INTSourceChangelist:2716250
+Availability:Public
+Title:ゲームを C++ で保存する
+Crumbs:%ROOT%, Gameplay, Gameplay/SaveGame
+Description:C++ でゲームを保存およびロードする方法
+Version:4.9
+
+[TOC (start:2 end:2)]
+
+## SaveGame オブジェクトの作成
+
+SaveGame クラスは、 Kismet/GameplayStatics.h に宣言される関数の保存およびロードのためにターゲットとして使用されるオブジェクトを設定します。  
+
+[](Programming\Development\ManagingGameCode\CppClassWizard) を使って SaveGame をもとに新規クラスを作成することができます。
+
+![](SaveGameCode.png)(w:800)
+
+このサンプルでは、新規の SaveGame クラスは「MySaveGame」と呼びます。
+
+### ヘッダ
+
+SaveGame オブジェクトのヘッダファイルの中では、 SaveGame を格納するためのどんな変数でも宣言することができます。 
+
+	UPROPERTY(VisibleAnywhere, Category = Basic)
+	FString PlayerName;
+
+[REGION:note]
+このサンプルでは、SaveSlotName と UserIndex に対するデフォルト値の保存の宣言に使用する変数もあるので、
+この `SaveGame` オブジェクトに保存される各クラスには、これらの変数を個別に設定する必要はありません。ここの部分はオプションですので、デフォルト値が変更されない場合は上書される保存スロットは 1 つになります。
+[/REGION]
+
+[REGION:codetitlebar]
+MySaveGame.h
+[/REGION:codetitlebar]
+	// Copyright 1998-2017 Epic Games, Inc.All Rights Reserved.
+
+	#pragma once
+
+	#include "GameFramework/SaveGame.h"
+	#include "MySaveGame.generated.h"
+
+	/**
+	 * 
+	 */
+	UCLASS()
+	class [PROJECTNAME]_API UMySaveGame : public USaveGame
+	{
+		GENERATED_BODY()
+
+		public:
+
+		UPROPERTY(VisibleAnywhere, Category = Basic)
+		FString PlayerName;
+
+		UPROPERTY(VisibleAnywhere, Category = Basic)
+		FString SaveSlotName;
+
+		UPROPERTY(VisibleAnywhere, Category = Basic)
+		uint32 UserIndex;
+
+		UMySaveGame();
+	};
+
+### ソース
+
+一般的に、保存システムに何か特別に機能をここで追加したい場合を除き、
+`SaveGame` オブジェクトのソースファイルは関数に対して特定のコードを必要としません。 
+
+このサンプルでは、クラス コンストラクタで `SaveSlotName` と `UserIndex` の値を定義するので、ゲームプレイ クラスによる読み取りと使用が可能です。
+
+[REGION:codetitlebar]
+MySaveGame.cpp
+[/REGION:codetitlebar]
+	// Copyright 1998-2017 Epic Games, Inc.All Rights Reserved.
+
+	#include "[ProjectName].h"
+	#include "MySaveGame.h"
+
+	UMySaveGame::UMySaveGame()
+	{
+		SaveSlotName = TEXT("TestSaveSlot");
+		UserIndex = 0;
+	}
+
+### モジュール ヘッダ ファイル
+
+`SaveGame` オブジェクトにへアクセスし、`GameplayStatics` から関数の作成、保存、ロードを簡単に行うために、
+ゲーム モジュールのヘッダファイル内の他のすべての `#include` ステートメントの位置に以下の行を追加してください。モジュール ヘッダー ファイル名は 「[ProjectName].h」 となります。
+
+[REGION:codetitlebar]
+MyProject.h
+[/REGION:codetitlebar]
+	#include "MySaveGame.h"
+	#include "Kismet/GameplayStatics.h"
+[REGION:warning]
+これらの #include ステートメントは必ず `#include "Engine.h"` の後に追加するようにしてください。そうでない場合、コンパイルが失敗します。
+[/REGION]
+
+## 変数の保存
+
+変数を `SaveGame` オブジェクトに保存したい場合は、`SaveGame` オブジェクトのインスタンスを作成して、その中に変数を設定しなければなりません。
+
+	PlayerName = TEXT("PlayerOne");
+	UMySaveGame* SaveGameInstance = Cast<UMySaveGame>(UGameplayStatics::CreateSaveGameObject(UMySaveGame::StaticClass()));
+	SaveGameInstance->PlayerName = MyPlayerName;
+	UGameplayStatics::SaveGameToSlot(SaveGameInstance, SaveGameInstance->SaveSlotName, SaveGameInstance->UserIndex);
+
+## 変数のロード
+
+変数をロードするには、まず `UGameplayStatics::LoadGameFromSlot` で `SaveGame` オブジェクトをロードしなければなりません。これにより、`SaveGame` オブジェクトのインスタンスが新規作成されます。
+
+ここでも、まず空の `SaveGame` オブジェクトを作成し、そこからデフォルトの `SaveSlotName` と `UserIndex` を読み取れるようにします。このステップは任意であり、全てのゲームの実装に適用するわけではありません。
+
+新規の `SaveGame` オブジェクトがハードドライブからロードされれば、変数値をそこから読み取り、必要なアクタまたはクラスへ割り当てたり、以下のように直接しようすることができます。
+
+	UMySaveGame* LoadGameInstance = Cast<UMySaveGame>(UGameplayStatics::CreateSaveGameObject(UMySaveGame::StaticClass()));
+	LoadGameInstance = Cast<UMySaveGame>(UGameplayStatics::LoadGameFromSlot(LoadGameInstance->SaveSlotName, LoadGameInstance->UserIndex));
+	FString PlayerNameToDisplay = LoadGameInstance->PlayerName;
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow, PlayerNameToDisplay);
+	}

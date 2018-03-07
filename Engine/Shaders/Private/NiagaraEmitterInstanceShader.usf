@@ -1,0 +1,240 @@
+// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+NiagaraSimulationShader.usf: 
+=============================================================================*/
+
+#if GPU_SIMULATION
+	#include "/Engine/Public/Platform.ush"
+#endif
+
+#include "Definitions.usf"
+
+
+//TODO: Add common utility code for things such as reading data sources, reading from and writing to events.
+
+#if GPU_SIMULATION
+	static uint3 GDispatchThreadId;
+	uint EmitterTickCounter;
+
+	#define THREADGROUP_SIZE 16
+
+	// 4D random number generator inspired by PCGs (permuted congruential generator)
+	// COPY FROM RANDOM.USF, which we can't easily include here due to a sizable dependency chain
+	uint4 NiagaraRand4DPCG32(int4 p)
+	{
+		// taking a signed int then reinterpreting as unsigned gives good behavior for negatives
+		uint4 v = uint4(p);
+
+		// Linear congruential step.
+		v = v * 1664525u + 1013904223u;
+
+		// swapping low and high bits makes all 32 bits pretty good
+		v = v * (1u << 16u) + (v >> 16u);
+
+		// final shuffle
+		v.x += v.y*v.w;
+		v.y += v.z*v.x;
+		v.z += v.x*v.y;
+		v.w += v.y*v.z;
+		v.x += v.y*v.w;
+		v.y += v.z*v.x;
+		v.z += v.x*v.y;
+		v.w += v.y*v.z;
+
+		return v;
+	}
+
+
+
+	// using Marc's PCG random implementation, sequentially; initially seed with DispatchThreadID and tick counter,
+	// then repeat seeding with the result from the PRNG; should be deterministic
+	// TODO: use this in the VM for CPU sims as well
+	//
+	static uint4 RandomVal = 2308975;
+	float4 rand4()
+	{
+		RandomVal = NiagaraRand4DPCG32( int4(GDispatchThreadId+(RandomVal/57843).xyz, 54121) + int4(EmitterTickCounter.xxxx));
+		return float4(RandomVal.xyzw) / float4(0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF);
+	}
+
+	float rand(float x)
+	{
+		return rand4().x * x;
+	}
+
+	float2 rand(float2 x)
+	{
+		return float2(rand4().x, rand4().y) * x;
+	}
+
+	float3 rand(float3 x)
+	{
+		return float3(rand4().x, rand4().y, rand4().z) * x;
+	}
+
+	float4 rand(float4 x) 
+	{
+		return rand4() * x;
+	}
+
+	int rand(int x)
+	{
+		RandomVal = NiagaraRand4DPCG32(int4(GDispatchThreadId + (RandomVal / 57843).xyz, 54121) + int4(EmitterTickCounter.xxxx));
+		return RandomVal.x % x+1;
+	}
+
+#else
+
+	//Temporary random hacks
+	float2 rand(float2 x)
+	{
+		return float2(rand(x.x), rand(x.y));
+	}
+
+	float3 rand(float3 x)
+	{
+		return float3(rand(x.x), rand(x.y), rand(x.z));
+	}
+
+	float4 rand(float4 x) 
+	{
+		return float4(rand(x.x), rand(x.y), rand(x.z), rand(x.w));
+	}
+
+	int rand(int x);
+#endif
+
+
+/** Hooks into the stats system. */
+void EnterStatScope(int ScopeIdx);
+void ExitStatScope();
+
+#if VM_SIMULATION
+	float noise(float x);
+	float noise(float2 x);
+	float noise(float3 x);
+
+	//Total hack to get around the cross compiler converting fmod() to "X - (Y * trunc(X/Y))";
+	//On gpu just define these as fmod(x,y)
+	float4 Modulo(float4 x, float4 y);
+	float3 Modulo(float3 x, float3 y);
+	float2 Modulo(float2 x, float2 y);
+	float Modulo(float x, float y);
+
+	/** Returns the index for this particle in the current execution context. On gpu this'll likely be derived from DispatchThreadId */
+	int ExecIndex();
+
+	//Some functions that we use to map to special VM operations for reading in data.
+	//TODO: replace with proper buffer reading capability and use standard hlsl.
+	int AcquireIndex(int DataSetID, bool DoAcquire);
+
+	float InputDataFloat(int DataSetIndex, int RegisterIdx);  //DataSetIndex is 0 for main dataset
+	int InputDataInt(int DataSetIndex, int RegisterIdx);
+	bool InputDataBool(int DataSetIndex, int RegisterIdx);
+
+	float InputDataNoadvanceFloat(int DataSetIndex, int RegisterIdx);  //DataSetIndex is 0 for main dataset
+	int InputDataNoadvanceInt(int DataSetIndex, int RegisterIdx);
+	bool InputDataNoadvanceBool(int DataSetIndex, int RegisterIdx);
+
+	void OutputDataFloat(int DataSetIndex, int RegisterIndex, int InstanceIndex, float Value);
+	void OutputDataInt(int DataSetIndex, int RegisterIndex, int InstanceIndex, int Value);
+	void OutputDataBool(int DataSetIndex, int RegisterIndex, int InstanceIndex, bool Value);
+#endif
+
+#if GPU_SIMULATION
+	uint NumInstancesPerThread;
+	uint StartInstance;
+	uint SimulateStartInstance;
+	uint NumInstances;
+	uint NumThreadGroups;
+	uint GroupStartInstance;
+	uint ComponentBufferSizeRead;
+	uint ComponentBufferSizeWrite;
+	int	NumEventsPerParticle;
+	int NumParticlesPerEvent;
+	uint CopyInstancesBeforeStart;
+	Buffer<float> InputFloat;
+	Buffer<int> InputInt;
+	RWBuffer<int> RWOutputInt;
+	RWBuffer<float> RWOutputFloat;
+	RWBuffer<int> RWDataSetIndices;
+
+	int AcquireIndex(int DataSetID, bool bDoAcquire)
+	{
+		int PrevIdx = -1;
+		if(bDoAcquire == true)
+		{
+			InterlockedAdd(RWDataSetIndices[DataSetID], 1, PrevIdx);
+		}
+		return PrevIdx;
+	}
+
+	float InputDataFloat(int DataSetIndex, int RegisterIdx, int InstanceIdx)
+	{
+		return InputFloat[RegisterIdx*ComponentBufferSizeRead + InstanceIdx];
+	}
+
+	void OutputDataFloat(int DataSetIndex, int RegisterIndex, int InstanceIndex, float Value)
+	{
+		RWOutputFloat[RegisterIndex*ComponentBufferSizeWrite + InstanceIndex + StartInstance] = Value;
+	}
+
+	void OutputDataInt(int DataSetIndex, int RegisterIndex, int InstanceIndex, int Value)
+	{
+		RWOutputInt[RegisterIndex*ComponentBufferSizeWrite + InstanceIndex + StartInstance] = Value;
+	}
+
+	void EnterStatScope(int ID)	{}
+	void ExitStatScope()	{}
+#endif
+
+//Include the simulation shader code generated by the node graph.
+#include "/Engine/Generated/NiagaraEmitterInstance.usf"
+
+
+//The VectorVM shader needs only the generated code but a compute shader requires some wrapping.
+#if GPU_SIMULATION
+
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void SimulateMainComputeCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+	uint3 GroupThreadId : SV_GroupThreadID)
+{
+	GDispatchThreadId = DispatchThreadId;
+
+	//if(CopyInstancesBeforeStart == 1)
+	//{
+	//	StartInstance = 0;
+	//}
+
+	for(uint InstanceIdx = 0; InstanceIdx<NumInstancesPerThread; InstanceIdx++)
+	{
+		uint InstanceID = StartInstance + InstanceIdx*THREADGROUP_SIZE*NumThreadGroups + DispatchThreadId.x;
+
+		if(InstanceID < StartInstance+NumInstances )
+		{
+			// if we have a start instance >0, then we need to be sure that we don't run on instances before that
+			//
+			if(InstanceID >= SimulateStartInstance)
+			{
+				// calculate event index for the current instance; this is primarily for spawn events, where we do a single read from a secondary DataSet for a subset of particles
+				//  for all-particle events, this will always end up being 0 because NumParticlesPerEvent = total particles in the set
+				uint EventIndex = (InstanceID-SimulateStartInstance) / NumParticlesPerEvent;
+
+				SimulateMain(InstanceID, EventIndex);
+			}
+			// event spawn scripts, for example, will need to copy instances before their start
+			//  TODO: should do this in the VM as well; saves an extra copy
+			//
+			//else if(CopyInstancesBeforeStart)
+			//{
+			//	CopyInstance(InstanceID);
+			//}
+
+		}
+	}
+}
+
+#endif//GPU_SIMULATION

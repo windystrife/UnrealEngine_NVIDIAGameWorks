@@ -1,0 +1,397 @@
+﻿INTSourceChangelist:2744667
+Availability:Public
+Title:Details 面板自定义
+Crumbs:%ROOT%, Programming, Programming/Slate
+Description:在虚幻编辑器的 Details 面板中自定义属性显示的指南。
+version:4.9
+
+现可对 **Details** 面板进行完全的自定义。可通过一个简单的系统重排属性，或使用 [](Programming/Slate) 进行完全自定义。也可使用 Slate 语法将其他 UI 添加到 Details。
+
+[TOC (start:2 end:3)]
+
+## 设置说明
+
+1. 创建一个类进行属性自定义。这必须继承自 **ILayoutDetails**。
+    
+	* 实现一个函数：**void LayoutDetails( IDetailLayoutBuilder& )**。
+	* 此类的作用是封装类属性的自定义。每个需要的 **Details** 面板均会创建一个类实例。 
+
+2. **Details** 面板识别特定类的属性时，设置将被调用的委托。
+    
+	* 此委托的唯一作用是为拥有属性的特定 **UObject** 创建一个自定义类的实例。注意：在任意点上通常存在多个细节视图，细节视图的每个实例获得其自身的自定义类实例。这使您可在 layout 类上存储每个细节实例数据。  
+	* 范例（可在 DetailCustomizations.cpp 中查看更多范例）：
+	
+			FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
+			PropertyModule.RegisterCustomPropertyLayout( ABrush::StaticClass(), FOnGetDetailLayoutInstance::CreateRaw( &FBrushDetails::MakeInstance ) );
+
+			...
+			static TSharedRef<ILayoutDetails> FBrushDetails::MakeInstance()
+			{
+				return MakeShareable( new FBrushDetails );
+			}
+
+3. 在步骤 1 中设置的类 LayoutDetails 函数中实现自定义。
+    
+	* 如这是一个引擎类，则需将自定义类（如它尚不存在）添加到 `DetailCustomizations` 模块。不重启编辑器即可重编译和重新加载此模块，便于快速调整属性。
+	* 在 `FDetailCustomizationsModule.StartupModule` 中绑定委托，在 `FDetailCustomizationsModule.ShutdownModule` 解除绑定。
+	* 游戏特定的类应使用游戏特定的模块。
+	* 查看此文档和 `DetailCustomizations` 模块中的范例（如 PrimitiveComponentDetails.cpp 和 StaticMeshComponentDetails.cpp）。
+
+
+## 自定义
+
+在自定义类的 LayoutDetails 函数中处理所有自定义。此函数接受一个 **IDetailLayoutBuilder**。它是属性的接口和传回自定义控件的方式。
+
+IDetailLayoutBuilder 的基函数是创建属性和其他细节存在的类。此分类上还拥有部分其他自解释的下函数（多数都不需要）。DetailLayoutBuilder.h 中有关于它们的文档。
+
+自定义的第一步是编辑类别：
+
+	virtual void LayoutDetails( IDetailLayoutBuilder& DetailBuilder ) override
+	{
+		// 编辑灯光类别
+		IDetailCategory& LightingCategory = DetailBuilder.EditCategory("Lighting", TEXT("OptionalLocalizedDisplayName") );
+	}
+
+**EditCategory** 函数为属性所在的类型接受一个 **FName**，和一个任选本地化显示名。如显示名已指定，它将覆盖现有的显示名。不要求类别名必须是 `UPROPERTY` 宏中指定的相同类别名。但如果名称相同，它将重新使用 `UPROPERTY` 类别。如属性未被自定义且不在树状视图中，宏类别名将用作默认类别。
+
+EditCategory 返回一个 **IDetailCategoryBuilder&**，其可用于将属性添加到类别。有两种方法进行操作：
+
+* 使用简单 [multibox 风格 layout](#MultiboxStyleLayout)，可迅速重排属性。
+* 使用 [Slate 语法](#SlateLayout) 提供最具鲁棒性的自定义选项。
+
+(#MultiboxStyleLayout)
+### Multibox 式 Layout
+
+之前创建的 **LightingCategory** 的简单使用范例：
+		
+	// 添加属性到类别。第一个参数是属性名，第二个参数是可选显示名覆盖。
+	LightingCategory.AddProperty("bCastStaticShadow", TEXT("Static") );
+	LightingCategory.AddProperty("bCastDynamicShadow", TEXT("Dynamic") );
+	LightingCategory.AddProperty("bCastVolumetricTranslucentShadow", TEXT("Volumetric") );
+
+这是最基础的范例。它添加 3 个垂直堆栈的属性，并覆写它们的显示名。（范例中文本的本地化并非用于节约空间，而是固定的操作。）
+
+[REGION:note]
+	注意：自定义属性和类别固定出现在非自定义属性和类别上方。可使用此简单语法识别重要属性，否则它们可能被掩盖。
+[/REGION]
+	
+结果：
+
+![](multibox_layout_vertical.png)
+        
+一个稍微更高级的范例（`PrimitiveComponentDetails.cpp` 中）：
+		
+	// 使用显示名“Shadows”创建一个不可重叠组，它在 CastShadow 属性启用后方可见。在 EndGroup 或另一个 BeginGroup 被调用之前，此调用下的所有属性均出现在同一个组中。
+	LightingCategory.BeginGroup( TEXT("Shadows"), GroupImageName, "CastShadow" );
+        // 开始新的一行。在 EndLine() 或另一个 BeginLine() 被调用之前，此调用下的所有属性均被添加到同一行中。
+        LightingCategory.BeginLine();
+                // 使用默认外观添加属性。
+                LightingCategory.AddProperty("bCastStaticShadow", TEXT("Static") );
+                LightingCategory.AddProperty("bCastDynamicShadow", TEXT("Dynamic") );
+                LightingCategory.AddProperty("bCastVolumetricTranslucentShadow", TEXT("Volumetric") );
+        LightingCategory.BeginLine();
+                LightingCategory.AddProperty("bCastInsetShadow", TEXT("Inset") );
+                LightingCategory.AddProperty("bCastHiddenShadow", TEXT("Hidden") );
+                LightingCategory.AddProperty("bCastShadowAsTwoSided", TEXT("Two Sided") );
+	LightingCategory.EndGroup();
+
+* `BeginGroup` 用于新建一组属性。它接受组显示的名称、显示在名称旁的任选图片名称（Slate 笔刷名），以及一个任选编辑条件属性（如为 _false_，将从视图中隐藏整个组，使其属性无法被修改。）这些编辑条件与 `UPROPERTY` 宏机制编辑条件相同，唯一的不同是它们操作的是一组属性，而非一个。未来版本中将添加更多类似的内容！
+* `AddProperty` 使用其默认外观添加属性。它通常只需要一个参数 — 属性名。更复杂的属性（如结构体中的属性）需要查阅更多信息。如有需要，可查看 [高级提示](#AdvancedTips) 部分或 `DetailCategoryBuilder.h` 中的文档。
+* `BeginLine` 可新建一行属性。通过 `AddProperty` 添加的所有属性均默认在新的行中创建。`BeginLine` 可确保所有属性被添加，直到下一个 `BeginLine` 或 `EndLine` 处于同一行上。
+
+
+结果：
+ 
+![](multibox_layout_horizontal.png)
+
+#### Multibox 式 layout 的要点
+
+* 它的功能不够强，但未来将按需加入更多功能。当前的设计功能是用于快速重组。
+* Slate 布局要求对属性（属性句柄）的更高级的访问。在需要对属性外观进行自定义时尤其如此。
+
+
+### 属性句柄
+
+属性句柄两个主函数的作用是读写属性值，并使 Slate 自定义控件识别属性。细节视图/属性树访问属性的方式有些复杂，因此属性句柄将这些全部隐藏，执行撤销/重新执行、编辑前/后变更、包污染、世界切换等处理。 
+
+如需获取属性句柄，必须询问 `IDetailCategory` 在何处进行自定义。调用 `IDetailCategory::GetProperty` 即可执行。通常只需按以下方式传入属性名：
+
+	IDetailCategoryBuilder& LightingCategory = DetailBuilder.EditCategory( "Lighting" );
+	// 获得“bOverrideLightmapRes”属性的句柄
+	TSharedPtr<IPropertyHandle> OverrideLightmapRes = LightingCategory.GetProperty( "bOverrideLightmapRes" );
+
+现在即拥有布尔属性 `bOverrideLightmapRes` 的句柄。
+
+此时即可读写属性数值和/或将其传入 Slate 控件进行自定义。  
+
+实用属性句柄函数（在 PropertyHandle.h 中可查看完整记录列表）：
+
+| 函数 | 描述 |
+| -------- | ----------- |
+| `IPropertyHandle::SetValue(const ValueType& InValue)` 和 `IPropertyHandle::GetValue(ValueType& OutValue)` | 读写属性数值。它们针对多种内置类型（包括矢量和旋转体）重载。对于用户结构体之类的复杂类型而言，需要获取一个子句柄。查阅此文档最后的高级部分。|
+| `ResetToDefault()` | 将属性重置为默认。|
+| `IsValidHandle()` | 返回是否拥有有效属性句柄。|
+| `AsArray()` | 阵列属性值为特殊。查阅此文档最后的高级部分。|
+
+其他要点：
+
+* 如属性无法被找到或不会出现在细节视图中，从 `GetProperty` 返回的句柄可能为无效。检查 `IsValidHandle()` 确认。在无效句柄上调用函数不会出现崩溃。
+* 不应将属性句柄存储在 layout 类之外，除非它们为弱指针。在内部，它们访问的数据为弱指针，因此在无效属性上尝试设置或获取数值不会出现崩溃；但如果将其存储且不进行清理，得到的是对无用对象的引用。
+* 如尝试读/写访问不支持属性的数据类型（如 `String` 属性的 `float`），操作将失败，但数据不会受损。
+
+
+[REGION:warning]
+	[REGION:largetitle]
+		访问数值时处理失败操作。
+	[/REGION]
+	
+	注意：细节视图可同时查看多个对象，用户可一次性选择数百个 Actor。在这种情况下，一个属性肯定会拥有多个数值。GetValue 和 SetValue 返回一个 `FPropertyAccess::Result`，以确定数据访问是否成功。`FPropertyAccess::MultipleValues` 将成为普通返回值。
+
+		/**
+		* 访问属性数值可能出现的结果                   
+			*/
+		namespace FPropertyAccess
+		{
+				enum Result
+				{
+					/** 找到多个值，因此无法读取值 */
+					MultipleValues,
+					/** 设置或获取数值失败（原因可能是属性不可用、为不兼容类型或编辑常量） */
+					Fail,
+					/** 成功设置或获得值 */
+					Success,
+				};
+		}
+
+	如要自定义低级类型的属性（如 `int` 或 `float`），必须设法处理多数值的状况。
+
+			INT MyInteger;
+			// 获得属性的值
+			FPropertyAccess::Result MyResult = MyIntHandle->GetValue(MyInteger);
+
+	如 MyResult 为 `FPropertyAccess::MultipleValues`，`MyInteger` 不会被设置。将其发送至展示它后将显示垃圾值的控件，并将其在尚未变好之前将其初始化，因为它还不是正确的值。如何处理，取决于自定义者。针对数字类型，推荐使用 `SNumericEntryBox`，通过它可选择性地在其值属性中不返回值。然后将显示设置的标签。查看 `SNumericEntryBox.h`。
+[/REGION]
+
+(#SlateLayout)
+### Slate 布局
+
+通过 Slate 布局可对属性的外观和排列进行完全的自定义。通过 `IDetailCategoryBuilder::AddWidget` 将布局传回类型，它从 Slate 接收一个任意控件。此处的自定义控件对您有所帮助：
+
+#### SProperty
+
+这是一个自定义控件。可使用此控件自定义属性和/或将属性嵌入另一个 slate 声明语法。使用 `SNew` 创建一个 `SProperty`，再为属性提供一个句柄，使其了解构建的内容。句柄是 `SNew` 不可选的参数：`SNew( SProperty, HandleToTheProperty )`
+
+范例： 
+
+	// 编辑灯光类别
+	IDetailCategoryBuilder& LightingCategory = DetailBuilder.EditCategory( "Lighting" );
+
+	// 获取 bOverrideLightmapRes 属性的句柄
+	TSharedPtr<IPropertyHandle> OverrideLightmapRes = LightingCategory.GetProperty( "bOverrideLightmapRes" );
+
+	LightingCategory.AddWidget()
+	[
+		SNew( SHorizontalBox )
+		+ SHorizontalBox::Slot()
+		[
+			// 制作新 SProperty
+			SNew( SProperty, EnableOverrideLightmapRes )
+		]
+		+ SHorizontalBox::Slot()
+		.Padding( 4.0f, 0.0f )
+		.MaxWidth( 50 )
+		[
+			SNew( SProperty, LightingCategory.GetProperty("OverriddenLightMapRes") )
+			.NamePlacement( EPropertyNamePlacement::Hidden ) // 隐藏名称
+		]
+	];
+
+结果：
+                 
+![](sproperty.png)
+
+`SProperty` 将默认生成一个属性的控件。`SProperty` 上有一些基础自定义属性，可对默认外观进行自定义（如名称）。如需自定义属性，使用 `CustomWidget` 槽。使用 `CustomWidget` 槽后，`SProperty` 便无法了解关于如何设置和获取数值的内容，因为已经构建了一个自定义控件。需要使用属性句柄来获取并设置数值。
+
+范例：
+
+      // 自定义 OverridenLightMapRes 属性，以便显示一些文本和一个 spinbox 
+      TSharedPtr<IPropertyHandle> LightMapResValue = LightingCategory.GetProperty("OverriddenLightMapRes")
+      SNew( SProperty, LightMapResValue )
+      .CustomWidget()
+      [
+            SNew( SHorizontalBox )
+            + SHorizontalBox::Slot()
+            .VAlign( VAlign_Center )
+            .Padding( 2.0f )
+            [
+                  SNew( STextBlock )
+                  .Text( TEXT("Lightmap Res") )
+            ]
+            + SHorizontalBox::Slot()
+            [
+                  SNew( SSpinBox )
+                  .MinSliderValue( 0 )
+                  .MaxSliderValue( 1024 )
+                  .OnValueCommitted( &SetValueOnProperty )  
+                  .Value( &GetValueFromProperty
+            ]
+      ]
+      ...
+      FLOAT GetValueFromProperty()
+      {
+            // 使用以上创建的属性句柄，获取其数值并发送至 spinbox
+            INT Value; // 注意：光照图分辨率为整数，因此必须这样进行访问。
+            LightMapResValue.GetValue( Value );
+            // 注意句柄出现失败的情况
+            return Value;
+      }
+
+      void SetValueOnProperty( FLOAT NewValue )
+      {
+            // 使用属性句柄，设置其数值
+            LightMapResValue.SetValue( NewValue )
+      }
+
+##### SProperty 要点
+
+* 即时制作了自定义控件，`SProperty` 仍然固定显示重设为默认。`SProperty` 存在一个参数，可开启此行为。如存在一行属性时，便无需在每个属性上显示重设为默认，在最后显示一个大菜单即可。查看下方的 [SResetToDefaultMenu](#SResetToDefaultMenu)。
+* 如将无效句柄传到 `SProperty`，它将不会显示。
+
+
+除 `SProperty` 外，还可使用其他自定义控件。
+
+#### SAssetProperty
+
+`SAssetProperty` 是一个 `SProperty`，显示资源的缩略图和变更资源的输入框。还可变更缩略图的尺寸。可将其用于拥有可渲染缩略图的 `UObject` 属性。如将其用于其他类型上，将不会显示任何内容。
+
+![](sassetproperty.png)
+
+#### SFilterableDetail
+
+`SFilterableDetail` 是一个不进行绘制的控件，但用户在细节视图的搜索框中输入内容时，它可对其内容槽中的所有内容进行过滤。此属性适用于不以属性为基础的细节。`SProperty` 已进行过滤，因此无需对它们设置 `SFilterableDetail`，除非需要将它们的过滤分组。
+
+	// “Create Blocking Volume”与用户的搜索项不匹配时，创建对内容槽中所有内容进行过滤的控件。
+	// 注意：第二个参数为和过滤匹配的本地化搜索项；第三个参数为该过滤所处的类别。
+	SNew( SFilterableDetail, NSLOCTEXT("StaticMeshDetails", "BlockingVolumeMenu", "Create Blocking Volume"), &StaticMeshCategory )
+	.Content()
+	[
+		  // 创建阻挡体积域菜单
+		  SNew( SComboButton )
+		  .ButtonContent()
+		  [
+				SNew( STextBlock )
+				.Text( NSLOCTEXT("StaticMeshDetails", "BlockingVolumeMenu", "Create Blocking Volume") ) 
+				.Font( IDetailLayoutBuilder::GetDetailFont() )
+		  ]
+		  .MenuContent()
+		  [
+				BlockingVolumeBuilder.MakeWidget()
+		  ]
+	]
+
+
+
+#### SResetToDefaultMenu
+
+`SResetToDefaultMenu` 是显示黄色重置到默认箭头的菜单。`SProperty` 默认添加一个重置到默认菜单，但有时有必要将多个属性建组放入相同菜单中。（如 `Vector` 属性）。可将 `SProperty` 控件添加到 `SResetToDefaultMenu` 进行处理。在 `SResetToDefaultMenu` 上调用 `AddProperty`，再把菜单放置在声明式语法中即可！
+
+#### SArrayProperty
+
+通过此控件可自定义属性阵列。创建一个和 `SProperty` 的控件，并与一个委托挂钩。每次需要阵列元素的控件时，便会调用此委托。
+
+范例：
+
+	void FMeshComponentDetails::LayoutDetails( IDetailLayoutBuilder& DetailLayout )
+	{
+		  IDetailCategoryBuilder& DetailCategory = DetailLayout.EditCategory("Rendering");
+		  TSharedRef<IPropertyHandle> MaterialProperty = DetailCategory.GetProperty( "Materials" );
+
+		  DetailCategory.AddWidget()
+		  [
+				SNew( SArrayProperty, MaterialProperty )
+				// 此委托针对每个阵列元素调用，为其生成控件。
+				.OnGenerateArrayElementWidget( this, &FMeshComponentDetails::OnGenerateElementForMaterials )
+		  ];
+	}
+	...
+	/**
+	* 为一个材质元素生成一个控件
+	* 
+	 * @param ElementProperty     我们需要生成的阵列元素句柄
+	* @param ElementIndex        我们生成的元素索引
+	*/
+	TSharedRef<SWidget> FMeshComponentDetails::OnGenerateElementForMaterials( TSharedRef<IPropertyHandle> ElementProperty, INT ElementIndex )
+	{
+		  return 
+				SNew( SAssetProperty, ElementProperty )
+				.ThumbnailSize( FIntPoint(32,32) );
+	}
+
+结果：
+ 
+![](sarrayproperty.png)
+
+### 自定义注意事项
+
+* 自定义属性和读写值时检查错误情况。注意：细节视图常同时查看多个对象，每个对象均拥有不同的值。自定义属性应足以处理多值的常见情况。
+* 存储关于自定义类选择的所有数据。部分非属性细节需要选中的 Actor 进行自定义。可从 `IDetailLayoutBuilder` 获取选中的 Actor。可在自定义类上存储此选择集或与选择密切相关的内容。它必将处于周围，而选择在其细节视图中仍保持不变。
+* 不使用 `FActorIterator`、`FSelectedActorIterator` 或 `GEditor->GetSelectedActorIterator`。注意：**Details** 面板可被锁定，如被锁定，这些内容将在全局选择集或 Actor（并非 **Details** 面板中选中的 Actor）列表上运行！使用它们将访问不同数据。可从 `IDetailLayoutBuilder` 获取选中 Actor 的列表。
+* 不保留对 layout 类的强引用或属性句柄（根本无需保留）。注意：细节视图（尤其是关卡编辑器的细节视图）可能基于用户选择随时发生变化，因此对 layout 类的引用很容易失效。自定义细节防止此情况发生时，将检查 layout 类共享指针的唯一性。
+
+
+(#AdvancedTips)
+## 高级提示
+
+### 访问复杂属性
+
+无法通过属性名进行分解的属性即被定义为复杂属性。这通常为结构体中的属性。
+
+访问复杂属性的方式有两种：
+
+* 返回属性句柄或添加属性到类型的函数使用任选参数分解属性。 
+
+	范例：
+
+		TSharedPtr<IPropertyHandle> IDetailCategoryBuilder::GetProperty(  FName PropertyPath, UClass* ClassOutermost , FName InstanceName) 
+	
+	| 参数 | 描述 |
+	| --------- | ----------- | 
+	| Path | 属性的路径。可为一个属性名称，或格式 `outer.outer.value[optional_index_for_static_arrays]` 中的一个路径。|
+	| ClassOutermost | 访问被自定义的当前类外的属性时可选的外部类。|
+	| InstanceName | 相同类存在多个 UProperty 时可选的实例名（如存在两个完全相同的结构体，实例名即为其中一个结构体变量名）。|
+
+	范例：
+
+		struct MyStruct
+		{ 
+			INT StaticArray[3];
+			FLOAT FloatVar;
+		}
+
+		class MyActor
+		{ 
+            MyStruct Struct1;
+            MyStruct Struct2;
+            FLOAT MyFloat
+		}
+                                
+	* 从 `MyActor` 中的 `Struct2` 访问索引 `2` 处的 `StaticArray` 时，路径为 `"MyStruct.StaticArray[2]"`，实例名为 `"Struct2"`。
+	* 在 `MyActor` 自定义函数外访问相同的 `StaticArray` 时需要执行上述操作，但 `ClassOutermost` 应为 `MyActor::StaticClass()`。
+	* 在 `MyActor` 中访问 `MyFloat` 时可传入 `"MyFloat"`，因为属性名很明确。
+
+* 如拥有一个属性句柄，可通过其名称获取子属性句柄：
+
+		TSharedPtr<IPropertyHandle> IPropertyHandle::GetChildHandle( FName ChildName )
+
+	| 参数 | 描述 |
+	| --------- | ----------- |
+	| ChildName | 子项的属性名。它将进行递归，直到找到。不支持路径，阵列子项无法通过此方式访问。|
+
+
+### 访问阵列
+
+可通过 `IPropertyHandle::AsArray` 访问阵列。如属性句柄为一个阵列，将返回一个 `IPropertyHandleArray`。它拥有添加、移除、插入、复制和获取阵列元素数量的函数。
+
+### 隐藏属性
+
+调用 `IDetailLayoutBuilder::HideProperty` 后可完全隐藏属性。它接受一个名称/路径或属性句柄。

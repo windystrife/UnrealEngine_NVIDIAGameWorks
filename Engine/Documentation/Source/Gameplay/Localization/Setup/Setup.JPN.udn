@@ -1,0 +1,173 @@
+﻿INTSourceChangelist:2713325
+Availability:Public
+Title:ローカリゼーションのためのプロジェクト設定
+Crumbs:%ROOT%, Gameplay, Gameplay/Localization
+Description:ローカリゼーションのためのプロジェクト設定方法 
+version:4.9
+
+[TOC (start:2)]
+
+ローカリゼーションのためには、プロジェクトに以下の設定を行います。
+* コマンドレット パイプライン用にローカリゼーション コンフィギュレーション スクリプトを書き出す
+* ローカリゼーション データのロード元を設定する
+* 配布用にパッケージ化するローカリゼーション データの指定 
+
+これまでは、ローカリゼーション コンフィギュレーション スクリプトは `Config/Localization` の下にあり、ローカリゼーション データは `Content/Localization` の下にありました。
+
+[REGION:raw]
+![](SetupFlowchart.png)
+[/REGION:raw]
+
+[REGION:note]
+ローカリゼーションの設定とイタレーションは今のところ手作業ですが、開発中のローカリゼーション管理用ダッシュボード UI によりワークフローが大幅に簡素化されます。
+[/REGION]
+
+
+
+
+## ローカリゼーション コンフィギュレーション スクリプト
+ローカリゼーション パイプラインは、 
+テキストの収集、ソート、翻訳の管理、エンジンで使用するバイナリファイル ファイル フォーマットへのコンパイル処理を行う [各種コマンドレット](Gameplay/Localization/Commandlets) で構成されています。実行ステップを指定するコンフィギュレーション ファイル経由で、マスターのコマンドレットがこれらのコマンドレットを実行します。
+
+通常プロジェクトは、翻訳するテキストをすべてカバーするターゲットが 1 つだけ必要です。1 つのコンフィギュレーション スクリプトにより、 
+テキストの収集、マニフェストとアーカイブの生成、新規の翻訳のインポート、新規ソースのエクスポート、アプリケーションで使用するコンパイル済のバイナリ ファイル フォーマットのローカリゼーション リソースの生成といった、 
+ローカリゼーション自動化のイタレーションを実行するための全てのステップと設定値を指定します。
+
+以下は、従来のローカリゼーション プロセスを実行するローカリゼーション コンフィギュレーションの例です。
+
+[REGION:codetitlebar]
+Config/Localization/Game.ini
+[/REGION:codetitlebar]
+	;Common settings to be used for all commandlets as needed.
+	[CommonSettings]
+	SourcePath=./Content/Localization/Game
+	DestinationPath=./Content/Localization/Game
+	ManifestName=Game.manifest
+	ArchiveName=Game.archive
+	ResourceName=Game.locres
+	PortableObjectName=Game.po
+	;English
+	SourceCulture=en
+	;English
+	CulturesToGenerate=en
+	;French - Commented Out
+	;CulturesToGenerate=fr
+	;Italian - Commented Out
+	;CulturesToGenerate=it
+	;German - Commented Out
+	;CulturesToGenerate=de
+	;Spanish - Commented Out
+	;CulturesToGenerate=es
+
+	;Gather text from source code and configuration files.
+	[GatherTextStep0]
+	CommandletClass=GatherTextFromSource
+	IncludePaths=./Source/
+	IncludePaths=./Config/
+	ExcludePaths=*/Config/Localization/*
+	SourceFileSearchFilters=*.h
+	SourceFileSearchFilters=*.cpp
+	SourceFileSearchFilters=*.ini
+
+	;Gather text from assets in content.
+	[GatherTextStep1]
+	CommandletClass=GatherTextFromAssets
+	IncludePaths=./Content/
+	ExcludePaths=*/Content/Localization/*
+	PackageExtensions=*.umap
+	PackageExtensions=*.uasset
+
+	;Create manifest with all gathered source text.
+	[GatherTextStep2]
+	CommandletClass=GenerateGatherManifest
+
+	;Create new archives/update existing archives with new entries from the manifest.
+	[GatherTextStep3]
+	CommandletClass=GenerateGatherArchive
+
+	;Import new translations from PO (portable object) files into existing archives.
+	[GatherTextStep4]
+	CommandletClass=InternationalizationExport
+	bImportLoc=true
+
+	;Export new source from existing archives into PO (portable object) files.
+	[GatherTextStep5]
+	CommandletClass=InternationalizationExport
+	bExportLoc=true
+
+	;Compile source text and translations into binary form for use by the application.
+	[GatherTextStep6]
+	CommandletClass=GenerateTextLocalizationResource
+
+
+### ディレクトリ構造の例
+"MyProject" という、 ターゲットが 2 つある ("Game" と "DLC") プロジェクトを使ったディレクトリ構造の例です。
+* MyProject
+	* Config
+		* Localization
+			* Game.ini
+			* DLC.ini
+
+## ローカリゼーション データ
+ローカリゼーション データを使うために、プロジェクトを設定する必要があります。ローカリゼーション データを検索するパスは、 
+キー `LocalizationPaths` の配列表記を使って `Internationalization` セクションの `Config/DefaultGame.ini` に指定されています。デフォルトでは、ローカリゼーション データは `Content/Localization/Game` で検索しますが、このエントリは削除したり置き換えが可能です。
+
+[REGION:codetitlebar]
+Config/DefaultGame.ini Excerpt
+[/REGION:codetitlebar]
+
+	[Internationalization]
+	;最初のエントリはデフォルトで BaseGame.ini から継承されます。
+	;+LocalizationPaths=%GAMEDIR%Content/Localization/Game
+	+LocalizationPaths=%GAMEDIR%Content/Localization/DLC
+
+
+### ディレクトリ構造の例
+"MyProject" という、英語 ("en") と ブラジル ポルトガル語 ("pt-BR") にローカライズされた、 2 つのターゲット ("Game" と "DLC") と持つプロジェクトを使ったディレクトリ構造の例です。
+
+* MyProject
+	* Content
+		* Localization
+			* Game
+				* Game.manifest
+				* en
+					* Game.archive
+					* Game.locres
+				* pt-BR
+					* Game.archive
+					* Game.locres
+			* DLC
+				* DLC.manifest
+				* en
+					* DLC.archive
+					* DLC.locres
+				* pt-BR
+					* DLC.archive
+					* DLC.locres
+
+## パッケージ設定
+プロジェクトを正しくパッケージングするために、サポートされたカルチャのローカリゼーション データをパッケージ用に指定する必要があります。エディタの **[File (ファイル)]** メニューの中の **[Package Project (プロジェクトのパッケージング)]** サブメニューを開き、 
+ **[Packaging Settings...(パッケージング設定)]** を選択します。**[Project Settings (プロジェクト設定)]** ウィンドウの **[Packaging (パッケージング)]** カテゴリで、詳細セクションを展開して **[Cultures to Package (パッケージングするカルチャ)]** 設定にアクセスします。ローカリゼーション データをパッケージングするカルチャに、 
+チェックを入れたり外したりすることができます。デフォルトでは英語にチェックが入っています。
+
+
+![](SetupEditor.png)
+
+または、エディタ UI を使わずに、キー `CulturesToStage` の配列表記を使って `/Script/UnrealEd.ProjectPackagingSettings` の中にある `Config/DefaultGame.ini` ファイルで 
+直接変更することができます。
+
+[REGION:codetitlebar]
+Config/DefaultGame.ini Excerpt
+[/REGION:codetitlebar]
+	[/Script/UnrealEd.ProjectPackagingSettings]
+	+CulturesToStage=en
+	+CulturesToStage=fr
+	+CulturesToStage=it
+	+CulturesToStage=de
+	+CulturesToStage=es
+
+
+## イタレーション
+ローカリゼーション データのイタレーションには、 GatherText コマンドレットの実行とローカリゼーション コンフィギュレーション スクリプトの作成が含まれます。コマンドラインは次のフォームとなります。 
+
+	<ProjectFilePath> -Run=GatherText -Config=<PathToConfigFileRelativeToProjectRoot>

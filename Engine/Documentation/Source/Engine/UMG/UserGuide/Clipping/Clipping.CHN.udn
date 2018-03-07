@@ -1,0 +1,102 @@
+﻿INTSourceChangelist:0
+Availability:Docs
+Crumbs:%ROOT%
+Title: Clipping
+Description: An overview of using the Clipping properties within the UMG UI Designer.
+Type: Reference
+Version:4.17
+Parent:Editor/UMG/UserGuide
+Related:Engine/UMG
+Related:Programming\Slate\ClippingSystem
+Order:100
+Tags:UMG UI Designer
+Topic-image:Clipping_Topic.png
+
+
+[VAR:spacer2]![](%ROOT%/spacer.png)(w:30 convert:false)[/VAR]
+
+[TOC(start:2 end:2)]
+
+
+[REGION:warning]
+With Unreal Engine 4.17, the clipping system has been overhauled and in some cases may break backwards compatibility. For additional information about these changes see the [Slate Clipping System](Programming\Slate\ClippingSystem) page.
+[/REGION]
+
+
+The clipping system in UMG uses [Slate's Clipping System](Programming/Slate/ClippingSystem) to control how clipping is handled for your Widgets (as well as the rest of the Editor).
+**Clipping** works by restricting rendered objects (graphics and text) to a region using a bounding box so that anything outside of it does not render. 
+
+![](Programming\Slate\ClippingSystem\ClippingExamples.png)(w:500)
+
+* Left - No clipping is enabled on the button or the text.
+* Center - Clipping is enabled on the text
+* Right - Clipping is enabled on the button.
+
+In this example, a Button Widget (the parent) and a Text Widget (the child) are used to show who is responsible for clipping. By default, the system clips to the bounds of a given Widget, so the button and text act independently to clip at their own bounds (left). If you enable clipping on the Text Widget, the system will use the bounds of the text to show only what is within its bounds (center). If you set the Button Widget to enable clipping, the text will cut off at the edge of the button for its bounds (right).
+
+The Canvas Panel (or clipping zone) represents your game screen and will clip anything outside of this area for your game. 
+
+[REGION:fullwidth]
+![](UMGDesigner.png)
+[/REGION]
+[REGION:caption] In the UMG Designer graph, the Canvas Panel (blue) represents the clipping zone for your game screen. [/REGION]
+
+Prior to Unreal Engine 4.17, clipping was handled differently that prevented anything from rendering outside of the canvas panel and Widgets only provided clipping in layout space. This presented a problem
+with widgets that would have their bounding boxes partially outside of the canvas panel. If they were rotated, the part of the bounding box outside of the clipping zone would not rotate and leave parts of the 
+Widget clipped. 
+
+Take for instance these examples: 
+
+[REGION:imagetable]
+| --- | --- | 
+| ![](Clipping1.png)(w:500) | [INCLUDE:#comparison] |
+[/REGION]
+
+
+
+<!----
+[INCLUDE:#comparison]
+
+[EXCERPT:comparison]
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Render Transform clipping | in 4.16 and earlier.](Clipping2.png)(w:500)
+	[/PARAM]
+	[PARAM:after]
+	![Render Transform clipping | in 4.17 and later.](Clipping3.png)(w:500)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:comparison]
+
+--->
+
+In this example, the Image Widget (left) has been placed at the edge of the Canvas Panel so that part of it is outside of the clipping zone. The clipping system now uses axis-aligned clipping, which resolves artifacts and issues as seen in the comparison image (right). In 4.16, if a Widget was rotated with part of its bounds outside of the Canvas Panel, you would get clipped edges inside of the Canvas Panel. Now with 4.17, when you rotate a Widget, the bounds also rotate with it to clip properly. 
+
+
+## Accessing Clipping
+
+The clipping properties for the currently-selected Widget can be found under the **Clipping** section of the **Details** panel.
+
+![](ClippingProperties.png)
+
+
+
+## Setting Clipping Properties
+
+The following clipping methods can be selected for your Widgets in UMG UI Designer:
+
+[REGION:raw]
+| Property | %spacer2% | Description |
+| --- | --- | --- |
+| **Inherit** || This widget does not clip children and obeys whatever clipping / culling it was passed in from a parent widget. |
+| **Clip to Bounds** || This widget clips content to the bounds of the widget. It intersects those bounds with any previous clipping area. |
+| **Clip to Bounds - Without Intersecting** || This widget clips to its bounds. It does not intersect with any existing clipping geometry, it pushes a new clipping state. Effectively allowing it to render outside the bounds of hierarchy that does clip. [REGION:note] This will not allow you to ignore the clipping zone that is set to **Clip to Bounds - Always** [/REGION] |
+| **Clip to Bounds - Always** || This widget clips to its bounds. It intersects those bounds with any previous clipping area. [REGION:note] This clipping area cannot be ignored, it will always clip children. This is useful for hard barriers in the UI where you never want animations or other effects to break this region. [/REGION] |
+| **On Demand** || This widget clips to its bound when it's Desired Size is larger than the allocated geometry the widget is given. If that occurs, it will work like **Clip to Bounds**.  [REGION:note] This mode was primarily added for **Text**, which is often placed into containers that eventually are resized to not be able to support the length of the text. So rather than needing to tag every container that could contain text with [YES], which would result in almost no batching, this mode was added to dynamically adjust the clipping if needed. The reason not every is not set to **On Demand** is because not every panel returns a Desired Size that matches what it plans to render at. [/REGION] |
+[/REGION]
+
+
+## Additional Considerations
+
+* In most cases, you should not need to adjust the clipping method except in instances where you can't control the length of the text and need to clip it. An example of this would be Scroll Box and Editable Text Widgets, which are set to **Clip to Bounds** instead of **Inherit**.
+* Elements in different clipping spaces cannot be batched together, so there is a performance cost that comes with clipping. For this reason, do not enable clipping unless a panel actually needs to prevent content from showing up outside of its bounds. 

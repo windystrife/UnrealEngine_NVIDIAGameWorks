@@ -1,0 +1,91 @@
+// NvFlow begin
+
+#include "/Engine/Public/Platform.ush"
+
+// Note : Unclear if /Engine/Private/ should be accessible here
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/GlobalDistanceFieldShared.ush"
+
+
+Buffer<uint> BlockList;
+Texture3D<uint> BlockTable;
+
+Texture3D<float4> DataIn;
+RWTexture3D<float4> DataOut;
+
+
+int3 TableValToCoord(uint val)
+{
+	uint valInv = ~val;
+	return int3(
+		(valInv >> 0) & 0x3FF,
+		(valInv >> 10) & 0x3FF,
+		(valInv >> 20) & 0x3FF);
+}
+
+float OpacityVsDistance(float dist)
+{
+	const float edgeScale = -10.f;
+	float opacity = 0.f;
+	if (dist >= NvFlowApplyDistanceField.MinActiveDist && dist <= NvFlowApplyDistanceField.MaxActiveDist)
+	{
+		opacity = saturate(edgeScale * (dist - NvFlowApplyDistanceField.MaxActiveDist));
+	}
+	return opacity;
+}
+
+[numthreads(THREAD_COUNT_X, THREAD_COUNT_Y, THREAD_COUNT_Z)]
+void ApplyDistanceField(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	if (all(DispatchThreadId < NvFlowApplyDistanceField.ThreadDim.xyz))
+	{
+		uint BlockListIdx = DispatchThreadId.x >> NvFlowApplyDistanceField.BlockDimBits.x;
+		int3 VBlockIdx = TableValToCoord(BlockList[BlockListIdx]);
+		int3 BlockIdx = NvFlowApplyDistanceField.IsVTR ? VBlockIdx : TableValToCoord(BlockTable[VBlockIdx]);
+		int3 Index = (BlockIdx << NvFlowApplyDistanceField.BlockDimBits.xyz) | (DispatchThreadId & (NvFlowApplyDistanceField.BlockDim.xyz - int3(1, 1, 1)));
+
+		int3 VIndex = (VBlockIdx << NvFlowApplyDistanceField.BlockDimBits.xyz) | (DispatchThreadId & (NvFlowApplyDistanceField.BlockDim.xyz - int3(1, 1, 1)));
+		float3 WorldPosition = mul(float4(NvFlowApplyDistanceField.VDimInv.xyz * (VIndex + 0.5f.xxx), 1), NvFlowApplyDistanceField.VolumeToWorld).xyz;
+
+		float Distance = GetDistanceToNearestSurfaceGlobal(WorldPosition) * NvFlowApplyDistanceField.DistanceScale;
+		float Opacity = OpacityVsDistance(Distance);
+
+		float4 ValueRate = saturate(NvFlowApplyDistanceField.ValueCoupleRate * Opacity);
+		float4 EmitValue = NvFlowApplyDistanceField.EmitValue;
+
+		float3 Grad = 0.f.xxx;
+		float Slip_t = 0.f;
+
+		bool bCheckSlip = (NvFlowApplyDistanceField.SlipFactor > 0.f && NvFlowApplyDistanceField.SlipThickness > 0.f);
+		bool bShouldSlip = bCheckSlip &&
+			Distance >= NvFlowApplyDistanceField.MaxActiveDist &&
+			Distance <= NvFlowApplyDistanceField.MaxActiveDist + NvFlowApplyDistanceField.SlipThickness;
+		if (bShouldSlip)
+		{
+			Slip_t = 1.f - (Distance - NvFlowApplyDistanceField.MaxActiveDist) / NvFlowApplyDistanceField.SlipThickness;
+			Grad = GetDistanceFieldGradientGlobal(WorldPosition);
+
+			bShouldSlip = (dot(Grad, Grad) > 0.f);
+			if (bShouldSlip)
+			{
+				Grad = normalize(Grad);
+			}
+		}
+
+		float4 Value = DataIn[Index];
+		Value += ValueRate * (EmitValue - Value);
+
+		// apply slip constraint
+		if (bShouldSlip)
+		{
+			float D1 = dot(Value.xyz, Grad);
+			float D2 = dot(EmitValue.xyz, Grad);
+
+			Value.xyz -= Slip_t * NvFlowApplyDistanceField.SlipFactor * (D1 - D2) * Grad;
+		}
+
+		DataOut[Index] = Value;
+	}
+}
+
+// NvFlow end

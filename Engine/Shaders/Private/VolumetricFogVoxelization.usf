@@ -1,0 +1,264 @@
+/*=============================================================================
+	VolumetricFogVoxelization.usf
+=============================================================================*/
+
+// So vertex factories can interpolate dependencies of VertexFactoryGetTranslatedPrimitiveVolumeBounds
+#define PASS_NEEDS_PRIMITIVE_VOLUME_BOUNDS 1
+#define MIN_MATERIAL_TEXCOORDS 1
+
+#include "Common.ush"
+#include "/Engine/Generated/Material.ush"
+#include "/Engine/Generated/VertexFactory.ush"
+
+struct FVoxelizeVolumePrimitiveVSToGS
+{
+	FVertexFactoryInterpolantsVSToPS FactoryInterpolants;
+	float2 VertexQuadCoordinate : ATTRIBUTE0;
+};
+
+struct FVoxelizeVolumePrimitiveGSToPS
+{
+	FVertexFactoryInterpolantsVSToPS FactoryInterpolants;
+	float4 OutPosition : SV_POSITION;
+	uint SliceIndex : SV_RenderTargetArrayIndex;
+};
+
+int ComputeZSliceFromDepth(float SceneDepth)
+{
+	return (int)(log2(SceneDepth * VolumetricFog.GridZParams.x + VolumetricFog.GridZParams.y) * VolumetricFog.GridZParams.z);
+}
+
+float ComputeDepthFromZSlice(float ZSlice)
+{
+	float SliceDepth = (exp2(ZSlice / VolumetricFog.GridZParams.z) - VolumetricFog.GridZParams.y) / VolumetricFog.GridZParams.x;
+	return SliceDepth;
+}
+
+#define PRIMITIVE_SPHERE_MODE 0
+#define OBJECT_BOX_MODE 1
+
+float4 FrameJitterOffsets[16]; 
+uint VoxelizationPassIndex;
+float4x4 ViewToVolumeClip; 
+
+#ifndef MAX_SLICES_PER_VOXELIZATION_PASS
+#define MAX_SLICES_PER_VOXELIZATION_PASS 1 
+#endif
+
+#if USING_VERTEX_SHADER_LAYER
+#define NUM_INPUT_VERTICES 1
+void Voxelize(FVoxelizeVolumePrimitiveVSToGS Inputs[1], out FVoxelizeVolumePrimitiveGSToPS Output)
+#else
+#define NUM_INPUT_VERTICES 3
+[maxvertexcount(MAX_SLICES_PER_VOXELIZATION_PASS * 3)]
+void VoxelizeGS(triangle FVoxelizeVolumePrimitiveVSToGS Inputs[3], inout TriangleStream<FVoxelizeVolumePrimitiveGSToPS> OutStream)
+#endif
+{
+#if !USING_VERTEX_SHADER_LAYER
+	ResolvedView = ResolveView();
+#endif
+
+	int GridSizeZ = VolumetricFog.GridSize.z;
+	float4 PrimitiveVolumeBounds = VertexFactoryGetTranslatedPrimitiveVolumeBounds(Inputs[0].FactoryInterpolants);
+	float3 ViewSpacePrimitiveVolumeOrigin = mul(float4(PrimitiveVolumeBounds.xyz, 1), ResolvedView.TranslatedWorldToView).xyz;
+
+	float QuadDepth = ViewSpacePrimitiveVolumeOrigin.z;
+
+	int FurthestSliceIndexUnclamped = ComputeZSliceFromDepth(QuadDepth + PrimitiveVolumeBounds.w);
+	int ClosestSliceIndexUnclamped = ComputeZSliceFromDepth(QuadDepth - PrimitiveVolumeBounds.w);
+
+	// Clamp to valid range, start at first slice for the current pass
+	int ClosestSliceIndex = max(ClosestSliceIndexUnclamped, 0) + MAX_SLICES_PER_VOXELIZATION_PASS * VoxelizationPassIndex;
+	// Clamp to valid range, end at the last slice for the current pass
+	int FurthestSliceIndex = min(min(FurthestSliceIndexUnclamped, GridSizeZ - 1), ClosestSliceIndex + MAX_SLICES_PER_VOXELIZATION_PASS - 1);
+	
+	if (ClosestSliceIndexUnclamped < GridSizeZ
+		&& ClosestSliceIndex <= FurthestSliceIndexUnclamped
+		&& FurthestSliceIndexUnclamped >= 0)
+	{
+#if VOXELIZE_SHAPE_MODE == OBJECT_BOX_MODE
+		float2 ViewSpaceBoundingBoxMin = 10000000;
+		float2 ViewSpaceBoundingBoxMax = -10000000;
+
+		for (int BoxVertex = 0; BoxVertex < 8; BoxVertex++)
+		{
+			float3 BoxVertexMask = float3((BoxVertex >> 0) & 1, (BoxVertex >> 1) & 1, (BoxVertex >> 2) & 1);
+			float3 BoxVertexLocalPosition = Primitive.LocalObjectBoundsMin + (Primitive.LocalObjectBoundsMax - Primitive.LocalObjectBoundsMin) * BoxVertexMask;
+			float3 BoxVertexPosition = mul(float4(BoxVertexLocalPosition, 1), Primitive.LocalToWorld).xyz;
+			float3 ViewSpaceBoxVertex = mul(float4(BoxVertexPosition + ResolvedView.PreViewTranslation, 1), ResolvedView.TranslatedWorldToView).xyz;
+			ViewSpaceBoundingBoxMin = min(ViewSpaceBoundingBoxMin, ViewSpaceBoxVertex.xy);
+			ViewSpaceBoundingBoxMax = max(ViewSpaceBoundingBoxMax, ViewSpaceBoxVertex.xy);
+		}
+#endif
+
+		// Clone the triangle to each slice
+		for (int SliceIndex = ClosestSliceIndex; SliceIndex <= FurthestSliceIndex; SliceIndex++)
+		{
+			float SliceDepth = ComputeDepthFromZSlice(SliceIndex + FrameJitterOffsets[0].z);
+			float SliceDepthOffset = abs(SliceDepth - ViewSpacePrimitiveVolumeOrigin.z);
+
+			BRANCH
+			if (PrimitiveVolumeBounds.w == 0 || SliceDepthOffset <= PrimitiveVolumeBounds.w)
+			{
+				float SliceRadius = sqrt(max(PrimitiveVolumeBounds.w * PrimitiveVolumeBounds.w - SliceDepthOffset * SliceDepthOffset, 0.0f));
+
+				float2 ViewSpaceVertices[NUM_INPUT_VERTICES];
+
+				UNROLL
+				for (uint VertexIndex = 0; VertexIndex < NUM_INPUT_VERTICES; VertexIndex++)
+				{
+					float2 CornerMask = Inputs[VertexIndex].VertexQuadCoordinate;
+
+					#if VOXELIZE_SHAPE_MODE == PRIMITIVE_SPHERE_MODE
+						// Use vertex positions that bound this slice of the sphere in view space
+						ViewSpaceVertices[VertexIndex] = ViewSpacePrimitiveVolumeOrigin.xy + (CornerMask * 2 - 1) * SliceRadius;
+					#elif VOXELIZE_SHAPE_MODE == OBJECT_BOX_MODE
+						// Use vertex positions that bound the OBB in view space
+						//@todo - accurately intersect each slice with the OBB producing a 3-6 vertex polygon like "A Vertex Program for Efficient Box-Plane Intersection"
+						ViewSpaceVertices[VertexIndex] = ViewSpaceBoundingBoxMin + (ViewSpaceBoundingBoxMax - ViewSpaceBoundingBoxMin) * CornerMask;
+					#endif
+				}
+
+				UNROLL
+				for (uint VertexIndex = 0; VertexIndex < NUM_INPUT_VERTICES; VertexIndex++)
+				{
+#if !USING_VERTEX_SHADER_LAYER
+					FVoxelizeVolumePrimitiveGSToPS Output;
+#endif
+					Output.SliceIndex = SliceIndex;
+
+					float3 ViewSpaceVertexPosition = float3(ViewSpaceVertices[VertexIndex], SliceDepth);
+					Output.OutPosition = mul(float4(ViewSpaceVertexPosition, 1), ViewToVolumeClip);
+					Output.FactoryInterpolants = Inputs[VertexIndex].FactoryInterpolants;
+
+#if !USING_VERTEX_SHADER_LAYER
+					OutStream.Append(Output);
+#endif
+				}
+
+#if !USING_VERTEX_SHADER_LAYER
+				OutStream.RestartStrip();
+#endif
+			}
+		}
+	}
+}
+
+void VoxelizeVS(
+	FVertexFactoryInput Input,
+	uint VertexId : SV_VertexID,
+#if USING_VERTEX_SHADER_LAYER
+	out FVoxelizeVolumePrimitiveGSToPS Output
+#else
+	out FVoxelizeVolumePrimitiveVSToGS Output
+#endif
+	)
+{
+	ResolvedView = ResolveView();
+
+	FVertexFactoryIntermediates VFIntermediates = GetVertexFactoryIntermediates(Input);
+	float4 TranslatedWorldPosition = VertexFactoryGetWorldPosition(Input, VFIntermediates);
+	float3x3 TangentToLocal = VertexFactoryGetTangentToLocal(Input, VFIntermediates);
+
+	// Warning: with OBJECT_BOX_MODE enabled, TranslatedWorldPosition here is wrong.  Any VF interpolants based on it which are passed to other shader stages will also be wrong.
+	FMaterialVertexParameters VertexParameters = GetMaterialVertexParameters(Input, VFIntermediates, TranslatedWorldPosition.xyz, TangentToLocal);
+	Output.FactoryInterpolants = VertexFactoryGetInterpolantsVSToPS(Input, VFIntermediates, VertexParameters);
+
+#if USING_VERTEX_SHADER_LAYER
+	FVoxelizeVolumePrimitiveVSToGS Inputs[1];
+	Inputs[0].FactoryInterpolants = Output.FactoryInterpolants;
+
+#if VOXELIZE_SHAPE_MODE == PRIMITIVE_SPHERE_MODE
+
+	Inputs[0].VertexQuadCoordinate = VertexParameters.TexCoords[0];
+
+#elif VOXELIZE_SHAPE_MODE == OBJECT_BOX_MODE
+
+	Inputs[0].VertexQuadCoordinate = float2(VertexId & 1, (VertexId >> 1) & 1);
+
+#endif
+
+	Voxelize(Inputs, Output);
+#else
+	#if VOXELIZE_SHAPE_MODE == PRIMITIVE_SPHERE_MODE
+
+	Output.VertexQuadCoordinate = VertexParameters.TexCoords[0];
+
+	#elif VOXELIZE_SHAPE_MODE == OBJECT_BOX_MODE
+
+	Output.VertexQuadCoordinate = float2(VertexId & 1, (VertexId >> 1) & 1);
+
+	#endif
+#endif
+}
+
+float ComputeVolumeShapeMasking(float3 WorldPosition, FVertexFactoryInterpolantsVSToPS FactoryInterpolants)
+{
+	float ValidRegionMask = 1;
+
+#if VOXELIZE_SHAPE_MODE == PRIMITIVE_SPHERE_MODE
+
+	float4 PrimitiveVolumeBounds = VertexFactoryGetTranslatedPrimitiveVolumeBounds(FactoryInterpolants);
+	float3 ConnectingVector = PrimitiveVolumeBounds.xyz - ResolvedView.PreViewTranslation - WorldPosition;
+
+	FLATTEN
+	if (dot(ConnectingVector, ConnectingVector) > PrimitiveVolumeBounds.w * PrimitiveVolumeBounds.w)
+	{
+		ValidRegionMask = 0;
+	}
+
+#elif VOXELIZE_SHAPE_MODE == OBJECT_BOX_MODE
+
+	float3 LocalPosition = mul(float4(WorldPosition, 1), Primitive.WorldToLocal).xyz;
+
+	FLATTEN
+	if (any((LocalPosition < Primitive.LocalObjectBoundsMin || LocalPosition > Primitive.LocalObjectBoundsMax)))
+	{
+		ValidRegionMask = 0;
+	}
+
+#endif
+
+	return ValidRegionMask;
+}
+
+void VoxelizePS(
+	FVoxelizeVolumePrimitiveGSToPS Interpolants,
+	in float4 SvPosition : SV_Position,
+	out float4 OutVBufferA : SV_Target0,
+	out float4 OutVBufferB : SV_Target1
+	)
+{
+	ResolvedView = ResolveView();
+
+	float ValidRegionMask = 1;
+
+	FMaterialPixelParameters MaterialParameters = GetMaterialPixelParameters(Interpolants.FactoryInterpolants, SvPosition);
+	FPixelMaterialInputs PixelMaterialInputs;
+	CalcMaterialParameters(MaterialParameters, PixelMaterialInputs, SvPosition, true);
+
+	float3 EmissiveColor = clamp(GetMaterialEmissiveRaw(PixelMaterialInputs), 0.0f, 65000.0f);
+
+	float3 Albedo = 0;
+	float Extinction = 0;
+
+#if !MATERIAL_SHADINGMODEL_UNLIT
+	Albedo = GetMaterialBaseColor(PixelMaterialInputs) * View.DiffuseOverrideParameter.w + View.DiffuseOverrideParameter.xyz;
+	Extinction = clamp(GetMaterialOpacityRaw(PixelMaterialInputs), 0.0f, 65000.0f);
+#endif
+
+	float3 Scattering = Albedo * Extinction;
+	float Absorption = max(Extinction - Luminance(Scattering), 0.0f);
+
+	float FadeStart = .6f;
+	float SliceFadeAlpha = 1 - saturate((SvPosition.w / VolumetricFog.MaxDistance - FadeStart) / (1 - FadeStart));
+
+	float UnitScale = 1.0f / 100.0f;
+	float Scale = UnitScale * SliceFadeAlpha * SliceFadeAlpha * SliceFadeAlpha;
+
+	// Would be faster to branch around the whole material evaluation, but that would cause divergent flow control for gradient operations
+	Scale *= ComputeVolumeShapeMasking(MaterialParameters.AbsoluteWorldPosition, Interpolants.FactoryInterpolants);
+
+	OutVBufferA = float4(Scattering * Scale, Absorption * Scale);
+	OutVBufferB = float4(EmissiveColor * Scale, 0);
+}

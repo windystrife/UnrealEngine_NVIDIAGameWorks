@@ -1,0 +1,92 @@
+﻿INTSourceChangelist:2011129
+Availability:Public
+Title:Slate 休眠和活动定时器
+Crumbs:%ROOT%, Programming, Programming/Slate
+Description:无 UI 需要更新时，活动定时器系统可使 Slate 进入休眠状态。
+Version:4.9
+
+[TOC (start:2)]
+
+Slate 是一个“立即模式”UI 框架，意味着它每帧都会重新绘制整个 UI。这适用于图像和动画较多的动态界面，但 UI 不发生变化时将无谓地占用处理器。在 Slate 中使用活动定时器系统即可在无需更新 UI 时使 Slate 进入休眠状态。对编辑器 UI 执行工作时应运用活动定时器功能，但对带实时视口的游戏 UI 执行工作时不可使用。 
+
+给定帧上以下两点为真，Slate 便会进入休眠状态。
+* 无用户操作，且
+* 没有需要执行的活动定时器
+
+用户操作指鼠标移动、点击或按键。 
+
+下图说明 Slate 应用如何 tick 每帧：
+
+[REGION:raw]
+![](image00.png)
+[/REGION:raw]
+
+
+此图表显示 Slate 休眠实现后编辑器的处理器时间出现的变化。
+
+![](image01.png)
+
+## 活动定时器
+活动定时器是控件显式注册的委托函数，将导致 Slate tick/绘制在执行时进行传递，即使用户操作不存在时也是如此（这便是定时器的“活动”特性）。活动定时器将继续按其执行周期决定的频率无限执行，直到注册移除。
+
+原始 `Tick()` 函数仍将作为“被动” tick 出现。和之前一样它将被 Slate 调用，但只在 Slate 不处于休眠状态时进行。在之后的更新中，它可能被重命名为 `PassiveTick()`，`Tick()` 将被启用，以便更清晰地表达。 
+
+注册活动定时器的步骤：
+1. 使用以下签名定义函数：			
+	`EActiveTimerReturnType Foo(double InCurrentTime, float InDeltaTime)`
+1. 将其绑定到一个 `FWidgetActiveTimerDelegate`。
+1. 将委托和定时器执行的时间周期（0 到每帧调用）传到 `SWidget::RegisterActiveTimer()`。
+
+可通过三种方法移除活动定时器的注册。
+* 从委托返回 `EActiveTimerReturnType::Stop`。
+* 将 `SWidget::RegisterActiveTimer()` 返回的 `FActiveTimerHandle` 传递到 `SWidget::UnRegisterActiveTick()`。
+* 销毁活动定时器注册的控件。
+
+
+[REGION:note]
+当前活动定时器时一种极端情况。因此如果单个活动定时器需要执行，所有 Slate 均会被 tick。此外，一个控件可同时注册的活动定时器数量 
+不存在限制。这非常实用，但也存在重复注册的可能性。为防止重复注册，可通过以下方法追踪注册状态：
+* 在控件中保留一个标记，追踪活动定时器是否已注册。
+	* 在 UE4 基本代码中搜索 `bIsActiveTimerRegistered` 查看范例。
+* 保存一个 `RegisterActiveTimer()` 返回的 `FActiveTimerHandle` 弱指针，仅在其无效时进行注册。
+	* 在 UE4 基本代码中搜索 `TWeakPtr<FActiveTimerHandle> ActiveTimerHandle` 查看范例。
+	* 只在活动定时器需要被显式取消注册时使用此方法可节约内存。
+[/REGION]
+
+## 使用情况
+
+针对以下常见使用情况的活动定时器推荐设置：
+
+* **触发部分操作时：**
+	* 注册一个固定返回 `EActiveTimerReturnType::Stop`、周期为 0 的活动定时器。
+* **执行不由 [FCurveSequence](#fcurvesequenceandactivetimers) 控制的某些动画或插值时：**
+	1. 惯性滚动开始时，注册一个周期为 0 的活动定时器每帧更新卷轴。
+	1. 到达终点前返回 `EActiveTimerReturnType::Continue`。
+	1. 到达目标终点后，返回 `EActiveTimerReturnType::Stop` 取消注册。
+	[REGION:tip]
+	查看惯性滚动的范例 `SScrollBox`。
+	[/REGION]
+* **在延迟后执行操作（如打开另一个子菜单或停驻在一个标签上）时：**
+	* 注册正数非零延迟
+	[REGION:note]
+	完成注册后，活动定时器上的周期无法变更。如需在执行前“重置”延迟，活动定时器必须被显式取消注册或重新注册。
+	[/REGION]
+* **周期性和无限执行操作时：**
+	* 注册正数非零周期并保持返回 `EActiveTimerReturnType::Continue`。
+
+(#fcurvesequenceandactivetimers)
+## FCurveSequence 和活动定时器
+`FCurveSequence` 的 API 已更新，简化设置控件动画时活动 tick 的注册过程。
+播放序列现要求引用带序列动画的控件。
+一个空白的活动 tick 将代表传递的控件自动注册，以便设置序列播放的长度。
+播放序列时将指定序列是否循环。然而执行此操作将无限注册活动 tick，因此需谨慎使用。 
+无论循环与否，调用 `Pause()`、`JumpToStart()` 或 `JumpToEnd()` 时活动 tick 将取消注册。
+
+## 测试 Slate 休眠
+
+有两个控制台变量与 Slate 休眠相关：
+* `Slate.AllowSlateToSleep` 控制 Slate 是否可进入休眠状态。此变量当前默认启用。
+`Slate.AllowSlateToSleep` 指定 Slate 在最后用户操作后继续保持活动状态的时间量。其默认为 0。这只应用于调试，因为它可能不是休眠系统的一个永久功能。 
+
+目标正是使休眠的 Slate 和不休眠的 Slate 难以区分，因此要辨别 Slate 是否处于休眠状态具有难度。当前，最佳的监控方法是显示编辑器帧率 
+（**Editor Settings->Miscellaneous->Show Frame Rate and Memory**）。帧率停止不动时，Slate 即处于休眠状态。

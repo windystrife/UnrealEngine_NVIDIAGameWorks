@@ -1,0 +1,111 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	HeightfieldLightingShared.usf
+=============================================================================*/
+
+Texture2D HeightfieldTexture;
+SamplerState HeightfieldSampler;
+Texture2D DiffuseColorTexture;
+SamplerState DiffuseColorSampler;
+uint NumHeightfields;
+Buffer<float4> HeightfieldDescriptions;
+
+// In float4's, must match C++
+#define HEIGHTFIELD_DATA_STRIDE 12
+
+float4 GetHeightfieldScaleBias(uint Index, out bool bHasSubsections)
+{
+	float4 HeightfieldVector = HeightfieldDescriptions[Index * HEIGHTFIELD_DATA_STRIDE + 0];
+	// Sign bit stored presence of subsections
+	bHasSubsections = HeightfieldVector.x < 0;
+	HeightfieldVector.x = abs(HeightfieldVector.x);
+	return HeightfieldVector;
+}
+
+float4 GetHeightfieldMinMaxUV(uint Index)
+{
+	return HeightfieldDescriptions[Index * HEIGHTFIELD_DATA_STRIDE + 1];
+}
+
+float4 GetHeightfieldGlobalScaleBias(uint Index)
+{
+	return HeightfieldDescriptions[Index * HEIGHTFIELD_DATA_STRIDE + 2];
+}
+
+float2 GetHeightfieldSize(uint Index)
+{
+	return HeightfieldDescriptions[Index * HEIGHTFIELD_DATA_STRIDE + 3].xy;
+}
+
+float2 GetGlobalTexelSize(uint Index)
+{
+	return HeightfieldDescriptions[Index * HEIGHTFIELD_DATA_STRIDE + 3].zw;
+}
+
+float4x4 GetWorldToLocal(uint Index)
+{
+	return float4x4(
+		HeightfieldDescriptions[Index * HEIGHTFIELD_DATA_STRIDE + 4],
+		HeightfieldDescriptions[Index * HEIGHTFIELD_DATA_STRIDE + 5],
+		HeightfieldDescriptions[Index * HEIGHTFIELD_DATA_STRIDE + 6],
+		HeightfieldDescriptions[Index * HEIGHTFIELD_DATA_STRIDE + 7]);
+}
+
+float4x4 GetLocalToWorld(uint Index)
+{
+	return float4x4(
+		HeightfieldDescriptions[Index * HEIGHTFIELD_DATA_STRIDE + 8],
+		HeightfieldDescriptions[Index * HEIGHTFIELD_DATA_STRIDE + 9],
+		HeightfieldDescriptions[Index * HEIGHTFIELD_DATA_STRIDE + 10],
+		HeightfieldDescriptions[Index * HEIGHTFIELD_DATA_STRIDE + 11]);
+}
+
+float2 GetHeightfieldUV(uint HeightfieldIndex, float2 LocalPosition, out float4 MinMaxHeightfieldUV)
+{
+	bool bHasSubsections;
+	float4 HeightfieldScaleBias = GetHeightfieldScaleBias(HeightfieldIndex, bHasSubsections);
+	float2 HeightfieldUV = LocalPosition * HeightfieldScaleBias.xy + HeightfieldScaleBias.zw;
+	MinMaxHeightfieldUV = GetHeightfieldMinMaxUV(HeightfieldIndex);
+
+	if (bHasSubsections)
+	{
+		float2 CenterUV = .5f * (MinMaxHeightfieldUV.xy + MinMaxHeightfieldUV.zw);
+		// One row of heights in the heightfield are duplicated between subsections
+		// The only number of subsections supported is 2
+		// If we are in subsection 0, no adjustment is needed, but if we are in subsection 1 we need to shift up by one texel
+		HeightfieldUV += HeightfieldUV + .5f * HeightfieldScaleBias.xy > CenterUV ? HeightfieldScaleBias.xy : 0;
+	}
+
+	return HeightfieldUV;
+}
+
+float2 GetHeightfieldUV(uint HeightfieldIndex, float2 LocalPosition)
+{
+	float4 MinMaxHeightfieldUV;
+	return GetHeightfieldUV(HeightfieldIndex, LocalPosition, MinMaxHeightfieldUV);
+}
+
+float3 GetHeightfieldWorldPositionAndNormal(uint HeightfieldIndex, float2 LocalPosition, float2 HeightfieldUV, out float3 WorldNormal)
+{
+	//@todo - don't call GetHeightfieldScaleBias twice
+	bool bHasSubsections;
+	float4 HeightfieldScaleBias = GetHeightfieldScaleBias(HeightfieldIndex, bHasSubsections);
+
+	float4 SampleValue = Texture2DSampleLevel(HeightfieldTexture, HeightfieldSampler, HeightfieldUV + .5f * HeightfieldScaleBias.xy, 0);
+	float HeightfieldHeight = DecodePackedHeight(SampleValue.xy);
+
+	float2 SampleNormal = float2(SampleValue.b, SampleValue.a) * float2(2.0,2.0) - float2(1.0,1.0);
+	WorldNormal = float3(SampleNormal, sqrt(max(1.0 - dot(SampleNormal, SampleNormal), 0.0)));
+
+	float3 HeightfieldShadingPosition = float3(LocalPosition, HeightfieldHeight);
+	float3 WorldHeightfieldShadingPosition = mul(float4(HeightfieldShadingPosition, 1), GetLocalToWorld(HeightfieldIndex)).xyz;
+
+	return WorldHeightfieldShadingPosition;
+}
+
+float3 GetHeightfieldWorldPosition(uint HeightfieldIndex, float2 LocalPosition, float2 HeightfieldUV)
+{
+	float3 WorldNormal;
+	return GetHeightfieldWorldPositionAndNormal(HeightfieldIndex, LocalPosition, HeightfieldUV, WorldNormal);
+}

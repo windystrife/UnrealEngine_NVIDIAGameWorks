@@ -1,0 +1,90 @@
+/*=============================================================================
+	FlexFluidSurfaceRendering.cpp: fluid rendering
+	Copyright (c) 2012 NVIDIA Corporation. All rights reserved.
+=============================================================================*/
+
+#include "Common.ush"
+
+Texture2D FlexFluidSurfaceDepthTexture;
+SamplerState FlexFluidSurfaceDepthTextureSampler;
+float SmoothScale;
+float MaxSmoothTexelRadius;
+float DepthEdgeFalloff;
+float2 TexelSize;
+
+void ScreenMainVS(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out float4 OutPosition : SV_POSITION,
+	out float2 OutTexCoord : TEXCOORD0
+	)
+{
+	DrawRectangle( InPosition, InTexCoord, OutPosition, OutTexCoord);
+}
+
+void DepthSmoothMainPS(
+	in float4 Position : SV_POSITION,
+	in float2 TexCoord : TEXCOORD0,
+	out float OutValue : SV_Target0)
+{
+
+	float Depth = Texture2DSampleLevel(FlexFluidSurfaceDepthTexture, FlexFluidSurfaceDepthTextureSampler, TexCoord, 0).r;
+
+	//debug visualization of depth values
+	//float debugvis = clamp((Depth - 100.0)/900.0f, 0.0, 1.0); 
+	//OutValue = debugvis;
+	//return;
+
+	if (Depth > 65000.0f)
+	{
+		OutValue = 65536.0f;
+		return;
+	}
+	
+	float Radius = min(MaxSmoothTexelRadius, SmoothScale / Depth);
+	float RadiusInv = 1.0/Radius;
+	float Taps = ceil(Radius);
+	float Frac = Taps - Radius;
+
+	float Sum = 0.0;
+    float WSum = 0.0;
+	float Count = 0.0;
+
+    for(float Y=-Taps; Y <= Taps; Y += 1.0)
+	{
+        for(float X=-Taps; X <= Taps; X += 1.0)
+		{
+			float2 Offset = float2(X, Y)*TexelSize;
+
+            float Sample = Texture2DSampleLevel(FlexFluidSurfaceDepthTexture, FlexFluidSurfaceDepthTextureSampler, TexCoord + Offset, 0).x;
+
+			if (Sample > 65000.0f)
+				continue;
+
+            // spatial domain
+            float R1 = length(float2(X, Y))*RadiusInv;
+			float W = exp(-(R1*R1));
+
+            // range domain (based on depth difference)
+            float R2 = (Sample - Depth) * DepthEdgeFalloff;
+            float G = exp(-(R2*R2));
+
+			//fractional radius contributions
+			float WBoundary = step(Radius, max(abs(X), abs(Y)));
+			float WFrac = 1.0 - WBoundary*Frac;
+
+			Sum += Sample * W * G * WFrac;
+			WSum += W * G * WFrac;
+			Count += G * WFrac;
+        }
+    }
+
+    if (WSum > 0.0) {
+        Sum /= WSum;
+    }
+
+	float Range = 2.0*Radius+1.0;
+	float Blend = Count/(Range*Range);
+
+	OutValue = lerp(Depth, Sum, Blend);
+}

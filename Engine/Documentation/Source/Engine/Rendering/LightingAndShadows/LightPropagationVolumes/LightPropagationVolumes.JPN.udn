@@ -1,0 +1,223 @@
+﻿INTSourceChangelist:2735504
+Availability:Public
+Title:Light Propagation Volume
+Crumbs:%ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description:グローバル イルミネーションを動的に生成するシステム
+Version:4.9
+SkillLevel:Advanced
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![](lpv_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/LightPropagationVolumes:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/LightPropagationVolumes:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/LightPropagationVolumes]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![](lpv_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/LightPropagationVolumes:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/LightPropagationVolumes:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/LightPropagationVolumes]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:todo]
+Light Propagation Volume は、開発段階の機能であり、本番環境で使用する準備はまだ整っていません。
+[/REGION]
+
+[TOC]
+
+
+
+[REGION:fullwidth]
+![](lpv_scene.png)
+[/REGION]
+
+## Light Propagation Volume を有効にする
+
+この機能を有効にするには、以下を `ConsoleVariables.ini` に入れて、エンジンを起動 (再起動) してください。
+
+	r.LightPropagationVolume = 1
+
+現時点では、このコンソール変数はランタイムに変更することができません。
+
+## 基本的なシーン設定
+
+* **可動性 (Mobility) ** を **可動 (Movable)** に設定した状態で平行光源 (Directional Light) を追加します。
+* ジオメトリ (頂点・形状) およびライトの方向を追加 / 調整し、シャドウがかかる部分とライトを受ける部分 (理想としては、明るい色のマテリアル) をつくります。
+* 動的 (グローバル イルミネーション) GI として混乱を招く Lightmass GI (グローバルイルミネーション) が有効になっていないことを確認します (両方の技術を一緒に使用すると、明るすぎる間接照明になります)。
+* 平行光源で **[Affect Dynamic Indirect Lighting]** を有効にします。
+* 表示フラグにある Light Propagation モードのビューモードが有効になり、Light Propagation Volume がカバーするエリアが視覚化されます。[以下を参照](#グローバルイルミネーションを表示する)。
+* ポスト プロセス ボリューム (unbound であること) を追加 / 変更し、必要な詳細度と距離 (トレードオフ) でエリアをカバーするように[LightPropagationVolume] 設定でサイズを微調整します。
+* GI を有効化 / 無効化するには、Global Illumination 表示フラグを使用します。
+                
+
+## Light Propagation Volume の設定
+
+グローバル設定の一部は、ポストプロセス設定にあります (ポストプロセス ボリュームを追加し、 
+unbound にし、適切な優先度を持たせるようにします)。
+
+![](LPV_settings.png)
+
+ツールチップ (マウスでかざす) には、設定に関する詳細情報が表示されます。
+
+<!-- add setting descriptions -->
+
+ボリュームでこうした設定をすると、カメラ位置に応じてソフトでブレンド可能なものにすることができます (例、 
+屋内環境または木々の下で GI バウンスが少なくなります)。
+
+セカンダリ オクルージョンを有効にします。セカンダリ バウンスは非常に負荷が低いため、これも有効にします。 
+
+### 外観とパフォーマンスの調整
+
+この技術では、低解像度ボリューム グリッドにデータを保存します。ボリュームよりも小さいジオメトリによる漏れを防ぐために、 
+注入にバイアスをかけます。これはポストプロセス設定で調整可能です。
+
+[REGION:imagetable]
+| [REGION:lightbox][![](LPV_injection_bias_1.png)(w:290)](LPV_injection_bias_1.png)[/REGION] | [REGION:lightbox][![](LPV_injection_bias_2.png)(w:290)](LPV_injection_bias_2.png)[/REGION] | [REGION:lightbox][![](LPV_injection_bias_3.png)(w:290)](LPV_injection_bias_3.png)[/REGION] |
+| --- | --- | --- |
+| 1.0 | 1.3 | 2.0 |
+[/REGION]
+
+このバイアスは、"LPV Bias Multiplier" でメッシュ毎に調整できます。
+
+![](LPV_bias_multiplier.png)
+
+パフォーマンスを高めるために (描画コールを減らし、CPU 負荷は無し、GPU 負荷はある程度は生じる)、マテリアルでこの機能を無効にすることができます。
+
+![](LPV_disable_material.png)
+
+## 平行光源の設定
+
+パフォーマンス上の理由から、Light Propagation Volume は平行光源のみを入射光として使用します。この方法では、 
+カメラの近くにある、いわゆる _Reflective Shadow Map_ を計算します。これは、通常のシャドウマップ (ライト パースペクティブからの不透明な深度の 2d テクスチャ) のようなものですが、 
+マテリアルのプロパティが追加 (マテリアルのカラー、法線) されています。各ポイントライトに対して 
+上記を行うと、非常に負荷が高くなります。平行光源で適切な設定を行うようにしてください。
+
+![](LPV_light_settings.png)
+
+"Affect Dynamic Indirect Lighting" と "Cast Shadows" を有効にし、 
+間接照明の強度を約 1.0 に設定してもよいでしょう。
+
+## グローバルイルミネーションを表示する
+
+表示フラグで LPV を無効にすることができます  
+(これは、ライトマスによって計算されたベークされたグローバル イルミネーションも無効にすることに注意してください)。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Global Illumination Disabled](LPV_show_flag.png)(w:460)
+	[/PARAM]
+	[PARAM:after]
+	![Global Illumination Enabled](LPV_show_flag_enabled.png)(w:460)
+	[/PARAM]
+[/OBJECT]
+
+## Light Propagation Volume を視覚化する
+
+実際の Light Propagation Volume は表示フラグを通して視覚化可能であり、ビューポートに表示されます。
+ 
+[INCLUDE:#visualizeslider]
+
+## GI Replace Material Switch
+[EXCERPT:GIReplaceExample]
+
+2 つの赤いボックスがあります。1 つは、赤の代わりに緑に反射しています。
+ 
+![](LPV_bounce_color_override.png)(convert:false)
+
+これは新しいマテリアル式を使用して実現できます。
+
+![](LPV_gi_replace.png)
+ 
+通常、全く違う色にはしたくないでしょうが、幾分暗くする、明るくする、 
+または若干、色を調整することが役立つ場合があります。
+
+[/EXCERPT:GIReplaceExample]
+
+##その他の注記
+
+現在の LPV 実装のプロパティ
+
+* 各フレームを計算し、動的なマテリアル / ライト / ジオメトリを実現。
+* ディフューズ (拡散色・物体色) と近似値化されたスペキュラ マテリアルの相互作用。
+* 距離の制限 (大きいボリューム、例えば 2 倍 は簡単でしょうが、メモリ要件と一部の計算は 8 倍になります)。
+* ワールド空間での一定の詳細度 (近くで詳細度を高くし、遠くで低くするのが良いでしょう)。
+* 透過処理に影響を与えません。
+* ライトのバウンスはデカールの影響を受けません。
+* デカールのシェーディングは単純に機能します (デカール適用前にベース パスにライティングが適用されるベイクされたライティングとは異なります)。
+* 演算シェーダー (DirectX11) のサポートが必要です。
+* ライトのバウンスに対して 1 つ以上の平行光源をサポートしています。
+* ランタイムにサイズを変更すると、時間の経過とともに徐々に薄くなる小さなアーティファクトが生じます。
+* 負荷が小さいエリアのライトに対するエミッシブ ライティング (現時点では未対応)
+* オクルージョン (現時点では未対応)
+* ポイント ライトシャドウをオクルージョンによって近似値化 (現時点では未対応)
+* パフォーマンス コストは多少かかりますが、クオリティは非常に高くなるジオメトリのボクセル化によるセカンダリ オクルージョン(現時点では未対応)
+
+
+<!--
+[EXCERPT:VisualizeSlider]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:id]
+	LPV_visualize
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:max]
+	17
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	**視覚化された Light Propagation Volume を見るには、スライダをドラッグします。** 
+	[/PARAM]
+	[PARAM:image_list]
+	![](LPV_visualize_1.png)
+	![](LPV_visualize_2.png)
+	![](LPV_visualize_3.png)
+	![](LPV_visualize_4.png)
+	![](LPV_visualize_5.png)
+	![](LPV_visualize_6.png)
+	![](LPV_visualize_7.png)
+	![](LPV_visualize_8.png)
+	![](LPV_visualize_9.png)
+	![](LPV_visualize_10.png)
+	![](LPV_visualize_11.png)
+	![](LPV_visualize_12.png)
+	![](LPV_visualize_13.png)
+	![](LPV_visualize_14.png)
+	![](LPV_visualize_15.png)
+	![](LPV_visualize_16.png)
+	![](LPV_visualize_17.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:VisualizeSlider]
+-->
+
+
+
+

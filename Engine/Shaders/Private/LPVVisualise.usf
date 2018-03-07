@@ -1,0 +1,153 @@
+//-----------------------------------------------------------------------------
+// File:		LPVVisualise.usf
+//
+// Summary:		Shaders to visualise an LPV
+//
+// Created:		2013-03-01
+//
+// Author:		mailto:benwood@microsoft.com
+//
+//				Copyright (C) Microsoft. All rights reserved.
+//-----------------------------------------------------------------------------
+
+/*------------------------------------------------------------------------------
+	Compile time parameters:
+------------------------------------------------------------------------------*/
+
+#include "Common.ush"
+#include "LPVCommon.ush"
+#include "LPVGeometryVolumeCommon.ush"
+
+#define CUBESIZE					40
+#define VISUALIZE_GV				0
+#define VISUALIZE_LPV				1
+#define VISUALIZE_AO				0 
+#define SHOW_EDGES					1
+
+#define EDGE_THICKNESS				0.995
+
+#define Brightness 2
+
+//-------------------------------------------------------------------------------------------------
+
+
+cbuffer LpvVisualiseCb
+{
+	row_major float4x4 mViewProjection; // FIXME: unused
+};
+//-------------------------------------------------------------------------------------------------
+
+// GS to VS
+struct VIn
+{
+    float4 position : SV_POSITION;
+	float4 params	: TEXCOORD0;
+};
+
+struct VOut 
+{
+    float4 position : SV_POSITION;
+	float3 texCoord : TEXCOORD0;
+};
+
+//-------------------------------------------------------------------------------------------------
+
+// Visualization
+VIn VShader(uint id : SV_InstanceID)
+{
+	uint sliceIndex = id % 32; 
+	uint orientation = id / 32;
+
+	VIn output;
+	output.position.xyz = float3( 0, (float(sliceIndex)/31.0f)*2-1, 0 );
+	output.position.w = 1;
+
+	output.params = float4( sliceIndex, orientation,0,0 ) ;
+    return output;
+}
+
+
+[maxvertexcount(12)]
+void GShader( point VIn input[1], inout TriangleStream<VOut> TriStream )
+{
+	float3 verts[4] = { 
+		float3(-1,-1,0 ),
+		float3( 1,-1,0 ),
+		float3( 1, 1,0 ),
+		float3(-1, 1,0 ) };
+
+	float3x3 rot[3] = 
+	{ 
+		float3x3( float3(1,0,0), float3(0,1,0), float3(0,0,1) ),
+		float3x3( float3(0,1,0), float3(1,0,0), float3(0,0,1) ),
+		float3x3( float3(1,0,0), float3(0,0,1), float3(0,1,0) )
+	};
+
+	float3 centreWorld = input[0].position.xyz;
+
+	int indices[6] = { 0,1,2, 2,3,0 };
+
+	[unroll]
+	for ( int i=0; i<6; i++ )
+	{
+		int index = indices[i];
+
+		VOut output;
+		float3 p = ( centreWorld + verts[ index ].xzy );
+		p = mul( p, rot[ (int)input[0].params.y ] );
+		float4 vert = float4( p, 1 );
+		output.texCoord = p.xyz * 0.5 + 0.5;
+		vert.xyz *= CUBESIZE;
+		vert.xyz += View.ViewForward * 100;
+		output.position = mul( vert, View.TranslatedWorldToClip);
+		TriStream.Append( output );
+	}
+	TriStream.RestartStrip();
+}
+
+
+
+float4 PShader(VOut IN) : SV_Target
+{
+	float3 pos;
+	pos.xyz = IN.texCoord.xyz * 31.0f;
+
+	uint3 posU = uint3( pos+0.5 );
+
+	uint index = GetGridAddress( posU );
+
+	float3 colour = 0;
+#if VISUALIZE_LPV
+	LPVCell cell = ReadLpvCell( index );
+	colour += cell.coeffs[0];
+	colour *= 0.000025f;
+#endif 
+
+#if VISUALIZE_AO
+	float AO = ReadLpvCellAO( index );
+	colour += saturate(1-AO*0.575);
+#endif
+	float brightness = Brightness;
+
+#if VISUALIZE_GV
+	GeometryVolumeEntry gvCell = ReadGvCell( index );
+	colour.r += SHLookupGeometryVolume( gvCell, float3( 1, 0, 0 ) );
+	colour.g += SHLookupGeometryVolume( gvCell, float3( 0, 1, 0 ) );
+	colour.b += SHLookupGeometryVolume( gvCell, float3( 0, 0, 1 ) );
+	colour *= 0.1f;
+#endif
+	colour *= brightness;
+
+#if SHOW_EDGES
+	int count = 0;
+	float3 m3 = abs( ( IN.texCoord.xyz - 0.5 ) * 2.0f );
+	if ( m3.x > EDGE_THICKNESS ) count++;
+	if ( m3.y > EDGE_THICKNESS ) count++;
+	if ( m3.z > EDGE_THICKNESS ) count++;
+	if ( count >= 2 )
+	{
+		colour = float3(0,0,50);
+	}
+#endif 
+	return float4( colour / 3, 1 );
+}

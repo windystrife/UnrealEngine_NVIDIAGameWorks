@@ -1,0 +1,171 @@
+﻿INTSourceChangelist:2730197
+Availability:Public
+Title:FText
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture/Reference, Programming/UnrealArchitecture/Reference/Properties, Programming/UnrealArchitecture/StringHandling
+Description:
+Version:4.9
+
+
+
+[EXCERPT:Overview]
+**FText** とは、「表示文字列」のことです。ユーザーに表示するテキストは、すべて FText で処理されます。FText クラスは、ローカリゼーション用にビルトインされたサポートです。 
+参照テーブルに格納されたローカライズ済みのテキスト コンテンツの処理に加えて、数、日付、時間、フォーマット済みテキストなどのランタイム時にローカライズされるテキストの処理も行います。ローカライズが必要ないテキストでさえも、 
+FText で処理が可能です。プレイヤー名などのユーザーが入力するコンテンツやスレートで表示されるテキストなどが含まれます。文字列を表示するために変更するというのは非常に危険な操作なので、Ftext には変更関数はありません。
+[/EXCERPT:Overview]
+
+### スレートと FText
+
+全体的に、スレートは FString 用のフックのエクスポーズをやめて、FText よりになっています。FText はインターフェース背後にあるローカリゼーション関連事項をすべて処理するため、 
+スレートは Live Language の切り替え機能などを今後サポートできるようになります。FString でこの操作が可能になります。FText を使うと、テキストのレンダリング パフォーマンスもあがります。FText を使う場合、文字列は不変であることが前提なので、
+文字列のメモリ アドレスをファスト キャッシュ参照のキーとして使うことができます。変更するために文字列をチェックしたり、表示するために再度測定するより、
+負荷は遥かに小さくなります。最後に、スレートで FText を使うということは、ローカリゼーションのサポートが UI システムに当然統合されていることを意味するので、 
+ローカリゼーションのベスト プラクティスに対し、しっかりしたフレームワークが存在します。 
+  
+
+## FText の作成
+
+FText のローカリゼーション アプリケーションのために、 FText はキーとしてのみならずテキストとしても設定しておかなければなりません。マクロの LOCTEXT と NSLOCTEXT を使うと FText を正しく設定することができます。
+LOCTEXT はキーとテキストをパラメータとして受け取ります。パラメータは全て文字列リテラルです。リテラルはすべてローカリゼーション システム経由でパスされます。
+
+[REGION:tip]
+このローカリゼーション キーの名前空間を指定するために、グローバルな LOCTEXT_NAMESPACE マクロをまず文字列リテラルに設定する必要があります。
+[/REGION]
+
+LOCTEXT マクロでストリングから FText を作成する方法です。
+  
+	/* Top of File */ 
+	#define LOCTEXT_NAMESPACE "Your Namespace" 
+	... 
+	FText TestHUDText = LOCTEXT( "Your Key", "Your Text" ) 
+	... 
+	#undef LOCTEXT_NAMESPACE 
+	/* Bottom of File */ 
+  
+NSLOCTEXT はキーとテキストに加えて、名前空間をパラメータとして受け取ります。パラメータは全て文字列リテラルです。リテラルはすべてローカリゼーション システム経由でパスされます。
+
+	FText TestHUDText = NSLOCTEXT( "Your Namespace", "Your Key", "Your Text" ) 
+
+以下の記法のいずれかを使っても、ブランクの FText を作成することができます。
+  
+* `FText TestHUDText = FText::GetEmpty(); `
+* `FText TestHUDText = FText(); `
+
+
+## 変換
+
+### 文字列変数
+
+#### FText からの変換
+
+|変換元 | 変換先 | 例|
+|---|------|---------|
+%Programming/UnrealArchitecture/StringHandling:ftexttofstring%
+%Programming/UnrealArchitecture/StringHandling:ftexttofname%
+
+  
+FText 文字列は不変なので、返された文字列をクローニングせずに変更することはできません。 
+
+#### FText への変換
+
+|変換元 | 変換先 | 例|
+|---|------|---------|
+%Programming/UnrealArchitecture/StringHandling:fnametoftext%
+%Programming/UnrealArchitecture/StringHandling:fstringtoftext%
+  
+
+### 数値変数
+
+Fname 文字列から数値変数への変換はありません。
+
+#### FText への変換
+
+float や int 変数を FText を使って **FText::AsNumber()** へ換することができます。現在のカルチャーでパスされた数を表す FText を作成する関数です。
+
+例：
+
+	FText::AsNumber( CurrentHealth )
+
+以下の数値変換が追加されます。
+
+* `FText::AsPercent()` 
+* `FText::AsCurrency()`
+* `FText::AsDate()`
+* `FText::AsTime()`
+
+  
+## 比較
+
+**FText::EqualTo()** または **FText::EqualToCaseIgnored()** を使い、結果を true または false で受け取り、 2 つの FText の比較ができます。**FText::CompareTo()** または **FText::CompareToCaseIgnored()** で文字列を比較すると、 
+整数値が返されます。   
+  
+現在のところ FText は、FStrings のように単純な序数の比較でなないため、比較操作用のこういった演算子をエクスポーズしません。操作の負荷がわかるように、 
+通常の演算子を敢えて使わないことにします。 
+
+## FText のフォーマット化
+  
+**FText::Format()** 関数を使って、異なる FText を一緒に連結させて FText 変数へ保存することもできます。 
+  
+	FText::Format( LOCTEXT( "HelloMessageFormat",  "Hello {0}," ), PlayerName ) 
+  
+現在のところ、 Format 関数は FText のみをパラメータとして受け取ります。
+
+FText::Format は、順序付きと名前付きの、2 種類のフォーマット用の引数をサポートしています。
+
+### 順序付き引数
+ 
+* Arguments = {0}, {1}, {2}, など 
+* 波括弧はフォーマット引数の始めと終わりを表し、数字はパスされたパラメータを示します。
+
+		FText::Format( LOCTEXT( "HealthFormatStr",  "{0} / {1}" ), FText::AsNumber( CurrentHealth ), FText::AsNumber( MaxHealth )  ) 
+
+### 名前付き引数 
+
+* Arguments = {Name}, {ID}, {Health}, etc... 
+* 波括弧はフォーマット引数の始めと終わりを表し、括弧で囲んだテキストは、パスされた FFormatNamedArgs コレクションに存在する引数名です。
+
+		FFormatNamedArguments Arguments;
+		Arguments.Add(TEXT("CurrentHealth"), FText::AsNumber( CurrentHealth ));
+		EditorErrors.Error(FText::Format(LOCTEXT("ExampleFText", "You currently have {CurrentHealth} health left."), Arguments ) );
+
+
+[PUBLISH:Licensee]
+TextTest.cpp で、有効なカルチャを意識したフォーマット、比較、ソートの方法を紹介しています。
+[/PUBLISH:Licensee]
+
+## HUD の FText
+
+### Canvas
+
+[Canvas](Gameplay/Framework\UIAndHUD#canvas) を使って HUD に FText を表示するには、新規に FCanvasTextItem を作成する必要があります。
+
+	FCanvasTextItem TextItem( FVector2D::ZeroVector, TestHUDText, BigFont, FLinearColor::Black);
+
+Text 変数を設定すると、 FCanvasTextItem のテキストの変更が可能になります。
+
+	FFormatNamedArguments Arguments;
+	Arguments.Add(TEXT("CurrentHealth"), FText::AsNumber( CurrentHealth ));
+	TextItem.Text = FText::Format(LOCTEXT("ExampleFText", "You currently have {CurrentHealth} health left."), Arguments ) ;
+
+FText を実際に画面に表示するには、**FCanvas::DrawItem()** 関数を呼び出します。
+
+	Canvas->DrawItem(TextItem,10.0f,10.0f);
+
+[REGION:note] 
+HUD クラスの DrawText() 関数内、もしくは **DrawHUD()** で始まる関数チェーン内にに DrawItem() 関数を呼び出す必要があります。
+[/REGION]
+
+
+## ブループリントの FText
+
+ブループリントは Text リテラルをサポートしています。Text 値の入力ピンはノードへの値の代入をサポートし、これらの文字列が集められてローカリゼーションを行います。
+
+**FText::Format** もブループリントで利用できます。Format テキストは、リテラルあるいはピン接続が可能です。リテラルとして使用すると、フォーマットのために引数が自動生成されます。リテラル "There are {number} days until {day}." を入力すると 
+ **Number** ピンと **Day** ピンが自動的にノードに追加されます。これらのピンはリテラルとして、または変数から入力することが可能です。 
+テキストは引数をピンに接続している値に置き換えます。 
+
+Format ピンが接続されると、Format は変数なので解読はできません。この場合、ピンを自分で追加し、可能性のある引数に因んだ名前を付けます。このように、 
+Format Text ノーの使用設定は、複数の可能性に対して行うことができます。引数が Format 変数の引数に一致すると、与えられた情報を利用します。
+
+ピンの名前は **[Details (詳細)]** パネルで変更、追加、削除することができます。
+
+ 

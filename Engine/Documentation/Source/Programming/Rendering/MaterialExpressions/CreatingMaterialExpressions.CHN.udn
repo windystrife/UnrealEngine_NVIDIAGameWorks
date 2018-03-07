@@ -1,0 +1,81 @@
+Availability:Docs
+Title:创建材质表达式
+Crumbs:%ROOT%, Programming, Programming/Rendering
+
+[TOC]
+
+
+
+## 概述
+
+在 UE4 中直接地创建一个新的材质表达式。作为示例，我将创建一个对输入端进行开平方的新的材质表达式，名称为 MaterialExpressionSquare。注意UE4中所有的材质表达式都是在MaterialExpressions.cpp中实现。
+
+
+
+## 脚本
+
+首先，增加一个继承 MaterialExpression 的一种新类型的引擎脚本文件。声明表达式的输入端和虚函数，比如：<br>  
+
+	class MaterialExpressionSquare extends MaterialExpression
+	   native(Material);
+
+	var ExpressionInput   A;
+
+	cpptext
+	{
+	   virtual int32 Compile(FMaterialCompiler* Compiler);
+	   virtual FString GetCaption() const;
+	   virtual void RemoveReferenceTo( UMaterialExpression* Expression );
+	}
+
+
+如果您正在添加材质编辑器中的属性页面内您想编辑的表达式变量，请记住在变量声明后面加上()，如下所示：
+
+	var() float ClampMin;
+
+
+编译脚本，UMaterialExpressionSquare声明将会被添加到EngineMaterialClasses.h中。
+
+
+
+## Native
+
+接下来，在MaterialExpressions.cpp 中放置一个适当的IMPLEMENT_CLASS 宏，如下所示：<br>   
+
+	IMPLEMENT_CLASS(UMaterialExpressionSquare);  
+
+  
+接下来，您需要为函数 Compile()、GetCaption()和RemoveReferenceTo()提供实现。Compile()函数调用在FMaterialCompiler 上的适当的函数。在这个例子中，我们可以使用现有的编译器功能(Mul)来实现Square (开平方)运算，但是您可能需要根据您的自定义表达式来添加新的材质编译器功能。<br>  
+
+
+	int32 UMaterialExpressionSquare::Compile(FMaterialCompiler* Compiler)
+	{
+	   if(!A.Expression)
+		  return Compiler->Errorf(TEXT("Missing Multiply input A"));
+	   else
+	   {
+		  int32 Arg1 = A.Compile(Compiler);
+		  return Compiler->Mul(
+			 Arg1,
+			 Arg1
+			 );
+	   }
+	}
+
+	FString UMaterialExpressionSquare::GetCaption() const
+	{
+	   return TEXT("Square");
+	}
+
+	void UMaterialExpressionSquare::RemoveReferenceTo( UMaterialExpression* Expression )
+	{
+	   Super::RemoveReferenceTo( Expression );
+	   REMOVE_REFERENCE_TO( A, Expression );
+	}
+
+
+现在您的新的材质表达式应该在材质编辑器的表达式列表中了。这里您可以看到Square (开平方)表达式已经生效：  
+
+![SquareMaterialExpression.jpg](SquareMaterialExpression.jpg)
+
+

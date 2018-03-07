@@ -1,0 +1,155 @@
+﻿Availability: Public
+Title:1. 附加相机到Pawn
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/PlayerCamera
+Description:创建弹簧臂和相机。
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[编程指南主页](Programming\Tutorials\)
+	[/PARAM]
+	[PARAM:next]
+		[下一步](Programming\Tutorials\PlayerCamera\2 "%Programming\Tutorials\PlayerCamera\2:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+[REGION:tip]如果您刚使用 **虚幻引擎4** ，建议您先读一下[%Programming\QuickStart:title% tutorial](Programming\QuickStart) 。 对这篇教程来说，我们假设您已经了解了如何创建项目，如何添加C++代码到项目中，如何编译您的代码以及如何添加 **组件** 到 **虚幻引擎** 编辑器中的 **Actors** 。[/REGION]
+
+1. 首先我们创建全新的、基础代码项目，附带初学者内容，其名称为"HowTo_PlayerCamera"。  我们想要创建一个自定义 **Pawn** 类，所以让我们先进行此操作。 在这个教程中，我们会对新的 **Pawn** 类使用名称"PawnWithCamera"。
+
+	[![](NamePawnClass.png)](NamePawnClass.png)
+
+1. 接下来，在 **Visual Studio** 中，我们应该打开`PawnWithCamera.h`并添加如下代码到类定义的底部位置： 
+
+		protected:
+			UPROPERTY(EditAnywhere)
+			USpringArmComponent* OurCameraSpringArm;
+			UCameraComponent* OurCamera;
+
+	我们可以使用这些变量来创建在末尾附加了 **CameraComponent** 的 **SpringArmComponent** 。 弹簧臂是一种添加相机（或其它 **组件** ）的既好又方便的方法，它们在总体上不完全是刚体，在移动时感觉更有弹性。
+
+1. 在此之后，我们需要在构造函数中创建 **组件** 。 添加如下代码到 **APawnWithCamera::APawnWithCamera** 的`PawnWithCamera.cpp`中： 
+
+		//创建组件
+		RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+		OurCameraSpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraSpringArm"));
+		OurCameraSpringArm->AttachTo(RootComponent);
+		OurCameraSpringArm->SetRelativeLocationAndRotation(FVector(0.0f, 0.0f, 50.0f), FRotator(-60.0f, 0.0f, 0.0f));
+		OurCameraSpringArm->TargetArmLength = 400.f;
+		OurCameraSpringArm->bEnableCameraLag = true;
+		OurCameraSpringArm->CameraLagSpeed = 3.0f;
+
+	这样我们就把基础的、空白的 **SceneComponent** 创建为 **组件** 层次结构的根，然后对其创建并附加 **SpringArmComponent** 。 **Spring Arm（弹簧臂）** 随后被设置为默认的-60度的倾斜度（也就是说，看起来是向下60度）以及根位置上方的50个单位的位置。 我们还设立了一些 **SpringArmComponent** 类的特定值，它们可以确定其运动的长度和平滑度。 这样设置完成后，我们需要创建并附加 **CameraComponent** 到 **SpringArmComponent** 末端位置的插槽，如下所示：
+
+		OurCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("GameCamera"));
+		OurCamera->AttachTo(OurCameraSpringArm, USpringArmComponent::SocketName);
+
+1. 最后，我们可以设置 **Pawn** 为默认受控，可以通过添加这段代码来自动生成本地玩家：
+
+		//控制默认玩家
+		AutoPossessPlayer = EAutoReceiveInput::Player0;
+
+----
+
+我们现在有一个简单的 **Pawn** ，可以让我们舒适地控制相机。 接下来，我们可以在 **虚幻引擎** 编辑器中配置输入并创建对其进行响应的代码。
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    代码
+    [/PARAMLITERAL]
+    [PARAM:heading]
+	    正在开发中的代码
+    [/PARAM]
+    [PARAM:content]
+		**PawnWithCamera.h**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "GameFramework/Pawn.h"
+			#include "PawnWithCamera.generated.h"
+
+			UCLASS()
+			class HOWTO_PLAYERCAMERA_API APawnWithCamera : public APawn
+			{
+				GENERATED_BODY()
+
+			public:
+				// 设置此pawn属性的默认值
+				APawnWithCamera();
+
+				// 当游戏开始或生成时调用
+				virtual void BeginPlay() override;
+	
+				// 在每一帧调用
+				virtual void Tick( float DeltaSeconds ) override;
+
+				// 调用以绑定功能到输入
+				virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override;
+
+			protected:
+				UPROPERTY(EditAnywhere)
+				USpringArmComponent* OurCameraSpringArm;
+				UCameraComponent* OurCamera;
+			};
+
+		**PawnWithCamera.cpp**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_PlayerCamera.h"
+			#include "PawnWithCamera.h"
+
+			// 设置默认值
+			APawnWithCamera::APawnWithCamera()
+			{
+ 				// 将此pawn设置为在每一帧都调用Tick()。  如果您不需要这项功能，您可以关闭它以改善性能。
+				PrimaryActorTick.bCanEverTick = true;
+
+				//创建组件
+				RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+				OurCameraSpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraSpringArm"));
+				OurCameraSpringArm->AttachTo(RootComponent);
+				OurCameraSpringArm->SetRelativeLocationAndRotation(FVector(0.0f, 0.0f, 50.0f), FRotator(-60.0f, 0.0f, 0.0f));
+				OurCameraSpringArm->TargetArmLength = 400.f;
+				OurCameraSpringArm->bEnableCameraLag = true;
+				OurCameraSpringArm->CameraLagSpeed = 3.0f;
+				OurCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("GameCamera"));
+				OurCamera->AttachTo(OurCameraSpringArm, USpringArmComponent::SocketName);
+
+				//控制默认玩家
+				AutoPossessPlayer = EAutoReceiveInput::Player0;
+			}
+
+			// 当游戏开始或生成时调用
+			void APawnWithCamera::BeginPlay()
+			{
+				Super::BeginPlay();
+	
+			}
+
+			// 在每一帧调用
+			void APawnWithCamera::Tick( float DeltaTime )
+			{
+				Super::Tick( DeltaTime );
+
+			}
+
+			// 调用以绑定功能到输入
+			void APawnWithCamera::SetupPlayerInputComponent(class UInputComponent* InputComponent)
+			{
+				Super::SetupPlayerInputComponent(InputComponent);
+
+			}
+
+
+    [/PARAM]
+[/OBJECT]
+
+%Steps%

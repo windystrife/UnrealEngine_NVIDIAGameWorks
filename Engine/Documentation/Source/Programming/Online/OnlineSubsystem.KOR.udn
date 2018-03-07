@@ -1,0 +1,166 @@
+﻿INTSourceChangelist:3599948
+Availability:Public
+Title: 온라인 서브시스템 개요
+Crumbs:%ROOT%, Programming
+Description:온라인 플랫폼에 관련된 여러가지 시스템에 대한 개요입니다.
+Version: 4.9
+
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Programming/Online:title%](%ROOT%/placeholder_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/ue4_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Programming/Online:title%
+	[/PARAM]
+	[PARAM:description]
+		%Programming/Online:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Programming/Online]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Programming/Online:title%](%ROOT%/placeholder_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/ue4_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Programming/Online:title%
+	[/PARAM]
+	[PARAM:description]
+		%Programming/Online:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Programming/Online]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+[TOC(start:2)]
+
+
+[EXCERPT:Intro] 
+온라인 서브시스템과 그 인터페이스의 존재 이유는, 주어진 환경에서 사용할 수 있는 여러 플랫폼 세트에 공통으로 사용되는 온라인 함수성을 추상화시켜 제공하기 위해서입니다. 이 맥락에서 **플랫폼** 이란 Steam, Xbox Live, Facebook 등을 말합니다.
+이식성(Portability)이 큰 목표 중 하나입니다.
+[/EXCERPT:Intro]
+
+## OnlineSubsystem 모듈
+
+### 기본 디자인
+
+OnlineSubsystem 베이스 모듈은 플랫폼 전용 모듈을 엔진에 정의하고 등록시키는 방법을 담당합니다. 어떤 플랫폼 서비스에 대한 접근은 이 모듈을 통하게 됩니다. 이 모듈이 로드되면 바로 `engine.ini` 파일에 지정된 기본 서비스 모듈 로드를 시도합니다.
+
+	[OnlineSubsystem]
+	DefaultPlatformService=<Default Platform Identifier>
+	
+로드에 성공한 경우, 지정된 파라미터가 없으면 정적인 접근자(accessor)를 통해 위의 기본 온라인 인터페이스를 사용할 수 있게 됩니다.
+
+	static IOnlineSubsystem* Get(const FName& SubsystemName = NAME_None)
+	
+이 함수에 적합한 식별자를 붙여 호출하면 부가 서비스는 요청에 따라 로드됩니다. 식별자가 유효하지 않거나 로드에 실패하면 모듈은 살포시 NULL 을 반환합니다.
+
+
+
+### 델리게이트 사용
+
+언리얼 엔진 3 (UE3)와 매우 비슷하게, 온라인 서브시스템은 비동기식 부작용(side effects)이 있는 함수를 호출할 때 델리게이트(delegate)에 크게 의존합니다. 꼭 델리게이트를 준수하고 적합한 델리게이트가 호출될 때까지 기다렸다가 체인상의 다음 함수를 호출하는 것이 중요한 것이지요. 비동기 태스크를 기다리지 못했다가는 크래시, 예상치 못한 부작용 등이 유발될 수 있습니다. 케이블이 뽑혔다든가 기타 사건으로 연결이 끊긴 와중에 델리게이트를 기다리는 것은 특히나 중요합니다. 이상적인 상황에서라면 태스크 완료에 걸리는 시간이 눈 깜짝할 새인 것 같아 보이기도 하겠지만, 타임아웃 상황에서라면 분 단위가 걸릴 수도 있는 것입니다.
+
+델리게이트 인터페이스는 꽤나 간단합니다. 각 델리게이트는 각각의 인터페이스 헤더 상단에 정의되어 있습니다. 모든 델리게이트에는 `Add<DelegateName>`, `Clear<DelegateName>`, `Trigger<DelegateName>` 함수가 있습니다 (물론 델리게이트를 수동으로 Trigger 하는 것은 바람직하지 못하기는 합니다). 보통은 적절한 함수를 호출하기 바로 직전에 델리게이트를 Add() (추가)한 다음, 델리게이트 안에서 스스로를 Clear() (삭제)합니다.
+
+
+### 인터페이스
+
+모든 플랫폼이 모든 인터페이스를 지원하지는 않는지라 게임 코드에 계획을 알맞게 세워야 합니다.
+
+#### 프로파일
+
+온라인 서비스의 프로파일 서비스에 대한 인터페이스 정의입니다. 프로파일 서비스란 주어진 사용자 프로파일과 그에 관련된 (온라인 접속 여부, 접근 권한 등의) 메타데이터 관련 모든 것을 말합니다.
+
+<!--Details can be found on the [](Programming/Online/Interfaces/Profile) page.-->
+
+#### 친구
+
+온라인 서비스 친구 서비스에 대한 인터페이스 정의입니다. 친구 서비스란 친구나 친구 목록 유지에 관련된 모든 것을 말합니다.
+
+<!--Details can be found on the [](Programming/Online/Interfaces/Friends) page.-->
+
+#### 세션
+
+온라인 서비스의 세션 서비스에 대한 인터페이스 정의입니다. 세션 서비스란 세션과 그 상태 관리에 대한 모든 것을 말합니다.
+
+자세한 내용은 [](Programming/Online/Interfaces/Session) 페이지를 참고하시기 바랍니다.
+
+#### 공유 클라우드
+
+다른 사용자와 이미 클라우드에 있는 파일 ( [유저 클라우드](#유저클라우드) 참고 ) 공유를 위한 인터페이스를 제공합니다.
+
+<!--Details can be found on the [](Programming/Online/Interfaces/SharedCloud) page.-->
+
+#### 유저 클라우드
+
+각 유저 클라우드 파일 스토리지에 대한 인터페이스를 제공합니다.
+
+<!--Details can be found on the [](Programming/Online/Interfaces/UserCloud) page.-->
+
+#### 순위표
+
+온라인 순위표(leaderboard) 접근을 위한 인터페이스를 제공합니다.
+
+<!--Details can be found on the [](Programming/Online/Interfaces/Leaderboards) page.-->
+
+#### 음성
+
+게임상에서 네트워크를 통한 음성 채팅 인터페이스를 제공합니다.
+
+<!--Details can be found on the [](Programming/Online/Interfaces/Voice) page.-->
+
+#### 업적
+
+업적(acheivement) 읽기/쓰기/풀기 (read/write/unlock) 인터페이스를 제공합니다.
+
+<!--Details can be found on the [](Programming/Online/Interfaces/Achievements) page.-->
+
+#### 외부 UI
+
+주어진 플랫폼에서 사용할 수 있는 외부 인터페이스 접근을 위한 인터페이스를 제공합니다.
+
+<!--Details can be found on the [](Programming/Online/Interfaces/ExternalUI) page.-->
+
+
+[OBJECT:TopicButtonList]
+	[PARAM:icon]
+		![](%ROOT%/start_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		참고
+	[/PARAM]
+	[PARAM:description]
+	[/PARAM]
+	[PARAM:links]
+		<!--* [](Programming/Online/Interfaces/Profile "%Programming/Online/Interfaces/Profile:Description%")-->
+		<!--* [](Programming/Online/Interfaces/Friends "%Programming/Online/Interfaces/Friends:Description%")-->
+		* [](Programming/Online/Interfaces/Session "%Programming/Online/Interfaces/Session:Description%")
+		<!--* [](Programming/Online/Interfaces/SharedCloud "%Programming/Online/Interfaces/SharedCloud:Description%")-->
+		<!--* [](Programming/Online/Interfaces/UserCloud "%Programming/Online/Interfaces/UserCloud:Description%")-->
+		<!--* [](Programming/Online/Interfaces/Leaderboards "%Programming/Online/Interfaces/Leaderboards:Description%")-->
+		<!--* [](Programming/Online/Interfaces/Voice "%Programming/Online/Interfaces/Voice:Description%")-->
+		<!--* [](Programming/Online/Interfaces/Achievements "%Programming/Online/Interfaces/Achievements:Description%")-->
+		<!--* [](Programming/Online/Interfaces/ExternalUI "%Programming/Online/Interfaces/ExternalUI:Description%")-->
+		* [](Programming/Online/Types/ "%Programming/Online/Types:Description%")
+		<!--* [](Programming/Online/AsyncManager/ "%Programming/Online/AsyncManager:Description%")-->
+	[/PARAM]
+[/OBJECT]
+
+
+   
+   

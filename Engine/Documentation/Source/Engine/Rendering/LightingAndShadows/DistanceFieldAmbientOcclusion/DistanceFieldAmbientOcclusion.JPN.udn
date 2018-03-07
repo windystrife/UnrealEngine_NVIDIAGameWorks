@@ -1,0 +1,267 @@
+﻿INTSourceChangeList:3108692
+Availability:Public
+Title:ディスタンス フィールド アンビエント オクルージョン
+Crumbs: %ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description: Movable Skylight (可動スカイライト) 用の動的アンビエント オクルージョン
+Version:4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/DistanceFieldAmbientOcclusion:title%](DistanceFieldAmbientOcclusion_Topic.jpg)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/DistanceFieldAmbientOcclusion:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/DistanceFieldAmbientOcclusion:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/DistanceFieldAmbientOcclusion]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/DistanceFieldAmbientOcclusion:title%](DistanceFieldAmbientOcclusion_Topic.jpg)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/DistanceFieldAmbientOcclusion:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/DistanceFieldAmbientOcclusion:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/DistanceFieldAmbientOcclusion]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:fullwidth raw]
+![](DistanceFieldAmbientOcclusion_Header.jpg)
+[/REGION]
+
+[TOC(start:2 end:2)]
+
+
+
+それぞれの剛体オブジェクトの周囲で事前計算された Signed Distance Field Volumes から中程度のアンビエント オクルージョンを作成する新機能が、Movable Sky Light (可動スカイライト) のシャドウイングに備わりました。動的シーンの変更に対応しているので、剛体メッシュの移動あるいは非表示が可能となり、オクルージョンにも影響します。スクリーン スクリーン アンビエント オクルージョンとは異なり、オクルージョンはワールド スペース オクルーダから計算されるので、オフスクリーン上でデータ不足によるアーティファクトは生じません。
+
+この動的 AO ソリューションは、動的シーンの変更に対応できるように侵害制限をかけているので、すべてのプロジェクトで機能するわけではありません。具体的には、わずかに不均一なスケーリング (スキッシュ) だけをサポートします。また、小さいボリューム テクスチャがオブジェクトごとにマップされるので、大きいスタティックメッシュは結果としてクオリティが低くなります。
+
+Static Mesh コンポーネント、Instanced Static Mesh コンポーネント、フォリッジ、ランドスケープのみがオクルージョンを発生するようにサポートされています。フォリッジは、フォリッジ設定で [Affect Distance Field Lighting] を有効にしなければなりません。他のオブジェクトはそのままオクルージョンを受け取ることができます。
+
+## セットアップ
+* まず最初に (Rendering にある) プロジェクト設定を **[Generate Mesh Distance Fields (メッシュ ディスタンス フィールド)]** にしてエディタを再起動します。次回ロードする時に、ディスタンス フィールドがバックグラウンドで作成されます。このプロセスはマルチスレッドなので、コア数が増えれば処理が速くなります。
+* [Engine Scalability (エンジン拡張)] 設定が [Epic for shadowing] になっていることを確認してください。低めの設定では、ディスタンス フィールド AO は無効になります。
+* **スカイライト** を配置して、[Mobility] を **[Movable (ムーバブル)]** に変更します。 
+* これでレベルを編集できるようになり、スタティックメッシュからの AO が動的に更新されます。
+
+デフォルトでは、生成されたディスタンス フィールドの解像度が非常に低いので、ライトにムラが生じます。スタティックメッシュの **[Distance Field Resolution Scale (ディスタンス フィールド解像度スケール)]** を高くして補正します。
+
+## 結果
+
+#### ディフューズ オクルージョン
+
+DFAO は、オクルージョンに加えて、スカイライト ディフューズの計算に使用するベント法線 (オクルージョンが最小になる方向) を作成します。 
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![No Distance Field Ambient Occlusion](Original2.jpg)(w:600)
+	[/PARAM]
+	[PARAM:after]
+	![Distance Field Ambient Occlusion](DistanceFieldAO2.jpg)(w:600)
+	[/PARAM]
+[/OBJECT]
+_昼間の Fortnite レベルです。Fortnite では、プレイヤーはどんなウォールも倒して新しくビルドできるので、ライティングもそれに合わせて更新しなければなりません。距離フィールド AO はこれらの変更をサポートしています。_
+
+[_レベル エディタでのオブジェクト、リアルタイム DFAO との相互作用に関するビデオ_](http://youtu.be/FmbrnbpHT9E)
+
+#### スペキュラ オクルージョン
+
+DFAO により、スカイライト上におおよそのスペキュラ オクルージョンが作成されます。これは、指向性オクルージョン コーンがリフレクション コーンと相互作用することで計算されます (サイズはマテリアルのラフネスによります)。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![](0Original.jpg)(w:600)
+	[/PARAM]
+	[PARAM:after]
+	![](0SpecularOcclusion.jpg)(w:600)
+	[/PARAM]
+[/OBJECT]
+
+_パイプ上のスペキュラ オクルージョン_
+
+## フォリッジ オクルージョン
+
+ディスタンス フィールド AO がサーフェス上で実行されていても、多数の小さい葉がシートにまとめられているフォリッジを処理することができます。フォリッジ メッシュの [Generate Distance Field As If Two Sided (両面マテリアルのようにディスタンス フィールドを生成する)] を有効にすると、計算されたオクルージョンを和らげるので、結果が一番きれいになります。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Screen Space Ambient Occlusion only](NoDFAO2.jpg)(w:600)
+	[/PARAM]
+	[PARAM:after]
+	![Distance Field Ambient Occlusion on foliage](DFAO2.jpg)(w:600)
+	[/PARAM]
+[/OBJECT]
+
+
+LOD (Level of Detail モデル) を伴うフォリッジは、トライアングル メッシュがディスタンス フィールド内で収縮するのでオクルージョンが出すぎて、ディスタンス フィールド AO に問題が発生することがあります。ディスタンス フィールドは距離に忠実であるのにトライアングル メッシュ LOD はそうではないためです。
+
+対策としては、これらの LOD 上で World Position Offset を使って、頂点をディスタンス フィールド外へ出すことができます。カメラに対してオフセットが小さいと、通常は効果的です。ビルボードに対して新しい Pixel Depth Offset 機能を使って、元の 3d トライアングル メッシュをきれいに表示する有効なデプス値を作成します。  
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![No Pixel Depth Offset ](0Billboard.jpg)(w:600)
+	[/PARAM]
+	[PARAM:after]
+	![Pixel Depth Offset](0BillboardWithPixelDepthOffset.jpg)(w:600)
+	[/PARAM]
+[/OBJECT]
+_遠くの木のビルボードには天空光のオーバーオクルージョン (影が濃すぎる) が現れますが、これは Pixel Depth Offset を使って補正します。_
+
+## どのように機能するのでしょう？
+
+この技術で使われているディスタンス フィールドは、技術的にはメッシュ サーフェスを表現する Signed Distance Fields (符号付きディスタンス フィールド) です。Signed Distance Field は、各ポイントで最も近いサーフェスまでの距離を保存します。メッシュ内の点に対しては、負の距離が保存されます。
+
+[![](DistanceField.jpg)](DistanceField.jpg)
+
+これらを便利にする最初のディスタンス フィールドのプロパティは、光線をトレースする際に、最も近いサーフェスまでの距離が分かっていれば空のスペースに安全に飛ぶことを可能にします。結果、少ない手順で交点を定義することができます。ディスタンス フィールドをレイトレーシングにより、結果が可視化され、シャドウイングに使用できます。
+
+[![](RayTrace.jpg)](RayTrace.jpg)
+
+ディスタンス フィールドを便利にする 2 つ目のプロパティは、光線の作成時に全く負荷をかけずにおおよそのコーンの交点の取得を可能にします。ディスタンス フィールドをレイトレースすることで、非常にソフトなエリア シャドウの設定が可能になります。このプロパティは、受け取り地点全体の領域のソフトな可視性を少ないコーンで計算することができるので、ディスタンス フィールド AO への鍵となります。
+
+[![](ConeTrace.jpg)](ConeTrace.jpg)
+
+レベル全体は、ボリューム テクスチャに保存されているインスタンス化されたディスタンス フィールドで表現されます。ランドスケープは高度フィールドにより別に表現されます。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Scene View](TriangleScene.jpg)(w:600)
+	[/PARAM]
+	[PARAM:after]
+	![Mesh Distance Fields View](MeshDistanceFieldScene.jpg)(w:600)
+	[/PARAM]
+[/OBJECT]
+
+
+ライティングにディスタンス フィールドを使用する詳細については [こちら](http://iquilezles.org/www/articles/raymarchingdf/raymarchingdf.htm) を参照してください。
+
+## 設定
+
+### スカイライト 
+
+ * **Cast Shadow** - ライトがシャドウをキャストすると、ディスタンス フィールド AO だけが計算されます。
+ * **Occlusion Max Distance** - オクルージョンを計算するための、オクルーダからの最長距離です。この値を上げるとディスタンス フィールド AO の負荷が増えますが、遠くまでオクルージョンが可能になります。
+ * **Contrast** - 計算されたオクルージョンのコントラストを高くするために使います。
+ * **Min Occlusion** - オクルージョンが完全に黒くなるのを防ぎたい場合に便利です。領域が現実的に真っ黒になってしまわないように、ライトを複数バウンスさせるシミュレーションに便利です。
+ * **Occlusion Tint** - オクルージョンに色を付けるための定数カラーです。物理的に正しくするには黒にします。その他の値だと、芸術的な様式が提供されます。
+
+### プリミティブ コンポーネント
+
+ * **Affect Distance Field Lighting** - ディスタンス フィールドのライティング手法に対してプリミティブの影響を無効にするために使用します。
+
+### メッシュ ビルド設定
+
+[![](MeshSettings.jpg)](MeshSettings.jpg)
+
+ * **Distance Field Resolution Scale** - ディスタンス フィールドは、デフォルトスケール値 1 でワールドに置かれる想定で、それぞれのスタティックメッシュにデフォルトで割り当てられています。これを使って、スケール値を変えて配置されたメッシュを相殺したり、ディスタンス フィールド AO の質を高めることができます。
+ * **Generate Distance Field As If Two Sided** - フォリッジなど、トライアングルの両側が表示されるメッシュの場合にこのフラグにチェックを入れます。メッシュにこの設定をすると自己シャドウイングによるアーティファクトが減り、フォリッジのアニメーションを制限することができます。
+ * **Distance Field Replacement Mesh** - これを照らすために使用されるディスタンス フィールドを生成するために使用できる、別のスタティックメッシュです。開始位置からメッシュの形状を大幅に変更するためにワールド ポジション オフセットを使用する場合に便利です。
+
+## 制限事項
+
+**テクニックに関する制限事項**
+* DX11 のみの、ハイエンド機能です。
+* ブロック距離に制限があるためアンビエント オクルージョンのみが提供されている点で、スカイ オクルージョンと異なります。
+* 動的に移動可能ではありますが、剛健なメッシュからのみシャドウをキャストします。
+* World Position Offset や Displacement によりメッシュを変形させるマテリアルがあると、ディスタンス フィールドはこれらを知らずに表現されるので、アーティファクトが発生します。
+
+**現在の実装の制限事項 (今後改善される見込みです)**
+* 不均等なスケーリングは正しく処理できません (ミラーリングは問題ありません) 。ただし、2x 以下でのスクイッシュは、通常は分かりません。
+* Static Mesh コンポーネント、Instanced Static Mesh コンポーネント、フォリッジ、ランドスケープのみがサポートされています。フォリッジは、フォリッジ設定で [bAffectDistanceFieldLighting] を有効にしなければなりません。
+* 動的シーンから AO へ更新すると機能が複数のフレームへ広まるので、ラグが若干変わります。オクルージョンは新規にサンプルが作成されると若干変化する場合があります。
+* ボリューム テクスチャはそれぞれのメッシュにマップされるので、オブジェクトが大きいとディスタンス フィールドの解像度が低く、そのため AO 品質が悪くなります。
+
+## パフォーマンス
+
+ディスタンス フィールド AO の主な負荷要因は、GPU 時間とビデオメモリです。ディスタンス フィールド AO は中程度のスペックの PC や PS4 で実行できるように最適化されました。負荷の信頼性も高くなり、オブジェクトの密度に若干依存しますが、ほぼ一定になりました。
+
+静的なカメラでほぼフラットなサーフェスの場合は、この新しいメソッドはこれまでの実行速度の 1.6 倍になります。フォリッジや高速移動カメラを使用した複雑なシーンでは、5.5 倍の速さになります。PS4 でのフル ゲーム シーンへのディスタンス フィールド AO 負荷は 3.7 ms になります。
+
+
+これまでは適応サンプリング メソッドだったので、フラット サーフェスでの作業は少なくなりますが、クリーンな背景に汚れが多く生じてしまいました。
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Old Method - Adaptive](DFAO_Scene_OldMethod.png)(w:700)
+	[/PARAM]
+	[PARAM:after]
+	![New Method - Smooth](DFAO_Scene_NewMethod.png)(w:700)
+	[/PARAM]
+[/OBJECT]
+
+AO の演算処理が速くなり適応サンプリングがいらなくなったので、オクルージョンが格段にスムーズになりました。
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Old Method - Adaptive](DFAO_View_OldMethod.png)(w:700)
+	[/PARAM]
+	[PARAM:after]
+	![New Method - Smooth](DFAO_View_NewMethod.png)(w:700)
+	[/PARAM]
+[/OBJECT]
+
+この新しい方法の難点は、より長い履歴フィルターが必要になるということです。これは、特にシャドウ キャスターが移動した場合にゴーストの原因になります。将来的にはこの問題を改善したいと思います。
+
+<!---
+ディスタンス フィールド AO の主な負荷要因は、GPU 時間とビデオメモリです。Fortnite レベルがかなり大きくなると、カメラが静止画であっても、Redeon 7970 上での 1080p 解像度の負荷は 3.5ms です。カメラが高速で回転すると負荷は 6ms まで上がってしまいます。参考までに、この設定で SSAO だと負荷は 1ms です。使用したディスタンス フィールド ボリューム テクスチャは最高 150mb でした。
+
+シェーディングが順応して行われるので、フラットなサーフェスおよび移動しないサーフェイスの負荷は低めになります。逆に、フォリッジのように小さなサーフェスが多いシーンやフレーム間での移動物が多いシーンは GPU 負荷が高めになります。 
+
+ディスタンス フィールド AO の負荷は、主にオブジェクトの密度が原因です。木が密集している密林は、技術的に最悪のケースです。
+--->
+
+## 技術的な詳細
+
+主な最適化は、カメラに従うグローバル ディスタンス フィールドを使用することです。これは通常のオブジェクト毎のディスタンス フィールドの全てを、カメラ周囲を中心としたクリップマップと呼ばれるいくつかのボリューム テクスチャに合成することで作成されます。新たに見えるエリアや、シーンの変更の影響を受けるエリアだけを更新する必要があります。そのため、合成の負荷はあまりかかりません。
+
+クリップマップのテクセル サイズを視覚化する場合、各クリップマップは異なる色になります。
+
+![](DF_ClipMap.png)(w:700)
+
+グローバル ディスタンス フィールドはオブジェクトのディスタンス フィールドよりも低解像度であるため、何にでも使用できるわけではありません。スカイ オクルージョンでコーンのトレースを演算処理する場合、オブジェクトのディスタンス フィールドはシェーディングされているポイント近くでサンプリングされます。一方、はるかに高速なグローバル ディスタンス フィールドはさらに離れた場所でサンプリングされます。
+
+以下は、グローバル ディスタンス フィールドとオブジェクトのディスタンス フィールドを対比するためにレイトレースしたものを視覚化しました。グローバル ディスタンス フィールドのサーフェスがぼやけて、細いオブジェクトがなくなりました。
+
+![](DF_GlobalDF.png)(w:700)
+
+## トラブルシューティングと品質
+
+クオリティ上の主な要因は、有効なディスタンス フィールドの解像度です。`DistanceFieldResolutionScale` で変更することができます。小さなサイズのメッシュでビルドされたレベルが品質は最も良いです。というのも、大きなメッシュは様々はエラーを起こしやすいのです。Fortnite では、メッシュはグリッドに合わせるか、またはプロップを回りに置くと最も上手くいきます。ランドスケープは別に処理され、ディスタンス フィールドの解像度の影響は受けません。
+
+ * **[View (表示)] -> [LightingFeatures]** のディスタンス フィールド AO 表示フラグを使用して、エディタ内の機能を切り替えます。ゲームでのコマンドは 'show distancefieldao' です。  
+ * **[View (表示)] -> [Vizualize (視覚化)]** のディスタンス フィールド AO フラグを使用して、この機能から AO だけを分離させます。  
+ * **[View (表示)] -> [Vizualize (視覚化)]** のメッシュディスタンス フィールド表示フラグを使用して、シーン内で表現されるディスタンス フィールドを表示します。  
+
+[![](VisualizeMeshDistanceFields.jpg)(w:600)](VisualizeMeshDistanceFields.jpg)  
+_レベルでのメッシュディスタンス フィールドの視覚化_
+
+[![](Mesh.jpg)](Mesh.jpg)  
+_オリジナル メッシュ_
+
+[![](LowResDistanceField.jpg)](LowResDistanceField.jpg)  
+_ディスタンス フィールド解像度が低すぎて、重要機能が失われ、 AO にアーティファクトが発生_
+
+[![](HighResDistanceField.jpg)](HighResDistanceField.jpg)  
+_DistanceFieldResolutionScale を 3 に設定、重要機能を表示_
+
+## 負荷の少ないバウンスライト
+
+スカイライトの [Lower Hemisphere Is Black (下半球が黒)] のチェックを外し、グラウンド カラーをキューブマップにペイントすることで、負荷をかけずに太陽光がバウンスしているように見せることができます。指向性ライトのシャドウイングは考慮されないので室内には光が漏れてしまいますが、屋外のシーンには有効です。

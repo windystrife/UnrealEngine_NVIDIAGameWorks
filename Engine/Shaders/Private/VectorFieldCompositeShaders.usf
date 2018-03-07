@@ -1,0 +1,216 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*==============================================================================
+	GlobalVectorFieldShaders.usf: Shaders for building global vector fields.
+==============================================================================*/
+
+/*------------------------------------------------------------------------------
+	Composites multiple arbitrarily scaled, translated, and rotated vector
+	fields in to a single volume texture.
+
+	Parameters:
+		THREADS_X - The number of threads to launch for the X axis.
+		THREADS_Y - The number of threads to launch for the Y axis.
+		THREADS_Z - The number of threads to launch for the Z axis.
+		MAX_VECTOR_FIELDS - The maximum number of vector fields that can be
+			composited.
+------------------------------------------------------------------------------*/
+
+#if COMPOSITE_GLOBAL
+
+#include "Common.ush"
+
+#define USE_CULLING (1)
+
+RWTexture3D<float4> GlobalVectorField;
+Texture3D VectorFieldTextures[MAX_VECTOR_FIELDS];
+SamplerState VectorFieldTexturesSampler;
+
+#if USE_CULLING
+
+groupshared bool LocalVolumeCulled[MAX_VECTOR_FIELDS];
+
+[numthreads(THREADS_X,THREADS_Y,THREADS_Z)]
+void CompositeVectorFields(
+	uint3 DispatchThreadId	: SV_DispatchThreadID,
+	uint3 GroupId			: SV_GroupID,
+	uint3 GroupThreadId		: SV_GroupThreadID,
+	uint ThreadId			: SV_GroupIndex )
+{
+	const uint4 GroupSize = uint4(THREADS_X,THREADS_Y,THREADS_Z,0);
+	float4 GroupWorldPosition = float4(0,0,0,0);
+	float4 VoxelWorldSize = float4(0,0,0,0);
+	float3 TotalForce = float3(0,0,0);
+
+	// Compute the world position and extents for this group.
+	const float3 GroupUV = GroupId * GroupSize * CVF.VoxelSize.xyz + CVF.VoxelSize.xyz * 0.5f;
+	GroupWorldPosition = mul( float4(GroupUV,1), CVF.GlobalVolumeToWorld );
+	VoxelWorldSize = mul( float4(CVF.VoxelSize.xyz,0), CVF.GlobalVolumeToWorld );
+
+	// The first MAX_VECTOR_FIELDS threads cull each of the vector fields for
+	// this group.
+	if ( ThreadId < MAX_VECTOR_FIELDS )
+	{
+		// Compute the bounds for this group (push out by one voxel).
+		const float4 BoundsCenter = GroupWorldPosition + (GroupSize - 1) * 0.5f * VoxelWorldSize;
+		const float4 BoundsExtents = VoxelWorldSize * (GroupSize + 1) * 0.5f;
+
+		// Check against the vector field's bounds.
+		const float3 CenterDiff = abs(CVF.VolumeCenters[ThreadId] - BoundsCenter.xyz);
+		const float3 TotalExtents = CVF.VolumeExtents[ThreadId] + BoundsExtents.xyz;
+
+		// if ( CenterDiff <= TotalExtents )
+		LocalVolumeCulled[ThreadId] = any( saturate(CenterDiff - TotalExtents) );
+	}
+
+	// Acquire culling results.
+	GroupMemoryBarrierWithGroupSync();
+
+	// Determine the world space position of this voxel.
+	const float4 WorldPosition = float4(GroupWorldPosition.xyz + GroupThreadId.xyz * VoxelWorldSize.xyz, 1);
+
+	// Iterate over each volume accumulating the contribution of each.
+	for ( uint VolumeIndex = 0; VolumeIndex < CVF.VectorFieldCount; ++VolumeIndex )
+	{
+		if ( LocalVolumeCulled[VolumeIndex] == false )
+		{
+			float3 VolumeUV = mul( WorldPosition, CVF.WorldToVolume[VolumeIndex] ).xyz;
+			float3 AxisWeights = saturate(VolumeUV * CVF.VolumeSize[VolumeIndex].xyz) * saturate((1.0f - VolumeUV) * CVF.VolumeSize[VolumeIndex].xyz);
+			float DistanceWeight = min(AxisWeights.x, min(AxisWeights.y, AxisWeights.z));
+			float3 VolumeForce = Texture3DSampleLevel(VectorFieldTextures[VolumeIndex], VectorFieldTexturesSampler, saturate(VolumeUV), 0 ).xyz
+				* CVF.Scale[VolumeIndex] * DistanceWeight;
+			TotalForce += mul( float4(VolumeForce,0), CVF.VolumeToWorld[VolumeIndex] ).xyz;
+			//TotalForce += float3(10.0f,10.0f,10.0f);
+		}
+	}
+
+	// Store the accumulated force in the global vector field.
+	GlobalVectorField[DispatchThreadId] = float4(TotalForce,0);
+}
+
+#else // #if USE_CULLING
+
+[numthreads(THREADS_X,THREADS_Y,THREADS_Z)]
+void CompositeVectorFields( uint3 DispatchThreadId : SV_DispatchThreadID )
+{
+	float3 TotalForce = float3(0,0,0);
+
+	// Determine the world space position of this voxel.
+	const float3 VoxelUV = DispatchThreadId * CVF.VoxelSize.xyz + CVF.VoxelSize.xyz * 0.5f;
+	const float4 WorldPosition = mul( float4(VoxelUV,1), CVF.GlobalVolumeToWorld );
+
+	// Iterate over each volume accumulating the contribution of each.
+	for ( uint VolumeIndex = 0; VolumeIndex < CVF.VectorFieldCount; ++VolumeIndex )
+	{
+		float3 VolumeUV = mul( WorldPosition, CVF.WorldToVolume[VolumeIndex] ).xyz;
+		float3 AxisWeights = saturate(VolumeUV * CVF.VolumeSize[VolumeIndex].xyz) * saturate((1.0f - VolumeUV) * CVF.VolumeSize[VolumeIndex].xyz);
+		float DistanceWeight = min(AxisWeights.x, min(AxisWeights.y, AxisWeights.z));
+		float3 VolumeForce = Texture3DSampleLevel(VectorFieldTextures[VolumeIndex], VectorFieldTexturesSampler, saturate(VolumeUV), 0 ).xyz
+			* CVF.Scale[VolumeIndex] * DistanceWeight;
+		TotalForce += mul( float4(VolumeForce,0), CVF.VolumeToWorld[VolumeIndex] ).xyz;
+	}
+
+	// Transform the accumulated force in to the space of the global vector field.
+	GlobalVectorField[DispatchThreadId] = float4(TotalForce,0);
+}
+
+#endif // #if USE_CULLING
+#endif // #if COMPOSITE_GLOBAL
+
+/*------------------------------------------------------------------------------
+	Composite an animated vector field.
+------------------------------------------------------------------------------*/
+
+#if COMPOSITE_ANIMATED
+
+#include "Common.ush"
+
+Texture2D AtlasTexture;
+SamplerState AtlasTextureSampler;
+Texture3D NoiseVolumeTexture;
+SamplerState NoiseVolumeTextureSampler;
+RWTexture3D<float4> OutVolumeTexture;
+
+void Extrude_X(float3 VolumeUV, out float2 ImageUV, out float3 AxisX, out float3 AxisY, out float3 AxisZ)
+{
+	ImageUV.x = VolumeUV.y;
+	ImageUV.y = 1.0f - VolumeUV.z;
+	AxisX = float3(0,1,0);
+	AxisY = float3(0,0,1);
+	AxisZ = float3(1,0,0);
+}
+
+void Extrude_Y(float3 VolumeUV, out float2 ImageUV, out float3 AxisX, out float3 AxisY)
+{
+	ImageUV.x = VolumeUV.x;
+	ImageUV.y = 1.0f - VolumeUV.z;
+	AxisX = float3(1,0,0);
+	AxisY = float3(0,0,1);
+}
+
+void Extrude_Z(float3 VolumeUV, out float2 ImageUV, out float3 AxisX, out float3 AxisY)
+{
+	ImageUV.x = VolumeUV.x;
+	ImageUV.y = 1.0f - VolumeUV.y;
+	AxisX = float3(1,0,0);
+	AxisY = float3(0,1,0);
+}
+
+void Revolve_HalfZ(float3 VolumeUV, out float2 ImageUV, out float3 AxisX, out float3 AxisY, out float3 AxisZ)
+{
+	const float2 PlaneDir = VolumeUV.xy * 2 - 1;
+	//ImageUV.x = 0.5f * saturate(length(PlaneDir)) + 0.5f;
+	ImageUV.x = saturate(length(PlaneDir));
+	ImageUV.y = 1.0f - VolumeUV.z;
+	AxisX = float3(normalize(PlaneDir),0);
+	AxisY = float3(0,0,1);
+	AxisZ = cross(AxisX,AxisY);
+}
+
+[numthreads(THREADS_X,THREADS_Y,THREADS_Z)]
+void CompositeAnimatedVectorField(
+	uint3 DispatchThreadId	: SV_DispatchThreadID,
+	uint3 GroupId			: SV_GroupID,
+	uint3 GroupThreadId		: SV_GroupThreadID,
+	uint ThreadId			: SV_GroupIndex )
+{
+	float3 AxisX = float3(1,0,0);
+	float3 AxisY = float3(0,1,0);
+	float3 AxisZ = float3(0,0,1);
+	float2 ImageUV = float2(0,0);
+
+	// Compute the UV coordinate for this voxel within the volume.
+	const float3 VolumeUV = DispatchThreadId * CVF.VoxelSize.xyz + CVF.VoxelSize.xyz * 0.5f;
+
+	// Sample the noise texture.
+	const float3 NoiseSample = Texture3DSampleLevel(NoiseVolumeTexture, NoiseVolumeTextureSampler, VolumeUV, 0).xyz;
+	const float NoiseMagnitude = length(NoiseSample);
+	const float3 NormalizedNoise = NoiseSample / (NoiseMagnitude + 0.001f);
+	const float3 Noise = NormalizedNoise * min(NoiseMagnitude * CVF.NoiseScale, CVF.NoiseMax);
+
+	// Determine the 2-D projection for this voxel based on the desired operation.
+	if (CVF.Op == 0) // VFCO_Extrude
+	{
+		Extrude_X(VolumeUV, ImageUV, AxisX, AxisY, AxisZ);
+	}
+	else // VFCO_Revolve
+	{
+		Revolve_HalfZ(VolumeUV, ImageUV, AxisX, AxisY, AxisZ);
+	}
+
+	// Sample the two subimages and interpolate.
+	float2 FrameA_UV = ImageUV.xy * CVF.FrameA.xy + CVF.FrameA.zw;
+	float2 FrameB_UV = ImageUV.xy * CVF.FrameB.xy + CVF.FrameB.zw;
+	float4 FrameA_Sample = Texture2DSampleLevel(AtlasTexture, AtlasTextureSampler, FrameA_UV, 0);
+	float4 FrameB_Sample = Texture2DSampleLevel(AtlasTexture, AtlasTextureSampler, FrameB_UV, 0);
+	float4 LerpedValue = lerp(FrameA_Sample, FrameB_Sample, CVF.FrameLerp);
+
+	// Determine the direction and project back to the volume.
+	float3 Direction = (LerpedValue.xyz * 2 - 1) * LerpedValue.w;
+	float3 ProjectedDirection = Direction.x * AxisX + Direction.y * AxisY + Direction.z * AxisZ;
+
+	// Write out this voxel's result.
+	OutVolumeTexture[DispatchThreadId] = float4(Noise + ProjectedDirection, 0.0f);
+}
+
+#endif // #if COMPOSITE_ANIMATED

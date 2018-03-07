@@ -1,0 +1,82 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	DepthOnlyPixelShader.hlsl: Depth-only pixel shader.
+=============================================================================*/
+
+#include "Common.ush"
+#include "/Engine/Generated/Material.ush"
+#include "/Engine/Generated/VertexFactory.ush"
+
+#if OUTPUT_PIXEL_DEPTH_OFFSET
+bool bApplyDepthOffset;
+#endif
+
+#if (FEATURE_LEVEL <= FEATURE_LEVEL_ES3_1)
+// used to write custom stencil values to color target
+float MobileColorValue;
+#endif
+
+void Main(
+#if !MATERIALBLENDING_SOLID || OUTPUT_PIXEL_DEPTH_OFFSET
+	FVertexFactoryInterpolantsVSToPS FactoryInterpolants,
+	float4 PixelPosition : TEXCOORD6,
+	in INPUT_POSITION_QUALIFIERS float4 SvPosition : SV_Position
+	OPTIONAL_IsFrontFace
+	OPTIONAL_OutDepthConservative,
+#endif
+	out float4 OutColor : SV_Target0
+#if MATERIALBLENDING_MASKED_USING_COVERAGE
+	, out uint OutCoverage : SV_Coverage
+#endif
+#if FLEX_FLUID_SURFACE_FACTORY
+   ,out float OutDepth : SV_DEPTH
+#endif
+	)
+{
+
+#if FLEX_FLUID_SURFACE_FACTORY
+
+	GetFlexFluidSurfaceCoverageAndClipping(FactoryInterpolants);
+	OutColor = 0;
+	OutDepth = GetFlexFluidSurfaceDepth(FactoryInterpolants);
+	
+	#if MATERIALBLENDING_MASKED_USING_COVERAGE
+	OutCoverage = 0xF;
+	#endif
+
+#else
+
+#if !MATERIALBLENDING_SOLID || OUTPUT_PIXEL_DEPTH_OFFSET
+	#if INSTANCED_STEREO
+		ResolvedView = ResolveView(GetEyeIndex(FactoryInterpolants.PackedEyeIndex));
+	#else
+		ResolvedView = ResolveView();
+	#endif
+
+	FMaterialPixelParameters MaterialParameters = GetMaterialPixelParameters(FactoryInterpolants, SvPosition);
+	FPixelMaterialInputs PixelMaterialInputs;
+	CalcMaterialParameters(MaterialParameters, PixelMaterialInputs, SvPosition, bIsFrontFace);
+
+	#if OUTPUT_PIXEL_DEPTH_OFFSET
+	ApplyPixelDepthOffsetToMaterialParameters(MaterialParameters, PixelMaterialInputs, OutDepth);
+	OutDepth = bApplyDepthOffset ? OutDepth : SvPosition.z;
+	#endif
+
+	#if MATERIALBLENDING_TRANSLUCENT
+		clip(GetMaterialOpacity(PixelMaterialInputs) - GetMaterialOpacityMaskClipValue());
+	#elif MATERIALBLENDING_MASKED_USING_COVERAGE
+		OutCoverage = DiscardMaterialWithPixelCoverage(MaterialParameters, PixelMaterialInputs);
+	#else
+		GetMaterialCoverageAndClipping(MaterialParameters, PixelMaterialInputs);
+	#endif
+#endif
+
+#if (FEATURE_LEVEL <= FEATURE_LEVEL_ES3_1)
+	OutColor = MobileColorValue;
+#else
+	OutColor = 0;
+#endif
+
+#endif //FLEX_FLUID_SURFACE_FACTORY
+}

@@ -1,0 +1,38 @@
+Availability: Public
+Title: Online Beacons
+Crumbs: %ROOT%, Engine
+Description:Overview of the Online Beacon system
+Version: 4.13
+parent:Gameplay/Networking
+Related: Gameplay/Networking/Actors/RPCs
+Related: Gameplay/Networking/Actors/Properties
+
+[TOC (start:2 end:3)]
+
+**Online Beacons** are a special type of **Actor** that provide a lightweight way to contact a server and interact with it (via RPCs) without committing to a normal game connection. While the built-in classes can be used as they are in some cases, they are intended to be extended into custom classes that perform project-specific interactions, logic, and information requests.
+
+## Online Beacon Base Classes
+Common actions performed by beacon classes are to request quality-of-service information, reserve a slot in a game that the client wishes to join, receive a list of the names of players in a game, find out the score and running time of a game in progress, and so on. The following classes are provided with the engine, and lay the foundation for the Online Beacon system:
+
+### AOnlineBeacon
+This is the base class for `AOnlineBeaconClient` and `AOnlineBeaconHost`. It derives from `AActor` directly.
+
+### AOnlineBeaconHost
+This class uses its own `UNetDriver` to listen for incoming Online Beacon connections from remote client machines. When it receives one, it looks through its list of registered `AOnlineBeaconHostObject` instances to find the one that matches the incoming client and hands the connection off to it. This class will not usually need to be derived, since it only manages the initial connection between the client and the registered `AOnlineBeaconHostObject`.
+
+### AOnlineBeaconClient
+Children of this class connect to hosts and make the actual RPCs. One of these will be spawned on the client machine, and one will be spawned on the server by the appropriate `AOnlineBeaconHostObject` that is registered with the server's `AOnlineBeaconHost`.  By default, the output of the `GetBeaconType` function (which will be the class name) will be used to match instances of this class to the registered instance of the appropriate host object class. Note that this is different from how Actor spawning usually works, where the server spawns the Actor and then replicates it to the client. However, once the connection between the client's and server's copy of the object has been made, replication of the object behaves as normal, with either side able to make RPCs to the other, and the server's version of the object being authoritative with regard to property replication.
+The base class implements `OnConnected` and `OnFailure` functions that can be overridden by child classes to perform RPCs when connected, or to handle failures to connect. This class is the workhorse of the Online Beacon system, and will do the client-side work that your Beacon requires. Since a second instance, synced with the original, will be spawned on the server in the event of a successful connection, this class can also do server-side work, coordinating and communicating through client and server RPCs, or server-to-client replicated properties.
+
+### AOnlineBeaconHostObject
+This class should also be overridden so that it can be paired with an overridden `AOnlineBeaconClient` class. Pairing is accomplished by matching the return value of the client's `GetBeaconType` with the value stored in the `BeaconTypeName` member variable. When the server's `AOnlineBeaconHost` detects a paired `AOnlineBeaconHostObject` for an incoming `AOnlineBeaconClient`, it will instruct the `AOnlineBeaconHostObject` to spawn a local copy of the `AOnlineBeaconClient` via the virtual `SpawnBeaconActor` function. By default, this function uses the `ClientBeaconActorClass` member variable to determine the class of actor to spawn, which should be set to the paired `AOnlineBeaconClient` class. It also calls `SetBeaconOwner` on the server's copy of the spawned object, so that the server-side instance of the client object can communicate with the host object. Most of this setup is established in the base class, and does not need to be overridden.
+
+## Online Beacon Example
+There are a variety of premade Beacon class pairs already in the engine, but the Test Beacon is a good, simple example of how to build your own. `ATestBeaconClient` is derived from `AOnlineBeaconClient`, and `ATestBeaconHost` is derived from `AOnlineBeaconHostObject`. The Test Beacon simply makes repeated function calls back and forth between the client and server. Here is how the classes work together:
+1. In `ATestBeaconHost`'s constructor, `ClientBeaconActorClass` is set to the class of `ATestBeaconClient`, and `BeaconTypeName` is set to the name (obtained by calling the `GetName` function) of `ClientBeaconActorClass`. This ensures that the `AOnlineBeaconHost` will pair the two Test Beacon classes correctly.
+1. When the client's `ATestBeaconClient` successfully contacts the server, the server's `AOnlineBeaconHost` instance will direct the registered `ATestBeaconHost` to spawn its own `ATestBeaconClient` and associate it with the `ATestBeaconClient` on the client. This is important because it allows client and server RPCs to pass between the two `ATestBeaconClient` instances.
+1. The server's `ATestBeaconHost` will then call `OnClientConnected`, a client RPC, on its `ATestBeaconClient` instance. Since this function is a client RPC, the command to call the function will be passed to the client machine rather than calling the function on the server.
+1. On the client's `ATestBeaconClient` instance, the RPC will run the virtual `OnConnected` function, which has been overridden to call `ClientPing`.
+1. `ClientPing` will output some text to the debug log and then call `ServerPong`, a server RPC, which will then be sent across the network connection and executed on the server's `ATestBeaconClient` instance.
+1. `ServerPong` will output debug text and then call `ClientPing`, again triggering a networked RPC call to the client.
+1. This process will continue indefinitely. While this is usually not desirable, especially since these RPCs aren't really doing anything, it could be used to keep track of a server's ping time by recording the time between two subsequent runs of the same RPC. There could also be a delay, so that this ping check is not done as frequently as the computer and network will allow, or the client or server could simply stop pinging back after a certain number of pings. Other use cases might involve only a single RPC call back to the client, rather than a continuing loop, such as asking a question along the lines of "What map is being used for this server's game?" or "Is this a Capture The Flag server?" depending on what information might be relevant to your specific game or project.

@@ -1,0 +1,314 @@
+Availability: Public
+Title: 3.2 - Implementing Shooting
+Crumbs: %ROOT%, Programming, Programming/Tutorials/FirstPersonShooter, Programming/Tutorials/FirstPersonShooter/3
+Description: Learn how to shooting for your First Person Shooter character.
+SkillLevel: Beginner
+Version: 4.15
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[Previous Step](Programming/Tutorials/FirstPersonShooter/3/1)
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[Section Home](Programming/Tutorials/FirstPersonShooter/3)
+	[/PARAM]
+	[PARAM:next]
+		[Next Step](Programming/Tutorials/FirstPersonShooter/3/3)
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+During this step, we're going to implement the `OnFire` function so that our character can start firing projectiles.
+
+## Implementing the OnFire Function
+
+1.	Locate the `FPSCharacter` class CPP file in the **Solution Explorer** and open `FPSCharacter.cpp`.
+
+1.	Add the following `#include` at the top of `FPSCharacter.cpp`.
+
+		#include "FPSProjectile.h"
+
+1.	Add the following `Fire` function definition to `FPSCharacter.cpp`:
+
+		void AFPSCharacter::Fire()
+		{
+			// Attempt to fire a projectile.
+			if (ProjectileClass)
+			{
+				// Get the camera transform.
+				FVector CameraLocation;
+				FRotator CameraRotation;
+				GetActorEyesViewPoint(CameraLocation, CameraRotation);
+		
+				// Transform MuzzleOffset from camera space to world space.
+				FVector MuzzleLocation = CameraLocation + FTransform(CameraRotation).TransformVector(MuzzleOffset);
+				FRotator MuzzleRotation = CameraRotation;
+				// Skew the aim to be slightly upwards.
+				MuzzleRotation.Pitch += 10.0f;
+				UWorld* World = GetWorld();
+				if (World)
+				{
+					FActorSpawnParameters SpawnParams;
+					SpawnParams.Owner = this;
+					SpawnParams.Instigator = Instigator;
+					// Spawn the projectile at the muzzle.
+					AFPSProjectile* Projectile = World->SpawnActor<AFPSProjectile>(ProjectileClass, MuzzleLocation, MuzzleRotation, SpawnParams);
+					if (Projectile)
+					{
+						// Set the projectile's initial trajectory.
+						FVector LaunchDirection = MuzzleRotation.Vector();
+						Projectile->FireInDirection(LaunchDirection);
+					}
+				}
+			}
+		}
+
+1.	`FPSCharacter.cpp` should now look like the following:
+
+		// Fill out your copyright notice in the Description page of Project Settings.
+		
+		#include "FPSProject.h"
+		#include "FPSCharacter.h"
+		#include "FPSProjectile.h"
+		
+		// Sets default values
+		AFPSCharacter::AFPSCharacter()
+		{
+		 	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
+			PrimaryActorTick.bCanEverTick = true;
+		
+			// Create a first person camera component.
+			FPSCameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("FirstPersonCamera"));
+			// Attach the camera component to our capsule component.
+			FPSCameraComponent->SetupAttachment(GetCapsuleComponent());
+			// Position the camera slightly above the eyes.
+			FPSCameraComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 50.0f + BaseEyeHeight));
+			// Allow the pawn to control camera rotation.
+			FPSCameraComponent->bUsePawnControlRotation = true;
+		
+			// Create a first person mesh component for the owning player.
+			FPSMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FirstPersonMesh"));
+			// Only the owning player sees this mesh.
+			FPSMesh->SetOnlyOwnerSee(true);
+			// Attach the FPS mesh to the FPS camera.
+			FPSMesh->SetupAttachment(FPSCameraComponent);
+			// Disable some environmental shadowing to preserve the illusion of having a single mesh.
+			FPSMesh->bCastDynamicShadow = false;
+			FPSMesh->CastShadow = false;
+		
+			// The owning player doesn't see the regular (third-person) body mesh.
+			GetMesh()->SetOwnerNoSee(true);
+		}
+		
+		// Called when the game starts or when spawned
+		void AFPSCharacter::BeginPlay()
+		{
+			Super::BeginPlay();
+			
+			if (GEngine)
+			{
+				// Put up a debug message for five seconds. The -1 "Key" value (first argument) indicates that we will never need to update or refresh this message.
+				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("We are using FPSCharacter."));
+			}
+		}
+		
+		// Called every frame
+		void AFPSCharacter::Tick( float DeltaTime )
+		{
+			Super::Tick( DeltaTime );
+		
+		}
+		
+		// Called to bind functionality to input
+		void AFPSCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent)
+		{
+			Super::SetupPlayerInputComponent(PlayerInputComponent);
+		
+			// Set up "movement" bindings.
+			PlayerInputComponent->BindAxis("MoveForward", this, &AFPSCharacter::MoveForward);
+			PlayerInputComponent->BindAxis("MoveRight", this, &AFPSCharacter::MoveRight);
+		
+			// Set up "look" bindings.
+			PlayerInputComponent->BindAxis("Turn", this, &AFPSCharacter::AddControllerYawInput);
+			PlayerInputComponent->BindAxis("LookUp", this, &AFPSCharacter::AddControllerPitchInput);
+		
+			// Set up "action" bindings.
+			PlayerInputComponent->BindAction("Jump", IE_Pressed, this, &AFPSCharacter::StartJump);
+			PlayerInputComponent->BindAction("Jump", IE_Released, this, &AFPSCharacter::StopJump);
+			PlayerInputComponent->BindAction("Fire", IE_Pressed, this, &AFPSCharacter::Fire);
+		}
+		
+		void AFPSCharacter::MoveForward(float Value)
+		{
+			// Find out which way is "forward" and record that the player wants to move that way.
+			FVector Direction = FRotationMatrix(Controller->GetControlRotation()).GetScaledAxis(EAxis::X);
+			AddMovementInput(Direction, Value);
+		}
+		
+		void AFPSCharacter::MoveRight(float Value)
+		{
+			// Find out which way is "right" and record that the player wants to move that way.
+			FVector Direction = FRotationMatrix(Controller->GetControlRotation()).GetScaledAxis(EAxis::Y);
+			AddMovementInput(Direction, Value);
+		}
+		
+		void AFPSCharacter::StartJump()
+		{
+			bPressedJump = true;
+		}
+		
+		void AFPSCharacter::StopJump()
+		{
+			bPressedJump = false;
+		}
+		
+		void AFPSCharacter::Fire()
+		{
+			// Attempt to fire a projectile.
+			if (ProjectileClass)
+			{
+				// Get the camera transform.
+				FVector CameraLocation;
+				FRotator CameraRotation;
+				GetActorEyesViewPoint(CameraLocation, CameraRotation);
+		
+				// Transform MuzzleOffset from camera space to world space.
+				FVector MuzzleLocation = CameraLocation + FTransform(CameraRotation).TransformVector(MuzzleOffset);
+				FRotator MuzzleRotation = CameraRotation;
+				// Skew the aim to be slightly upwards.
+				MuzzleRotation.Pitch += 10.0f;
+				UWorld* World = GetWorld();
+				if (World)
+				{
+					FActorSpawnParameters SpawnParams;
+					SpawnParams.Owner = this;
+					SpawnParams.Instigator = Instigator;
+					// Spawn the projectile at the muzzle.
+					AFPSProjectile* Projectile = World->SpawnActor<AFPSProjectile>(ProjectileClass, MuzzleLocation, MuzzleRotation, SpawnParams);
+					if (Projectile)
+					{
+						// Set the projectile's initial trajectory.
+						FVector LaunchDirection = MuzzleRotation.Vector();
+						Projectile->FireInDirection(LaunchDirection);
+					}
+				}
+			}
+		}
+
+1.	Save `FPSCharacter.cpp` in Visual Studio.
+
+1.	Locate **FPSProject** in the **Solution Explorer**.
+
+1.	Right-click on **FPSProject** and select **Build** to compile your project.
+
+	![](BuildFPSProject.png)
+
+## Building the Projectile Blueprint
+
+[REGION:note]
+Before continuing, download and extract our sample mesh from the following link:
+["Projectile Mesh"](Sphere.zip "Projectile Mesh")
+[/REGION]
+
+1.	Right-click inside the Content Browser's file box to open the **Import Asset** dialog box
+
+1.	Click **'Import to /Game...'** to open the **Import** dialog box.
+
+	![](RightClickImport.png)
+
+1.	Locate and select the **Sphere.fbx** mesh file.
+
+1.	Click **Open** to begin importing the mesh to your project.
+
+1.	In the **Content Browser**, the **FBX Import Options** dialog box appears. Clicking **Import** adds your mesh to the Project.
+
+	[REGION:warning]
+	Disregard the following error regarding smoothing groups:
+	
+	![](FBXWarning.png)
+	
+	This mesh still illustrates the first person mesh setup and it will work with the animations you'll set-up in a later section.
+	[/REGION]
+
+1.	Click the **Save** button to save your imported static mesh.
+
+1.	Navigate back to the **Blueprints** folder in the **Content Browser**.
+
+1.	Click the **Add New** button and select **Blueprint Class**.
+
+1.	Expand the **All Classes** dropdown menu and type "FPSProjectile" into the search box.
+
+	![](AddNewBPClass.png)
+
+1.	Click on the **FPSProjectile** and click the **Select** button.
+
+1.	Name the new Blueprint "BP_FPSProjectile".
+
+	![](NameBP_FPSProjectile.png)
+
+1.	 Double-click the **BP_FPSCharacter** icon to open it in the **Blueprint Editor**.
+
+1.	Click on **CollisionComponent** in the **Components** tab.
+
+1.	Click on the **Add Component** dropdown list and select **Static Mesh**.
+
+	![](AddStaticMeshComponent.png)
+
+1.	Name your new component "ProjectileMeshComponent".
+
+	![](NameProjectileMeshComponent.png)
+
+1.	Scroll down to the **Static Mesh** section of the **Details** tab and click on the dropdown menu that says "None".
+
+1.	Select the **Sphere** static mesh.
+
+	![](SelectSphereMesh.png)
+
+	[REGION:note]
+	Note that if you're making a multiplayer game, you'll need to also uncheck "Initial Velocity in Local Space" in the "MovementComp" Component in order for this projectile to replicate correctly over a server.
+	[/REGION]
+
+1.	Set the X, Y, and Z scale values to "0.09".
+
+	![](Set_XYZ_ScaleValues.png)
+
+	[REGION:note]
+	Clicking on the lock icon locks all three axes so that they preserve their relative scale.
+	[/REGION]
+
+1.	Set the `ProjectileMeshComponent` **Collision Presets** value to **NoCollision** (since you're using `SphereComponent` for collision and not this Static Mesh).	
+
+	![](SetCollisionPresets.png)
+	
+1.	**Compile** and **Save** your Blueprint before closing the **Blueprint Editor**.
+
+1.	Double-click on **BP_FPSCharacter** to open the character blueprint for editing.
+
+1.	Open **Class Defaults Mode**.
+
+1.	Locate the **Projectile Class** property and set it to **BP_FPSProjectile**.
+
+	![](SelectProjectileClass.png)
+
+1.	Set the **MuzzleOffset** property to {100, 0, 0} in order to spawn the projectile slightly in front of the camera.
+
+	![](CharacterProjectileClass.png)
+
+1.	**Compile** and **Save** your Blueprint before closing the **Blueprint Editor**.
+
+## Shooting Projectiles In-Game
+
+1.	Click the **Play In** button in the **Level Editor Toolbar** to shoot projectiles in-game.
+
+1.	Left-click your mouse button to fire projectiles into the world.
+
+	![](FiringProjectiles.png)
+
+1.	Press the Escape key or click the **Stop** button in the Level Editor to exit Play in Editor (PIE) mode.
+
+%Steps%

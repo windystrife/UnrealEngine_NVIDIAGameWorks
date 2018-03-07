@@ -1,0 +1,214 @@
+Availability:Public
+Title: Animation Node Technical Guide
+Crumbs: %ROOT%, Engine, Engine/Animation
+Description: Guide to creating new nodes for use within graphs in Anim Blueprints.
+Version: 4.9
+
+[REGION:banner]
+![Anim Nodes](animnodes_banner.png)(convert:false)
+[/REGION]
+
+[TOC(start:2)]
+
+Animation nodes are used inside of [Anim Blueprints](Engine/Animation/AnimBlueprints) 
+to perform operations, such as blending of poses or direct manipulation of bones. Several animation 
+nodes are provided, but custom nodes can be created to suit the needs of any game.
+
+## Anatomy of an Animation Node
+
+Animation nodes are composed of two parts:
+
+* A runtime struct that performs the actual operations to generate an output pose.
+* An editor-time container class that handles visual aspects and functionality 
+of the node within the graph, such as node titles and the context menu.
+
+
+In order to add a new animation node, both of these must be created.
+
+### Node Hierarchies
+
+It is possible to create a hierarchy of nodes, but any non-abstract editor-time classes should contain exactly 
+one runtime node (do not add additional nodes when deriving unless the parent was abstract and did not contain one).  
+See the `UAnimGraphNode_BlendListBase` family for examples.
+
+## Runtime Node
+
+The runtime struct is derived from `FAnimNode_Base` and is responsible for initialization, updating, 
+and performing operations on one or more input poses to generate the desired output pose. It also declares any 
+input pose links and any properties needed by the node to perform the desired operation.
+
+### Pose Inputs
+
+In the runtime node, pose inputs are exposed by creating properties of the type `FPoseLink` or 
+`FComponentSpacePoseLink`. `FPoseLink` is used when working with poses in local space, such 
+as blending animations. `FComponentSpacePoseLink` is used when working with poses in component 
+space, such as applying skeletal controllers.
+
+A node can have a single pose input:
+
+**Local Space**
+
+	UPROPERTY(Category=Links)
+	FPoseLink BasePose;
+
+![Pose Input Pin](node_posepin.png)
+
+**Component Space**
+
+	UPROPERTY(Category=Links)
+	FComponentSpacePoseLink ComponentPose;
+
+![Pose Input Pins](node_posepin_component.png)
+[REGION:caption]
+	Component space pose pins are shaded blue.
+[/REGION]
+
+Or, more than one input for nodes that blend between multiple animations:
+
+	UPROPERTY(Category=Links)
+	FPoseLink Base;
+
+	UPROPERTY(Category=Links)
+	FPoseLink Additive;
+
+![Pose Input Pins](node_posepin_multiple.png)
+
+Each of these properties will cause a pose link to be displayed. Properties of this type are always 
+exposed as input pins. They cannot be optionally hidden or used only as editable properties in the 
+**Details** panel.
+
+### Properties and Data Inputs
+
+Animation nodes can have any number of properties, such as an alpha or transformation data, that are used 
+to perform the operations of the node. These properties are declared just like any other property, using 
+the `UPROPERTY()` macro.
+
+	UPROPERTY(Category=Settings, meta(PinShownByDefault))
+	mutable float Alpha;
+
+![Property Pin](node_propertypin.png)
+
+Properties of animation nodes can be exposed as data inputs using special metadata keys to allow values to 
+be passed to the node. This allows properties used by the node to use values calculated outside the node. 
+The following metadata keys are available:
+
+| Metadata | Description |
+| -------- | ----------- |
+| `NeverAsPin` | The property is not exposed as a data pin and is only be editable in the **Details** panel in Persona. |
+| `PinHiddenByDefault` | The property can be exposed as a data pin, but is hidden by default (See [Optional Pins](#OptionalPins) below). |
+| `PinShownByDefault` | The property can be exposed as a data pin and is visible by default (See [Optional Pins](#OptionalPins) below). |
+| `AlwaysAsPin` | The property is always exposed as a data pin. |
+
+(#OptionalPins)
+**Optional Pins**
+[REGION:none]
+	For properties with `PinHiddenByDefault` or `PinShownByDefault`, a check box will show up next 
+	to the property in the **Details** panel, allowing you to show or hide it.
+[/REGION]	
+[REGION:none]
+	![Property Details](node_property_details.png)
+[/REGION]
+
+## Editor Node
+
+The editor class is derived from `UAnimGraphNode_Base` and is responsible for things like visual node 
+title or adding context menu actions.
+
+The editor-time class should contain an instance of your runtime node exposed as editable.
+
+	UPROPERTY(Category=Settings)
+	FAnimNode_ApplyAdditive Node;
+
+### Title
+
+![Node Title](node_title.png)
+
+The background color and text of the title of the animation node displayed in the graph of the Animation Blueprint in 
+Persona are defined by overriding the `GetNodeTitle()` and `GetNodeTitleColor()` functions.
+
+For example, the `UAnimGraphNode_ApplyAdditive` node uses a gray background and displays "Apply Additive":
+
+	FLinearColor UAnimGraphNode_ApplyAdditive::GetNodeTitleColor() const
+	{
+		return FLinearColor(0.75f, 0.75f, 0.75f);
+	}
+
+	FString UAnimGraphNode_ApplyAdditive::GetNodeTitle(ENodeTitleType::Type TitleType) const
+	{
+		return TEXT("Apply Additive");
+	}
+
+### Tooltip
+
+![Node Tooltip](node_tooltip.png)
+
+The tooltip displayed when hovering over the node in Persona is defined by overriding the `GetTooltip()` function:
+
+	FString UAnimGraphNode_ApplyAdditive::GetTooltip() const
+	{
+		return TEXT("Apply additive animation to normal pose");
+	}
+
+### Context Menu
+
+Each animation node can add node-specific options to the context menu displayed when **Right-clicking** on the 
+node in a graph in Persona. Options are added using the `GetContextMenuActions()` function which is a 
+member of all Blueprint nodes.
+
+![Node Context Menu Entry](node_menu.png)
+
+For example, the `UAnimGraphNode_LayeredBoneBlend` node adds menu entries for adding a new input or removing an existing one:
+
+	void UAnimGraphNode_LayeredBoneBlend::GetContextMenuActions(const FGraphNodeContextMenuBuilder& Context) const
+	{
+		if (!Context.bIsDebugging)
+		{
+			if (Context.Pin != NULL)
+			{
+				// we only do this for normal BlendList/BlendList by enum, BlendList by Bool doesn't support add/remove pins
+				if (Context.Pin->Direction == EGPD_Input)
+				{
+					//@TODO: Only offer this option on arrayed pins
+					Context.MenuBuilder->BeginSection("AnimNodesLayeredBoneBlend", NSLOCTEXT("A3Nodes", "LayeredBoneBlend", "Layered Bone Blend"));
+					{
+						Context.MenuBuilder->AddMenuEntry(FGraphEditorCommands::Get().RemoveBlendListPin);
+					}
+					Context.MenuBuilder->EndSection();
+				}
+			}
+			else
+			{
+				Context.MenuBuilder->BeginSection("AnimNodesLayeredBoneBlend", NSLOCTEXT("A3Nodes", "LayeredBoneBlend", "Layered Bone Blend"));
+				{
+					Context.MenuBuilder->AddMenuEntry(FGraphEditorCommands::Get().AddBlendListPin);
+				}
+				Context.MenuBuilder->EndSection();
+			}
+		}
+	}
+
+## Derived Native Getters
+
+Many projects create their own `UAnimInstance` derived class to get better performance. To go along with this, you can add new getters if there is a need. In order to do so however there is a bit of a setup involved in order for them to work correctly. 
+
+* The getter functions must be tagged as **UFUNCTIONS**. 
+* They must be **BlueprintPure**. 
+* They must include the metadata **AnimGetter="True"**. 
+
+They must also define some specifically named parameters (this is also explained above the base anim getter functions in `AnimInstance.h`). That list of parameters includes : 
+
+| **Paramter** | **Description** |
+| --- | --- |
+| **int32 AssetPlayerIndex**| The getter acts on an asset player and an entry will be added to the editor per asset player available. |
+| **int32 MachineIndex**| The getter acts on a state machine, an entry will be added per state machine. |
+| **int32 StateIndex**| This also requires MachineIndex. The getter acts on a state, an entry will be added per state.  |
+| **int32 TransitionIndex**| This also requires MachineIndex. The getter acts on a transition, an entry will be added per transtion.|
+
+There are also helper functions to get the actual nodes in your getters. These exist on the `UAnimInstance`: 
+
+| **Function** | **Description** |
+| --- | --- |
+| **GetStateMachineInstance(int32 MachineIndex)**| Gets the baked state machine instance. |
+| **GetCheckedNodeFromIndex(int32 NodeIdx)**| Gets a node from an index, asserts if invalid. |
+| **GetNodeFromIndex(int32 NodeIdx)**| As above, can return nullptr. |
+| **GetRelevantAssetPlayerFromState(int32 MachineIndex, int32 StateIndex)**| Gets the highest weighted asset player in a state. |

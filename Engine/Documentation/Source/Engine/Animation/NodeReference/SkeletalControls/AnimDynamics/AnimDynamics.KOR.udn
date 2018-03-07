@@ -1,0 +1,183 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title:애님 다이내믹스
+Crumbs: %ROOT%, Engine, Engine/Animation, Engine/Animation/NodeReference, Engine/Animation/NodeReference/SkeletalControls
+Description:AnimDynamics 를 사용하여 물리 기반 이차 애니메이션을 내는 법을 설명합니다.
+version: 4.12
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine\Animation\NodeReference\SkeletalControls\AnimDynamics:title%](Engine\Animation\NodeReference\SkeletalControls\AnimDynamics\AnimDynamicsNode.png)
+	[/PARAM]
+	[PARAM:title]
+		%Engine\Animation\NodeReference\SkeletalControls\AnimDynamics:title%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine\Animation\NodeReference\SkeletalControls\AnimDynamics]
+	[/PARAM]
+	[PARAM:description]
+		%Engine\Animation\NodeReference\SkeletalControls\AnimDynamics:description%
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine\Animation\NodeReference\SkeletalControls\AnimDynamics:title%](Engine\Animation\NodeReference\SkeletalControls\AnimDynamics\AnimDynamicsNode.png)
+	[/PARAM]
+	[PARAM:title]
+		%Engine\Animation\NodeReference\SkeletalControls\AnimDynamics:title%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine\Animation\NodeReference\SkeletalControls\AnimDynamics]
+	[/PARAM]
+	[PARAM:description]
+		%Engine\Animation\NodeReference\SkeletalControls\AnimDynamics:description%
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+**AnimDynamics** (애님 다이내믹스) 노드는 스켈레탈 메시 애셋에 물리 기반 이차 애니메이션을 내는 데 사용할 수 있는 작은 솔버입니다.
+캐릭터에 목걸이, 팔찌, 팩, 와이어, 헤어, 클로스 등 캐릭터의 움직임에 따라 튕기는 아이템이 있는 경우, 이 노드로 그 움직임을 낼 수 있습니다.
+
+애님 다이내믹스는 LOD 나 기타 애니메이션 세팅과 함께 켜고 끌 수 있는 초경량 구현입니다. 이에 대한 처리는 [**애님 그래프**](Engine/Animation/AnimBlueprints/AnimGraph) 에서의 애니메이션 처리 도중 일어납니다. 
+단순하고 빠른 솔버로 만들어졌기에, 솔버가 추정하는 것이 몇 가지 있다는 점을 알아두는 것이 좋습니다.
+
+* 다이내믹 본은 박스로만 표현되며, 이것이 해당 부분의 관성 계산에 사용됩니다.
+* 콜리전은 계산되지 않습니다. 하지만 컨스트레인트를 사용해서 운동을 제약시킬 수 있습니다.
+
+애님 다이내믹스는 Linear, Angular, Planar Constraint (선형, 각형, 평면형 컨스트레인트)를 지원합니다. 선형 및 각형 컨스트레인트는 보다 탄력적인 느낌을 내기 위해 스프링으로 구동되며, 평면형 컨스트레인트는 부속이 건너지 못하는 면을 만드는 데 사용됩니다.
+
+체인 역시 지원되는데, 캐릭터에 시작 본과 끝 본을 선택하면 해당 링크에 대해 체인이 생성됩니다. 바디가 하나인 다이내믹 본에 비하면 훨씬 비싼데, 링크된 컨스트레인트마다 훨씬 많은 계산과 반복 처리를 해야 올바르게 수렴되기 때문입니다.
+반복처리 수는 노드별로도 설정할 수 있습니다.
+
+애님 다이내믹스를 사용한 체인의 예입니다:
+
+![](AnimDynamicsChain.gif)(convert:false)
+
+[REGION:caption]
+**Anim Dynamics** 노드의 **디테일 패널** 에서 **Chain** 박스를 체크하여 이 옵션을 켤 수 있습니다.
+[/REGION]
+
+바디의 위치와 크기를 표시해 주는 시각화 레이어도 있습니다.
+
+![](AnimDynamicsVisualization.png)
+
+각형 한계에 대한 시각화 표시 예제입니다:
+
+![](AnimDynamicsaAngular.png)
+
+[REGION:caption]
+애님 다이내믹스 노드를 선택한 채 **디테일 패널** 에서 설정할 수 있습니다.
+[/REGION]
+
+애님 다이내믹스의 핵심적인 부분은 **디테일 패널** 의 **Setup** 및 **Constraint** 섹션에 있습니다.
+
+![](SetupConstraints.png)
+
+이 두 섹션의 값을 미세 조정하여 원하는 움직임을 만들어내게 됩니다. **Bound Bone** 은 노드에 영향받는 본이며, **Box Extents** 섹션은 관성이 적용되는 볼륨을 만들고 운동을 구동시키는 데 사용됩니다.
+
+예를 들어, 천천히 앞뒤로 움직이는 형태의 운동에는 적당한 넓이의 매우 긴 박스가 필요할 것이고, 약간 움직이다가 어떤 위치로 돌아오는 형태의 운동은 넓지만 길이는 짧은 박스가 필요할 것입니다.
+
+**Local Joint Offset** 은 컨스트레인트를 붙이고 피벗 포인트를 결정하는 데 사용되는 오프셋입니다. 이 값을 0 으로 놔두면, 피벗 기준을 알 수 없으므로 아무런 운동도 보이지 않을 것입니다. 원하는 운동이 나올 때까지 이 값을 조절하세요.
+
+Constraint 섹션에서는 운동 범위를 정의할 수 있는데, 그 범위는 시각화를 통해 확인할 수 있습니다. 값이 0 이면 영향을 끼치지 않습니다. 어떤 값을 입력하자마자, 이동할 수 있는 범위가 나옵니다.
+
+애님 다이내믹스 관련 비디오 분석, 팁과 정보, **파라곤** 에서의 사용 예 등은 아래 애님 다이내믹스 트위치 스트림 방송을 시청해 주세요:
+
+[OBJECT:EmbeddedVideo]
+[PARAMLITERAL:width]
+640
+[/PARAMLITERAL]
+[PARAMLITERAL:height]
+360
+[/PARAMLITERAL]
+[PARAMLITERAL:videoid]
+5h5CvZEBBWo
+[/PARAMLITERAL]
+[/OBJECT]
+
+빠르게 시작해 보려면, **애니메이션 블루프린트** 의 애님 그래프 안에서 **AnimDynamics** 노드를 생성합니다. 다이내믹 본 또는 연속 다이내믹 체인마다 하나의 노드가 있을 것입니다. 모든 시각화, 컨스트레인트, 바디, 시뮬레이션 세팅은 각 노드별로 설정됩니다.
+
+![](AnimDynamicsNode.png)
+
+| 핀 | 설명 |
+| --- | ----------- |
+| [REGION:tablesection]**입력 핀**[/REGION] ||
+| **External Force** | 외부 힘 - 체크하면 시뮬레이션 내 모든 바디에 (월드 스페이스로 지정된) 외부 힘을 가합니다. |
+| **Component Pose** | 컴포넌트 포즈 - 변경시킬 입력 포즈입니다. |
+| **Alpha** | 알파 - 알파 값으로 사용할 [0.0, 1.0] 범위의 플로트 값으로, SkeletalControl 에 적용되는 Transform 의 가중치를 결정합니다. 0.0 은 입력 포즈만, 1.0 이면 콘트롤이 계산한 트랜스폼만 사용합니다. |
+| [REGION:tablesection]**출력 핀**[/REGION] ||
+| Pose (Blank) | 포즈 (공백) - 트랜스폼이 적용된 이후의 최종 포즈입니다. |
+
+**AnimDynamics** 노드는 4.11 에 도입된 **LOD Threshold** (LOD 한계치) 시스템의 영향도 받습니다. 이 세팅은 **AnimDynamics** 노드의 **디테일 패널** 에서 찾을 수 있습니다.
+
+[INCLUDE:Engine/Animation/NodeReference/SkeletalControls#lodthresh]
+
+[REGION:note]
+애님 다이내믹스의 단계별 사용 예는 [](Engine\Animation\AnimHowTo\AnimDynamics) 문서를 참고하세요.
+[/REGION]
+
+
+<!--
+[OBJECT:modulesectionexpanded]
+	[PARAMLITERAL:id]
+		LODThresholdMSE
+	[/PARAMLITERAL]
+	[PARAM:heading]
+		퍼포먼스
+	[/PARAM]
+	[PARAM:content]
+		%p100%
+	[/PARAM]
+[/OBJECT]
+
+[VAR:p100]
+
+[INCLUDE:Engine/Animation/NodeReference/SkeletalControls#lodthresh]
+
+[/VAR]
+
+
+[VAR:spacer]![](%ROOT%/spacer.png)(w:150 convert:false)[/VAR]
+
+[VAR:spacer2]![](%ROOT%/spacer.png)(w:35 convert:false)[/VAR]
+
+[REGION:raw]
+| 프로퍼티 | %spacer% | 설명 |
+| --- | --- | :--- |
+| **Node** || %doxygen:UAnimGraphNode_AnimDynamics::Node% |
+| **Preview Live** || %doxygen:UAnimGraphNode_AnimDynamics::bPreviewLive% |
+| **Show Linear Limits** || %doxygen:UAnimGraphNode_AnimDynamics::bShowLinearLimits% |
+| **Show Angular Limits** || %doxygen:UAnimGraphNode_AnimDynamics::bShowAngularLimits% |
+| **Show Planar Limit** || %doxygen:UAnimGraphNode_AnimDynamics::bShowPlanarLimit% |
+| **Show Spherical Limit** || %doxygen:UAnimGraphNode_AnimDynamics::bShowSphericalLimit% |
+| **Show Collision Spheres** || %doxygen:UAnimGraphNode_AnimDynamics::bShowCollisionSpheres% |
+| **Last Preview Component** || %doxygen:UAnimGraphNode_AnimDynamics::LastPreviewComponent% |
+| **Cached Node Titles** || %doxygen:UAnimGraphNode_AnimDynamics::CachedNodeTitles% |
+| **Edit Preview Shape** || %doxygen:UAnimGraphNode_AnimDynamics::EditPreviewShape% |
+| **Post Load** || %doxygen:UAnimGraphNode_AnimDynamics::PostLoad% |
+| **Reset Button Clicked** || %doxygen:UAnimGraphNode_AnimDynamics::ResetButtonClicked% |
+| **Reset Sim** || %doxygen:UAnimGraphNode_AnimDynamics::ResetSim% |
+| **Serialize** || %doxygen:UAnimGraphNode_AnimDynamics::Serialize% |
+| **Get Node Title** || %doxygen:UAnimGraphNode_AnimDynamics::GetNodeTitle% |
+| **Get Tooltip Text** || %doxygen:UAnimGraphNode_AnimDynamics::GetTooltipText% |
+| **Validate Anim Node During Compilation** || %doxygen:UAnimGraphNode_AnimDynamics::ValidateAnimNodeDuringCompilation% |
+| **Customize Details** || %doxygen:UAnimGraphNode_AnimDynamics::CustomizeDetails% |
+| **Draw** || %doxygen:UAnimGraphNode_AnimDynamics::Draw% |
+| **Get On Screen Debug Info** || %doxygen:UAnimGraphNode_AnimDynamics::GetOnScreenDebugInfo% |
+| **Get Preview Dynamics Node** || %doxygen:UAnimGraphNode_AnimDynamics::GetPreviewDynamicsNode% |
+| **Get Controller Description** || %doxygen:UAnimGraphNode_AnimDynamics::GetControllerDescription% |
+| **Post Edit Change Property** || %doxygen:UAnimGraphNode_AnimDynamics::PostEditChangeProperty% |
+| **Draw Linear Limits** || %doxygen:UAnimGraphNode_AnimDynamics::DrawLinearLimits% |
+| **Draw Angular Limits** || %doxygen:UAnimGraphNode_AnimDynamics::DrawAngularLimits% |
+| **Get Node** || %doxygen:UAnimGraphNode_AnimDynamics::GetNode% |
+[/REGION]
+-->
+
+
+
+

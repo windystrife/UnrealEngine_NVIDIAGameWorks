@@ -1,0 +1,236 @@
+//-----------------------------------------------------------------------------
+// File:		LPVSkyInjection.usf
+//
+// Summary:		Compute shader which handles LPV propagation
+//
+// Created:		2013-03-01
+//
+// Author:		mailto:benwood@microsoft.com
+//
+//				Copyright (C) Microsoft. All rights reserved. 
+//-----------------------------------------------------------------------------
+
+/*------------------------------------------------------------------------------
+	Compile time parameters:
+------------------------------------------------------------------------------*/
+ 
+#include "Common.ush"
+#include "LPVWriteCommon.ush"
+#include "LPVGeometryVolumeCommon.ush"
+#include "CubemapCommon.ush"
+
+//-------------------------------------------------------------------------------------------------
+
+#define JITTER						1
+#define AO_ITERATIVE_REFINEMENT     1
+#define OPTIMISED					1
+#define FILTERED_GV_LOOKUP			0 // Really expensive! Do not use!
+
+#if AO_ITERATIVE_REFINEMENT 
+#define REFINE_AO_MULTIPLIER 0.15
+#endif
+
+//-------------------------------------------------------------------------------------------------
+#define DIRECTIONS32	float3( -0.05512,  0.76586, -0.56600),	float3(  0.32073,  0.38860, -0.45865),	float3( -0.94457,  0.10946, -0.06761),	float3(  0.52959, -0.54968, -0.22405),\
+						float3(  0.35128,  0.08201,  0.46989),	float3(  0.23199, -0.17011,  0.70594),	float3(  0.60823,  0.34747,  0.27763),	float3( -0.08181,  0.04158, -0.12801),\
+						float3( -0.41883,  0.48855, -0.58237),	float3( -0.10297, -0.74525,  0.27079),	float3( -0.90964, -0.07262,  0.42218),	float3( -0.73489, -0.44662,  0.18148),\
+						float3(  0.44118,  0.15554, -0.23668),	float3(  0.15504, -0.44441,  0.12967),	float3(  0.22360, -0.43429, -0.62978),	float3( -0.27742, -0.22710,  0.77011),\
+						float3(  0.82907,  0.19693, -0.38211),	float3(  0.28126,  0.86776, -0.00408),	float3( -0.17777,  0.38409, -0.25268),	float3(  0.01183, -0.22878,  0.39425),\
+						float3(  0.44725, -0.00260, -0.63503),	float3( -0.42517, -0.58948, -0.66224),	float3( -0.49335,  0.05575, -0.22749),	float3( -0.27795,  0.03986, -0.68356),\
+						float3(  0.04470,  0.61118, -0.16199),	float3(  0.10392,  0.21927, -0.91510),	float3( -0.34484, -0.21977,  0.40968),	float3( -0.70361,  0.44257,  0.48594),\
+						float3(  0.53131, -0.16425,  0.77398),	float3( -0.07781,  0.06550,  0.63558),	float3(  0.18829, -0.62067,  0.46053),	float3( -0.59232,  0.16259, -0.71309)
+
+//-------------------------------------------------------------------------------------------------
+
+#define DIRECTIONS16	float3(  0.51472, -0.49163,  0.35433), float3( -0.35116, -0.01130, -0.39922), float3( -0.80703,  0.42269,  0.06061),    \
+						float3(  0.64946, -0.41234, -0.64451), float3(  0.66478, -0.05262,  0.61239), float3(  0.51724,  0.50787,  0.13460),    \
+						float3( -0.34963,  0.50349, -0.25580), float3( -0.06436, -0.00462, -0.99482), float3( -0.06583,  0.94559, -0.29587),    \
+						float3( -0.06452,  0.50999,  0.47619), float3(  0.00707, -0.05436,  0.40955), float3( -0.03803, -0.85644,  0.21446),    \
+						float3(  0.09232, -0.36510, -0.59058), float3(  0.61293, -0.00690, -0.08238), float3( -0.48265, -0.49618, -0.59132),    \
+						float3( -0.37232, -0.48738,  0.41218)
+
+
+//-------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+
+#if FILTERED_GV_LOOKUP
+GeometryVolumeEntry ReadGvCellFiltered( float3 gridPos )
+{
+	GeometryVolumeEntry gv;
+
+	float3 texPos = saturate( gridPos / 32.0f ); // Half pixel offset?
+	float4 gvTex0 = gGv3DTexture0.SampleLevel( gLpv3DTextureSampler, texPos, 0 );
+	gv.SH[0] = gvTex0.x;
+#if ( GV_ORDER >= 1 ) 
+	float4 gvTex1 = gGv3DTexture1.SampleLevel( gLpv3DTextureSampler, texPos, 0 );
+	gv.SH[1] = gvTex0.y;
+	gv.SH[2] = gvTex0.z;
+	gv.SH[3] = gvTex0.w;
+#endif
+#if ( GV_ORDER >= 2 )
+	float4 gvTex2 = gGv3DTexture2.SampleLevel( gLpv3DTextureSampler, texPos, 0 );
+	gv.SH[4] = gvTex1.x;
+	gv.SH[5] = gvTex1.y;
+	gv.SH[6] = gvTex1.z;
+	gv.SH[7] = gvTex1.w;
+	gv.SH[8] = gvTex2.x;
+#endif
+
+ #if LPV_MULTIPLE_BOUNCES
+ #if (GV_ORDER == 0 )
+  gv.color = gvTex0.yzw;
+#elif (GV_ORDER == 1)
+  gv.color = gvTex1.xyz;
+#else
+	gv.color = gvTex2.yzw;
+ #endif
+ #endif
+	return gv;
+}
+
+#endif //FILTERED_GV_LOOKUP
+
+
+#if FILTERED_GV_LOOKUP
+GeometryVolumeEntry ReadGvCell_Pos( float3 gridPos ) 
+{
+	//gridPos+=float3(0.5,0.5,0.5)*1;
+	//gridPos = max( min( float3(32,32,32), gridPos ), float3(0,0,0) );
+	return ReadGvCellFiltered( gridPos );
+}
+#else
+GeometryVolumeEntry ReadGvCell_Pos( int3 pos ) 
+{
+	pos = max( min( int3(31,31,31), pos ), int3(0,0,0) );
+	return ReadGvCell( GetGridAddress( pos ) );
+}
+#endif
+
+//-------------------------------------------------------------------------------------------------
+
+float ComputeAmbientOcclusion( float3 gridPos )
+{
+#if OPTIMISED
+	const uint NumSamples=16;
+	const float3 Directions[16] = 
+	{
+		DIRECTIONS16
+	};
+	const float rayLength = 16.0f;
+	const uint samplesPerRay = 8;
+	float sampleLength = rayLength / float(16); // Optimised = same initial step size as with 16 taps, but step size increases per iteration to compensate
+#else
+	const uint NumSamples=32;
+	const float3 Directions[32] = 
+	{
+		DIRECTIONS32
+	};
+	const float rayLength = 16.0f;
+	const uint samplesPerRay = 16;
+	float sampleLength = rayLength / float(samplesPerRay);
+#endif
+	sampleLength *= LpvWrite.DirectionalOcclusionRadius / 16.0f;
+	float RayWeight = 1.0f/float(NumSamples);
+
+#if OPTIMISED
+	RayWeight *= 1.02;
+#endif 
+
+	float ao = 0.0f;
+
+#if JITTER
+	// Required, but not cache friendly (roughly 4X performance cost). Happily, we can get away with far fewer taps
+	float3 gp = abs( float3( gridPos - LpvWrite.mLpvGridOffset ) );
+	float3x3 rotation = { float3(1,0,0), float3(0,1,0), float3(0,0,1) };
+	int ix = int(gp.x+gp.y*5+gp.z*3+21) % NumSamples;
+	int iy = int(gp.x+gp.y+gp.z+456) % NumSamples;
+	rotation[0] = normalize(Directions[ix]);
+	rotation[1] = normalize(Directions[iy]);
+	rotation[2] = normalize( cross( rotation[0], rotation[1] ) );
+	rotation[1] = normalize( cross( rotation[0], rotation[2] ) );
+#endif
+
+	// NOTE: Balanced to give 0.5 AO on a plane, using default settings
+	LOOP
+	for ( uint i=0; i<NumSamples; i++ )
+	{
+#if JITTER
+		float3 direction = mul( rotation, Directions[i] );
+#else 
+		float3 direction = Directions[i];
+#endif
+
+		float3 pos = gridPos + float3(0.5,0.5,0.5);
+		float3 inc = direction * sampleLength;
+		float rayOcclusion = 1.0f;
+
+		pos += inc*0.5f;
+		float weight = 2.0f;
+
+		for ( uint j=0; j < samplesPerRay; j++ )
+		{ 
+			pos += inc;
+			GeometryVolumeEntry gvCell = ReadGvCell_Pos( pos );
+			{
+				// TODO: should this just be -direction? (need to rebalance)
+				float s = SHLookupGeometryVolume( gvCell, direction );
+				s += SHLookupGeometryVolume( gvCell, -direction );
+				rayOcclusion -= weight * s;
+			}
+#if OPTIMISED
+			inc *= 1.1f; // Sample distance increases with range (equivalent to adjusting weight in high quality version)			
+#else
+			weight *= 0.75f;
+#endif
+
+		}
+		rayOcclusion *= 1.25f;
+		ao += ( 1.0-saturate(rayOcclusion) );
+	}
+
+	float aoWeight = RayWeight;
+	aoWeight *= 1.2f;
+	ao *= aoWeight;
+
+	return ( 1.0f-ao ) * 1.81f;
+}
+//-------------------------------------------------------------------------------------------------
+
+[numthreads(4,4,4)]
+void CSDirectionalOcclusion(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID ) 
+{
+	int index = GetGridAddress( DTid );
+
+	float3 gridPos = float3( DTid );
+
+	// Read the current SH cell
+	LPVCell cell = ReadLpvCell( index );
+
+	float AO = ComputeAmbientOcclusion( gridPos );
+#if AO_ITERATIVE_REFINEMENT
+	cell.AO = lerp( cell.AO, AO, REFINE_AO_MULTIPLIER );
+#else
+	cell.AO = AO;
+#endif
+
+	// Write the accumulated cell
+	WriteLpvCell( cell, index );
+}
+
+//-------------------------------------------------------------------------------------------------
+
+// Compute shader to copy the AO volume from the full-float LPV to a lower-precision
+// volume texture
+[numthreads(4,4,4)]
+void CSCopyAOVolume(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID ) 
+{
+	int index = GetGridAddress( DTid );
+
+	float3 gridPos = float3( DTid );
+
+	// Read the current SH cell
+	float AO = ReadLpvCellAO( index );
+
+	gAOVolumeTextureRW[ DTid ] = AO;
+}
+

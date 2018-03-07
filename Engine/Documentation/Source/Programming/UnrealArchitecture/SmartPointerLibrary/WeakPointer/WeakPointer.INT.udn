@@ -1,0 +1,85 @@
+Availability:Public
+Title:Weak Pointers
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture/SmartPointerLibrary
+Description:Smart pointers that store weak references and do not prevent their objects from being destroyed.
+Type:reference
+Version: 4.9
+Parent:Programming/UnrealArchitecture/SmartPointerLibrary
+Order:
+Tags:Programming
+
+[TOC(start:2)]
+
+**Weak pointers** store a weak reference to an object. Unlike a shared pointer, a weak pointer will not prevent an object from being destroyed. Weak pointers are automatically emptied when their object is destroyed no matter who destroyed the object, which allows you to safely cache pointers to volatile objects. This also means, weak pointers might become empty when you are not expecting it and weak pointers can be used to break reference cycles.
+
+A weak pointer's object will be destroyed when there are no more shared references to it.
+
+Weak pointers help confer intent. When you see a weak pointer in a class, you know that is just caching a pointer to the object, and does not control its lifetime.
+
+## Declaration and Initialization
+
+Weak pointers are always created from shared pointers/references, or other weak pointers.
+
+	// Allocate a new tree node.
+	TSharedRef<FTreeNode> NodeOwner( new FTreeNode() );
+
+	// Create a weak pointer to the new tree node.
+	TWeakPtr<FTreenode> NodeObserver( NodeOwner );
+
+Remember, a weak pointer does not prevent the object from being destroyed. If NodeOwner is reset while NodeObserver is still in scope, the object will be deleted:
+
+	// Destroy the node.
+	NodeOwner.Reset();
+
+Weak pointers can be copied around safely, just like shared pointers.
+
+	TWeakPtr<FTreeNode> NodeObserverB = NodeObserver;
+
+You can reset (or reassign) a weak pointer when you are done with it.
+
+	NodeObserver = null;
+
+## Dereferencing and Accessing
+
+To access a weak pointer's object, first promote it to a shared pointer by calling the **Pin()** method.
+
+	// Get access to the node through the weak pointer.
+	TSharedPtr<TFreeNode> LockedObserver( NodeObserver.Pin() );
+
+	// Check that the shared reference was successfully created from the weak reference.
+	If( LockedObserver.IsValid() )
+	{
+		// Object still exists, so it can be accessed.
+		LockedObserver->ListChildren();
+	}
+
+Pin() is fast. It is called Pin because it prevents the object from being destroyed while the weak pointer is temporarily accessed.
+
+Weak pointers automatically know when their object has been deleted, so you can handle these cases in a safe way by using the IsValid() method.
+
+	// Make sure the weak pointer's object still exists before accessing it.
+	if( NodeObserver.IsValid() )
+	{
+		...
+	}
+
+## Breaking Cycles with Weak Pointers
+
+You can use weak pointers to break cycles:
+
+	class FTreeNode
+	{
+		/** Child nodes, owned by this node. */
+		TArray< TSharedPtr<FTreeNode> > Children;
+
+		/** Weak pointer back to this node's parent. */
+		TWeakPtr<FTreeNode> Parent;
+	}
+
+FTreeNode has shared pointers to its child nodes that it _owns_. This means the child nodes will be destroyed with it. It also uses a weak pointer to cache a reference to its parent node. Weak pointers never prevent an object from being destroyed. Using shared/weak pointers this way makes the chain of authority more obvious.
+
+Weak pointers just know when their object is deleted, so you could safely cache pointers to any node in the tree this way.
+
+## Conversion
+
+You must use the **Pin()** method to convert weak pointers to shared pointers. There is no explicit constructor.

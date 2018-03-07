@@ -1,0 +1,89 @@
+﻿INTSourceChangelist:3467293
+Availability: Public
+Title:VFX 최적화 안내서
+Crumbs: %ROOT%, Engine, Engine/Rendering/ParticleSystems
+Description:파티클 시스템 최적화를 통한 퍼포먼스 문제 해결하기 입니다.
+Version: 4.9
+tags:Particles
+topic-image:VFXOptimization_topic.png
+
+[TOC (start:2 end:3)]
+
+이 문서는 캐스케이드, 머티리얼 에디터, 블루프린트, 마티네는 물론 퍼포먼스 이슈에 관계된 흔한 이펙트 사전 지식이 있다 가정합니다. 퍼포먼스 이슈 솔루션은 여러 갈래가 있지만, 여기서는 에픽의 이펙트 팀이 UE4 에서 사용할 수 있는 툴을 가지고 이러한 이슈를 해결해 나가는 과정을 개략적으로 담아 보겠습니다.
+
+
+## 이펙트 퍼포먼스를 떨어뜨리는 주역
+
+$ **Overdraw** 오버드로 : 파티클이 덮는 스크린 스페이스 크기와 그 파티클에 있는 인스트럭션 수 입니다. 오버드로 = 레이어 수 * 영향받은 픽셀 수 입니다. (GPU)
+$ **Tick Time** 틱 시간 : 게임 스레드가 모든 파티클 시스템을 업데이트하는 데 걸리는 시간입니다. (게임 스레드)
+$ **Draw Calls** 드로 콜 : GPU 용으로 준비할 스테이트 셋업입니다. (렌더 스레드)
+$ **Bounds Calculation** 바운드 계산 : 이펙트의 바운드를 업데이트하는 데 걸리는 시간입니다. 이 바운드는 카메라 프러스텀을 기준으로 표시여부(즉 이펙트의 바운드가 뷰에 있는지)를 결정하는데 사용됩니다.
+
+이와 같은 주요 이슈도 여러 분류로 나뉘며, 보통은 이슈 생성에 큰 역할을 합니다. 그리고 각각의 분류에 대해서도 보통 퍼포먼스 이슈 관리를 위한 툴이 있습니다.
+
+
+## 이펙트 퍼포먼스를 위한 코어 시스템
+
+$ **GPU** : 화면 위에 픽셀을 그리는 데 걸리는 시간입니다. (오버드로)
+$ **Game Thread** : 파티클 시스템 행위 업데이트에 걸리는 시간입니다. (틱 시간)
+$ **Render Thread** : 파티클 지오메트리와 관련된 드로 콜을 패킹하는 데 걸리는 시간입니다. (드로 콜)
+
+## 퍼포먼스 고려사항
+
+ 퍼포먼스를 거시적인 관점에서 따져보자면 파티클의 수는 정말이지 무시할 만 합니다. 어떤 시스템의 전체 비용으로 파 내려가 보자면, 분할화면이든 아니든 머티리얼 복잡도와 화면 차지비율(오버드로)가 바로 주적입니다. 버텍스 컬러를 곱해준 텍스처만 달랑 있는 단순한 방출형 스파크를 라이팅되지 않은 머티리얼의 emissive(방출) 입력에 연결한 정도는 그저 인스트럭션을 약간 차지할 뿐입니다. 이런 정도야 하루 종일 틀어놔도 전체 퍼포먼스에 미치는 영향은 매우 작은 수준입니다. 스프라이트가 작다는 것은 화면 차지비율이 낮다는 것이고, 머티리얼 복잡도 또한 렌더링을 싸고 빠르게 하는 데 일조합니다. 결국 버텍스 수는 (백단위 이상으로) 엄청나지 않은 다음에야 그다지 신경쓸 필요가 없는 것입니다.
+
+일반적인 퍼포먼스에 훨씬 큰 영향을 끼치는 것은 머티리얼에 있는 인스트럭션 수입니다. 불이나 연기같은 머티리얼은 기본적으로 두 가지 방식으로 구현됩니다. 먼저 (불을 예로 들어) 불에 대한 머티리얼을 좀 더 복잡하게 만들고 스프라이트는 줄인 다음, 머티리얼을 랜덤하고 복잡하게 만들어 이미터를 살리는 방법을 들 수 있겠습니다. 아니면 머티리얼은 좀 싼 녀석으로 하고 스프라이트 스폰 수를 조금 늘려 전체 비용은 비슷하게 하여, 머티리얼의 복잡도를 늘리는 것과는 반대의 방법으로 많은 수의 파티클을 통해 랜덤하게 만드는 것입니다. 명심할 점은 머티리얼 비용은 거리에 따라 기하급수적으로 감소한다는 점입니다. (카메라에서 두 배 멀리 떨어진 화면상의 쿼드는 픽셀 구역도 거리에 따라 기하급수적으로 떨어지기에 비용은 1/4이 되어, 오버드로되는 픽셀 수가 확 줄어들게 됩니다.)
+
+즉 머티리얼이 얼마나 비싼지, 스폰시키는 스프라이트 수가 얼마나 되는지, 화면상에서 이 효과에 얼마나 가까이 다가갈 지를 분석해야 합니다. 이와 같은 세 가지 속성이 이미터의 복잡도의 관점에서 볼 때, 전체적으로 균형이 잡혔는가를 볼 때의 주요 관건입니다. 파티클 시스템에 가까이 가거나 멀어지면서 스프라이트 수, 머티리얼 복잡도, 기타 요소를 조절해 주는 LOD 시스템도 적절히 활용해 주셔야 하겠습니다.
+
+일반적으로 퍼포먼스를 향상시키기 위해서는 머티리얼의 복잡도를 줄이는 데 초점을 맞추고, 이미터 작업을 할 때는 항상 오버드로를 염두에 둬야 합니다. 파티클 수를 엄청 스폰한다거나, 버텍스 수가 엄청난 메시 이미터를 사용하는 메시를 스폰한다거나 하지 않는 이상, 파티클 수에 진땀뺄 필요는 없습니다.
+
+문제점이 어디에 있는지 알아차리고 난 후, 다음 명령으로 최적화를 시작하면 됩니다.
+
+
+[OBJECT:TopicList]
+	[PARAM:icon]
+		![](%ROOT%/fx_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		고민해결 링크
+	[/PARAM]
+	[PARAM:description]
+	[/PARAM]
+	[PARAM:links]
+		* [GPU 관련 문제를 겪고 있습니다.](Engine/Rendering/ParticleSystems/Optimization/Results#OverdrawGraphics)
+		* [게임 스레드 관련 문제를 겪고 있습니다.](Engine/Rendering/ParticleSystems/Optimization/Results#GameThread)
+		* [렌더 스레드 관련 문제를 겪고 있습니다.](Engine/Rendering/ParticleSystems/Optimization/Results#RenderThread)
+	[/PARAM]
+[/OBJECT]
+
+ 
+
+
+[OBJECT:TopicList]
+	[PARAM:icon]
+		![](%ROOT%/fx_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		파티클 시스템 일반 토픽
+	[/PARAM]
+	[PARAM:description]
+	[/PARAM]
+	[PARAM:links]
+		* [](Engine/Rendering/ParticleSystems/Optimization/Balance)
+		* [](Engine/Rendering/ParticleSystems/Optimization/Concepts)
+		* [](Engine/Rendering/ParticleSystems/Optimization/Results)
+		* [](Engine/Rendering/ParticleSystems/Optimization/SplitScreen)
+	[/PARAM]
+[/OBJECT]
+
+
+
+
+
+ 
+
+
+
+
+

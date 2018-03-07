@@ -1,0 +1,95 @@
+﻿INTSourceChangelist:3339919
+Availability:Public
+Title:移动补丁工具节点
+Crumbs:
+Description:介绍不同类型的移动补丁工具蓝图节点。
+Related:Engine/Blueprints
+Related:Platforms/Mobile
+Related:Platforms/Mobile/MobilePackagingWizard
+version:4.14
+Parent:Engine/Blueprints
+type:overview
+tags:Blueprints
+skilllevel:Intermediate
+topic-image:Patching_Topic.png
+
+[TOC (start:2 end:2)]
+
+使用 [](Platforms/Mobile/MobilePackagingWizard) 为移动项目创建小型初始下载后，还需要以可下载数据块的方式将项目的剩余内容提供给用户。全新的移动补丁工具蓝图库包含移动游戏从云端网站下载并安装游戏内容和补丁（而非从 App Store 上进行初始下载）的所有必备功能。这些功能可确定是否有更新游戏内容、开始下载、跟踪进程、处理错误，并在最后安装成功下载的内容包。此外还包含检查存储空间和 WiFi 连接的功能，以便在这些情况下提醒用户。支持 Android 和 iOS。
+
+[REGION:tip]
+为展示这些函数之间的上下文关系，此处展示设置范例。
+如蓝图图表范例中的函数或事件未列于下表中，则需要为您自己的项目创建自定义节点。 
+[/REGION]
+
+## 使用待定内容
+
+[REGION:lightbox]
+[![](Patching_1.png)(convert:false)](Patching_1.png)
+[/REGION]
+
+这是补丁流程的第一步。补丁开始时，需要使用 **Request Content** 节点从远程服务器请求内容（通过关卡加载或用户行为）。在此例中，安装目录保存在一个变量中，但其也可作为函数输入进行传递。**Content To Install** 同样保存在一个变量中，以便之后使用。内容请求完成后，将请求的成功或失败执行不同事件。自定义事件用作 **Request Content** 函数的输入。此处显示的 **Check Download Space** 函数将调用一个自定义事件，开始补丁逻辑的下一套内容。
+
+| 节点 | 描述 | 
+| --- | --- |
+| Request Content | 尝试使用特定的 manifest URL 下载一个 manifest 文件。成功后，它将返回一个代表远程内容的对象。可查询此对象的更多信息，如内容总大小、下载大小，等等。用户可选择下载并安装远程内容。|
+
+[REGION:lightbox]
+[![](Patching_2.png)(convert:false)](Patching_2.png)
+[/REGION]
+
+请求远程内容成功后，下一步是使用 **Get Required Disk Space** 节点确保有足够空间进行下载，并将结果与 **Get Disk Free Space** 的结果进行对比。如所需的磁盘空间小于剩余磁盘空间，则调用自定义事件开始下载。
+
+| 节点 | 描述 | 
+| --- | --- |
+| Get Disk Free Space | 获取内容安装（或即将进行安装）路径的剩余磁盘空间（以 MB 为单位）。|
+| Get Required Disk Space | 获取此内容安装所需的磁盘空间（以 MB 为单位）。|
+
+[REGION:lightbox]
+[![](Patching_3.png)(convert:false)](Patching_3.png)
+[/REGION]
+
+虽然此图表中有大量内容，但唯一的移动补丁工具函数是 **Start Install**，它将尝试下载并安装远程内容。和 **Request Content** 一样，**Start Install** 拥有成功和失败的事件参数。如安装成功，则使用 **Mount Content** 自定义事件触发补丁流程的最终部分。此时将触发另一个带定时器的自定义事件 **Mount Content**。使用定时器和 **Update Download State** 函数，下载状态可以固定间隔向用户展示。此逻辑的更多内容在下一个蓝图图表中。
+
+| 节点 | 描述 | 
+| --- | --- |
+| Start Install | 尝试下载并安装远程内容。用户可选择将安装内容装入游戏中。|
+
+[REGION:lightbox]
+![](Patching_4.png)
+[/REGION]
+
+**Display Download State** 自定义事件连接到 **Format Text** 节点，用户可在补丁流程的这个阶段中在 UI（用户界面）上填入进度条，或显示进度的其他方法。**Get Download Size**、**Get Download Speed**、**Get Download Status Text**、**Get Install Progress** 和 **Get Total Downloaded Size** 节点的输出在此组合为一个简单文本段，向用户呈现。此脚本随定时器以固定间隔调用，但并不回叫到任何其他范例图表。
+
+| 节点 | 描述 | 
+| --- | --- |
+| Get Download Size | 获取此安装内容的总下载大小。|
+| Get Download Speed | 获取当前的下载速度（以 MB/秒为单位）安装中有效。|
+| Get Download Status Text | 获取当前的安装状态文本。安装中有效。|
+| Get Install Progress | 获取当前的安装进度。已知进度的结果在 0 和 1 之间，未知进度的结果小于 0。|
+| Get Total Downloaded Size | 获取已下载的总大小（以 MB 为单位）。安装中有效。|
+
+## 使用安装内容
+
+[REGION:lightbox]
+![](Patching_5.png)
+[/REGION]
+
+补丁流程的最后阶段是装入内容。我们使用的是第一个蓝图图表容纳的 **Install Directory** 变量，但这也可作为函数输入进行传递。**Get Installed Content** 节点用于从目录中寻找内容，然后 **Mount** 函数将把内容装入游戏。与 **Request Content** 和 **Start Install** 不同的是，**Mount** 没有成功和失败的事件回调。
+
+| 节点 | 描述 | 
+| --- | --- |
+| Get Installed Content | 获取安装的内容。如指定目录中有安装内容，此节点将返回一个非空对象。用户可选择将安装内容装入游戏。|
+| Mount | 装入安装内容。|
+
+## 其他移动补丁函数
+
+上方的图表是如何在移动设备上设置补丁的简单范例，但也能设置其他复杂行为。例如可设置游戏在无可用 WiFi 连接时提醒用户，或为 iOS 和 Android 设备提供不同内容。针对这些以及其他使用情况，将以下函数添加到蓝图将有所帮助。
+
+| 节点 | 描述 | 
+| --- | --- |
+| Get Active Device Profile Name | 获取当前选中的设备配置文件命名。|
+| Get Installed Content Size | 获取安装内容的大小（以 MB 为单位）|
+| Get Supported Platform Names | 获取此设备上支持平台名的列表。范例：Android_ETC2, Android_ASTC |
+| Has Active WiFi Connection | 返回当前是否存在可用 WiFi 连接。|
+	 

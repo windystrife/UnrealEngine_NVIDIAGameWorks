@@ -1,0 +1,120 @@
+﻿INTSourceChangelist:2711147
+Availability:Public
+Title: 虚幻引擎编译系统的目标文件
+Crumbs: %ROOT%, Programming, Programming\UnrealBuildSystem
+Description: 虚幻引擎编译系统在编译模块时使用的目标文件（Target File）的参考。
+Version: 4.9
+
+[TOC (start:2 end:3)]
+
+虚幻引擎编译系统使用 **Target** 文件给 UnrealBuildTool 用于编译生成每个应用模块，制作动态规则模块。这些文件替换了以前较早时的 `UEBuild*.cs` 这样的文件，当时这些文件直接被编译在 UnrealBuildTool 的工具内。现在，每个目标文件定义了一个类，以供 UnrealBuildTool 来在编译的时候确认该模块是个游戏模块，还是一个应用工具模块。
+
+UnrealBuildTool 现在是从 RulesModule.dll 中获取需要编译生成项目的正确的目标信息。
+
+有两种目标类型：
+
+* **Game** - 这种类型的目标会利用“共享”的UE4 来执行。
+* **Program** - 这种类型的目标具有独立的可执行能力。ShaderCompileWorker，SlateViewer，以及 UnrealHeaderTool 就是这种类型。
+
+
+## 目标文件的命名和路径
+
+目标文件必须存在于一个程序的根目录或者游戏的 “Source” 目录的根目录中，并且必须被命名为 `[APPNAME].Target.cs`。
+
+举个例子，ShaderCompileWorker 这个程序位于 \UE4\Engine\Source\Programs\ShaderCompileWorker，该路径下有文件 ShaderCompileWorker.Target.cs。
+
+类似的，ExampleGame 的 Source 目录位于 UE4\ExampleGame\Source，其中应有文件 ExampleGame.Target.cs。
+
+## 目标文件的内容
+
+目标文件中，为每个游戏模块或者功能模块定义的类，都继承自 TargetRules（可以在 RulesCompiler.cs 文件中查到声明）。
+
+该类的名字由当前这个游戏模块或者功能模块自身的名字加上 target 字样组合而成。比如，ShaderCompileWorker 的目标文件中的类名应该是 ShaderCompileWorkerTarget。这里必须要用 Target 作为结尾。这么做是为了避免和 *.Build.cs 文件中的那些类似规则的类名冲突，因为它们将会编译进同一个 DLL 文件中。
+
+当需要从 Rules DLL 中编译某个目标时，UnrealBuildTool 会用 [APPNAME] 并附加 Target 的组合。继续用先前的例子，当 UnrealBuildTool 在处理 ShaderCompileWorker Win64 Development 传入的时候，会以 ShaderCompileWorkerTarget 作为 TargetRules 的类名来请求。
+
+### 构造函数
+
+构造函数中设定了该应用模块的名称以及类型。下面以 ExampleGameTarget 的构造函数来举例：
+	
+	public ExampleGameTarget(TargetInfo Target)
+	{
+		Type = TargetType.Game;
+		Name = "ExampleGame";
+	}
+
+### 设置二进制
+
+使用 **TargetRules::SetupBinaries()** 这个函数来生成 UEBuildBinaryConfiguration 的实例列表，UnrealBuildTool 将用该列表来填充 AppBinaries 数组（这是会生成的东西）。
+
+### 设置全局环境
+
+**TargetRules::SetupGlobalEnvironment()** 用于为 UnrealBuildTool 生成目标设置各种配置选项，也用于设置编译和链接使用的环境变量。
+
+[REGION:note]
+如果当前游戏并不包含这个函数的话，那就意味着是采用 UEBuildGame 类里面的默认实现。必要的话游戏可以通过实现这个函数来重载覆盖默认的设置。
+[/REGION]
+
+## 目标文件示例
+
+以下是 ShaderCompileWorker.Target.cs 的完整示例：
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+	using UnrealBuildTool;
+	using System.Collections.Generic;
+
+	public class ShaderCompileWorkerTarget : TargetRules
+	{
+		public ShaderCompileWorkerTarget(TargetInfo Target)
+		{
+			Type = TargetType.Program;
+			Name = "ShaderCompileWorker";
+		}
+
+		//
+		// TargetRules interface.
+		//
+
+		public override void SetupBinaries(
+			TargetInfo Target,
+			ref List<UEBuildBinaryConfiguration> OutBuildBinaryConfigurations,
+			ref List<string> OutExtraModuleNames
+			)
+		{
+			List<string> LinkModules = new List<string>() { "Core", "ShaderCore", "RenderCore", "RHI", "WindowsTools", "ShaderCompileWorker" };
+			OutBuildBinaryConfigurations.Add(
+				new UEBuildBinaryConfiguration(	InType: UEBuildBinaryType.Executable,
+												InModuleNames: LinkModules )
+				);
+		}
+
+		public override void SetupGlobalEnvironment(
+			TargetInfo Target,
+			ref LinkEnvironmentConfiguration OutLinkEnvironmentConfiguration,
+			ref CPPEnvironmentConfiguration OutCPPEnvironmentConfiguration
+			)
+		{
+			// Turn off various third party features we don't need
+			UEBuildConfiguration.bAllowSteamworks = false;
+			UEBuildConfiguration.bAllowLive = false;
+			UEBuildConfiguration.bCompilePerforce = false;
+
+			// Currently we force Lean and Mean mode
+			UEBuildConfiguration.bCompileLeanAndMeanUE = true;
+
+			// Currently this app is not linking against the engine, so we'll compile out references from Core to the rest of the engine
+			UEBuildConfiguration.bCompileAgainstEngine = false;
+
+			// ShaderCompileWorker is a console application, not a Windows app (sets entry point to main(), instead of WinMain())
+			OutLinkEnvironmentConfiguration.bIsBuildingConsoleApplication = true;
+
+			// Disable logging, as the workers are spawned often and logging will just slow them down
+			OutCPPEnvironmentConfiguration.Definitions.Add("ALLOW_LOG_FILE=0");
+			OutCPPEnvironmentConfiguration.Definitions.Add("HACK_HEADER_GENERATOR=1");
+			OutCPPEnvironmentConfiguration.Definitions.Add("HACK_SHADER_COMPILER_WORKER=1");
+		}
+	}
+
+
+

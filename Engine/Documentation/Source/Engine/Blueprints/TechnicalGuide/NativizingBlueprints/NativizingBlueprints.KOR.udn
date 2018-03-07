@@ -1,0 +1,305 @@
+﻿INTSourceChangelist:3492049
+Availability:Public
+Title:블루프린트 네이티브화
+Crumbs:
+Description:블루프린트에 게임플레이 요소를 노출시키는 게임플레이 프로그래머를 위한 기술 안내서입니다.
+Version: 4.15
+Parent: Engine/Blueprints/TechnicalGuide
+type:overview
+tags:Blueprints
+Skilllevel:Intermediate
+Related: Engine/Blueprints/TechnicalGuide/NativizingBlueprints/Advanced
+social-image:social_bp_nativization.png
+topic-image:NativizingBlueprints_topic.png
+
+[TOC(start:1 end:4)]
+
+팀이 블루프린트로 게임플레이 스크립트를 짜면, 네이티브 C++ (C++) 코드 작성이나 컴파일할 필요 없이 UClass 를 새로 만들어 줍니다. 그로 인해 네이티브 C++ 프로그래머 기술 지식이 없는 
+게임 팀에게는 블루프린트가 적합합니다. 프로그래머가 아닌 사람도 블루프린트만 가지고 작업이 가능한 이유는, 블루프린트 노드는 가상 머신(VM)에서 실행되어 
+네이티브 C++ 함수를 호출할 수 있기 때문입니다. 그러나 아쉽게도 블루프린트를 네이티브 C++ 코드로 변환해 주는 VM 에는 비용이 발생합니다.
+그렇기 때문에 상상하시듯, 블루프린트 노드를 네이티브 C++ 함수로 변환하는 것은 게임의 프레임당 퍼포먼스를 낮출 소지가 있습니다. 
+
+VM 에서 블루프린트를 실행하는 비용이 크지 않을 때는 VM 비용을 안고갈 수도 있지만, 아주 약간의 게임 퍼포먼스도 아쉬울 때가 있습니다 
+(하드웨어 성능이 제한된 디바이스에 출시할 때는 특히나 그렇습니다). 그럴 때 언리얼 엔진의 Blueprint Nativization (블루프린트 네이티브화) 툴이 도움이 됩니다.
+
+[REGION:note]
+에픽에서는 저희 VR 신작 타이틀 [Robo Recall](https://www.epicgames.com/roborecall/en-US/home) 개발에 블루프린트 네이티브화를 성공적으로 활용했습니다.
+[/REGION]
+
+##VM 비용 감소
+
+블루프린트 네이티브화의 주 목적은 프로젝트의 블루프린트에서 네이티브 C++ 코드를 생성하여 프로젝트의 런타임 버전에서 발생하는 VM 비용을 줄이는 것입니다.
+일반적으로 모든 블루프린트 클래스를 새로 생성되는 네이티브 C++ 클래스로 대체한 뒤 [쿠킹 프로세스](Engine/Deployment/Cooking) 도중 컴파일하는 것입니다.
+변환된 C++ 코드를 텍스트 에디터에서 읽을 수는 있지만, 코드 포맷이 재사용 가능하지는 (또는 사람이 읽기 좋게 생성되어 있지는) 않음을 알 수 있습니다.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![블루프린트](Blueprint.png)(w:1200)
+	[/PARAM]
+	[PARAM:after]
+	![네이티브화된 블루프린트](NativizedBlueprint.png)(w:1200)
+	[/PARAM]
+[/OBJECT]
+
+_플레이어 캐릭터 블루프린트와 네이티브화된 코드를 비교한 것입니다._
+
+여기서는 프로젝트의 블루프린트를 네이티브화하는 것으로 시작하여, 블루프린트 전용 프로젝트에 대해서도 알아볼텐데, 꽤나 단순한 작업이 될 것입니다. 시작하기에 앞서 
+블루프린트 네이티브화를 켜고 끄는 유저 인터페이스(UI)가 어디있는지 알아야 합니다.
+
+##블루프린트 네이티브화 켜기
+
+프로젝트를 처음 만들면, 블루프린트 네이티브화는 기본적으로 꺼져있습니다. 블루프린트 네이티브화 세팅은 언리얼 에디터 **프로젝트 세팅** 메뉴의
+왼편 **패키징** 부분에서 찾을 수 있습니다. **프로젝트 패키징** 메뉴 안에 **Blueprints** (블루프린트) 드롭다운 메뉴가 보일 것입니다.
+
+[REGION:lightbox]
+	[![](BPNativization_DisabledUI.png)(w:600)](BPNativization_DisabledUI.png)
+[/REGION]
+
+[REGION:caption]
+	클릭하면 원본 이미지를 확인합니다.
+[/REGION]
+
+개발 도중 언제든 블루프린트 네이티브화를 끄려면, **Blueprint Nativization Method** 드롭다운 목록에서 **Disable** 을 선택하면 됩니다.
+
+![](BPNativization_DisabledUI1.png)(w:900)
+
+드롭다운 목록에서 볼 수 있듯이, 가능한 옵션이 둘 더 있습니다:
+
+* **Inclusive** Nativization (포괄적 네이티브화)
+* **Exclusive** Nativization (배타적 네이티브화)
+
+##포괄적 네이티브화
+
+**Inclusive** (포괄적) 네이티브화를 선택하면, 프로젝트에 지원되는 블루프린트 클래스 전체를 네이티브화 한다는 것입니다.
+
+![](BPNativization_InclusiveUI.png)(w:900)
+
+**포괄적** 네이티브화 메소드를 선택한 후, [패키징 프로세스](Engine/Basics/Projects/Packaging) 도중 
+Unreal Automation Tool (UAT) 는 다음과 같은 지원 블루프린트 애셋을 네이티브화시킵니다:
+
+* Blueprint Classes 블루프린트 클래스
+* Blueprint Function Libraries 블루프린트 함수 라이브러리
+* Blueprint Interfaces 블루프린트 인터페이스
+* Anim Blueprints 애님 블루프린트
+* Widget Blueprints 위젯 블루프린트
+* User Defined Structures 사용자 정의 구조체
+* User Defined Enums 사용자 정의 Enum
+
+[REGION:note]
+현재 레벨 블루프린트와 블루프린트 매크로는 블루프린트 네이티브화 툴에 지원되지 않아, 네이티브 C++ 코드로 변환되지 않습니다.
+[/REGION]
+
+###변환에서 블루프린트 제외
+
+블루프린트 네이티브화 툴이 블루프린트 노드를 네이티브 C++ 코드로 변환하면, 그 지원을 위해 추가적인 머신 인스트럭션, 종속성, 임베디드 메타데이터를 포함시켜 결과 실행파일을 
+컴파일합니다. 
+
+[REGION:warning]
+즉 **포괄적** 블루프린트 네이티브화 메소드를 선택한 경우, 실행파일 크기가 발매 대상 플랫폼에 맞지 않을 만큼 커질 수도 있다는 점에 
+유의해야 합니다.
+[/REGION]
+
+변환 프로세스에서 제외시킬 블루프린트를 지정하는 것으로 실행파일 크기가 커지는 정도를 줄일 수 있습니다. 변환에서 블루프린트를 제외하려면, 
+프로젝트의 `DefaultEditor.ini` 파일을 열고 `[BlueprintNativizationSettings]` 제목줄 아래 다음과 같은 환경설정 프로퍼티를 추가합니다:
+
+* 특정 블루프린트 애셋 유형을 제외하려면, `ExcludedBlueprintTypes` 환경설정 프로퍼티를 설정합니다.
+  예를 들어 `+ExcludedBlueprintTypes=/Script/UMGEditor.WidgetBlueprint` 라 하면 위젯 블루프린트 애셋은 변환하지 않습니다.
+* 특정 블루프린트 애셋을 제외하려면, `ExcludedAssets` 환경설정 프로퍼티를 설정합니다.
+  예를 들어 `+ExcludedAssets=/Engine/Tutorial/SubEditors/TutorialAssets/Character/TutorialCharacter` 라 하면 **Tutorial Character** 블루프린트 애셋은 변환하지 않습니다.
+
+![](DefaultEngineINI.png)(w:900)
+
+참고로 블루프린트 애셋은 패키징 프로세스의 일부로 쿠킹된 경우에만 네이티브화 됩니다. 즉 쿠킹할 블루프린트 애셋이나 맵을 지정하지 않은 경우, 언리얼 엔진은 
+**콘텐츠** 디렉토리 안에 있는 모든 것을 쿠킹합니다. **포괄적** 메소드를 선택한 이후라면 사용되지 않는 블루프린트도 네이티브화될 것이므로, **배타적** 블루프린트 네이티브화 메소드를 
+선택하는 것이 좋을 것입니다.
+
+##배타적 네이티브화
+
+하드웨어 리소스가 제한된 디바이스에 커다란 프로젝트를 출시하는 경우, **배타적** 블루프린트 네이티브화 메소드를 선택할 것을 추천합니다.
+
+![](BPNativization_ExclusiveUI.png)(w:900)
+
+어플리케이션 실행을 위한 타겟 하드웨어 용량 이상으로 커질 리 없는 작은 프로젝트에는 **포괄적** 메소드를 써도 괜찮지만, **배타적** 블루프린트 네이티브화 메소드를 선택했을 때의 
+장점이 여러가지 있는데, 그 중 몇 가지는 다음과 같습니다:
+
+* 실행파일 최종 크기가 제한됩니다.
+* 미사용 블루프린트 애셋이 변환되는 것을 능동적으로 막을 수 있습니다.
+* 변환할 블루프린트를 명시적으로 선택할 수 있습니다.
+
+일반적으로는 계산 비용이 비싼 블루프린트를 배타적으로 네이티브화하는 것을 추천하는데, 그 경우는 다음과 같습니다 (여기에만 국한되는 것은 아닙니다):
+
+* 노드가 많은 블루프린트.
+* 최적화된 루프를 요하는 블루프린트.
+* 복잡한 수학 연산을 하는 블루프린트.
+
+###네이티브화할 블루프린트 선택
+
+[REGION:note]
+블루프린트 애셋이 들어있는 프로젝트가 없으신 경우, 가능한 프로젝트 템플릿 중 하나를 사용하여 새 프로젝트를 생성하세요. 여기서는 데모 목적으로 **Puzzle** 프로젝트 템플릿을 
+사용하고 있습니다.
+[/REGION]
+
+다음과 같이 **배타적** 블루프린트 네이티브화 메소드를 사용하여 네이티브화 하고자 하는 블루프린트 애셋을 선택합니다.
+
+1.	먼저 **편집** 메뉴를 열고 **프로젝트 세팅...** 을 선택합니다.
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_1.png)(w:900)](BPNativization_ExclusiveStep_1.png)
+	[/REGION]
+	
+	[REGION:caption]
+		클릭하면 원본 이미지를 확인합니다.
+	[/REGION]
+
+1.	**프로젝트 세팅** 메뉴를 연 상태에서 **패키징** 을 클릭하여 **프로젝트 세팅 - 패키징** 메뉴를 엽니다.
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_2.png)(w:900)](BPNativization_ExclusiveStep_2.png)
+	[/REGION]
+	
+	[REGION:caption]
+		클릭하면 원본 이미지를 확인합니다.
+	[/REGION]
+
+1.	**블루프린트** 서브메뉴에서 **Blueprint Nativization Menu** (블루프린트 네이티브화 메뉴) 드롭다운 목록을 클릭합니다.
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_3.png)(w:900)](BPNativization_ExclusiveStep_3.png)
+	[/REGION]
+	
+	[REGION:caption]
+		클릭하면 원본 이미지를 확인합니다.
+	[/REGION]
+
+1.	**Exclusive** (배타적) 옵션을 선택하여 배타적 블루프린트 네이티브화 메소드를 선택합니다.
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_4.png)(w:900)](BPNativization_ExclusiveStep_4.png)
+	[/REGION]
+	
+	[REGION:caption]
+		클릭하면 원본 이미지를 확인합니다.
+	[/REGION]
+
+1.	계속해서 서브메뉴 하단의 확장 화살표를 클릭하면 공백 배열이 나타납니다.
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_5.png)(w:900)](BPNativization_ExclusiveStep_5.png)
+	[/REGION]
+	
+	[REGION:caption]
+		클릭하면 원본 이미지를 확인합니다.
+	[/REGION]
+
+	이 배열은 명시적으로 네이티브화 선택할 블루프린트 애셋 목록입니다.
+	![](BPNativization_ExclusiveStep_5Note.png)(w:900)
+
+1.	**프로젝트 프로퍼티** 메뉴를 나가 블루프린트 애셋이 들어있는 폴더로 이동합니다.
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_6.png)(w:900)](BPNativization_ExclusiveStep_6.png)
+	[/REGION]
+	
+	[REGION:caption]
+		클릭하면 원본 이미지를 확인합니다.
+	[/REGION]
+
+1.	이제 네이티브화 하려는 블루프린트 애셋을 엽니다.
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_7.png)(w:900)](BPNativization_ExclusiveStep_7.png)
+	[/REGION]
+	
+	[REGION:caption]
+		클릭하면 원본 이미지를 확인합니다.
+	[/REGION]
+
+1.	**블루프린트 에디터** 가 열리면 **클래스 세팅** 버튼을 클릭합니다.
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_8.png)(w:900)](BPNativization_ExclusiveStep_8.png)
+	[/REGION]
+	
+	[REGION:caption]
+		클릭하면 원본 이미지를 확인합니다.
+	[/REGION]
+
+1.	이 블루프린트 애셋을 네이티브화 마킹하려면, **디테일** 패널의 **Packaging** (패키징) 서브메뉴에 위치한 **Nativize** (네이티브화) 박스를 체크합니다.
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_9.png)(w:900)](BPNativization_ExclusiveStep_9.png)
+	[/REGION]
+	
+	[REGION:caption]
+		클릭하면 원본 이미지를 확인합니다.
+	[/REGION]
+
+1.	**저장** 버튼을 클릭한 후 이 애셋의 **블루프린트 에디터** 를 닫습니다.
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_10.png)(w:900)](BPNativization_ExclusiveStep_10.png)
+	[/REGION]
+	
+	[REGION:caption]
+		클릭하면 원본 이미지를 확인합니다.
+	[/REGION]
+
+1.	배타적 네이티브화에 선택한 블루프린트 애셋을 확인하려면, **프로젝트 세팅** 메뉴를 열고 네이티브화 마킹한 블루프린트 애셋 목록이 들어있는 배열을 확인하면 됩니다.
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_11.png)(w:900)](BPNativization_ExclusiveStep_11.png)
+	[/REGION]
+	
+	[REGION:caption]
+		클릭하면 원본 이미지를 확인합니다.
+	[/REGION]
+
+이 시점에서, **배타적** 블루프린트 네이티브화 메소드를 사용하여 프로젝트를 쿠킹하고 패키징할 준비가 되었습니다.
+
+[REGION:note]
+참고로 네이티브화 하도록 선택한 블루프린트를 빌드하기 위해 필요한 지원 종속성 전부 네이티브화 플래그 설정될 것입니다.
+[/REGION]
+
+##네이티브화된 코드 위치
+
+네이티브화된 코드 위치는 `[프로젝트 디렉토리]\Intermediate\\[쿠킹 대상 플랫폼]\NativizedAssets\Source\NativizedAssets\` 입니다.
+
+![](NativizedAssetsLocation.png)(w:900)
+
+##네이티브화 플래그 설정
+
+**프로젝트 세팅 > 프로젝트 패키징** 메뉴로 돌아가면, **Warn if Packaged Without Nativization Flag** (네이티브화 플래스 없이 패키징된 경우 경고) 옵션이 있습니다.
+
+[REGION:lightbox]
+	[![](NativizationFlag.png)(w:900)](NativizationFlag.png)
+[/REGION]
+
+[REGION:caption]
+	클릭하면 원본 이미지를 확인합니다.
+[/REGION]
+
+이 플래그는 (서버측 빌드 엔지니어처럼) 명령줄에서 프로젝트를 빌드/쿠킹하는 고급 사용자용 옵션입니다. 기본적으로 이 플래그를 켜고 **프로젝트 세팅** 메뉴에서 
+네이티브화도 켠 상태라면, 명령줄에서 네이티브화 플래그를 사용하지 않은 경우 빌드/쿠킹 시간에 경고가 뜰 것입니다. 명령줄에서 네이티브화 스위치를 사용하는 방법에 대해서는 
+[](Engine/Blueprints/TechnicalGuide/NativizingBlueprints/Advanced) 문서를 참고하세요.
+
+## 부가 자료
+
+블루프린트 네이티브화 관련 부가 정보는 다음 피처 하이라이트 비디오에서 찾아보실 수 있습니다.
+
+[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:videoid]
+	Ut_CRt7o8PA
+	[/PARAMLITERAL]
+	[PARAMLITERAL:width]
+	100
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	56.25
+	[/PARAMLITERAL]
+	[PARAMLITERAL:units]
+	%
+	[/PARAMLITERAL]
+	[PARAMLITERAL:type]
+	simple
+	[/PARAMLITERAL]
+[/OBJECT]

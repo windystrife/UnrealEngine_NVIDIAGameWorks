@@ -1,0 +1,120 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	MeshTexCoordSizeAccuracyPixelShader.usf: Outputs the accucary of the texel factor.
+=============================================================================*/
+
+#include "Common.ush"
+
+#include "DebugViewModeCommon.ush"
+
+float4 AccuracyColors[5];
+float4 CPUTexelFactor; // In world space units.
+float PrimitiveAlpha;
+int TexCoordAnalysisIndex;
+
+#define UNDEF_ACCURACY 1024
+
+float GetCPUTexelFactor(int CoordIndex)
+{
+	FLATTEN
+	if (CoordIndex == 0) return CPUTexelFactor.x;
+	FLATTEN
+	if (CoordIndex == 1) return CPUTexelFactor.y;
+	FLATTEN
+	if (CoordIndex == 2) return CPUTexelFactor.z;
+	return CPUTexelFactor.w;
+}
+
+
+float2 GetTexCoord(in FDebugPSIn Inputs, int CoordIndex)
+{
+	FLATTEN
+	if (CoordIndex == 0) return Inputs.TexCoord01.xy;
+	FLATTEN
+	if (CoordIndex == 1) return Inputs.TexCoord01.zw;
+	FLATTEN
+	if (CoordIndex == 2) return Inputs.TexCoord23.xy;
+	return Inputs.TexCoord23.zw;
+}
+
+float GetTexCoordSizeAccuracy(in FDebugPSIn Inputs, int CoordIndex, float CPUSize)
+{
+	float3 WorldPosition = SvPositionToResolvedTranslatedWorld(Inputs.SvPosition);
+
+	float2 TexCoord = GetTexCoord(Inputs, CoordIndex);
+
+#if FEATURE_LEVEL >= FEATURE_LEVEL_SM5
+	float2 CoordDDX = ddx_fine(TexCoord);
+	float2 CoordDDY = ddy_fine(TexCoord);
+	float3 WorldPosDDX = ddx_fine(WorldPosition);
+	float3 WorldPosDDY = ddy_fine(WorldPosition);
+#else
+	float2 CoordDDX = ddx(TexCoord);
+	float2 CoordDDY = ddy(TexCoord);
+	float3 WorldPosDDX = ddx(WorldPosition);
+	float3 WorldPosDDY = ddy(WorldPosition);
+#endif 
+
+	float UVAera = abs(CoordDDX.x * CoordDDY.y - CoordDDX.y * CoordDDY.x);
+	float WorldAera = length(cross(WorldPosDDX, WorldPosDDY));
+
+	float GPUTexelFactor = sqrt(WorldAera / max(UVAera, 0.0000000001f)) ;
+
+	return clamp(log2(CPUSize) - log2(GPUTexelFactor), -1.99, 1.99);
+}
+
+// Needed because UAV accesses disable early depth test otherwises.
+EARLYDEPTHSTENCIL
+void Main(
+	in FDebugPSIn DebugInputs,
+	out float4 OutColor : SV_Target0
+	)
+{
+#if INSTANCED_STEREO
+	ResolvedView = ResolveView(GetEyeIndex(DebugInputs.PackedEyeIndex));
+#else
+	ResolvedView = ResolveView();
+#endif
+
+	float3 Result = float3(UNDEFINED_ACCURACY, UNDEFINED_ACCURACY, UNDEFINED_ACCURACY);
+
+	if (TexCoordAnalysisIndex >= 0)
+	{
+		float CPUSize = GetCPUTexelFactor(TexCoordAnalysisIndex);
+		if (CPUSize > 0)
+		{
+			float Accuracy = GetTexCoordSizeAccuracy(DebugInputs, TexCoordAnalysisIndex, CPUSize);
+			int ColorIndex = floor(Accuracy) + 2;
+			Result = lerp(AccuracyColors[ColorIndex].rgb, AccuracyColors[ColorIndex + 1].rgb, frac(Accuracy));
+		}
+	}
+	else
+	{
+		float MinAccuracy = UNDEF_ACCURACY;
+		float MaxAccuracy = -UNDEF_ACCURACY;
+
+		[unroll]
+		for (int CoordIndex = 0; CoordIndex < 4; ++CoordIndex)
+		{
+			float CPUSize = GetCPUTexelFactor(CoordIndex);
+			if (CPUSize > 0)
+			{
+				float Accuracy = GetTexCoordSizeAccuracy(DebugInputs, CoordIndex, CPUSize);
+				MinAccuracy = min(Accuracy, MinAccuracy);
+				MaxAccuracy = max(Accuracy, MaxAccuracy);
+			}
+		}
+
+		int2 PixelPosition = DebugInputs.SvPosition.xy;
+		float Accuracy = (PixelPosition.x & 0x08) == (PixelPosition.y & 0x08) ? MinAccuracy : MaxAccuracy;
+
+		if (abs(Accuracy) != UNDEF_ACCURACY)
+		{
+			int ColorIndex = floor(Accuracy) + 2;
+			Result = lerp(AccuracyColors[ColorIndex].rgb, AccuracyColors[ColorIndex + 1].rgb, frac(Accuracy));
+		}
+	}
+
+	OutColor = RETURN_COLOR(float4(Result, PrimitiveAlpha));
+}

@@ -1,0 +1,302 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	PNTriangles.usf: Shader fragments for PN-AEN triangles tessellation
+=============================================================================*/
+
+#define IN_CONTROL_POINTS 12
+#define OUT_CONTROL_POINTS 3  
+
+
+
+struct FHullShaderConstantOutput
+{
+	// Tess factor for the FF HW block
+	float TessFactor[3]    : SV_TessFactor;
+	float InsideTessFactor : SV_InsideTessFactor;
+
+	float4 WorldB111		: PN_POSITION9;
+};
+
+struct FPNTessellationHSToDS
+{
+	FPassSpecificVSToDS PassSpecificData;
+	//@todo - Should be storing View position, then we can do a faster projection matrix multiply in the 
+	//domain shader
+	float4 WorldPosition[3]		: PN_POSITION;
+
+	// scale factors in tangent space
+	float3 DisplacementScale	: PN_DisplacementScales;
+
+	// Tessellation multiplier.
+	float TessellationMultiplier : PN_TessellationMultiplier;
+
+#if DISPLACEMENT_ANTICRACK
+	// dominant edge and vertex data used to avoid cracking when displacing
+	FHullShaderConstantDominantVertexData DominantVertex : PN_DominantVertex;
+	FHullShaderConstantDominantEdgeData DominantEdge : PN_DominantEdge;
+#endif
+};
+
+float4 ComputeControlPoint(float4 PositionA, float4 PositionB, float4 NormalA)
+{
+    return (2 * PositionA + PositionB - (dot((PositionB - PositionA), NormalA) * NormalA)) / 3.0f;
+}
+
+// GLSL needs those on the domain shader, HLSL on the hull shader, so we replicate them for both
+#define TESSELLATION_ATTRIBUTES [partitioning("fractional_odd")][outputtopology("triangle_cw")]
+
+#if HULLSHADER
+
+	// Note that we input all control point from AEN, but only their PassSpecificData is valid (see MainHull shader)
+	FHullShaderConstantOutput PNSharedConstantHull( const OutputPatch<FPNTessellationHSToDS, OUT_CONTROL_POINTS> I )
+	{
+		FHullShaderConstantOutput O = (FHullShaderConstantOutput)0;
+
+		#if INSTANCED_STEREO
+			ResolvedView = ResolveView(GetEyeIndex(I[0].PassSpecificData.FactoryInterpolants.InterpolantsVSToPS.PackedEyeIndex));
+		#else
+			ResolvedView = ResolveView();
+		#endif
+		
+#if DISABLE_TESSELLATION_OVERRIDE
+		O.TessFactor[0] = 1.0f; // 1->2 edge
+		O.TessFactor[1] = 1.0f; // 2->0 edge
+		O.TessFactor[2] = 1.0f; // 0->1 edge
+		O.InsideTessFactor = 1.0f;
+#else // #if DISABLE_TESSELLATION_OVERRIDE
+		float4 B300 = I[0].WorldPosition[0],
+			   B210 = I[0].WorldPosition[1],
+			   B120 = I[0].WorldPosition[2],
+			   B030 = I[1].WorldPosition[0],
+			   B021 = I[1].WorldPosition[1],
+			   B012 = I[1].WorldPosition[2],
+			   B003 = I[2].WorldPosition[0],
+			   B102 = I[2].WorldPosition[1],
+			   B201 = I[2].WorldPosition[2];
+
+		float4 E = (B210 + B120 + B021 + B012 + B102 + B201) / 6.0f;
+		float4 V = (B003 + B030 + B300) / 3.0f;
+		O.WorldB111 = E + ((E - V) / 2.0f);
+
+		float4 TessellationMultipliers;
+		TessellationMultipliers.x = 0.5 * (I[1].TessellationMultiplier + I[2].TessellationMultiplier);
+		TessellationMultipliers.y = 0.5 * (I[2].TessellationMultiplier + I[0].TessellationMultiplier);
+		TessellationMultipliers.z = 0.5 * (I[0].TessellationMultiplier + I[1].TessellationMultiplier);
+		TessellationMultipliers.w = 0.333 * (I[0].TessellationMultiplier + I[1].TessellationMultiplier + I[2].TessellationMultiplier);
+
+		//@todo: This should be vectorized and done in the MainHull shader.
+		float4 CompositeTessellationFactors = TessellationMultipliers * CalculateCompositeTessellationFactors(B300.xyz,B030.xyz,B003.xyz);
+		CompositeTessellationFactors = clamp( CompositeTessellationFactors, 1, 15 );
+
+		O.TessFactor[0] = CompositeTessellationFactors.x; // 1->2 edge
+		O.TessFactor[1] = CompositeTessellationFactors.y; // 2->0 edge
+		O.TessFactor[2] = CompositeTessellationFactors.z; // 0->1 edge
+		O.InsideTessFactor = CompositeTessellationFactors.w;
+#endif // #if DISABLE_TESSELLATION_OVERRIDE
+
+		return O;
+	}
+
+	[domain("tri")]
+	[patchconstantfunc("PNSharedConstantHull")]
+	[outputcontrolpoints(OUT_CONTROL_POINTS)]
+	[maxtessfactor(15)]
+	TESSELLATION_ATTRIBUTES
+	FPNTessellationHSToDS MainHull( InputPatch<FPassSpecificVSToDS, IN_CONTROL_POINTS> I, uint ControlPointID : SV_OutputControlPointID )
+	{
+		#if INSTANCED_STEREO
+			ResolvedView = ResolveView(GetEyeIndex(I[0].FactoryInterpolants.InterpolantsVSToPS.PackedEyeIndex));
+		#else
+			ResolvedView = ResolveView();
+		#endif
+
+		FPNTessellationHSToDS O = (FPNTessellationHSToDS) 0;
+
+		float3x3 TangentToLocal = VertexFactoryGetTangentToLocalDS(I[ControlPointID].FactoryInterpolants);
+		float4 Normal = GetNormalDS(TangentToLocal);
+
+		O.DisplacementScale = GetTangentSpaceNonUniformScales(TangentToLocal);
+
+		const uint NextControlPointID = ControlPointID < 2 ? ControlPointID + 1 : 0; // (ControlPointID + 1) % 3
+		const uint NeighborControlPointID = 3 + 2 * ControlPointID;
+		const uint NeighborNextControlPointID = NeighborControlPointID + 1;
+
+		O.PassSpecificData = I[ControlPointID];
+		O.WorldPosition[0] = I[ControlPointID].Position;
+		O.TessellationMultiplier = GetTessellationMultiplier( I[ControlPointID] );
+
+#if DISPLACEMENT_ANTICRACK
+		// NextControlPointID is first opposite edge vert
+		// NextNextControlPointID is second opposite edge vert
+		const uint NextNextControlPointID = NextControlPointID < 2 ? NextControlPointID + 1 : 0; // (NextControlPointID + 1) % 3 
+
+		// we also need the neghbors of the opposite edge verts
+		const uint NextNeighborControlPointID = 3 + 2 * NextControlPointID;	// neighbor for first opposite edge vert
+		const uint NextNeighborNextControlPointID = NextNeighborControlPointID+1; // neighbor for second opposite edge vert
+
+		// Dominant vertex is provided explicitly
+		const uint DominantVertexControlPointID = 9 + ControlPointID;
+		O.DominantVertex = GenerateDominantVertexData(I[DominantVertexControlPointID]);
+
+		// we need the other verts from each prim to generate the edges, clock wise winding
+		O.DominantEdge = GenerateDominantEdgeData(I[NextControlPointID],I[NextNextControlPointID],I[NextNeighborControlPointID],I[NextNeighborNextControlPointID]);
+#endif	// DISPLACEMENT_ANTICRACK
+
+		// AEN Computations
+		float4 NextNormal = GetNormalDS(VertexFactoryGetTangentToLocalDS(I[NextControlPointID].FactoryInterpolants));
+		float4 NeighborNormal = GetNormalDS(VertexFactoryGetTangentToLocalDS(I[NeighborControlPointID].FactoryInterpolants));
+		float4 NeighborNextNormal = GetNormalDS(VertexFactoryGetTangentToLocalDS(I[NeighborNextControlPointID].FactoryInterpolants));
+
+		float4 ThisControlPoint, NeighborControlPoint;
+		
+		ThisControlPoint = ComputeControlPoint(I[ControlPointID].Position, I[NextControlPointID].Position, Normal);
+		NeighborControlPoint = ComputeControlPoint(I[NeighborControlPointID].Position, I[NeighborNextControlPointID].Position, NeighborNormal);
+		O.WorldPosition[1] = (ThisControlPoint + NeighborControlPoint) / 2;
+		
+		ThisControlPoint = ComputeControlPoint(I[NextControlPointID].Position, I[ControlPointID].Position, NextNormal);
+		NeighborControlPoint = ComputeControlPoint(I[NeighborNextControlPointID].Position, I[NeighborControlPointID].Position, NeighborNextNormal);
+		O.WorldPosition[2] = (ThisControlPoint + NeighborControlPoint) / 2;
+		
+		return O;
+	}
+#endif
+
+#if DOMAINSHADER
+	[domain("tri")]
+	TESSELLATION_ATTRIBUTES
+	FPassSpecificVSToPS MainDomain(
+		FHullShaderConstantOutput HSConstantData,
+		const OutputPatch<FPNTessellationHSToDS, OUT_CONTROL_POINTS> I,
+		float3 BarycentricCoords : SV_DomainLocation
+#if USE_GLOBAL_CLIP_PLANE
+		, out float OutGlobalClipPlaneDistance : SV_ClipDistance
+#endif
+#if INSTANCED_STEREO && !MULTI_VIEW
+		, out float OutClipDistance : SV_ClipDistance1
+#endif
+		)
+	{
+		#if INSTANCED_STEREO
+			ResolvedView = ResolveView(GetEyeIndex(I[0].PassSpecificData.FactoryInterpolants.InterpolantsVSToPS.PackedEyeIndex));
+			#if !MULTI_VIEW
+				OutClipDistance = 0.0;
+			#endif
+		#else
+			ResolvedView = ResolveView();
+		#endif
+
+		// Get the barycentric coords
+		float U = BarycentricCoords.x;
+		float V = BarycentricCoords.y;
+		float W = BarycentricCoords.z;
+		
+		// Precompute squares and squares * 3 
+		float UU = U * U;
+		float VV = V * V;
+		float WW = W * W;
+		float UU3 = UU * 3.0f;
+		float VV3 = VV * 3.0f;
+		float WW3 = WW * 3.0f;
+		
+		float4 B300 = I[0].WorldPosition[0],
+			   B210 = I[0].WorldPosition[1],
+			   B120 = I[0].WorldPosition[2],
+			   B030 = I[1].WorldPosition[0],
+			   B021 = I[1].WorldPosition[1],
+			   B012 = I[1].WorldPosition[2],
+			   B003 = I[2].WorldPosition[0],
+			   B102 = I[2].WorldPosition[1],
+			   B201 = I[2].WorldPosition[2];
+
+
+		// Compute position from cubic control points and barycentric coords
+		float4 WorldPosition =
+			B300 * UU * U +
+			B030 * VV * V + 
+			B003 * WW * W + 
+			B210 * UU3 * V +
+			B120 * VV3 * U +
+			B021 * VV3 * W +
+			B012 * WW3 * V +
+			B102 * WW3 * U +
+			B201 * UU3 * W +
+			HSConstantData.WorldB111 * 6.0f * W * U * V;
+
+
+		// Interp remaining attributes (construct barycentric interp from bilerp primitives)
+		// NB: the HLSL compiler resolves the 1.f to something efficient (i.e. no-op)
+		FPassSpecificVSToDS Interp = PassInterpolate( PassInterpolate(I[0].PassSpecificData, U, I[1].PassSpecificData, V), 1.f, I[2].PassSpecificData, W );
+
+		// Forward the eye index along
+		#if INSTANCED_STEREO
+		Interp.FactoryInterpolants.InterpolantsVSToPS.PackedEyeIndex = I[0].PassSpecificData.FactoryInterpolants.InterpolantsVSToPS.PackedEyeIndex;
+		#endif
+
+		// get our base material params that we will potentially override
+		FMaterialTessellationParameters MaterialParameters = GetMaterialTessellationParameters(Interp.FactoryInterpolants, WorldPosition.xyz); // VF ops
+
+#if DISPLACEMENT_ANTICRACK
+
+		float2 DisplacementTexCoords = 0;
+#if NUM_MATERIAL_TEXCOORDS
+		DisplacementTexCoords = GetTextureCoordinateDS( Interp );
+#endif
+
+		FMaterialTessellationParameters DisplacementMaterialParameters = MaterialParameters;
+
+		float3x3 TangentToLocal = VertexFactoryGetTangentToLocalDS(Interp.FactoryInterpolants);
+
+		// Override to dominant data if along edge or at control vert.  This is necessary to avoid cracks causes by primitives
+		// from disjoint locations in UV space abutting each other.
+		ApplyDominantData(	DisplacementTexCoords, DisplacementMaterialParameters.TangentToWorld,
+							GetNormalDS( TangentToLocal ), GetTangentDS( TangentToLocal ),
+							U, V, W,
+							I[0].DominantEdge, I[1].DominantEdge, I[2].DominantEdge,
+							I[0].DominantVertex, I[1].DominantVertex, I[2].DominantVertex
+							);
+		
+		// Override texture coordinate 0.
+#if NUM_MATERIAL_TEXCOORDS
+		DisplacementMaterialParameters.TexCoords[0].xy = DisplacementTexCoords.xy;
+#endif
+				
+#else
+
+		FMaterialTessellationParameters DisplacementMaterialParameters = MaterialParameters;
+							
+#endif	// DISPLACEMENT_ANTICRACK
+
+		// tangent space displacement scaling
+		DisplacementMaterialParameters.TangentToWorldPreScale = I[0].DisplacementScale*U + I[1].DisplacementScale*V + I[2].DisplacementScale*W;
+
+		// world space displacement value.  This will likely use the tangent2world transform.
+		float3 WorldDisplacement = GetMaterialWorldDisplacement(DisplacementMaterialParameters);
+		WorldPosition.xyz += WorldDisplacement;
+										
+		#if USE_GLOBAL_CLIP_PLANE
+			OutGlobalClipPlaneDistance = dot(ResolvedView.GlobalClippingPlane, float4(WorldPosition.xyz - ResolvedView.PreViewTranslation.xyz, 1));
+		#endif
+
+		FPassSpecificVSToPS Result = PassFinalizeTessellationOutput(Interp, WorldPosition, MaterialParameters);
+
+		#if INSTANCED_STEREO && !MULTI_VIEW
+		BRANCH
+		if (IsInstancedStereo(I[0].PassSpecificData.FactoryInterpolants.InterpolantsVSToPS.PackedEyeIndex))
+		{
+			const uint EyeIndex = GetEyeIndex(I[0].PassSpecificData.FactoryInterpolants.InterpolantsVSToPS.PackedEyeIndex);
+
+			// Clip at the center of the screen
+			OutClipDistance = dot(Result.Position, EyeClipEdge[EyeIndex]);
+			
+			// Scale to the width of a single eye viewport
+			Result.Position.x *= 0.5 * ResolvedView.HMDEyePaddingOffset;
+
+			// Shift to the eye viewport
+			Result.Position.x += (EyeOffsetScale[EyeIndex] * Result.Position.w) * (1.0f - 0.5 * ResolvedView.HMDEyePaddingOffset);
+		}
+		#endif
+
+		return Result;
+	}
+#endif

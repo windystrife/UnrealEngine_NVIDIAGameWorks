@@ -1,0 +1,245 @@
+Availability: Public
+Title:3. Coding Our Pawn Movement Component's Behavior
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/Components
+Description:Writing the code that will define how our Pawn Movement Component will determine where the Pawn it controls will go each frame.
+version:4.9
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[Previous Step](Programming\Tutorials\Components\2 "%Programming\Tutorials\Components\2:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[](Programming\Tutorials\Components\)
+	[/PARAM]
+	[PARAM:next]
+		[Next Step](Programming\Tutorials\Components\4 "%Programming\Tutorials\Components\4:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+1. We can go back to **Visual Studio** now and program our customized **Pawn Movement Component**. All we really need to write is a **TickComponent** function (similar to an **Actor's** **Tick** function) to tell us how to move each frame. In CollidingPawnMovementComponent.h, we'll need to override TickComponent in the class definition:
+
+		public:
+			virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction *ThisTickFunction) override;	
+
+	We'll define this function in CollidingPawnMovementComponent.cpp:
+
+		void UCollidingPawnMovementComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction *ThisTickFunction)
+		{
+			Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+			// Make sure that everything is still valid, and that we are allowed to move.
+			if (!PawnOwner || !UpdatedComponent || ShouldSkipUpdate(DeltaTime))
+			{
+				return;
+			}
+
+			// Get (and then clear) the movement vector that we set in ACollidingPawn::Tick
+			FVector DesiredMovementThisFrame = ConsumeInputVector().GetClampedToMaxSize(1.0f) * DeltaTime * 150.0f;
+			if (!DesiredMovementThisFrame.IsNearlyZero())
+			{
+				FHitResult Hit;
+				SafeMoveUpdatedComponent(DesiredMovementThisFrame, UpdatedComponent->GetComponentRotation(), true, Hit);
+
+				// If we bumped into something, try to slide along it
+				if (Hit.IsValidBlockingHit())
+				{
+					SlideAlongSurface(DesiredMovementThisFrame, 1.f - Hit.Time, Hit.Normal, Hit);
+				}
+			}
+		};
+
+	This code will move our **Pawn** smoothly around the world, sliding off of surfaces where appropriate. There is no gravity applied to our Pawn, and its maximum speed is hard-coded to 150 **Unreal Units** per second.
+
+	[REGION:note]
+	This TickComponent function makes use of a few of the powerful features offered by the **UPawnMovementComponent** class.
+	
+	**ConsumeInputVector** reports and clears the value of a built-in variable that we will use to store our movement inputs.
+	
+	**SafeMoveUpdatedComponent** uses **Unreal Engine** physics to move our Pawn Movement Component while respecting solid barriers.
+	
+	**SlideAlongSurface** handles the calculations and physics involved with sliding smoothly along collision surfaces like walls and ramps when a move results in a collision, rather than simply stopping in place and sticking to the wall or ramp.
+	
+	There are more features included in Pawn Movement Components that are worthy of examination, but they are not needed for the scope of this tutorial. Looking at other classes, such as **Floating Pawn Movement**, **Spectator Pawn Movement**, or **Character Movement Component**, could provide additional usage examples and ideas.
+	[/REGION]
+
+----
+
+With our Pawn Movement Component's behavior defined, we can now write the code that will tie it all together in our customized Pawn class.
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    code
+    [/PARAMLITERAL]
+    [PARAM:heading]
+	    Work-In-Progress Code
+    [/PARAM]
+    [PARAM:content]
+		**CollidingPawn.h**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "GameFramework/Pawn.h"
+			#include "CollidingPawn.generated.h"
+
+			UCLASS()
+			class HOWTO_COMPONENTS_API ACollidingPawn : public APawn
+			{
+				GENERATED_BODY()
+
+			public:
+				// Sets default values for this pawn's properties
+				ACollidingPawn();
+
+			protected:
+				// Called when the game starts or when spawned
+				virtual void BeginPlay() override;
+	
+			public:
+				// Called every frame
+				virtual void Tick( float DeltaSeconds ) override;
+
+				// Called to bind functionality to input
+				virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override;
+
+				UParticleSystemComponent* OurParticleSystem;
+			};
+
+		**CollidingPawn.cpp**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_Components.h"
+			#include "CollidingPawn.h"
+
+			// Sets default values
+			ACollidingPawn::ACollidingPawn()
+			{
+ 				// Set this pawn to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
+				PrimaryActorTick.bCanEverTick = true;
+
+				// Our root component will be a sphere that reacts to physics
+				USphereComponent* SphereComponent = CreateDefaultSubobject<USphereComponent>(TEXT("RootComponent"));
+				RootComponent = SphereComponent;
+				SphereComponent->InitSphereRadius(40.0f);
+				SphereComponent->SetCollisionProfileName(TEXT("Pawn"));
+
+				// Create and position a mesh component so we can see where our sphere is
+				UStaticMeshComponent* SphereVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualRepresentation"));
+				SphereVisual->SetupAttachment(RootComponent);
+				static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereVisualAsset(TEXT("/Game/StarterContent/Shapes/Shape_Sphere.Shape_Sphere"));
+				if (SphereVisualAsset.Succeeded())
+				{
+					SphereVisual->SetStaticMesh(SphereVisualAsset.Object);
+					SphereVisual->SetRelativeLocation(FVector(0.0f, 0.0f, -40.0f));
+					SphereVisual->SetWorldScale3D(FVector(0.8f));
+				}
+
+				// Create a particle system that we can activate or deactivate
+				OurParticleSystem = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("MovementParticles"));
+				OurParticleSystem->SetupAttachment(SphereVisual);
+				OurParticleSystem->bAutoActivate = false;
+				OurParticleSystem->SetRelativeLocation(FVector(-20.0f, 0.0f, 20.0f));
+				static ConstructorHelpers::FObjectFinder<UParticleSystem> ParticleAsset(TEXT("/Game/StarterContent/Particles/P_Fire.P_Fire"));
+				if (ParticleAsset.Succeeded())
+				{
+					OurParticleSystem->SetTemplate(ParticleAsset.Object);
+				}
+
+				// Use a spring arm to give the camera smooth, natural-feeling motion.
+				USpringArmComponent* SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraAttachmentArm"));
+				SpringArm->SetupAttachment(RootComponent);
+				SpringArm->RelativeRotation = FRotator(-45.f, 0.f, 0.f);
+				SpringArm->TargetArmLength = 400.0f;
+				SpringArm->bEnableCameraLag = true;
+				SpringArm->CameraLagSpeed = 3.0f;
+
+				// Create a camera and attach to our spring arm
+				UCameraComponent* Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("ActualCamera"));
+				Camera->SetupAttachment(SpringArm, USpringArmComponent::SocketName);
+
+				// Take control of the default player
+				AutoPossessPlayer = EAutoReceiveInput::Player0;
+			}
+
+			// Called when the game starts or when spawned
+			void ACollidingPawn::BeginPlay()
+			{
+				Super::BeginPlay();
+	
+			}
+
+			// Called every frame
+			void ACollidingPawn::Tick( float DeltaTime )
+			{
+				Super::Tick( DeltaTime );
+
+			}
+
+			// Called to bind functionality to input
+			void ACollidingPawn::SetupPlayerInputComponent(class UInputComponent* InputComponent)
+			{
+				Super::SetupPlayerInputComponent(InputComponent);
+
+			}
+
+		**CollidingPawnMovementComponent.h**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "GameFramework/PawnMovementComponent.h"
+			#include "CollidingPawnMovementComponent.generated.h"
+
+			/**
+			 * 
+			 */
+			UCLASS()
+			class HOWTO_COMPONENTS_API UCollidingPawnMovementComponent : public UPawnMovementComponent
+			{
+				GENERATED_BODY()
+	
+			public:
+				virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction *ThisTickFunction) override;	
+			};
+
+		**CollidingPawnMovementComponent.cpp**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_Components.h"
+			#include "CollidingPawnMovementComponent.h"
+
+			void UCollidingPawnMovementComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction *ThisTickFunction)
+			{
+				Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+				// Make sure that everything is still valid, and that we are allowed to move.
+				if (!PawnOwner || !UpdatedComponent || ShouldSkipUpdate(DeltaTime))
+				{
+					return;
+				}
+
+				// Get (and then clear) the movement vector that we set in ACollidingPawn::Tick
+				FVector DesiredMovementThisFrame = ConsumeInputVector().GetClampedToMaxSize(1.0f) * DeltaTime * 150.0f;
+				if (!DesiredMovementThisFrame.IsNearlyZero())
+				{
+					FHitResult Hit;
+					SafeMoveUpdatedComponent(DesiredMovementThisFrame, UpdatedComponent->GetComponentRotation(), true, Hit);
+
+					// If we bumped into something, try to slide along it
+					if (Hit.IsValidBlockingHit())
+					{
+						SlideAlongSurface(DesiredMovementThisFrame, 1.f - Hit.Time, Hit.Normal, Hit);
+					}
+				}
+			};
+
+
+    [/PARAM]
+[/OBJECT]
+
+%Steps%

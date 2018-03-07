@@ -1,0 +1,201 @@
+﻿INTSourceChangelist:2621701
+Availability:Public
+Title:2.変数と関数をエディタに公開する
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/VariablesTimersEvents
+Description:UPROPERTY マクロと UFUNCTION マクロを使用して変数と関数をエディタに公開します。
+version:4.9
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[前の手順](Programming\Tutorials\VariablesTimersEvents\1 "%Programming\Tutorials\VariablesTimersEvents\1:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[](Programming\Tutorials\VariablesTimersEvents)
+	[/PARAM]
+	[PARAM:next]
+		[次の手順](Programming\Tutorials\VariablesTimersEvents\3 "%Programming\Tutorials\VariablesTimersEvents\3:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+1. 現時点のカウントダウン タイマーは値 3 (秒) にハード コーディングされています。エディタでカウントダウン時間に希望する値を設定できるとより実用的になります。しかもこの変更は簡単にできます。**Visual Studio** で、「Countdown.h」ファイルを開いて以下の行を探します。
+
+		int32 CountdownTime;
+
+	この変数を **アンリアル エンジン** に公開するには、**UPROPERTY** に変更する必要があります。変更後は、ゲームの起動時や保存レベルのロード時に変数の値をエンジンに保存できるようになります。影響を与える変数のすぐ上に以下のように空の丸括弧を付けて **UPROPERTY** タグを追加します。
+
+		UPROPERTY()
+		int32 CountdownTime;
+
+	**UPROPERTY** は **アンリアルエンジン** がどのように変数を使用するかを変更する引数をサポートします。変数を編集可能に設定したいため、 **EditAnywhere** 引数を追加します。
+
+		UPROPERTY(EditAnywhere)
+		int32 CountdownTime;
+
+	[![](ExposingVariable.png)](ExposingVariable.png)
+
+	C++ コードの変数にコメントを追加することもできます。コメントは以下のように **アンリアルエディタ** で変数の説明として表示されます。
+
+		// カウントダウンの実行時間 (秒)
+		UPROPERTY(EditAnywhere)
+		int32 CountdownTime;
+
+	[![](CommentingVariable.png)](CommentingVariable.png)
+
+	[REGION:tip]**UPROPERTY** でさらに多くの設定が可能です。 **BlueprintReadWrite** と **Category** など他の引数を今後の段階で検討するのは良いことかしれませんが、現時点で必要なものはそろっています。[/REGION]
+	**アンリアル エディタ** に戻って **Compile (コンパイル)** ボタンを押すと、配置した ACountdown の変数が **[Details(詳細)] パネル** に表示されます。タイマー値を変更して **Play** を押して様々な値で試してみてください。 
+
+1. タイマー値の変更に加えて、プログラマーでない方もタイマー終了時に起こることを変更できるようにしましょう。**Visual Studio** で `Countdown.h` ファイルを開いて以下の行を探します。
+
+		void CountdownHasFinished();
+
+	この関数を以下のように **UFUNCTION** にすると **アンリアルエンジン** にこの関数を公開できます。
+
+		UFUNCTION()
+		void CountdownHasFinished();
+
+	[REGION:note]
+	**UPROPERTY** マクロのように、より多くの機能を有効にしたりプログラマーではないデベロッパーが利用できるように、何ができるかについての情報を追加する必要があります。これを行うために考えられるオプションとして以下の 3 つがあります。
+
+	1. **BlueprintCallable** 関数は C++ コードで記述されていて **ブループリントグラフ** で呼び出しが可能ですが、C++コードを編集せずに変更またはオーバーライドすることができません。このようにマークされた関数は、通常はプログラマー以外の方が使用するためにプログラミングされた機能ですが、変更を想定していなかったり、変更する意味がありません。例えば分かりやすい例として math 関数を見てみましょう。
+
+	1. **BlueprintImplementableEvent** 関数は C++ ヘッダ (".h") ファイルに設定されていますが、関数のボディ全体は C++ コードではなく **ブループリント グラフ** に記述されます。期待していたデフォルト アクションや標準のビヘイビアが存在しないなど、特殊な状況でプログラマー以外の方がカスタム仕様のリアクションを作成して対応できるようになっています。この例としては、スペースシップゲームでパワーアップがプレイヤーのシップに触れた時のイベントなどがあります。
+
+	1. **BlueprintNativeEvent** 関数は BlueprintCallable と BlueprintImplementableEvent 関数を組み合わせたようなものです。デフォルトのビヘイビアは C++ でプログラミングされていますが、ブループリント グラフ でオーバーライドして追加や置換が可能です。こうしたプログラミングをする場合、以下のように C++ コードは名前の最後に _Implementation を追加して常に仮想関数にします。これが最も柔軟性のあるオプションなため、このチュートリアルではこのオプションを使用します。
+	[/REGION]
+
+	プログラマー以外の方が C++ 関数を呼び出したり **ブループリント** でオーバーライドできるように、`Countdown.h` ファイルに以下の変更を加えます。
+
+		UFUNCTION(BlueprintNativeEvent)
+		void CountdownHasFinished();
+		virtual void CountdownHasFinished_Implementation();
+
+	「Countdown.cpp」で次の行を探します。
+
+		void ACountdown::CountdownHasFinished()
+
+	以下のように変更します。
+
+		void ACountdown::CountdownHasFinished_Implementation()
+
+----
+
+C++ コードに独自の値と機能を記述しながら、プログラマー以外の方がアクセスおよび変更可能な変数と関数を作成しました。プログラマー以外の方の使用方法を確認するために、ACountdown クラスのブループリント拡張を作成して自身でこれを修正します。
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    コード
+    [/PARAMLITERAL]
+    [PARAM:heading]
+	    完成コード
+    [/PARAM]
+    [PARAM:content]
+		**Countdown.h**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "GameFramework/Actor.h"
+			#include "Countdown.generated.h"
+
+			UCLASS()
+			class HOWTO_VTE_API ACountdown : public AActor
+			{
+				GENERATED_BODY()
+
+			public:	
+				// このアクタのプロパティのデフォルト値を設定します。
+				ACountdown();
+
+				// ゲーム開始またはスポーン時に呼び出されます。
+				virtual void BeginPlay() override;
+	// フレーム毎に呼び出されます。
+				virtual void Tick( float DeltaSeconds ) override;
+
+				// カウントダウンの実行時間 (秒)
+				UPROPERTY(EditAnywhere)
+				int32 CountdownTime;
+
+				UTextRenderComponent* CountdownText;
+
+				void UpdateTimerDisplay();
+
+				void AdvanceTimer();
+
+				UFUNCTION(BlueprintNativeEvent)
+				void CountdownHasFinished();
+				virtual void CountdownHasFinished_Implementation();
+
+				FTimerHandle CountdownTimerHandle;
+			};
+
+
+		**Countdown.cpp**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_VTE.h"
+			#include "Countdown.h"
+
+			// デフォルト値を設定
+			ACountdown::ACountdown()
+			{
+ 				// フレーム毎に Tick() を呼び出すようにこのアクタを設定。必要がなければパフォーマンスを向上させるためにオフにすることができます。
+				PrimaryActorTick.bCanEverTick = false;
+
+CountdownText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("CountdownNumber"));
+
+CountdownText->SetHorizontalAlignment(EHTA_Center);
+				CountdownText->SetWorldSize(150.0f);
+				RootComponent = CountdownText;
+
+				CountdownTime = 3;
+			}
+
+			// ゲーム開始またはスポーン時に呼び出されます。
+			void ACountdown::BeginPlay()
+			{
+				Super::BeginPlay();
+
+	UpdateTimerDisplay();
+				GetWorldTimerManager().SetTimer(CountdownTimerHandle, this, &ACountdown::AdvanceTimer, 1.0f, true);
+			}
+
+			// フレーム毎に呼び出されます。
+			void ACountdown::Tick( float DeltaTime )
+			{
+				Super::Tick( DeltaTime );
+
+			}
+
+			void ACountdown::UpdateTimerDisplay()
+			{
+				CountdownText->SetText(FString::FromInt(FMath::Max(CountdownTime, 0)));
+			}
+
+			void ACountdown::AdvanceTimer()
+			{
+				--CountdownTime;
+				UpdateTimerDisplay();
+				if (CountdownTime < 1)
+				{
+					//カウントダウンを終了したのでタイマーの実行を停止します。
+					GetWorldTimerManager().ClearTimer(CountdownTimerHandle);
+					//タイマー終了時に任意の特別なアクションを実行。
+					CountdownHasFinished();
+				}
+			}
+
+			void ACountdown::CountdownHasFinished_Implementation()
+			{
+				//特別な読み出しに変更
+				CountdownText->SetText(TEXT("GO!"));
+			}
+
+    [/PARAM]
+[/OBJECT]
+
+%Steps%

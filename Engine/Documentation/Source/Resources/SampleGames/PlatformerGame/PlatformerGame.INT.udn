@@ -1,0 +1,184 @@
+Availability: Public
+Title:Platformer Game Sample
+Crumbs:%ROOT%, Resources
+Description:Overview of the Platformer Sample Game.
+Version: 4.9
+
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Resources/SampleGames/PlatformerGame:title%](Platformer_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%\anim_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/PlatformerGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/PlatformerGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/PlatformerGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Resources/SampleGames/PlatformerGame:title%](Platformer_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%\anim_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/PlatformerGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/PlatformerGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/PlatformerGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+[REGION:fullwidth]
+![](platformer_game.png)
+[/REGION]
+
+[TOC(start:2)]
+
+The **Platformer Game** sample is an example of a PC/mobile side-scroller game. It includes basic implementations of 
+different movement types along with a simple front end menu system.
+
+A complete list of the featured concepts:
+
+* Forced movement
+* Custom movement: slide (PlatformerPlayerMovementComp)
+* Root motion animations (climbing over cars)
+* Position adjustment for playing animation at spot (climbing ledges)
+
+
+## Forced Movement
+
+Movement of the player is handled through its `CharacterMovementComponent`, which allows modifying acceleration 
+before every move update using `ScaleInputAcceleration()`. This function is overridden in `UPlatformerPlayerMovementComp` 
+to force acceleration along X-axis when the round is in progress. Additionally, all axis bindings - look and move - 
+are removed in the `APlatformerCharacter::SetupPlayerInputComponent()` to prevent the player from moving by himself.
+
+![](forced_movement.png)
+
+## Custom Movement
+
+The _slide_ custom move allows the player to pass under obstacles, in a similar fashion to regular crouching. 
+
+![](slide_move.png)
+
+Sliding is implemented as part of the walking mode of the `UPlatformerPlayerMovementComp` in the `PhysWalking()` function. 
+When the player begins sliding in `UPlatformerPlayerMovementComp::StartSlide()`, the height of their collision 
+capsule is reduced via the `SetSlideCollisionHeight()` function. 
+
+[REGION:imagetable]
+| ![](collision_full.png) | ![](collision_slide.png) |
+| --- | --- |
+| Walking Height | Sliding Height |
+[/REGION]
+
+The player's speed is reduced every tick while sliding in `CalcCurrentSlideVelocityReduction()` and `CalcSlideVelocity()`, 
+but can be boosted by sliding down a slope. The player's speed is not reduced below the `MinSlideSpeed` threshold to 
+prevent the player from becoming stuck under an obstacle.
+
+The player can forcefully exit a slide by jumping, or it will occur automatically when their speed is too low. However, 
+the reduced height of the collision capsule means they cannot just pop out of the slide until they reach a spot with enough 
+clearance to accommodate the default height of the collision capsule. The `TryToEndSlide()` function calls the 
+`RestoreCollisionHeightAfterSlide()` function which checks to see if restoring the default height of the collision 
+capsule would result in the player overlapping some of the world geometry. If no overlap occurs, the player is allowed 
+to exit the slide.
+
+## Root Motion Animation
+
+When the character fails to jump and runs into an obstacle, it will attempt to climb, or _mantle_, over it automatically. This 
+movement makes use of **root motion** animation where the animation sequence itself modifies the location of the root bone of 
+the skeleton and that motion is then transferred to the Actor, causing the player's location to change as opposed to normal 
+animation sequences that only affect the child bones of the skeleton. 
+
+`APlatformerCharacter::MoveBlockedBy()` is called when the movement component detects the player has run into a wall. 
+The implementation of this function stops the forced movement of the player, plays the _HitWallMontage_ 'bump reaction' 
+AnimMontage. Once that animation completes, `APlatformerCharacter::ClimbOverObstacle()` is executed to do the actual climbing.
+
+There are three climbing AnimMontages for different obstacles of various heights, and all obstacles in the level must match 
+one of those heights in order for climbing to work. The AnimationSequences in each AnimMontage apply motion to the root bone. 
+In order to transfer the root motion from the AnimMontage to the player's character, `APlatformerCharacter::Tick()` 
+calculates the change in position of the root bone each frame and applies that to the Actor's location.
+
+Just before finishing animation `ResumeMovement()` is called, restoring the default forced movement scheme. Any 
+remaining animation is blended out as the character moves forward.
+
+## Position-Adjusted Animation
+
+Ledges are different from obstacles on the ground because the player's vertical position relative to the ledge will be different 
+each time, as it depends on where in the player's jump it is when it hits the ledge. 
+
+To make animation syncing easier, climbing works only with a single, specialized Actor class, `PlatformerClimbMarker`. As with 
+the climbing movement, the process starts when the player runs into a ledge and `APlatformerCharacter::MoveBlockedBy()` is called. This function 
+checks to see whether the player is falling (as opposed to walking) and whether the object the player collided with was one of 
+the special `PlatformerClimbMarker` Actors. If this is the case, the forced movement is disabled and `APlatformerCharacter::ClimbToLedge()` 
+is executed, passing it the location of the marker's top left corner - i.e. the location of the ledge to grab. 
+
+Because the ledge climbing animation needs to always start at the same location relative to the ledge, and the player can be 
+anywhere nearby, the character's location is interpolated with from the initial position of the impact with the ledge to the 
+location the animation expects it to be at. `ClimbToLedge()` stores the initial position as `AnimPositionAdjustment` 
+and then immediately teleports the character to the spot where the climbing animation should finish and starts playing the 
+climbing AnimMontage. At the same time, `APlatformerCharacter::Tick()` quickly interpolates the relative location of 
+the `SkeletalMeshComponent` of the character to zero, causing the mesh to smoothly catch up to the animation.
+
+## Menu System
+
+The menu system is created using the [Slate UI framework](Programming/Slate). It consists of **menus**, **menu widgets**, and **menu items**. 
+Each menu has a single menu widget (`SPlatformerMenuWidget`) that is responsible for layout, internal event handling, and animations 
+for all of the menu items. Menu items (`SPlatformerMenuItem`) are compound objects that can perform actions and contain any number 
+of other menu items. These can be as simple as a label or button or "tabs" that contain complete submenus made up of other menu items. 
+This menu can be operated using keyboard or controller, but there is only limited mouse support at this time.
+
+Each menu is _constructed_ via the `Construct()` function, which adds all of the necessary menu items, including sub-items, 
+and attaches delegates to them where necessary. This is done using the helper methods - `AddMenuItem()`, `AddMenuItemSP()`, etc. - 
+defined in the `MenuHelper` namespace in the `SPlatformerMenuWidget.h` file.
+
+Navigation to previous menus is done using an array of shared pointers to menus and is stored in the `MenuHistory` variable of 
+the menu widget. `MenuHistory` acts like stack to hold previously entered menus and makes it easy to go back. By using this method, 
+no direct relationship is created between menus and the same menu can be reused in different places if necessary.
+
+Animations are performed using interpolation curves defined in `SPlatformerMenuWidget::SetupAnimations()`. Each curve has start time, 
+duration, and interpolation method. Animations can be played forward and in reverse and their attributes can be animated at specific time 
+using `GetLerp()`, which returns a value from 0.0f to 1.0f. There are several different interpolation methods available defined in 
+`ECurveEaseFunction::Type` in `SlateAnimation.h`.
+
+### Main Menu
+
+![](main_menu.png)
+
+The main menu is opened automatically when the game starts by specifying the _PlatformerMenu_ map as the default. It loads a special 
+GameMode, `APlatformerGameMode`, that uses the `APlatformerPlayerController_Menu` class which opens the main menu by creating a new 
+instance of the `FPlatformerMainMenu` class in its `PostInitializeComponents()` function.
+
+### In-Game Menu
+
+![](ingame_menu.png)
+
+The in-game menu is created in the `PostInitializeComponents()` function of the `APlatformerPlayerController` class, and opened or closed 
+via the `OnToggleInGameMenu()` function.
+
+### Options Menu
+
+The options menu is available as a submenu of both the main menu and in-game menu. The only difference is how changes are applied:
+
+* Accessed from the main menu, changes are applied when the player starts the game. 
+* Accessed from the in-game menu, changes are applied immediately when the menu is closed.
+
+
+The settings in the options menu are saved to `GameUserSettings.ini`, and loaded automatically at startup.

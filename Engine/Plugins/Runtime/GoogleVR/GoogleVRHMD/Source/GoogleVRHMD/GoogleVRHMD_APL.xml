@@ -1,0 +1,573 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--GoogleVRHMD plugin additions-->
+<root xmlns:android="http://schemas.android.com/apk/res/android">
+	<!-- init section is always evaluated once per architecture -->
+	<init>
+		<log text="GoogleVRHMD init" />
+
+		<!-- Check for desired sustained-performance -->
+		<setBoolFromProperty result="bGoogleVRSustainedPerformance" ini="Engine" section="/Script/AndroidRuntimeSettings.AndroidRuntimeSettings" property="bGoogleVRSustainedPerformance" default="false" />
+		<if condition="bGoogleVRSustainedPerformance">
+			<true>
+				<log text="Sustained-performance mode is desired" />
+			</true>
+			<false>
+				<log text="Sustained-performance mode is not desired" />
+			</false>
+		</if>
+
+		<!-- Check for GoogleVR device requirements and deployment mode. -->
+		<setBool result="bDaydreamMode" value="false" />
+		<setBool result="bDaydreamAndCardboardMode" value="false" />
+		<setBool result="bSupportDaydream" value="false" />
+
+		<setBoolFromPropertyContains result="bCardboardCaps" ini="Engine" section="/Script/AndroidRuntimeSettings.AndroidRuntimeSettings" property="GoogleVRCaps" contains="Cardboard"/>
+		<setBoolFromPropertyContains result="bDaydream33Caps" ini="Engine" section="/Script/AndroidRuntimeSettings.AndroidRuntimeSettings" property="GoogleVRCaps" contains="Daydream33"/>
+		<setBoolFromPropertyContains result="bDaydream63Caps" ini="Engine" section="/Script/AndroidRuntimeSettings.AndroidRuntimeSettings" property="GoogleVRCaps" contains="Daydream63"/>
+
+		<setBoolOr result="bSupportDaydream" arg1="$B(bDaydream33Caps)" arg2="$B(bDaydream63Caps)"/>
+		<if condition="bSupportDaydream">
+			<true>
+				<log text="Project supports daydream, will enable async reprojection when possible." />
+
+				<if condition="bCardboardCaps">
+					<true>
+						<setBool result="bDaydreamAndCardboardMode" value="true" />
+					</true>
+					<false>
+						<setBool result="bDaydreamMode" value="true" />
+					</false>
+				</if>
+			</true>
+		</if>
+
+		<if condition="bCardboardCaps">
+			<true>
+				<log text="Project supports Cardboard device." />
+			</true>
+		</if>
+		<if condition="bDaydream33Caps">
+			<true>
+				<log text="Project supports Daydream Phone 3.3 device." />
+			</true>
+		</if>
+		<if condition="bDaydream63Caps">
+			<true>
+				<log text="Project supports Daydream AIO 6.3 device." />
+			</true>
+		</if>
+	</init>
+
+	<!-- optional files or directories to copy to Intermediate/Android/APK -->
+	<resourceCopies>
+		<log text="Copying GoogleVR runtime files to staging" />
+		<isArch arch="armeabi-v7a">
+			<copyFile src="$S(EngineDir)/Source/ThirdParty/GoogleVR/lib/android/armv7/libgvr.so"
+						dst="$S(BuildDir)/libs/armeabi-v7a/libgvr.so" />
+		</isArch>
+		<isArch arch="arm64-v8a">
+			<copyFile src="$S(EngineDir)/Source/ThirdParty/GoogleVR/lib/android/arm64/libgvr.so"
+						dst="$S(BuildDir)/libs/arm64-v8a/libgvr.so" />
+		</isArch>
+		<isArch arch="x86">
+			<copyFile src="$S(EngineDir)/Source/ThirdParty/GoogleVR/lib/android/x86/libgvr.so"
+						dst="$S(BuildDir)/libs/x86/libgvr.so" />
+		</isArch>
+		<isArch arch="x86_64">
+			<copyFile src="$S(EngineDir)/Source/ThirdParty/GoogleVR/lib/android/x86_64/libgvr.so"
+						dst="$S(BuildDir)/libs/x86_64/libgvr.so" />
+		</isArch>
+	</resourceCopies>
+
+	<!-- Files to copy before the build so they can be used in the build -->
+	<prebuildCopies>
+		<log text="Copying GoogleVR buildtime files to staging" />
+		<copyDir src="$S(EngineDir)/Source/ThirdParty/GoogleVR/lib/common_library"
+					dst="$S(BuildDir)/JavaLibs/common_library" />
+	</prebuildCopies>
+
+	<!-- optional additions to proguard -->
+	<proguardAdditions>
+		<insert>
+# Don't obfuscate any NDK/SDK code. This makes the debugging of stack traces in
+# in release builds easier.
+-keepnames class com.google.vr.ndk.** { *; }
+-keepnames class com.google.vr.sdk.** { *; }
+
+# These are part of the SDK VrCore interfaces for GVR.
+-keepnames class com.google.vr.vrcore.library.api.** { *; }
+
+# These are part of the Java native interfaces for GVR.
+-keep class com.google.vr.** { native &lt;methods&gt;; }
+
+-keep class com.google.vr.cardboard.annotations.UsedByNative
+-keep @com.google.vr.cardboard.annotations.UsedByNative class *
+-keepclassmembers class * {
+		@com.google.vr.cardboard.annotations.UsedByNative *;
+}
+
+-keep class com.google.vr.cardboard.UsedByNative
+-keep @com.google.vr.cardboard.UsedByNative class *
+-keepclassmembers class * {
+		@com.google.vr.cardboard.UsedByNative *;
+}
+		</insert>
+	</proguardAdditions>
+
+	<!-- optional updates applied to AndroidManifest.xml -->
+	<androidManifestUpdates>
+		<!-- Add features -->
+		<addFeature android:name="android.hardware.sensor.accelerometer" android:required="true" />
+		<addFeature android:name="android.hardware.sensor.gyroscope" android:required="true" />
+		<if condition="bSupportDaydream">
+			<true>
+				<if condition="bDaydreamAndCardboardMode">
+					<true>
+						<addFeature android:name="android.hardware.vr.high_performance" android:required="false" />
+						<addFeature android:name="android.software.vr.mode" android:required="false" />
+					</true>
+					<false>
+						<addFeature android:name="android.hardware.vr.high_performance" android:required="true" />
+						<addFeature android:name="android.software.vr.mode" android:required="true" />
+					</false>
+				</if>
+			</true>
+			<false>
+				<addFeature android:name="android.hardware.vr.high_performance" android:required="false" />
+				<addFeature android:name="android.software.vr.mode" android:required="false" />
+			</false>
+		</if>
+		<if condition="bDaydream63Caps">
+			<true>
+				<if condition="bDaydream33Caps">
+					<true>
+						<addFeature android:name="android.hardware.vr.headtracking" android:version="1" android:required="false" />
+					</true>
+					<false>
+						<addFeature android:name="android.hardware.vr.headtracking" android:version="1" android:required="true" />
+					</false>
+				</if>
+			</true>
+		</if>
+
+		<!-- Add intents -->
+		<loopElements tag="activity">
+			<setStringFromAttribute result="activityName" tag="$" name="android:name" />
+			<setBoolIsEqual result="bGameActivity" arg1="$S(activityName)" arg2="com.epicgames.ue4.GameActivity" />
+			<if condition="bGameActivity">
+				<true>
+					<!-- Check for existing intent filter -->
+					<setBool result="bHasIntentFilter" value="false" />
+					<loopElements tag="intent-filter">
+						<setBool result="bHasIntentFilter" value="true" />
+					</loopElements>
+
+					<!-- If no intent filter found, add a new one -->
+					<if condition="bHasIntentFilter">
+						<false>
+							<setElement result="newIntentFilter" value="intent-filter" />
+							<addElement tag="$" name="newIntentFilter" />
+						</false>
+					</if>
+
+					<!-- Add intents for either Cardboard or Daydream -->
+					<if condition="bDaydreamMode">
+						<true>
+							<setElement result="intentInfo" value="category" />
+							<addAttribute tag="$intentInfo" name="android:name" value="com.google.intent.category.DAYDREAM" />
+							<addElement tag="intent-filter" name="intentInfo" />
+						</true>
+						<false>
+							<if condition="bDaydreamAndCardboardMode">
+								<true>
+									<setElement result="intentInfo" value="category" />
+									<addAttribute tag="$intentInfo" name="android:name" value="com.google.intent.category.DAYDREAM" />
+									<addElement tag="intent-filter" name="intentInfo" />
+									<setElement result="intentInfo" value="category" />
+									<addAttribute tag="$intentInfo" name="android:name" value="com.google.intent.category.CARDBOARD" />
+									<addElement tag="intent-filter" name="intentInfo" />
+								</true>
+								<false>
+									<setElement result="intentInfo" value="category" />
+									<addAttribute tag="$intentInfo" name="android:name" value="com.google.intent.category.CARDBOARD" />
+									<addElement tag="intent-filter" name="intentInfo" />
+								</false>
+							</if>
+						</false>
+					</if>
+					<if condition="bSupportDaydream">
+						<true>
+							<!-- Set additional attributes required for daydream. -->
+							<addAttribute tag="$" name="android:enableVrMode" value="@string/gvr_vr_mode_component" />
+							<addAttribute tag="$" name="android:theme" value="@style/VrActivityTheme" />
+							<addAttribute tag="$" name="android:resizeableActivity" value="false" />
+							<!-- Add App Tiles to manifest file. -->
+							<addElements tag="$">
+								<meta-data android:name="com.google.android.vr.icon" android:resource="@drawable/vr_icon" />
+								<meta-data android:name="com.google.android.vr.icon_background" android:resource="@drawable/vr_icon_background" />
+							</addElements>
+						</true>
+					</if>
+				</true>
+			</if>
+		</loopElements>
+	</androidManifestUpdates>
+
+	<gameActivityImportAdditions>
+		<insert>
+			import com.google.vr.ndk.base.GvrLayout;
+			import com.google.vr.ndk.base.AndroidCompat;
+			import com.google.vr.ndk.base.DaydreamApi;
+			import android.app.PendingIntent;
+			import android.view.ViewGroup;
+			import android.widget.ImageButton;
+			import android.os.Handler;
+			import android.os.Looper;
+			import android.os.PowerManager;
+			import android.os.Build.VERSION;
+			import android.view.KeyEvent;
+		</insert>
+	</gameActivityImportAdditions>
+
+	<gameActivityClassAdditions>
+		<insert>
+			private GvrLayout gvrLayout;
+			private boolean bAsyncReprojectionEnabled;
+			private boolean bIsVrLaunch;
+			private boolean bEnableSustainedPerformanceMode = false;
+
+			public native void nativeOnUiLayerBack();
+
+			public void AndroidThunkJava_UiLayer_SetEnabled(boolean bEnable)
+			{
+				_activity.gvrLayout.getUiLayout().setEnabled(bEnable);
+			}
+
+			public void AndroidThunkJava_UiLayer_SetViewerName(String viewerName)
+			{
+				_activity.gvrLayout.getUiLayout().setViewerName(viewerName);
+			}
+
+			public long AndroidThunkJava_GetNativeGVRApi()
+			{
+				return _activity.gvrLayout.getGvrApi().getNativeGvrContext();
+			}
+
+			public void AndroidThunkJava_GvrLayout_SetFixedPresentationSurfaceSizeToCurrent()
+			{
+				// Setup hardware scaling
+				gvrLayout.setFixedPresentationSurfaceSize(DesiredHolderWidth, DesiredHolderHeight);
+			}
+
+			public boolean AndroidThunkJava_IsVrLaunch()
+			{
+				return bIsVrLaunch;
+			}
+
+			public void AndroidThunkJava_QuitDaydreamApplication()
+			{
+				// The back button takes us back to the 2D device desktop.
+				Intent homeIntent = new Intent(Intent.ACTION_MAIN);
+				homeIntent.addCategory(Intent.CATEGORY_HOME);
+				homeIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+				startActivity(homeIntent);
+				finish();
+				return;
+			}
+			
+			public void AndroidThunkJava_EnableSPM()
+			{
+				_activity.runOnUiThread(new Runnable()
+				{
+					@Override
+					public void run()
+					{
+						AndroidCompat.setSustainedPerformanceMode(_activity, true);
+						bEnableSustainedPerformanceMode = true;
+					}
+				});
+			}
+			
+			public void AndroidThunkJava_DisableSPM()
+			{
+				_activity.runOnUiThread(new Runnable()
+				{
+					@Override
+					public void run()
+					{
+						AndroidCompat.setSustainedPerformanceMode(_activity, false);
+						bEnableSustainedPerformanceMode = false;
+					}
+				});
+			}
+
+			@Override
+			public boolean dispatchKeyEvent(KeyEvent event)
+			{
+				// Avoid accidental volume key presses while the phone is in the VR headset.
+				if (event.getKeyCode() == KeyEvent.KEYCODE_VOLUME_UP
+					|| event.getKeyCode() == KeyEvent.KEYCODE_VOLUME_DOWN)
+				{
+					return true;
+				}
+				return super.dispatchKeyEvent(event);
+			}
+
+			public String AndroidThunkJava_GetDataString()
+			{
+				Intent intent = getIntent();
+				return intent.getDataString();
+			}
+
+			public DaydreamApi daydreamApi;
+			public DaydreamApi getDaydreamApi()
+			{
+				return daydreamApi;
+			}
+		</insert>
+
+		<!-- If using Daydream, the transition view should not be brought up as it would be jarring when launching from VR -->
+		<!-- If using Cardboard-only mode, the native code should be set up to use PPHMD distortion only. -->
+		<if condition="bSupportDaydream">
+			<true>
+				<insert>
+					public boolean AndroidThunkJava_ProjectWantsCardboardOnlyMode()
+					{
+						return false;
+					}
+				</insert>
+			</true>
+			<false>
+					public boolean AndroidThunkJava_ProjectWantsCardboardOnlyMode()
+					{
+						return true;
+					}
+			</false>
+		</if>
+
+		<!-- Function to support Async Reprojection -->
+		<if condition="bSupportDaydream">
+			<true>
+				<insert>
+					public boolean ProjectWantsAsyncReprojection()
+					{
+						return true;
+					}
+				</insert>
+			</true>
+			<false>
+				<insert>
+					public boolean ProjectWantsAsyncReprojection()
+					{
+						return false;
+					}
+				</insert>
+			</false>
+		</if>
+
+	</gameActivityClassAdditions>
+
+	<gameActivityOnPauseAdditions>
+		<insert>
+			if(gvrLayout != null)
+			{
+				gvrLayout.onPause();
+			}
+		</insert>
+	</gameActivityOnPauseAdditions>
+
+	<gameActivityOnResumeAdditions>
+		<insert>
+			if(gvrLayout != null)
+			{
+				gvrLayout.onResume();
+			}
+
+			// We are trying to make sure SPM got reenabled after VRMode got enabled when returnning back
+			// from a non-vr activity. This is a workaround for a bug in Android that it didn't set the correct clock
+			// rate if SPM is enabled before VRMode.
+			if(bEnableSustainedPerformanceMode)
+			{
+				Thread tempThread = new Thread(new Runnable() {
+					public void run() {
+						try {
+							Thread.sleep(1000);
+						} catch (InterruptedException e) {
+							e.printStackTrace();
+						}
+						_activity.runOnUiThread(new Runnable()
+						{
+							@Override
+							public void run()
+							{
+								AndroidCompat.setSustainedPerformanceMode(_activity, false);
+							}
+						});
+						try {
+							Thread.sleep(500);
+						} catch (InterruptedException e) {
+							e.printStackTrace();
+						}
+						_activity.runOnUiThread(new Runnable()
+						{
+							@Override
+							public void run()
+							{
+								AndroidCompat.setSustainedPerformanceMode(_activity, true);
+							}
+						});
+					}
+				});
+				tempThread.start();
+			}
+
+		</insert>
+	</gameActivityOnResumeAdditions>
+	<gameActivityOnDestroyAdditions>
+		<insert>
+			if(gvrLayout != null)
+			{
+				gvrLayout.shutdown();
+			}
+		</insert>
+	</gameActivityOnDestroyAdditions>
+
+	<gameActivityOnCreateAdditions>
+		<if condition="bGoogleVRSustainedPerformance">
+			<true>
+				<insert>
+					bEnableSustainedPerformanceMode = true;
+				</insert>
+			</true>
+			<false>
+				<insert>
+					bEnableSustainedPerformanceMode = false;
+				</insert>
+			</false>
+		</if>
+		<insert>
+			// Create the Layout and override the content view
+			gvrLayout = new GvrLayout(this);
+			((ViewGroup)MySurfaceView.getParent()).removeView(MySurfaceView);
+			gvrLayout.setPresentationView(MySurfaceView);
+
+			setContentView(gvrLayout);
+
+			// Attempt to enable AsyncReprojection. Only supported on some platforms.
+			if(ProjectWantsAsyncReprojection())
+			{
+				bAsyncReprojectionEnabled = gvrLayout.setAsyncReprojectionEnabled(true);
+			}
+			else
+			{
+				bAsyncReprojectionEnabled = false;
+			}
+
+			// If AsyncReprojection is not enabled, then this is
+			// Either a pure cardboard app, or a daydream+cardboard app running in
+			// cardboard mode on a non-daydream device.
+			// In this case, we override the close button listener so that it does the same
+			// thing as the back button (exposed as a key event in UE4).
+			// Otherwise, we just use the default daydream close button functionality.
+			if (!bAsyncReprojectionEnabled)
+			{
+				gvrLayout.getUiLayout().setCloseButtonListener(
+					new Runnable() {
+						@Override
+						public void run() {
+							nativeOnUiLayerBack();
+						}
+				});
+			}
+			IsInVRMode = bAsyncReprojectionEnabled;
+			
+			AndroidCompat.setVrModeEnabled(this, true);
+
+			// Attempt to enable VR Mode. Only supported on some platforms. Check done internally.
+			if(!bAsyncReprojectionEnabled)
+			{
+				gvrLayout.getUiLayout().setTransitionViewEnabled(true);
+			}
+
+			// Attempt to enable sustained-performance mode
+			if(bEnableSustainedPerformanceMode)
+			{
+				AndroidCompat.setSustainedPerformanceMode(this, true);
+			}
+
+			Intent intent = getIntent();
+			// Note: Extra will be available via com.google.vr.sdk.base.EXTRA_VR_LAUNCH,
+			// but for now, use "android.intent.extra.VR_LAUNCH" directly.
+			if (intent.getBooleanExtra("android.intent.extra.VR_LAUNCH", false /* defaultValue */))
+			{
+				bIsVrLaunch = true;
+			}
+			else
+			{
+				bIsVrLaunch = false;
+			}
+			
+			if(bAsyncReprojectionEnabled)
+			{
+				daydreamApi = DaydreamApi.create(this);
+
+				purchaseLaunchCallback = new GooglePlayStoreHelper.PurchaseLaunchCallback() {
+					@Override
+					public void launchForResult(final PendingIntent pendingIntent, final int requestCode) {
+						Handler mainHandler = new Handler(Looper.getMainLooper());
+							Runnable myRunnable = new Runnable() {
+								@Override
+								public void run() {
+									DaydreamApi api = GameActivity.this.getDaydreamApi();
+									api.launchInVrForResult(GameActivity.this, pendingIntent, requestCode);
+							}
+						};
+						mainHandler.post(myRunnable);
+					}
+				};
+			}
+      
+		</insert>
+		<if condition="bSupportDaydream">
+			<true>
+				<insert>
+					// If we are in Daydream mode and we have use obb file, check if the obb file exist in GameAvtivity
+					// to avoid starting another Activity, which may cause problems for daydream.
+					if(bAsyncReprojectionEnabled)
+					{
+						if(!HasAllFiles)
+						{
+							HasAllFiles = DownloadShim.expansionFilesDelivered(this);
+						}
+					}
+				</insert>
+			</true>
+		</if>
+	</gameActivityOnCreateAdditions>
+
+	<gameActivityOnStartAdditions>
+		<insert>
+		</insert>
+	</gameActivityOnStartAdditions>
+
+	<gameActivityOnDestroyAdditions>
+		<insert>
+			if (daydreamApi!=null) {
+				daydreamApi.close();
+				daydreamApi = null;
+			}
+		</insert>
+	</gameActivityOnDestroyAdditions>
+
+	<iosPListUpdates>
+		<addElements tag="dict">
+			<key>NSCameraUsageDescription</key>
+			<string>$(PRODUCT_NAME) camera use.</string>
+		</addElements>
+	</iosPListUpdates>
+
+	<!-- optional libraries to load in GameActivity.java before libUE4.so -->
+	<soLoadLibrary>
+		<loadLibrary name="gvr" failmsg="GoogleVR library not loaded and required!" />
+	</soLoadLibrary>
+</root>

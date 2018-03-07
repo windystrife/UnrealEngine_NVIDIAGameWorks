@@ -1,0 +1,185 @@
+﻿INTSourceChangelist:2723382
+Availability:Public
+Title:プラットフォーマーゲームのサンプル
+Crumbs:%ROOT%, Resources
+Description:プラットフォーマーゲームのサンプルの概要
+Version:4.9
+
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Resources/SampleGames/PlatformerGame:title%](Platformer_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%\anim_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/PlatformerGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/PlatformerGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/PlatformerGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Resources/SampleGames/PlatformerGame:title%](Platformer_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%\anim_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/PlatformerGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/PlatformerGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/PlatformerGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+[REGION:fullwidth]
+![](platformer_game.png)
+[/REGION]
+
+[TOC(start:2)]
+
+**Platformer Game** のサンプルは、 PC やモバイル マルチプレーヤー用のサイドスクローラーの例を取り上げています。この例には、簡単なフロントメニュー システムに沿った、 
+様々な動作タイプの基本的な実装が含まれています。
+
+取り上げられたコンセプトの全リストは以下となります。
+
+* 強制動作
+* カスタム動作： スライド (PlatformerPlayerMovementComp)
+* ルートモーション アニメーション (車を乗り越える)
+* ある地点でアニメーションを再生するための位置調整 (岩棚のよじ登り)
+
+
+## 強制動作
+
+プレイヤーの動作は CharacterMovementComponent を通じて処理されます。これは、 
+ ScaleInputAcceleration() を使用して、それぞれの動作更新前に加速を修正することができます。この関数は、ラウンド進行中に X 軸に沿った加速を強制するため、 
+UPlatformerPlayerMovementComp でオーバーライドされます。また、全ての軸のバインディング (容貌や動作) は、プレイヤー自身による動きを防ぐために 
+ APlatformCharacter::SetupPlayerInputComponent() で削除されます。
+
+![](forced_movement.png)
+
+## カスタム動作
+
+_スライド_ のカスタム動作は、プレイヤーが障害物の下をくぐることを可能にします。一般的なかがんだ姿勢と同じような動作です。 
+
+![](slide_move.png)
+
+スライディングは PhysWalking() 関数の UPlatformerPlayerMovementComp の歩くモードの一部として実装されています。 
+ UPlatformerPlayerMovementComp::StartSlide() でプレイヤーがスライディングを始めると、 
+コリジョン カプセルの高さが SetSlideCollisionHeight() 関数で縮小されます。 
+
+[REGION:imagetable]
+| ![](collision_full.png) | ![](collision_slide.png) |
+| --- | --- |
+| 歩きの高さ | スライディングの高さ |
+[/REGION]
+
+CalcCurrentSlideVelocityReduction() と CalcSlideVelocity() でスライディングしている間、プレイヤーの速度がティック毎に減速されます。 
+ただし、坂を滑り降りることによって加速できます。プレイヤーが障害物によって行き詰ることを防ぐため、 
+プレイヤーの速度は MinSlideSpeed 閾値以下には減速されません。
+
+プレイヤーはジャンプして強制的にスライドを終了することができます。もしくは速度が著しく減速すると自動的に終了します。しかし、 
+コリジョン カプセルの高さの減少は、コリジョン カプセルのデフォルトの高さに対応可能な、 
+十分な空間距離がある地点に到達するまではスライディングから抜け出せないことを意味します。TryToEndSlide() 関数は、コリジョン カプセルのデフォルトの高さの復元により、 
+プレイヤーがワールド ジオメトリのいくつかをオーバーラップしているかをチェックする 
+ RestoreCollisionHeightAfterSlide() 関数を呼びます。オーバーラップが発生していない場合、 
+プレイヤーはスライドを終了することができます。
+
+## ルート モーション アニメーション
+
+キャラクターがジャンプに失敗し障害物に衝突すると、自動的によじ昇ったり、それらを _覆う_ 動作をします。つまり、 
+ **ルートモーション** アニメーションを使用します。この動作のアニメーションシーケンス自体が、スケルトンのルートボーンの位置を修正し、その後アクタへ移動します。 
+結果として、スケルトンの子ボーンのみに影響を与える 
+通常のアニメーションシーケンスとは対照的に、プレイヤーの位置が変化します。 
+
+プレイヤーが壁にぶつかったことが動作コンポーネントによって検知されると APlatformerCharacter::MoveBlockedBy() が呼ばれます。 
+この関数を実装するとプレイヤーの強制動作を停止して、 
+ _HitWallMontage_ bump reaction'AnimMontage を再生します。一度アニメーションが完了すると、実際のよじ登る動作のために APlatformerCharacter::ClimbOverObstacle() が実行されます。
+
+さまざまな高さの障害物に対応するために 3 つのクライミング用 AnimMontage があります。そしてレベルにある全ての障害物は、 
+クライミング動作を機能させるために、これらの 1 つの高さと合致しなくてはいけません。各 AnimMontage の AnimationSequence はルートボーンに動きを適用します。 
+ルート モーションを Anim Montage からプレイヤーのキャラクターへ移動させるには、 
+各フレームのルートボーンの位置変更を `APlatformerCharacter::Tick()` で計算し、アクターの位置へ適用します。
+
+アニメーションを終了する直前に ResumeMovement() が呼ばれ、デフォルトの強制動作スキームが復元されます。残りの 
+アニメーションはキャラクターが前進する際にブレンドされます。
+
+## 位置調整アニメーション
+
+岩棚と相対的なプレイヤーの垂直位置は毎回異なるため、岩棚は地面の障害物とは異なります。 
+垂直位置は、岩棚と衝突時のプレイヤーのジャンプ位置に依存します。 
+
+アニメーションの同期をより簡単にするには、クライミングは単一の特殊なアクタクラスである PlatformerClimbMarker としか機能しません。クライミング動作と同様に、 
+プロセスはプレイヤーが岩棚と衝突した際に開始して、 APlatformerCharacter::MoveBlockedBy() が呼ばれます。この関数は、 
+プレイヤーの落下 (ウォーキングとは対照的に) 状況と、プレイヤーが衝突したオブジェクトが 
+特殊な PlatformerClimbMarker アクタのひとつであったかどうかをチェックします。その場合は強制動作は無効となり、マーカーの左上隅の位置へ渡して、 
+APlatformerCharacter::ClimbToLedge() が実行されます。例えば、岩棚をつかむ位置などです。 
+
+岩棚をよじ登るアニメーションは、岩棚に対する割合と同位置から常に開始する必要があるため、またプレイヤーは 
+周辺のどこかで利用することができるため、キャラクター位置はアニメーションが要求する岩棚の最初の衝撃位置で補間されます。 
+ ClimbToLedge() は、最初の位置を AnimPositionAdjustment として格納し、 
+クライミングアニメーションが終了し、クライミング AnimMontage が 
+開始する位置へ即座にキャラクターを移動させます。それと同時に、キャラクターの SkeletalMeshComponent の相対位置は、 
+ `APlatformerCharacter::Tick()` によって素早く0に補間し、メッシュを滑らかにアニメーションへ取り入れます。
+
+## メニュー システム
+
+メニュー システムは [スレート UI フレームワーク](Programming/Slate) を使用して作成します。**メニュー** 、 **メニュー ウィジェット** 、 **メニュー アイテム** で構成されています。 
+各メニューには、全てのメニュー アイテムに対応するレイアウト、内部イベント処理、そしてアニメーションに関与する 
+単一のメニュー ウィジェット (SPlatformerMenuWidget) があります。メニューアイテム (SPlatformerMenuItem) は、アクションを実行しその他のメニュー アイテムをいくつでも格納することができる 
+複合オブジェクトです。これらは、その他のメニュー アイテムを構成するサブ メニュー一式を含む、ラベルやボタン、もしくはタブのように簡単なものです。 
+このメニューはキーボードやコントローラで操作しますが、現時点でのマウスのサポートには制限があります。
+
+各メニューは Construct() 関数によって _構成_ されています。この関数は、サブ アイテムを含む必要不可欠のメニュー アイテムを全て追加し、 
+必要な箇所にデリゲートをアタッチします。これは、「SPlatformerMenuWidget.h」ファイルの MenuHelper ネームスペースで定義される、 
+ AddMenuItem() や AddMenuItemSP() など、ヘルパーメソッドを使用して処理されます。
+
+前回のメニューへのナビゲーションは、メニューへの共有ポインタの配列を使用して行われ、メニュー ウィジェットの MenuHistory 変数に格納されます。 
+MenuHistory 変数はこれまでに入力されたメニューを保持するスタックのような振る舞いをし、復元を簡単にします。このメソッドを使用することによって、 
+メニュー間に直接的な関係は構築されず、必要に応じて同メニューは別の場所で再利用されます。
+
+アニメーションは SPlatformerMenuWidget::SetupAnimations() で定義された補間カーブを使用して実行します。それぞれのカーブには、開始時間、 
+継続時間、そして補間メソッドがあります。アニメーションは再生や逆再生が可能で、それらの属性は特定の時間に GetLerp() を使用してアニメートすることができます。 
+これにより 0.0f から 1.0f の値が返されます。SlateAnimation.h の ECurveEaseFunction::Type で定義された 
+いくつかの様々な補間メソッドがあります。
+
+### メイン メニュー
+
+![](main_menu.png)
+
+メイン メニューは、デフォルトで _PlatformerMenu_ マップを特定してゲームを開始すると自動的に開きます。そして特別な GameMode である APlatformerGameMode を読み込みます。 
+このモードは、 PostbeginPlay() 関数内の FPlatformerMainMenu クラスの新規インスタンスを作成してメインメニューを開く 
+ APlatformerPlayerController_Menu クラスを使用します。
+
+### インゲーム メニュー
+
+![](ingame_menu.png)
+
+インゲームメニューは APlatformerPlayerController  クラスの PostInitializeComponents() 関数で作成され、 
+ OnToggleInGameMenu() 関数を経由して開いたり閉じたりします。
+
+### オプション メニュー
+
+オプション メニューは、メイン メニューとインゲーム メニュー両方のサブ メニューとして利用できます。唯一の違いは変更の適用方法です。
+
+* メイン メニューからの操作は、プレイヤーによるゲームの開始時に変更が適用されます。 
+* インゲーム メニューからの操作は、メニューが閉じられた直後に変更が適用されます。
+
+
+* オプション メニューの設定は GameUserSettings.ini に保存されて、起動時に自動的に読み込まれます。

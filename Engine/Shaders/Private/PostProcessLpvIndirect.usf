@@ -1,0 +1,260 @@
+//-----------------------------------------------------------------------------
+// File:		PostProcessLpvIndirect.usf
+//
+// Summary:		Light propagation volume postprocessing
+//
+// Created:		11/03/2013
+//
+// Author:		mailto:benwood@microsoft.com
+//
+//				Copyright (C) Microsoft. All rights reserved.
+//-----------------------------------------------------------------------------
+ 
+#define ENABLE_LPV_SPECULAR				1
+
+// Directional occlusion
+#define DEBUG_USE_RAW_AO				0
+#define LPV_OCCLUSION_EDGE_FADE			0
+#define ENABLE_DIRECTIONAL_OCCLUSION	1
+
+#define APPLY_FADE						1
+#define DEBUG_SHOW_FADE					0
+#define DEBUG_SHOW_EDGES				0
+#define DISABLE_NEAR_FADE				1
+
+#define SUPPORT_CONTACT_SHADOWS 		0
+
+#define SPEC_FADE_ON_RANGE_MAX 			0.02f
+
+#define LuminanceVec float3(0.299f,0.587f,0.114f)
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+#include "DeferredLightingCommon.ush"
+#include "Random.ush"
+#include "LPVFinalPass.ush"
+
+float max3(float3 val)
+{
+	return max(val.x,max(val.y,val.z));
+}
+
+// TODO: Move the LPVFinalPass.usf
+float3 WorldToGridSmooth( float3 worldPos )
+{
+	return worldPos * LpvRead.OneOverLpvScale + LpvRead.LpvGridOffsetSmooth;
+}
+
+
+float GetFadeValue(float3 WorldPosition, float3 CameraPosition, float FadeRange)
+{
+	float3 gridSmooth = WorldToGridSmooth( WorldPosition );
+	float gridExtentSmooth = max3(abs(gridSmooth-float3(16,16,16)));
+	float fadeValue = saturate((15.5-gridExtentSmooth)/FadeRange);
+
+#if DISABLE_NEAR_FADE
+	float3 cameraGridSmooth = WorldToGridSmooth( CameraPosition );
+	float3 d = cameraGridSmooth-gridSmooth;
+	float distanceSquared = dot(d,d);
+	return ( distanceSquared > (8*8) ) ? fadeValue : 1.0f;
+#else
+	return fadeValue;
+#endif
+}
+
+float3 LpvSpecularHighQuality( float3 WorldPosition, float3 R, float Roughness )
+{
+	float Smooth = 1.0f-Roughness;
+	float offset = Smooth * Smooth * Smooth * Smooth *  8.0f;
+
+	// Decreased roughness results in longer ray offsets and higher frequency reflections 
+	float3 specularOut = LPVSpecular( WorldPosition, R, offset ); 
+	// To prevent artifacts from very long ray lookups, we do multiple lookups and combine 
+	// with a weighting favouring brighter/further samples
+	[branch] 
+	if ( offset > 5.0f ) // TODO: Use AO to block rays
+	{
+		float3 spec1 = LPVSpecular( WorldPosition, R, offset * 0.5 ); 
+		float l1 = dot( spec1,			LuminanceVec ) * 0.25;
+		float l2 = dot( specularOut,	LuminanceVec ) * 0.75;
+		float weight = l2/((l1+l2)+0.0001f);
+		specularOut = lerp( spec1, specularOut, weight );
+	}
+	[branch] 
+	if ( offset > 1.0f )
+	{
+		float3 spec1 = ( LPVDiffuse( WorldPosition, R ) / LpvRead.DiffuseIntensity ) * LpvRead.SpecularIntensity; // FIX A BUG. This is horrible!
+		float l1 = dot( spec1,			LuminanceVec ) * 0.25;
+		float l2 = dot( specularOut,	LuminanceVec ) * 0.75;
+		float weight = l2/((l1+l2)+0.0001f);
+		specularOut = lerp( spec1, specularOut, weight );
+	}
+	return specularOut;
+}
+
+void MainPS(in noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SVPos: SV_POSITION, out float4 OutColor : SV_Target0
+#if APPLY_SEPARATE_SPECULAR_RT
+			,out float4 OutSpecular : SV_Target1
+#endif
+			)
+{
+	float2 UV = UVAndScreenPos.xy; 
+
+	FScreenSpaceData ScreenSpaceData = GetScreenSpaceData(UV);  
+	FGBufferData GBuffer = ScreenSpaceData.GBuffer;
+
+	OutColor = 0;
+#if APPLY_SEPARATE_SPECULAR_RT
+	OutSpecular = 0;
+#endif
+
+	BRANCH if (GBuffer.ShadingModelID == SHADINGMODELID_UNLIT )
+	{
+		return;
+	}
+
+	// screen position in [-1, 1] screen space 
+	float2 ScreenSpacePos = UVAndScreenPos.zw;
+
+	float3 ScreenVectorU = mul(float4(ScreenSpacePos, 1, 0), View.ScreenToWorld).xyz;
+	float3 ScreenVector = normalize(ScreenVectorU); 
+
+	float SceneDepth = CalcSceneDepth(UV);
+	float3 WorldPosition = ScreenVectorU * SceneDepth + View.WorldCameraOrigin;
+
+	float3 grid = WorldToGrid( WorldPosition );
+
+	float gridExtent = max3(abs(grid-float3(16,16,16)));
+
+#if APPLY_FADE
+	float fadeValue = GetFadeValue(WorldPosition, View.WorldCameraOrigin.xyz, LpvRead.FadeRange );
+#if DEBUG_SHOW_FADE
+	if ( fadeValue < 1.0f )
+	{
+		OutColor.rgb = lerp( float3(1.0f, 0.0f, 0.0f ), float3( 0, 1.0f, 0 ), fadeValue );
+		if ( fadeValue==0.0f ) OutColor.rgb = 0;
+		return;
+	}
+#endif
+	[branch]
+	if ( fadeValue > 0.0f )
+#endif
+	{
+		float3 R = reflect( ScreenVector, GBuffer.WorldNormal );
+
+		float3 DiffuseColor  = GBuffer.DiffuseColor;
+		float3 DiffuseNormal = GBuffer.WorldNormal;
+		float3 SubsurfaceColor = ExtractSubsurfaceColor(ScreenSpaceData.GBuffer);
+		float3 Diffuse = LPVDiffuse( WorldPosition, DiffuseNormal ) * DiffuseColor;
+
+		float3 LpvSpecular = 0;
+
+		float SpecIntensity = dot( GBuffer.SpecularColor.rgb, LuminanceVec );
+
+		[branch]
+		if ( SpecIntensity >= LpvRead.PostprocessSpecularIntensityThreshold )
+		{
+			LpvSpecular = LpvSpecularHighQuality(WorldPosition, R, GBuffer.Roughness );
+
+			float SpecFadeOnRange = min( LpvRead.PostprocessSpecularIntensityThreshold, SPEC_FADE_ON_RANGE_MAX );
+			float FadeOnMultiplier = saturate( (SpecIntensity - LpvRead.PostprocessSpecularIntensityThreshold) / SpecFadeOnRange );
+			LpvSpecular *= FadeOnMultiplier;
+		}
+	
+		// apply darkening from ambient occlusion (does not use PostprocessInput1 to set white texture if SSAO is off)
+		float AmbientOcclusion = GBuffer.GBufferAO * ScreenSpaceData.AmbientOcclusion;
+		OutColor = float4( Diffuse.xyz, 1 ) * AmbientOcclusion;
+
+#if !ENABLE_LPV_SPECULAR
+		LpvSpecular = 0;
+#endif 
+
+#if APPLY_SEPARATE_SPECULAR_RT
+
+		// Ambient occlusion already applied with Reflection Environment
+		// Note: we don't need to apply the BRDF, since it gets applied during reflection apply
+		// Alpha = 1.0f;
+		OutSpecular = float4( LpvSpecular, 1 );
+
+#else // APPLY_SEPARATE_SPECULAR_RT
+
+		// Combine Specular (same behaviour as PostProcessAmbient)
+		OutColor.rgb += LpvSpecular;
+
+#endif // APPLY_SEPARATE_SPECULAR_RT
+	}
+
+#if APPLY_FADE
+	OutColor.rgb *= fadeValue;
+#if APPLY_SEPARATE_SPECULAR_RT
+	OutSpecular *= fadeValue;
+#endif 
+#endif
+
+#if DEBUG_SHOW_EDGES
+	float3 gridSmooth = WorldToGridSmooth( WorldPosition );
+	float gridExtentSmooth = max3(abs(gridSmooth-float3(16,16,16)));
+	float d = gridExtent-16;
+	if ( d<0.05 && d>0.0f )
+	{
+		OutColor.rgb=float3(0,0,1.0f);
+		return;
+	}
+	float d2 = gridExtentSmooth-16;
+	if ( d2<0.05 && d2>0.0f )
+	{
+		OutColor.rgb=float3(0,1.0f,0.0);
+		return;
+	}
+#endif
+}
+
+
+
+
+void DirectionalOcclusionPS(in noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SVPos: SV_POSITION, out float4 OutColor : SV_Target0 )
+{
+	float2 defaultDirectionalOcclusion = float2(LpvRead.DirectionalOcclusionDefaultValue.x, LpvRead.DirectionalOcclusionDefaultValue.y);
+	OutColor = defaultDirectionalOcclusion.xyxy;
+
+#if ENABLE_DIRECTIONAL_OCCLUSION 
+	float2 UV = UVAndScreenPos.xy; 
+
+	FScreenSpaceData ScreenSpaceData = GetScreenSpaceData(UV);  
+	FGBufferData GBuffer = ScreenSpaceData.GBuffer;
+
+	BRANCH if (GBuffer.ShadingModelID != SHADINGMODELID_UNLIT )
+	{
+		float2 ScreenSpacePos = UVAndScreenPos.zw;
+
+		float3 ScreenVectorU = mul(float4(ScreenSpacePos, 1, 0), View.ScreenToWorld).xyz;
+		float3 ScreenVector = normalize(ScreenVectorU); 
+
+		float SceneDepth = CalcSceneDepth(UV);
+		float3 WorldPosition = ScreenVectorU * SceneDepth + View.WorldCameraOrigin;
+
+#if APPLY_FADE
+		float fadeValue = GetFadeValue(WorldPosition, View.WorldCameraOrigin.xyz, LpvRead.DirectionalOcclusionFadeRange );
+
+		[branch]
+		if ( fadeValue > 0.0f )
+#endif
+		{
+			float3 grid = WorldToGrid( WorldPosition );
+
+			float3 R = reflect( ScreenVector, GBuffer.WorldNormal );
+
+			float3 DiffuseNormal = GBuffer.WorldNormal;
+
+			float3 SubsurfaceColor = ExtractSubsurfaceColor( ScreenSpaceData.GBuffer );
+
+			float2 DirectionalOcclusion = LPVGetDirectionalOcclusion_DiffuseSpec( WorldPosition, R, GBuffer.Roughness, DiffuseNormal );
+#if APPLY_FADE
+			DirectionalOcclusion = lerp( defaultDirectionalOcclusion, DirectionalOcclusion, fadeValue );
+#endif
+			OutColor = DirectionalOcclusion.xyxy;
+		}
+	}
+
+	#endif  // ENABLE_DIRECTIONAL_OCCLUSION
+}

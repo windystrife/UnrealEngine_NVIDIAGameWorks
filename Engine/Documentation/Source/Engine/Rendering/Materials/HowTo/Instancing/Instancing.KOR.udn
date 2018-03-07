@@ -1,0 +1,290 @@
+﻿INTSourceChangelist:3242329
+Availability: Public
+Title:머티리얼 인스턴스 생성 및 사용법
+Crumbs: %ROOT%, Engine, Engine/Rendering/Materials, Engine/Rendering/Materials/HowTo
+Description:머티리얼 인스턴스 구성 및 사용법 안내입니다.
+Related: Engine/Rendering/Materials/MaterialInstances
+Related: Engine/Rendering/Materials/Editor/Interface
+Related: Engine/Rendering/Materials/MaterialInputs
+Related: Engine/Rendering/Materials/Editor
+Related: Engine/Rendering/Materials/IntroductionToMaterials
+Related: Engine/Rendering/Materials/MaterialProperties
+Version:4.9
+SkillLevel: Intermediate
+tags:Materials
+
+[TOC(start:2 end:3)]
+
+
+
+표준 머티리얼 생성, 셋업, 트윅 작업은 UE4 에서 시간을 매우 많이 잡아먹는 프로세스가 될 수 있습니다.
+이 프로세스 효율을 높이고 속도를 올리기 위해, 언리얼 엔진 4 에는 **머티리얼 인스턴스** 라는 특수 유형 머티리얼이 제공됩니다.
+다음 비법에서는 프로젝트에서 머티리얼 인스턴스를 구성하고 사용하는 방법에 대해 배워보실 수 있습니다.
+
+## 머티리얼 인스턴싱
+
+머티리얼 인스턴싱이란, 부모 머티리얼이라 불리는 하나의 머티리얼을 만든 다음, 그것을 바탕으로 여러가지 다양한 모양의 머티리얼을 만드는 것을 말합니다.
+이러한 유연성을 내기 위해 머티리얼 인스턴싱은 상속이란 개념을 사용합니다.
+상속이란 단순히 부모가 가진 속성이 자손에게 부여되는 것을 뜻합니다.
+실제 머티리얼 상속의 예는 이렇습니다.
+
+![](Material_Instancing_Explanation.png)
+
+|번호| 설명|
+|------------|------------------|
+|**1:**| 부모 머티리얼로, 오른쪽에 보이는 두 머티리얼이 여기서 프로퍼티를 상속받습니다. 머티리얼에 텍스처가 네 개 사용되는 것도 눈여겨 보세요. |
+|**2:**| 머티리얼 인스턴스에서 부모 머티리얼로 사용되어야 하는 머티리얼이 설정되는 곳입니다. 여기에 사용되는 머티리얼을 변경하면 머티리얼 인스턴스 작동방식이 완전히 바꿀 수 있습니다. |
+|**3:**| 여기서 사용되는 텍스처를 변경하면, 머티리얼 인스턴스의 전체적인 모양을 바꿀 수 있습니다. 네 개의 텍스처 입력이 여기 어떻게 되어 있는지 살펴보자면, 머티리얼 인스턴스가 왼쪽의 부모 머티리얼에서 함수성을 상속받았기 때문에 네 개의 텍스처 입력이 있는 것입니다.|
+
+
+
+## 머티리얼 파라미터
+
+머티리얼 인스턴스 내 머티리얼의 다양한 파라미터를 변경할 수 있으려면, 머티리얼 그래프에 **Parameter** (파라미터) 라는 다양한 유형의 노드를 사용해야 합니다.
+파라미터 노드는 모양도 기능도 일반 머티리얼 노드와 같지만, 핵심적인 차이라면 머티리얼 인스턴스의 작동 방식을 알려주는 데 쓰인다는 점입니다.
+머티리얼 파라미터는 머티리얼 인스턴스와 상호작용하는 머티리얼을 구하는 유일한 방법입니다.
+
+### 노드를 파라미터 노드로 추가/변환하기
+
+머티리얼 그래프에 **파라미터** 노드를 추가하는 완전히 다른 두 가지 방법은 다음과 같습니다.
+
+* **머티리얼 팔레트에서 추가하기** - 단어로 검색을 하는 경우, **머티리얼 팔레트** 에서 **Parameter** 를 검색하면 사용할 수 있는 모든 파라미터 노드를 찾을 수 있습니다. 그런 다음 원하는 것을 팔레트에서 머티리얼 그래프로 끌어 놓으면 됩니다.
+
+	![](Materails_Instances_Search_For_Pram_Nodes.png)
+
+* **노드 변환하기** - **머티리얼 그래프** 안에서 노드에 **우클릭** 한 다음 **파라미터로 변환** 옵션을 선택하면 됩니다.
+
+	[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:width]
+	640
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	360
+	[/PARAMLITERAL]
+	[PARAMLITERAL:videoid]
+	ICjxcEzGAno
+	[/PARAMLITERAL]
+	[/OBJECT]
+
+[region:note]
+참고로 모든 머티리얼 노드를 파라미터 노드로 변환할 수 있는 것은 아닙니다. 노드에 우클릭해서 **파라미터로 변환** 옵션이 보이지 않는다면, 그 노드는 파라미터 노드로 변환이 안되는 것입니다.
+[/region]
+
+## 머티리얼 인스턴스 만들기
+
+다음 섹션에서는 위에 언급한 방법으로 별도의 머티리얼 인스턴스를 만들어 보겠습니다.
+
+1. 먼저 작업할 머티리얼을 새로 만들어야 합니다. 그러기 위해서는 **콘텐츠 브라우저** 에 **우클릭** 한 다음 **기본 애셋 생성** 에서 **머티리얼** 을 선택하여 머티리얼을 새로 만듭니다.
+	
+	![](Materails_Instances_Creat_New_Material.png)
+
+1. 이제 머티리얼이 생성되었으니, 이름을 지읍시다. 이 예제에서는 **Material_Master** 라고 짓겠습니다.
+	
+	![](Materails_Instances_Named_Material.png)
+
+1. 이제 머티리얼 이름을 지었으니, **콘텐츠 브라우저** 에서 위치를 찾은 다음 **더블클릭** 하여 열어줍니다. 열리면 팔레트에서 다음 머티리얼 표현식 노드를 검색한 다음 머티리얼 그래프에 추가합니다.
+	
+	*  **Constant 3 Vector** x 1
+	*  **Constant Node** x 1
+	*  **Scalar Parameter** x 1
+	
+	[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:width]
+	640
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	360
+	[/PARAMLITERAL]
+	[PARAMLITERAL:videoid]
+	COw7Q7o1sHo
+	[/PARAMLITERAL]
+	[/OBJECT]
+
+1. 머티리얼 노드 배치가 완료되었으니, 메인 머티리얼 노드의 각 슬롯에 연결해 줄 차례입니다. 이 예제에서는 다음 슬롯을 사용하겠습니다.
+	
+	* **베이스 컬러**
+	* **메탈릭**
+	* **러프니스**
+
+	[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:width]
+	640
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	360
+	[/PARAMLITERAL]
+	[PARAMLITERAL:videoid]
+	aN3QPYokHf4
+	[/PARAMLITERAL]
+	[/OBJECT]
+
+1. 모두 연결해주고 나면, 일부 머티리얼 노드를 [머티리얼 인스턴스](Resources/ContentExamples/MaterialInstances/1_2) 에서 사용할 수 있도록 **파라미터** 노드로 변환해 줄 차례입니다. 그러기 위해서는 변환하려는 머티리얼 노드에 **우클릭** 한 다음 **파라미터로 변환** 옵션을 선택해 주면 됩니다.
+	
+	[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:width]
+	640
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	360
+	[/PARAMLITERAL]
+	[PARAMLITERAL:videoid]
+	-tIO2lmJhVw
+	[/PARAMLITERAL]
+	[/OBJECT]
+
+1. 노드가 파라미터 노드로 변환되었으니, 머티리얼 인스턴스에서 사용할 수 있도록 라벨을 붙여서 각 노드가 하는 일을 알수 있도록 해 줄 차례입니다. 파라미터 노드에 이름을 지으려면 머티리얼 그래프에서 파라미터 노드를 **좌클릭** 선택한 다음 **Parameter Name** 섹션 아래 파라미터 이름으로 사용할 이름을 입력해 줍니다. 이 예제에서는 다음과 같은 이름을 사용할 것입니다.
+	
+	* **Base Color **
+
+	* **Metallic **
+
+	* **Roughness **
+
+	[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:width]
+	640
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	360
+	[/PARAMLITERAL]
+	[PARAMLITERAL:videoid]
+	tE8_Dju0ee0
+	[/PARAMLITERAL]
+	[/OBJECT]
+	
+	[region:tip]
+	노드에 선택한 이름이 실제 하는 일에 매우 근접하도록 해 줍니다. 그렇게 해 두면 머티리얼과 머티리얼 인스턴스를 왔다갔다 하면서 노드가 실제 하는 역할을 일일이 확인할 필요가 없습니다.
+	[/region]
+
+1. 노드 생성이 완료되면 **적용** 버튼을 눌러 머티리얼을 컴파일합니다. 제대로 컴파일되면 **적용** 버튼이 다음과 같이 회색으로 변할 것입니다.
+	
+	![](Materails_Instances_Complied.png)
+
+1. 머티리얼 컴파일이 완료되었으니, 거기서 머티리얼 인스턴스를 만들 차례입니다. 그러기 위해서는 **콘텐츠 브라우저** 에서 그 머티리얼에 **우클릭** 한 다음 **머티리얼 인스턴스 생성** 옵션을 선택하면 됩니다.
+	
+	[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:width]
+	640
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	360
+	[/PARAMLITERAL]
+	[PARAMLITERAL:videoid]
+	PwsuXdGpe7M
+	[/PARAMLITERAL]
+	[/OBJECT]
+
+	[region:tip]
+	머티리얼 인스턴스의 이름이 원본 머티리얼의 이름을 따옵니다. 머티리얼 인스턴스 이름변경은 생성 도중이나, 머티리얼을 선택한 다음 **F2** 키를 누르고서 원하는 이름을 입력하면 됩니다.
+	[/region]
+
+1. 새로 생성된 머티리얼 인스턴스를 열려면, **콘텐츠 브라우저** 에서 **더블클릭** 하면 됩니다. 열린 모습은 다음과 같습니다.
+	
+	![](Materails_Instances_Instance_Editor.png)(convert:false)
+
+1. **머티리얼 인스턴스 에디터** 가 열리면, 원하는 대로 파라미터 조정을 시작하면 됩니다. 파라미터를 조정하려면 먼저 파라미터 왼쪽에 있는 박스를 클릭하여 활성화시켜 줘야 합니다. 파라미터가 활성화되면 그 이름이 회색에서 변하고, 그 왼쪽의 박스에 체크 표시가 나타날 것입니다.
+	
+	[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:width]
+	640
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	360
+	[/PARAMLITERAL]
+	[PARAMLITERAL:videoid]
+	aJ4fJ2buAVo
+	[/PARAMLITERAL]
+	[/OBJECT]
+
+1. 파라미터가 활성화되었으니, 이제 원하는 대로 조정하면 머티리얼을 다시 컴파일하지 않아도 실시간으로 그 결과를 확인할 수 있습니다.
+	
+	[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:width]
+	640
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	360
+	[/PARAMLITERAL]
+	[PARAMLITERAL:videoid]
+	OKvC9e4FddU
+	[/PARAMLITERAL]
+	[/OBJECT]
+
+[region:note]
+머티리얼 안에서 파라미터에 설정한 이름은 머티리얼 인스턴스 안에 보이는 이름에 반영됩니다. 그래서 이름을 지을 때 파라미터의 실제 역할에 일치하도록 하는 것이 중요하다는 것입니다.
+![](Materails_Instances_Names_Relation.png)
+[/region] 
+
+
+## 머티리얼 인스턴스 실전
+
+머티리얼 인스턴스 시스템의 진짜 위력은 엄청 많은 머티리얼이 전부 달라 보이지만 유사한 제어점이 있다거나, 게임 플레이 도중 머티리얼을 특정한 방식으로 제어할 필요가 있을 때 드러납니다.
+다음 예제에서는 기존 단계에서 만든 부모 머티리얼을 기반으로 생성된 각기 다른 세 개의 인스턴싱된 머티리얼을 만들어 보겠습니다.
+그런 다음 부모 머티리얼을 변경하여, 부모에 대한 변경이 자손에게 어떠한 영향을 끼치는지 살펴보겠습니다.
+
+1. 먼저 위에서 부모 머티리얼로 생성한 **Material_Master** 머티리얼을 사용하여 머티리얼 인스턴스를 조금 더 만들어 줍니다.
+   그러기 위해서는 **콘텐츠 브라우저** 에서 **Material_Master** 에 **우클릭** 한 다음 메뉴에서 **새 머티리얼 인스턴스 생성** 을 선택합니다.
+   머티리얼 인스턴스가 총 세 개 생길 때까지 이 작업을 반복합니다.
+
+	![](Materails_Instances_Create_3_New_MI.png)(w:800)
+
+1. 머티리얼 인스턴스를 세 개 더 만들었으니, 이제 그 **파라미터** 를 열어 조정을 시작해 볼 차례입니다.
+   머티리얼 인스턴스 중 하나를 열려면, **콘텐츠 브라우저** 안에서 **더블클릭** 하면 됩니다.
+   열었으면 그 컬러, 러프니스, 메탈릭 값을 원하는 대로 설정하면 됩니다.
+   이 예제에서는 컬러에 빨강, 초록, 파랑을, 다른 입력에는 각기 다른 숫자를 사용하고 있습니다.
+   이 예제에 사용된 숫자는 아래 그림에서 확인할 수 있습니다.
+   
+    [REGION:lightbox]
+	[![](Materails_Instances_Fill_In_Instances.png)(w:920 convert:false)](Materails_Instances_Fill_In_Instances.png)
+	[/REGION]
+
+1. 머티리얼 인스턴스를 만들고 데이터를 채웠으니, 이제 월드의 오브젝트에 적용할 수 있습니다.
+   이 예제에서는 **시작용 콘텐츠** 의 **Shapes** 폴더에서 찾아볼 수 있는 기본 메시에 머티리얼 인스턴스를 적용하도록 하겠습니다.
+   [REGION:lightbox]
+   [![](Materails_Instances_Applied_Instanaces.png)(w:920 convert:false)](Materails_Instances_Applied_Instanaces.png)
+   [/REGION]
+
+1. 이제 머티리얼 인스턴스 시스템의 실전 위력을 확인하기 위해, **Master_Material** 을 엽니다.
+	**Master_Material** 이 열리면 **Scalar Parameter** 노드 중 하나를 선택한 다음 **Ctrl + W** 키를 눌러 복제합니다.
+	노드 복제 후 이름을 **Specular** 로 바꾸고 기본값을 **0.5** 로 설정합니다.
+	Scalar Parameter 노드의 출력을 **스페큘러** 입력에 연결한 다음 머티리얼을 컴파일합니다.
+	[REGION:lightbox]
+	[![](Materails_Instances_Add_New_Param.png)(w:920 convert:false)](Materails_Instances_Add_New_Param.png)
+	[/REGION]
+
+1. 머티리얼 zjavkdlfdl dhksfyehlaus, **Master Material** 을 닫은 다음 빨강 머티리얼 인스턴스를 엽니다.
+   열리면 **스페큘러** 에 새 입력이 어떻게 되어 있는지 보세요.
+   이제 **파랑** 과 **초록** 머티리얼 인스턴스 둘 다 확인합니다. **스페큘러** 새 입력이 어떻게 되어있는지 보세요.
+   머티리얼 인스턴스의 진정한 위력은 이렇습니다. 부모 머티리얼에 가하는 변경사항은 항상 그 자손에게 전파되는 것입니다.
+   [REGION:lightbox]
+   [![](Materails_Instances_New_Options.png)(w:920 convert:false)](Materails_Instances_New_Options.png)
+   [/REGION]
+
+
+## 머티리얼 인스턴스의 부모 머티리얼 변경하기
+
+머티리얼 인스턴스 에디터에서 새 부모를 설정하여 머티리얼 인스턴스의 부모로 사용되는 머티리얼을 빠르게 변경할 수 있습니다.
+그러기 위해서 해야할 작업은, 머티리얼 인스턴스를 연 다음 **디테일** 패널의 **General** 섹션 아래 **Parent** 섹션에 있는 머티리얼을 새로이 선택한 머티리얼로 변경합니다.
+그 작업 이후 새 머티리얼의 옵션에 따라 머티리얼 인스턴스 에디터가 새로운 부모 머티리얼의 옵션을 반영하여 변경됩니다.
+위에서의 머티리얼을 부모로 사용하여 생성된 머티리얼 인스턴스는 이렇습니다.
+
+![](Material_Instancing_Change_Parent.png)
+
+머티리얼 인스턴스는 동일하되 이번에는 부모 머티리얼이 변경된 것입니다.
+텍스처 입력 갯수가 적어지고 일부 숫자 입력 값이 추가된 것을 확인할 수 있습니다.
+
+
+![](Material_Instancing_Change_Parent_Results.png)
+
+## 결론
+
+머티리얼 인스턴싱은 프로젝트 전 부분에 걸쳐 사용할 수 있는 강력한 도구입니다.
+무기나 소품에 약간의 개성을 추가하는 것에서부터 아티스트의 머티리얼 활용을 돕는 것까지,
+머티리얼 인스턴스는 프로젝트에서의 머티리얼 생성 및 사용법을 효율적으로 통합시키는 데 큰 도움이 될 수 있습니다.
+
+
+
+
+
+
+

@@ -1,0 +1,164 @@
+Availability: Licensee
+Title:Perforce Auto-Merge Tool
+Crumbs:%ROOT%, GettingStarted, GettingStarted/DownloadingUnrealEngine, GettingStarted/DownloadingUnrealEngine/Perforce
+Description:Script that automates the process of performing an integration using Perforce.
+version: 4.9
+
+[TOC(start:2)]
+
+The Perforce Auto-Merge script exists to automate the tedious and/or error-prone steps involved in performing a Perforce integration (aka merge). It incorporates several best-practices for merging as described in the [Perforce Integration](GettingStarted/DownloadingUnrealEngine/Perforce/Integration) page, so is the recommended way to merge in the Unreal Engine Perforce database.
+
+
+
+## Using the Auto-Merge Tool
+
+The script operates as a "custom tool" in P4V or P4Win that allows you to merge a single changelist between two branches.
+
+The screenshot below shows how it looks in P4V:
+
+![P4AutoMergeCustomToolMenu.jpg](P4AutoMergeCustomToolMenu.jpg)
+
+
+* For any branch, you can choose a **Safe Merge** or a **NULL Merge** (described below). 
+* There is a General tool that allows you to choose an arbitrary branch (with a pop-up dialog). 
+* You can add your own custom branches by matching the format used in the custom tool editor in P4V or P4Win.
+
+
+When the script runs, it will output diagnostics to a separate window (in P4V, P4Win displays them in the status pane) like so:
+
+![P4AutoMergeOutput.jpg](P4AutoMergeOutput.jpg)
+
+This window will give a summary of what is occurring, and can be used to troubleshoot problems.
+
+Finally, when you are ready to check in, the description field will already be filled out with information required by our merge policy:
+
+![P4AutoMergeChangeDescription.jpg](P4AutoMergeChangeDescription.jpg)
+
+The description contains:
+
+
+* [AUTOMERGE] or [SAFEMERGE] to indicate how the merge occurred.
+* A copy of the original changelist description.
+* A footer that indicates the originating branch, change#, submitting user, and date.
+
+
+
+### Safe Merge
+
+The Safe Merge tool merges a changelist and performs an auto-safe resolve, which only resolves files that have changed in one branch or the other, but not both. This type of resolve is guaranteed to succeed. When this process is finished, you will have a new changelist with the required checkin description already in place. If there are any files left to resolve (files that need to have a merge performed on them), you will have to handle them manually before checking in.
+
+See the [Perforce Integration](GettingStarted/DownloadingUnrealEngine/Perforce/Integration#Resolve) page for help with manual resolves.
+
+
+### NULL Merge
+
+The NULL Merge tool merges a changelist and performs an accept yours resolve, which means that the files will be integrated, but will not be changed. This will unambiguously indicate that a changelist has been considered for integration, but it was decided not to incorporate those changes.
+
+For more information on NULL merges, see the [Perforce Integration](GettingStarted/DownloadingUnrealEngine/Perforce/Integration#NullMerge) page.
+
+
+
+## Usage
+
+
+* Safe Merge (UT3 is merely used as an example):
+    * **Right-click** a submitted changelist in UT3-PC. 
+    * AutoMerge | UT3 PC -> PS3: SAFE Merge. 
+    * When finished, a new changelist will be created with the files. 
+    * Any files that can be safely resolved will be done for you, and the output window will list the remaining files.
+    * Resolve any files that could not be safely resolved and check in.
+* NULL Merge (UT3 is merely used as an example):
+    * **Right-click** a submitted changelist in UT3-PC. 
+    * MergeTo | UT3 PC -> PS3: NULL Merge. 
+    * When finished, a new changelist will be created with the files. 
+    * All files will be NULL merged.
+    * Check in the NULL merge.
+
+
+
+
+## Installation
+
+
+### Installing Python
+
+The script is a Python script that uses the P4Python API, so you will need to install that first.
+
+* For Python:
+    * The [ActiveState ActivePython](http://www.activestate.com/activepython/) distribution is recommended.
+    * The script is currently tested with Python version 2.5.2.
+* For P4Python:
+    * You can download the latest P4Python from the [Related Software](http://www.perforce.com/perforce/loadsupp.html) page of the Perforce site. 
+    * You can get the [API documentation](http://www.perforce.com/perforce/doc.current/manuals/p4script/p4script.pdf) from the Perforce site.
+    * The script is currently tested with P4Python version 2008.2.
+
+
+
+### Installing the custom tool
+
+Once Python and P4Python is installed:
+
+* Download the [](P4AutoMerge.py.txt) python script and place it in your Python path.
+* In the P4V **Tools** menu, select **Manage custom tools...**
+* Select **New > Tool...** (optionally creating a folder to group your tools).
+* Set up the options like the image below.
+    * Replace the indicated string with your branch name.
+    * Click the **select...** button for more details on the options available for P4V's custom tools.
+
+
+![P4AutoMergeSetup.jpg](P4AutoMergeSetup.jpg)
+
+
+* From there, you should be able to **Right-click** on a submitted changelist and select your tool.
+
+
+
+### Installing the general branch tool
+
+You can also set P4V up to display a prompt for the branch name. This is set up almost exactly the same way, but specifies a special option instead of the branch name:
+
+* **`P4AutoMerge.py -p $p -u $u -c $c -b $D -m SAFE %C`**
+* In the description, type in the following text: "Enter the branchspec you want to merge from (append -r to reverse it)."
+
+
+![P4AutoMergeSetupGeneral.jpg](P4AutoMergeSetupGeneral.jpg)
+
+
+
+## Merging more than one changelist at once
+
+Technically, the script supports merging a range of changelists at once. However, this is not recommended, and is hard to expose in the custom tool GUI. You can use the command-line options to control this yourself, though:
+
+
+    
+    Usage: P4AutoMerge.py [options]
+    
+            Desc: Script to support auto-merging changelists from a branch.
+    
+    Options:
+      --version             show program's version number and exit
+      -h, --help            show this help message and exit
+      -p PORT, --port=PORT  P4 port to use. ie: p4-server:1666. Uses p4
+                            environment search for P4PORT by default.
+      -u USER, --user=USER  P4 user to use. Uses p4 environment search for P4USER
+                            by default.
+      -c CLIENT, --client=CLIENT
+                            P4 client to use. Uses p4 environment search for
+                            P4CLIENT by default.
+      -r, --reverse         Reverse the branchspec if specified. Default = False
+      -b BRANCHSPEC, --branchspec=BRANCHSPEC
+                            <Required> Branchspec to use.
+      -m MERGETYPE, --mergetype=MERGETYPE
+                            Type of merge to perform Valid options are SAFE and
+                            NULL. Default = SAFE
+    
+
+
+
+No accommodation is made for logging in, so you must already be authenticated for that user on that client for the script to work successfully.
+
+ 
+
+
+
+

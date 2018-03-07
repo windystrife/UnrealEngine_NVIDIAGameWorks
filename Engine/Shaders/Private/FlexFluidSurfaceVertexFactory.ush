@@ -1,0 +1,297 @@
+
+// Copyright 1998-2014 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	FlexFluidSurfaceRendering.cpp: Flex fluid surface screen vertex factory shader code.
+=============================================================================*/
+
+#include "VertexFactoryCommon.ush"
+#include "ParticleVertexFactoryCommon.ush"
+
+Texture2D FlexFluidSurfaceDepthTexture;
+SamplerState FlexFluidSurfaceDepthTextureSampler;
+
+float2 ClipXYAndViewDepthToViewXY;
+float InvTexResScale;
+
+struct FVertexFactoryInput
+{
+	float4	Position				: ATTRIBUTE0;
+};
+
+struct FVertexFactoryInterpolantsVSToPS
+{
+	float4	ClipPosition			: TEXCOORD0;
+
+#if INSTANCED_STEREO
+	nointerpolation uint PackedEyeIndex : PACKED_EYE_INDEX;
+#endif
+};
+
+struct FVertexFactoryIntermediates
+{
+	float4	VertexWorldPosition;
+	float4	VertexClipPosition;
+};
+
+float3 GetViewPos(float2 TexCoordUV, float ViewZ)
+{
+	float2 ClipXY = (TexCoordUV - ResolvedView.ScreenPositionScaleBias.wz) / ResolvedView.ScreenPositionScaleBias.xy;
+
+	//find position at z=1 plane in view space
+	float2 XY = ClipXY*ClipXYAndViewDepthToViewXY;
+	return float3(-XY*ViewZ, ViewZ);
+}
+
+//TODO: merge texture accesses
+//also maybe do this:
+// Derive ScreenPosition from WorldPosition to avoid using another interpolator
+// Parameters.ScreenPosition = mul(PixelPosition, ResolvedView.TranslatedWorldToClip);
+
+/** Converts from vertex factory specific interpolants to a FMaterialPixelParameters, which is used by material inputs. */
+FMaterialPixelParameters GetMaterialPixelParameters(FVertexFactoryInterpolantsVSToPS Interpolants, float4 PixelPosition)
+{
+	// GetMaterialPixelParameters is responsible for fully initializing the result
+	FMaterialPixelParameters Result = MakeInitializedMaterialPixelParameters();
+
+	float2 TexCoord = float2(Interpolants.ClipPosition.xy * ResolvedView.ScreenPositionScaleBias.xy + ResolvedView.ScreenPositionScaleBias.wz);
+	float2 TexelSize = View.BufferSizeAndInvSize.zw*InvTexResScale;
+
+	float ViewPosZ = Texture2DSample(FlexFluidSurfaceDepthTexture, FlexFluidSurfaceDepthTextureSampler, TexCoord).x;
+	float3 ViewPos = GetViewPos(TexCoord, ViewPosZ);
+
+	float2 TexCoordL = TexCoord - float2(TexelSize.x, 0.0f);
+	float2 TexCoordR = TexCoord + float2(TexelSize.x, 0.0f);
+	float2 TexCoordT = TexCoord - float2(0.0f, TexelSize.y);
+	float2 TexCoordB = TexCoord + float2(0.0f, TexelSize.y);
+
+	float3 ViewPosL = GetViewPos(TexCoordL, Texture2DSample(FlexFluidSurfaceDepthTexture, FlexFluidSurfaceDepthTextureSampler, TexCoordL).x);
+	float3 ViewPosR = GetViewPos(TexCoordR, Texture2DSample(FlexFluidSurfaceDepthTexture, FlexFluidSurfaceDepthTextureSampler, TexCoordR).x);
+	float3 ViewPosT = GetViewPos(TexCoordT, Texture2DSample(FlexFluidSurfaceDepthTexture, FlexFluidSurfaceDepthTextureSampler, TexCoordT).x);
+	float3 ViewPosB = GetViewPos(TexCoordB, Texture2DSample(FlexFluidSurfaceDepthTexture, FlexFluidSurfaceDepthTextureSampler, TexCoordB).x);
+
+	float3 ZL = ViewPos - ViewPosL;
+	float3 ZR = ViewPosR - ViewPos;
+	float3 ZT = ViewPosT - ViewPos;
+	float3 ZB = ViewPos - ViewPosB;
+
+	//We don't use the one-sided hw differences as they yiald wrong results at the shape boundaries 
+	float3 DX = ZL;
+	float3 DY = ZT;
+
+	if (abs(ZR.z) < abs(ZL.z))
+		DX = ZR;
+
+	if (abs(ZB.z) < abs(ZT.z))
+		DY = ZB;
+
+	DX = normalize(DX);
+	DY = normalize(DY);
+
+	float3 ViewNormal = cross(DX, DY);
+	
+	// for some reason, View.ViewToTranslatedWorld is not the right transform to rotate from view space to world space
+	float3x3 ViewToWorldRot = float3x3(ResolvedView.ViewRight, ResolvedView.ViewUp, -ResolvedView.ViewForward);
+	float3 WorldNormal = normalize(mul(ViewNormal, ViewToWorldRot));
+
+	float3 WorldTangent = normalize(cross(WorldNormal, ResolvedView.ViewUp));
+	float3 WorldBinormal = cross(WorldNormal, WorldTangent);
+
+	Result.TangentToWorld[0] = WorldTangent;
+	Result.TangentToWorld[1] = WorldBinormal;
+	Result.TangentToWorld[2] = WorldNormal;
+
+	return Result;
+}
+
+
+void GetFlexFluidSurfaceCoverageAndClipping(FVertexFactoryInterpolantsVSToPS Interpolants)
+{
+	float2 TexCoord = float2(Interpolants.ClipPosition.xy * ResolvedView.ScreenPositionScaleBias.xy + ResolvedView.ScreenPositionScaleBias.wz);
+	float SmoothDepth = Texture2DSampleLevel(FlexFluidSurfaceDepthTexture, FlexFluidSurfaceDepthTextureSampler, TexCoord, 0).x;
+	//TODO use far distance plane value
+	clip(65000.0f - SmoothDepth);
+}
+
+float GetFlexFluidSurfaceDepth(FVertexFactoryInterpolantsVSToPS Interpolants)
+{
+	float2 TexCoord = float2(Interpolants.ClipPosition.xy * ResolvedView.ScreenPositionScaleBias.xy + ResolvedView.ScreenPositionScaleBias.wz);
+	float SmoothDepth = Texture2DSampleLevel(FlexFluidSurfaceDepthTexture, FlexFluidSurfaceDepthTextureSampler, TexCoord, 0).x;
+	return ConvertToDeviceZ(SmoothDepth);
+}
+
+float3 GetDebugNormalColor(float3 Normal)
+{
+	if (dot(normalize(Normal), float3(1, 0, 0)) > 0.85)
+		return float3(1, 0, 0);
+
+	if (dot(normalize(Normal), float3(-1, 0, 0)) > 0.85)
+		return float3(0, 1, 1);
+
+	if (dot(normalize(Normal), float3(0, 1, 0)) > 0.85)
+		return float3(0, 1, 0);
+
+	if (dot(normalize(Normal), float3(0,-1, 0)) > 0.85)
+		return float3(1, 0, 1);
+
+	if (dot(normalize(Normal), float3(0, 0, 1)) > 0.85)
+		return float3(0, 0, 1);
+
+	if (dot(normalize(Normal), float3(0, 0,-1)) > 0.85)
+		return float3(1, 1, 0);
+
+	return float3(1,1,1);
+}
+
+float3 GetFlexFluidSurfaceDebugColor(FVertexFactoryInterpolantsVSToPS Interpolants)
+{
+	return float3(0.0f, 0.0f, 0.0f);
+}
+
+/** Converts from vertex factory specific input to a FMaterialVertexParameters, which is used by vertex shader material inputs. */
+FMaterialVertexParameters GetMaterialVertexParameters(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates, float3 WorldPosition, float3x3 TangentToLocal)
+{
+	FMaterialVertexParameters Result = (FMaterialVertexParameters)0;
+	return Result;
+}
+
+void GetLightMapCoordinates(FVertexFactoryInterpolantsVSToPS Interpolants, out float2 LightmapUV0, out float2 LightmapUV1)
+{
+}
+
+half2 GetShadowMapCoordinate(FVertexFactoryInterpolantsVSToPS Interpolants)
+{
+	return 0;
+}
+
+float3 SafeNormalize(float3 V)
+{
+	return V * rsqrt(max(dot(V,V),0.01));
+}
+
+void GetTangents(FVertexFactoryInput Input, float3 WorldPosition, float3 OldWorldPosition, out float3 OutRight, out float3 OutUp)
+{
+	// Select camera up/right vectors.
+	OutRight = float3(1, 0, 0);
+	OutUp = float3(0, 1, 0);
+}
+
+/** derive basis vectors */
+float3x3 CalcTangentBasis(FVertexFactoryIntermediates Intermediates)
+{
+	// Return the identity matrix.
+	return float3x3(1,0,0,0,1,0,0,0,1);
+}
+
+FVertexFactoryIntermediates GetVertexFactoryIntermediates(FVertexFactoryInput Input)
+{
+	FVertexFactoryIntermediates Intermediates = (FVertexFactoryIntermediates)0;
+
+	float4 ClipPos = Input.Position;
+	float4 ViewPos = mul(ClipPos, ResolvedView.ClipToView);
+	ViewPos = ViewPos*(1.0f/ViewPos.w);
+	float4 TranslatedWorldPos = mul(ViewPos, ResolvedView.ViewToTranslatedWorld);
+	 
+	Intermediates.VertexWorldPosition = TranslatedWorldPos;
+	Intermediates.VertexClipPosition = ClipPos;
+	return Intermediates;
+}
+
+float4 VertexFactoryGetWorldPosition(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates)
+{
+	return Intermediates.VertexWorldPosition;
+}
+
+float4 VertexFactoryGetRasterizedWorldPosition(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates, float4 TranslatedWorldPosition)
+{
+	return TranslatedWorldPosition;
+}
+
+FVertexFactoryInterpolantsVSToPS VertexFactoryGetInterpolantsVSToPS(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates, FMaterialVertexParameters VertexParameters)
+{
+	FVertexFactoryInterpolantsVSToPS Interpolants;
+
+	// Initialize the whole struct to 0
+	Interpolants = (FVertexFactoryInterpolantsVSToPS)0;
+	Interpolants.ClipPosition = Intermediates.VertexClipPosition;
+
+#if INSTANCED_STEREO
+	Interpolants.PackedEyeIndex = 0;
+#endif
+
+	return Interpolants;
+}
+
+float4 VertexFactoryGetPreviousWorldPosition(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates)
+{
+	return VertexFactoryGetWorldPosition(Input, Intermediates);
+}
+
+/**
+* Get the 3x3 tangent basis vectors for this vertex factory
+*
+* @param Input - vertex input stream structure
+* @return 3x3 matrix
+*/
+float3x3 VertexFactoryGetTangentToLocal(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates)
+{
+	// Return the identity matrix.
+	return float3x3(1,0,0,0,1,0,0,0,1);
+}
+
+#if NUM_MATERIAL_TEXCOORDS //just to make it compile
+bool UVIndexUseZW(int UVIndex)
+{
+	return false;
+}
+
+float2 GetUV(FVertexFactoryInterpolantsVSToPS Interpolants, int UVIndex)
+{
+	return float2(0.0f, 0.0f);
+}
+
+void SetUV(inout FVertexFactoryInterpolantsVSToPS Interpolants, int UVIndex, float2 InValue)
+{
+}
+#endif //NUM_MATERIAL_TEXCOORDS
+
+
+
+#if USING_TESSELLATION //just to make it compile
+
+	struct FVertexFactoryInterpolantsVSToDS
+	{
+		FVertexFactoryInterpolantsVSToPS InterpolantsVSToPS;
+	};
+
+	float2 VertexFactoryGetTextureCoordinateDS( FVertexFactoryInterpolantsVSToDS Interpolants )
+	{
+		return float2(0,0);
+	}
+
+	FVertexFactoryInterpolantsVSToDS VertexFactoryInterpolate(FVertexFactoryInterpolantsVSToDS a, float aInterp, FVertexFactoryInterpolantsVSToDS b, float bInterp)
+	{
+		FVertexFactoryInterpolantsVSToDS O;
+		return O;
+	}
+
+	FVertexFactoryInterpolantsVSToPS VertexFactoryAssignInterpolants(FVertexFactoryInterpolantsVSToDS Input)
+	{
+		return Input.InterpolantsVSToPS;
+	}
+
+	FVertexFactoryInterpolantsVSToDS VertexFactoryGetInterpolantsVSToDS(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates, FMaterialVertexParameters VertexParameters)
+	{
+		FVertexFactoryInterpolantsVSToDS Interpolants;
+		Interpolants.InterpolantsVSToPS = VertexFactoryGetInterpolantsVSToPS(Input, Intermediates, VertexParameters);
+		return Interpolants;
+	}
+
+#endif //USING_TESSELLATION
+
+#if INSTANCED_STEREO
+uint VertexFactoryGetEyeIndex(uint InstanceId)
+{
+	return InstanceId & 1;
+}
+#endif

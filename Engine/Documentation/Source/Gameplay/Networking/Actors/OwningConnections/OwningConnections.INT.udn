@@ -1,0 +1,29 @@
+Availability:Public
+Title: Actors and their Owning Connections
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking, Gameplay/Networking/Actors
+Description:An overview of the role of the server in multiplayer.
+Related: Gameplay/Networking/Actors
+Related: Gameplay/Networking/Actors/RPCs
+Related: Gameplay/Networking/Server
+version: 4.9
+
+You will hear a lot about the owning connection of an actor. Ultimately, each connection has a PlayerController, created specifically for that connection (read more about this process in the client connection flow details). Each PlayerController that is created for this reason, is owned by that connection. To determine if an actor in general is owned by a connection, you query for the actors most outer owner, and if the owner is a PlayerController, then that actor is also owned by the same connection that owns the PlayerController.
+
+One example of this is when Pawn actors are possessed by a PlayerController. Their owner will be the PlayerController that they are possessed by. During this time, they are owned by the connection of the PlayerController. The Pawn is only owned by this connection during the time it is also owned/possessed by the PlayerController. So as soon as the PlayerController no longer possesses the Pawn, the Pawn is no longer owned by the connection.
+
+Another example is inventory items that are owned by a Pawn. These inventory items are owned by the same connection (if any) that might own that Pawn.
+
+Components are a little special in how they determine their owning connection. In this case, we first determine the components owner by walking the components outer chain until we find the owning actor, and then we continue as above by determining owning connection of this actor.
+
+Connection ownership is important for a few things:
+* RPCs need to determine which client will execute a run-on-client RPC
+* Actor replication and connection relevancy
+* Actor property replication conditions when the owner is involved
+
+Connection ownership is important for things like RPCs, because when you call an RPC function on an actor, unless the RPC is marked as multicast, it needs to know which client to execute that RPC on. It determines the connection to send the RPC to by finding the owning connection.
+
+Connection ownership is used during actor replication, and determining which connections get updates for each actor. For actors that have bOnlyRelevantToOwner set to true, only the connection that owns that actor will receive property updates for that actor. By default, all PlayerControllers have this flag set, and this is why each client only receives updates for PlayerControllers that he owns. This is done for various reasons, the main ones being to prevent players from cheating and efficiency.
+
+Connection ownership is important during [property replication involving conditions](Gameplay/Networking/Actors/Properties/Conditions) that use the owner. For example. When `COND_OnlyOwner` is used, only the owners of that actor will receive these property updates.
+
+Lastly, the owning connection is important for actors that are autonomous proxies (Role is `ROLE_AutonomousProxy`). For these actors, their role is downgraded to `ROLE_SimulatedProxy` while their properties are replicated to connections that don't own these actors.

@@ -1,0 +1,111 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	DistortionAccumulatePixelShader.usf: Vertex/Hull/Domain shader for accumulating distortion offsets
+=============================================================================*/
+
+#include "Common.ush"
+#include "/Engine/Generated/Material.ush"
+#include "/Engine/Generated/VertexFactory.ush"
+
+struct FDistortAccumulateVSToPS
+{
+	FVertexFactoryInterpolantsVSToPS FactoryInterpolants;
+	float4	PixelPosition	: TEXCOORD6;
+	float4	Position		: SV_POSITION;
+};
+
+#if USING_TESSELLATION	
+	struct FDistortAccumulateVSToDS
+	{
+		FVertexFactoryInterpolantsVSToDS FactoryInterpolants;
+		float4 Position : VS_To_DS_Position;
+		OPTIONAL_VertexID_VS_To_DS
+	};
+	
+	#define VS_OUTPUT_TYPE FDistortAccumulateVSToDS
+#else
+	#define VS_OUTPUT_TYPE FDistortAccumulateVSToPS
+#endif
+
+#if USING_TESSELLATION	
+	#define FPassSpecificVSToDS FDistortAccumulateVSToDS
+	#define FPassSpecificVSToPS FDistortAccumulateVSToPS
+	#define INTERPOLATE_MEMBER(member) O.member = a.member * aInterp + b.member * bInterp
+
+	FDistortAccumulateVSToDS PassInterpolate(FDistortAccumulateVSToDS a, float aInterp, FDistortAccumulateVSToDS b, float bInterp)
+	{
+		FDistortAccumulateVSToDS O;
+		
+		O.FactoryInterpolants = VertexFactoryInterpolate(a.FactoryInterpolants, aInterp, b.FactoryInterpolants, bInterp);
+
+		return O;
+	}
+
+	#undef INTERPOLATE_MEMBER
+	
+	FDistortAccumulateVSToPS PassFinalizeTessellationOutput(FDistortAccumulateVSToDS Interpolants, float4 WorldPosition, FMaterialTessellationParameters MaterialParameters)
+	{
+		FDistortAccumulateVSToPS O;
+		
+		O.FactoryInterpolants = VertexFactoryAssignInterpolants(Interpolants.FactoryInterpolants);
+		
+		// Finally, transform position to clip-space
+		O.Position = mul(WorldPosition, View.TranslatedWorldToClip);
+			
+		O.PixelPosition = WorldPosition;
+		
+		return O;
+	}
+	
+	#include "Tessellation.ush"
+#endif
+
+#if VERTEXSHADER
+
+/** transform mesh as normal */
+void Main(
+	FVertexFactoryInput Input,
+	OPTIONAL_VertexID
+	out VS_OUTPUT_TYPE Output
+#if USE_GLOBAL_CLIP_PLANE && !USING_TESSELLATION
+	, out float OutGlobalClipPlaneDistance : SV_ClipDistance
+#endif
+	)
+{
+	ResolvedView = ResolveView();
+
+	FVertexFactoryIntermediates VFIntermediates = GetVertexFactoryIntermediates(Input);
+	float4	WorldPosition = VertexFactoryGetWorldPosition(Input, VFIntermediates);
+	float3x3 TangentToLocal = VertexFactoryGetTangentToLocal(Input, VFIntermediates);
+
+	FMaterialVertexParameters VertexParameters = GetMaterialVertexParameters(Input, VFIntermediates, WorldPosition.xyz, TangentToLocal);
+	// Isolate instructions used for world position offset on xbox 360, 
+	// As these cause the optimizer to generate different position calculating instructions in each pass, resulting in self-z-fighting.
+	// This is only necessary for shaders used in passes that have depth testing enabled.
+	ISOLATE
+	{
+		WorldPosition.xyz += GetMaterialWorldPositionOffset(VertexParameters);
+	}
+	
+#if USING_TESSELLATION
+	Output.Position = WorldPosition;
+	Output.FactoryInterpolants = VertexFactoryGetInterpolantsVSToDS(Input, VFIntermediates, VertexParameters);
+	
+#else // !USING_TESSELLATION
+
+	Output.Position = mul(WorldPosition, View.TranslatedWorldToClip);
+	Output.FactoryInterpolants = VertexFactoryGetInterpolantsVSToPS(Input, VFIntermediates, VertexParameters);
+
+#if USE_GLOBAL_CLIP_PLANE
+	OutGlobalClipPlaneDistance = dot(ResolvedView.GlobalClippingPlane, float4(WorldPosition.xyz - ResolvedView.PreViewTranslation.xyz, 1));
+#endif
+
+	Output.PixelPosition = WorldPosition;
+
+#endif // USING_TESSELLATION
+
+	OutputVertexID( Output );
+}
+
+#endif // VERTEXSHADER

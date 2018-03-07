@@ -1,0 +1,49 @@
+Availability:Public
+Title:Actor Relevancy and Priority
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking, Gameplay/Networking/Actors
+Description:Information about Actor relevancy and priority
+Related: Gameplay/Networking/Actors
+Related: Gameplay/Networking/Actors/ReplicationPerformance
+version: 4.9
+
+[TOC (start:2 end:3)]
+
+## Relevancy
+
+A level can be huge, and at any time a player can only see a small fraction of the Actors in that level. Most of the other Actors in the level are not visible, are not audible, and have no 
+significant effect on the player. The set of Actors that a server deems are visible to or capable of affecting a client are deemed the relevant set of Actors for that client. A significant 
+bandwidth optimization in Unreal's network code is that the server only tells clients about Actors in that client's relevant set.
+
+Unreal applies the following rules (in order) in determining the relevant set of Actors for a player. These tests are implemented in the virtual function `AActor::IsNetRelevantFor()`.
+
+1. If the Actor is bAlwaysRelevant, is owned by the Pawn or PlayerController, is the Pawn, or the Pawn is the Instigator of some action like noise or damage, it is relevant.
+1. If the Actor is bNetUseOwnerRelevancy and has an Owner, use the owner's relevancy. 
+1. If the Actor is bOnlyRelevantToOwner, and does not pass the first check, it is not relevant.
+1. If the Actor is attached to the skeleton of another Actor, then its relevancy is determined by the relevancy of its base.
+1. If the Actor is hidden (bHidden == _true_) and the root component does not collide then the Actor is not relevant.
+	* If there is no root component, `AActor::IsNetRelevantFor()` will log a warning and ask if the Actor should be set to bAlwaysRelevant=_true_.
+1. If AGameNetworkManager is set to use distance based relevancy, the Actor is relevant if it is closer than the net cull distance.
+
+[REGION:note]
+Pawn and PlayerController override `AActor::IsNetRelevantFor()` and have different conditions for relevancy as a result. 
+[/REGION]
+
+Note that bStatic Actors (which remain on the client) can also be replicated.
+
+These rules are designed to give a good approximation of the set of Actors which really can affect a player. Of course, it is imperfect: the distance check can sometimes give a false negative with large Actors (though we use some heuristics to help it out), it does not account for sound occlusion of ambient sounds, and so on. However, the approximation is such that its error is overwhelmed by the error inherent in a network environment with such latency and packet loss characteristics as the Internet.
+
+## Prioritization
+
+Unreal uses a load-balancing technique that prioritizes all Actors, and gives each one a fair share of the bandwidth based on how important it is to gameplay.
+
+Each Actor has a floating point variable called NetPriority. The higher the number, the more bandwidth that Actor receives relative to others. An Actor with a priority of 2.0 will be updated exactly 
+twice as frequently as an Actor with priority 1.0. The only thing that matters with priorities is their ratio; so obviously you cannot improve Unreal's network performance by increasing all of the 
+priorities. Some of the values of NetPriority we have assigned in our performance-tuning are:
+
+* Actor = 1.0
+* Matinee = 2.7
+* Pawn = 3.0 
+* PlayerController = 3.0
+
+The current priority of an Actor is calculated using the virtual function AActor::GetNetPriority(). To avoid starvation `AActor::GetNetPriority()` multiplies NetPriority with the time since the Actor 
+was last replicated. The `GetNetPriority` functions also consider the relative location of and distance between the Actor and the viewer.

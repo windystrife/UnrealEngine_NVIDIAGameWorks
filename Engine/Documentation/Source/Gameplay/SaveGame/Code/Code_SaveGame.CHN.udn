@@ -1,0 +1,122 @@
+﻿INTSourceChangelist:2716250
+Availability:Public
+Title: 使用 C++ 保存游戏
+Crumbs:%ROOT%, Gameplay, Gameplay/SaveGame
+Description:如何使用 C++ 代码保存和加载游戏
+version: 4.9
+
+[TOC (start:2 end:2)]
+
+## 创建 SaveGame 对象
+
+`SaveGame` 类定义了一个对象结构，该结构可供 `Kismet/GameplayStatics.h` 中的存盘和读取的函数调用来使用。 
+
+要新建基于 `SaveGame` 的类可使用 [](Programming\Development\ManagingGameCode\CppClassWizard)。
+
+![](SaveGameCode.png)(w:800)
+
+在本例中，新建的 `SaveGame` 类称为 `MySaveGame`。
+
+### 头文件
+
+在这个 `SaveGame` 类的头文件中，您可以声明任意想要存储的变量。 
+	
+	UPROPERTY(VisibleAnywhere, Category = Basic)
+	FString PlayerName;
+
+[REGION:note]
+在本示例中，还有一些已声明的变量，这些变量将用于存储 `SaveSlotName` 和 `UserIndex` 的默认值，保存至此 `SaveGame` 对象的各类
+就不必单独设置这些变量了。此步骤为可选步骤，将产生一个保存槽，如果默认值未发生变化，则该保存槽将被覆盖。
+[/REGION]
+
+[REGION:codetitlebar]
+MySaveGame.h
+[/REGION:codetitlebar]
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+	#pragma once
+
+	#include "GameFramework/SaveGame.h"
+	#include "MySaveGame.generated.h"
+
+	/**
+	 * 
+	 */
+	UCLASS()
+	class [PROJECTNAME]_API UMySaveGame : public USaveGame
+	{
+		GENERATED_BODY()
+
+		public:
+
+		UPROPERTY(VisibleAnywhere, Category = Basic)
+		FString PlayerName;
+
+		UPROPERTY(VisibleAnywhere, Category = Basic)
+		FString SaveSlotName;
+	
+		UPROPERTY(VisibleAnywhere, Category = Basic)
+		uint32 UserIndex;
+
+		UMySaveGame();
+	};
+
+### 源文件
+
+通常，`SaveGame` 对象的源文件无需为功能编写特定代码，除非您的特定保存系统有您想要在此设置的
+附加功能。 
+
+本例中，我们在类构建器中定义了 `SaveSlotName` 和 `UserIndex` 的值，以便其他游戏类可读取及使用这些值。
+
+[REGION:codetitlebar]
+MySaveGame.cpp
+[/REGION:codetitlebar]
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+	#include "[ProjectName].h"
+	#include "MySaveGame.h"
+
+	UMySaveGame::UMySaveGame()
+	{
+		SaveSlotName = TEXT("TestSaveSlot");
+		UserIndex = 0;
+	}
+
+### 模块头文件
+
+为了能从 `GameplayStatics` 同时方便地存取 `SaveGame` 对象及创建、保存和加载功能，您应在游戏模块的头文件中的
+任何其他 `#include` 语句下面加入以下行。您的模块头文件将会自动命名为 [ProjectName].h。
+
+[REGION:codetitlebar]
+MyProject.h
+[/REGION:codetitlebar]
+	#include "MySaveGame.h"
+	#include "Kismet/GameplayStatics.h"
+[REGION:warning]
+需要保证这些 #include 语句添加在 `#include "Engine.h"` 之后，否则编译会失败。
+[/REGION]
+
+## 保存变量
+
+当想要在 `SaveGame` 的对象中保存变量的时候，必须先创建一个 `SaveGame` 的对象实例，然后再实例中设置需要的变量。
+
+	PlayerName = TEXT("PlayerOne");
+	UMySaveGame* SaveGameInstance = Cast<UMySaveGame>(UGameplayStatics::CreateSaveGameObject(UMySaveGame::StaticClass()));
+	SaveGameInstance->PlayerName = MyPlayerName;
+	UGameplayStatics::SaveGameToSlot(SaveGameInstance, SaveGameInstance->SaveSlotName, SaveGameInstance->UserIndex);
+
+## 加载变量
+
+若要加载变量，您必须先使用 `UGameplayStatics::LoadGameFromSlot` 加载 `SaveGame` 对象。这样做将创建一个 `SaveGame` 对象的新实例。
+
+同上示例，本示例中先创建了一个空的 `SaveGame` 对象，因此可从该对象中读取默认的 `SaveSlotName` 和 `UserIndex`。此步骤为可选步骤，可能无法适用于所有游戏实施。
+
+从硬盘驱动器加载新的 `SaveGame` 对象后，即可从该对象中读取变量值，并将其指派给所需的 actor 或类，或者如此处所示直接使用。
+
+	UMySaveGame* LoadGameInstance = Cast<UMySaveGame>(UGameplayStatics::CreateSaveGameObject(UMySaveGame::StaticClass()));
+	LoadGameInstance = Cast<UMySaveGame>(UGameplayStatics::LoadGameFromSlot(LoadGameInstance->SaveSlotName, LoadGameInstance->UserIndex));
+	FString PlayerNameToDisplay = LoadGameInstance->PlayerName;
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow, PlayerNameToDisplay);
+	}

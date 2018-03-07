@@ -1,0 +1,201 @@
+﻿INTSourceChangelist:3388666
+Availability: Public
+Title: 2.3 - 캐릭터 동작 함수 구현
+Crumbs: %ROOT%, Programming, Programming/Tutorials/FirstPersonShooter, Programming/Tutorials/FirstPersonShooter/2
+Description: 일인칭 슈팅 캐릭터에 대한 동작 함수 구현법을 배워봅니다.
+SkillLevel: Beginner
+Version: 4.15
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[예전 단계](Programming/Tutorials/FirstPersonShooter/2/2)
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[섹션 홈](Programming/Tutorials/FirstPersonShooter/2)
+	[/PARAM]	
+	[PARAM:next]
+		[다음 단계](Programming/Tutorials/FirstPersonShooter/2/4)
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+이번 단계에서는 Player Input Component 를 구성하고, `FPSCharacter` 클래스에 다음 함수를 구현합니다:
+
+*	`MoveForward`
+*	`MoveRight`
+
+## 무브먼트 함수 인터페이스
+
+`FPSCharacter` 축 매핑을 구성했으니, 이제 Visual Studio 에서 프로젝트로 전환할 수 있습니다.
+
+1.	`FPSCharacter.h` 에서 다음 함수 선언을 `SetupPlayerInputComponent` 아래 추가합니다.
+
+		// 전후 이동 처리
+		UFUNCTION()
+		void MoveForward(float Value);
+		
+		// 좌우 이동 처리
+		UFUNCTION()
+		void MoveRight(float Value);
+
+	(이 함수들 각각의 상단에 위치한) `UFUNCTION` 매크로는 엔진에게 이 함수들을 인식시켜 시리얼라이제이션, 최적화, 기타 엔진 함수성에 포함될 수 있도록 합니다.
+
+1.	`FPSCharacter.h` 는 다음과 같아 보일 것입니다:
+
+		// 프로젝트 세팅의 설명 페이지에 저작권 공지를 채우세요.
+		
+		#pragma once
+		
+		#include "GameFramework/Character.h"
+		#include "FPSCharacter.generated.h"
+		
+		UCLASS()
+		class FPSPROJECT_API AFPSCharacter : public ACharacter
+		{
+			GENERATED_BODY()
+		
+		public:
+			// 이 캐릭터의 프로퍼티 기본값을 설정합니다.
+			AFPSCharacter();
+		
+		protected:
+			// 게임 시작 또는 스폰시 호출됩니다.
+			virtual void BeginPlay() override;
+			
+		public:
+			// 매 프레임 호출됩니다.
+			virtual void Tick( float DeltaSeconds ) override;
+		
+			// 입력에 함수성 바인딩을 위해 호출됩니다.
+			virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+		
+			// 전후 이동을 처리합니다.
+			UFUNCTION()
+			void MoveForward(float Value);
+		
+			// 좌우 이동을 처리합니다.
+			UFUNCTION()
+			void MoveRight(float Value);
+			
+		};
+
+## 동작 함수 구현
+
+전형적인 FPS 조작법에서, 캐릭터의 동작 축은 카메라에 상대적입니다. "전방" 이란 "카메라가 향하는 방향" 을, "우측" 이란 "카메라가 향하는 방향의 우측"을 뜻합니다. 캐릭터의 제어 방향을 구하는 데는 `PlayerController` 를 사용할 것입니다. 또한 `MoveForward` 함수는 제어 회전의 핏치 컴포넌트를 무시하고 입력을 XY 면으로 제한시켜 위아래를 처다보더라도 캐릭터는 땅과 평행으로 움직일 수 있도록 합니다.
+
+1.	`FPSCharacter.cpp` 에서, `SetupPlayerInputComponent` 함수의 `Super::SetupPlayerInputComponent(PlayerInputComponent)` 아래 다음 줄을 추가합니다:
+
+		// 입력에 함수성 바인딩을 위해 호출됩니다.
+		void AFPSCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent)
+		{
+			Super::SetupPlayerInputComponent(PlayerInputComponent);
+			
+			// "movement" 바인딩 구성
+			PlayerInputComponent->BindAxis("MoveForward", this, &AFPSCharacter::MoveForward);
+			PlayerInputComponent->BindAxis("MoveRight", this, &AFPSCharacter::MoveRight);
+		}
+
+	[REGION:note]
+	`InputComponent` 는 입력 데이터 처리 방식을 정의하는 컴포넌트입니다. `InputComponent` 는 입력을 받기 원하는 액터에 붙이면 됩니다.
+	[/REGION]
+
+1.	`FPSCharacter.cpp` 에 다음 `MoveForward` 함수 정의를 추가합니다.
+
+		void AFPSCharacter::MoveForward(float Value)
+		{
+			// 어느 쪽이 전방인지 알아내어, 플레이어가 그 방향으로 이동하고자 한다고 기록합니다.
+			FVector Direction = FRotationMatrix(Controller->GetControlRotation()).GetScaledAxis(EAxis::X);
+			AddMovementInput(Direction, Value);
+		}
+
+1.	`FPSCharacter.cpp`에 다음 `MoveRight` 함수 정의를 추가합니다.
+
+		void AFPSCharacter::MoveRight(float Value)
+		{
+			// 어느 쪽이 전방인지 알아내어, 플레이어가 그 방향으로 이동하고자 한다고 기록합니다.
+			FVector Direction = FRotationMatrix(Controller->GetControlRotation()).GetScaledAxis(EAxis::Y);
+			AddMovementInput(Direction, Value);
+		}
+
+1.	`FPSCharacter.cpp` 는 다음과 같은 모습일 것입니다:
+
+// 프로젝트 세팅의 설명 페이지에 저작권 문구를 채우세요.
+
+#include "FPSProject.h"
+		#include "FPSCharacter.h"
+				
+		// Sets default values
+		AFPSCharacter::AFPSCharacter()
+		{
+		 	// 이 캐릭터가 매 프레임 Tick() 을 호출하도록 합니다. 필요치 않을 경우 꺼서 퍼포먼스를 향상시킬 수 있습니다.
+			PrimaryActorTick.bCanEverTick = true;
+		
+		}
+		
+		// 게임 시작시 또는 스폰시 호출됩니다.
+		void AFPSCharacter::BeginPlay()
+		{
+			Super::BeginPlay();
+			
+			if (GEngine)
+			{
+				// 5 초간 디버그 메시지를 표시합니다. (첫 인수인) -1 "Key" 값은 이 메시지를 업데이트 또는 새로고칠 필요가 없음을 나타냅니다.
+				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("We are using FPSCharacter."));
+			}
+		}
+		
+		// 매 프레임 호출됩니다.
+		void AFPSCharacter::Tick( float DeltaTime )
+		{
+			Super::Tick( DeltaTime );
+		
+		}
+		
+		// 입력에 함수성 바인딩을 위해 호출됩니다.
+		void AFPSCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent)
+		{
+			Super::SetupPlayerInputComponent(PlayerInputComponent);
+		
+			// "movement" 바인딩을 구성합니다.
+			PlayerInputComponent->BindAxis("MoveForward", this, &AFPSCharacter::MoveForward);
+			PlayerInputComponent->BindAxis("MoveRight", this, &AFPSCharacter::MoveRight);
+		}
+		
+		void AFPSCharacter::MoveForward(float Value)
+		{
+			// 어느 쪽이 전방인지 알아내어, 플레이어가 그 방향으로 이동하고자 한다고 기록합니다.
+			FVector Direction = FRotationMatrix(Controller->GetControlRotation()).GetScaledAxis(EAxis::X);
+			AddMovementInput(Direction, Value);
+		}
+		
+		void AFPSCharacter::MoveRight(float Value)
+		{
+			// 어느 쪽이 오른쪽인지 알아내어, 플레이어가 그 방향으로 이동하고자 한다고 기록합니다.
+			FVector Direction = FRotationMatrix(Controller->GetControlRotation()).GetScaledAxis(EAxis::Y);
+			AddMovementInput(Direction, Value);
+		}
+
+## 캐릭터 동작 테스트하기
+
+새로 구현된 캐릭터 동작 함수를 컴파일하고 테스트할 차례입니다.
+
+1.	Visual Studio 에서 `FPSCharacter` 헤더 (\*.h) 와 CPP (\*.cpp) 파일을 저장합니다.
+
+1.	**Solution Explorer** 에서 **FPSProject** 를 찾습니다.
+
+1.	**FPSProject** 에 **우클릭** 하고 **Build** 를 선택하여 프로젝트를 컴파일합니다.
+
+	![](BuildProject.png)
+
+1.	빌드가 끝난 후, 언리얼 에디터에서 **FPSProject** 를 엽니다.
+
+1.	레벨 에디터 툴바에서 **플레이** 버튼을 **클릭** 합니다. 이제 전후좌우 이동이 가능할 것입니다.
+
+1.	Esc 키를 누르거나 레벨 에디터의 **중지** 버튼을 클릭하여 에디터에서 플레이 (PIE) 모드를 빠져나옵니다.
+
+%Steps%

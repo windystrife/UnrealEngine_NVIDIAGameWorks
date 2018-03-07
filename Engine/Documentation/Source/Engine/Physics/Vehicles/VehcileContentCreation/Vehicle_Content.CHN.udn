@@ -1,0 +1,160 @@
+﻿INTSourceChangelist:2713167
+Availability:Public
+Title:载具美术设置
+Crumbs:%ROOT%
+Description:如何在虚幻引擎 4 中为载具设置美术资源。
+Navigation:topic
+SkillLevel:Advanced
+Version:4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Programming/Gameplay/Framework/Vehicle/Vehicle_Content:title%](vehicleArt_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/content_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Programming/Gameplay/Framework/Vehicle/Vehicle_Content:title%
+	[/PARAM]
+	[PARAM:description]
+		%Programming/Gameplay/Framework/Vehicle/Vehicle_Content:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Programming/Gameplay/Framework/Vehicle/Vehicle_Content]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+
+
+载具最基础、最少量的美术设置即为 **骨骼网格体**。载具的类型决定所需美术设置的复杂程度，对于悬挂 
+部分可能需要进行特殊考量。坦克不需要进行精细的悬挂设置，因为其悬挂部分未不可见。 
+但 **Vehicle Game** 中的越野大脚车则需要更多的连接点，使暴露在外组件的运动效果真实。
+
+## 基础
+
+载具网格体应向下指向正 X 轴。
+
+![](basics01.png)(convert:false)
+
+需要测量在虚幻引擎 4 中使用的轮子半径（以厘米为单位）。
+
+![](wheelRadius.png)
+
+上图中，Maya 的距离测量工具基于两者相对的顶点距离得出轮子的直径。 
+轮子的半径即为该数值的一半。
+
+3D Studio Max 的 Helpers 部分中也有类似工具。
+
+## 连接点
+
+四轮载具连接点的绝对最小数量为 5:1 根、4 轮。轮子和根连接点与 X 轴向前、Z 轴向上对齐：
+
+![](wheelJnt.png)
+
+可确保轮子在 Y 轴上旋转，在 Z 轴上转向。
+
+其他所有节点均可按适当方式进行排列，但需注意诸如 **动画蓝图** **Look At** 节点之类的资源会假定 X 轴向前。
+
+为防止出现视觉古怪，轮子的连接点应被精确居中。视觉网格体不会用于碰撞检测，然而如果轮子网格体偏移中心，
+视觉上会感觉轮子已经损坏，出现动态模糊时十分明显。
+
+## 蒙皮
+
+Maya 的标准平滑绑定，或 3DS Max 的 Skin Modifier。轮子应只在一个连接点拥有权重，确保在旋转时不产生变形。对避震和支柱而言， 
+可使用一些技巧性的蒙皮，但需要虚幻编辑器层面上进行一些思考。 
+
+
+## 导出
+
+载具可作为 [**骨骼网格体**](Engine/Content/FBX/SkeletalMeshes) 被导出而无需其他考量。
+
+
+## 导入
+
+骨骼网格体的标准 FBX 导入。需要导入器为您创建一个 **物理资源**。
+
+## 物理资源
+
+![](PAicon.png)(w:150)
+
+物理资源对载具十分重要，不应被忽视或忽略。首次在虚幻引擎 4 中创建物理资源时，情况可能 
+与下图相似：
+
+![](badPA.png)
+
+这是因为 **Physics Asset 工具**（**PhAT**）尝试将一个连接点的蒙皮顶点尽可能完善地包裹起来。您需要将它们全部删除并重新创建。 
+为什么呢？因为 PhAT 当前无法良好地重建支撑所有物理形体的约束。所以，如果作为中间媒介的 
+物理形体被删除后，层级上将不会创建一个新约束。如果删除所有物理形体并从根连接点进行构建，所有约束 
+均会被正确创建。
+
+在 **Hierarchy** 窗格中，**按住 Shift 键全选**，然后 **按下** **Delete** 键。此操作将从资源中移除所有物理形体。
+
+![](selectAllDelete.png)
+
+现在从根连接点开始在载具连接点上创建物理形体。请牢记，一个连接点只需要一个物理形体。连接点须进行物理 
+模拟或影响载具边界。
+
+就此例中的大脚车而言，以方块为根、以球体为轮子即可开始。但要达到期望的效果还需要多个其他物理 
+形体。
+
+### 创建形体碰撞
+
+为载具的根创建方块：
+
+1. 在 **Hierarchy** 窗格中 **右键单击** 根连接点。
+1. **选择** **Add Body**
+1. 将 **Collision Geometry** **设为** **Box**。
+1. **点击** “**OK**”
+
+	[REGION:raw]
+	![](bodyToRoot.png)(convert:false)
+	[/REGION]
+
+1. 可以对新建物理形体进行 **移动**、**旋转**、**缩放**，使其匹配载具的外形
+
+	![](newBodyBoxResultScaled.png)
+
+
+### 创建轮子碰撞
+
+为轮子创建球体：
+
+1. 在 Hierarchy 窗格中 **右键单击** 轮子连接点。
+1. **选择 Add Body**。
+
+	![](bodyToWheel.png)
+
+1. 将 **Collision Geometry** **设为** **Sphere**。
+1. 点击 “**OK**”
+
+	![](spheres.png)
+
+1. 在 Details 窗格中，选择 **Physics Type** 属性并 **将其设为 Kinematic**。
+
+	![](makeTheWheelsKin.png)
+
+	此为必要操作，使轮子影响载具的边界，使阴影和消隐正常产生，并在游戏开始时防止轮子从载具上 
+	滚落。
+
+	[REGION:note]
+	轮子物理形体不会实际用于碰撞。当前轮子使用光线投射与世界场景互动。
+	[/REGION]
+
+
+### 更进一步
+
+这是一个简单的设置。在 Vehicle Game 中查看载具物理资源如下图所示：
+
+![](goodPA.png)
+
+所有的碰撞形体都在载具的根连接点上，轮子的外部。它们可防止轮子被游戏内的元素塞住， 
+还可防止轮胎与墙壁和栏杆之间发生穿插。
+
+
+
+
+

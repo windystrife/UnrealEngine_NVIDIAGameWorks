@@ -1,0 +1,121 @@
+Availability:Public
+Title: Saving Your Game with C++
+Crumbs:%ROOT%, Gameplay, Gameplay/SaveGame
+Description:How to save and load your game with C++ code
+Version: 4.9
+
+[TOC (start:2 end:2)]
+
+## Create a SaveGame Object
+
+The `SaveGame` class sets up an object that can be used as a target for the saving and loading functions declared in `Kismet/GameplayStatics.h`.  
+
+You can create a new class based on `SaveGame` using the [](Programming\Development\ManagingGameCode\CppClassWizard).
+
+![](SaveGameCode.png)(w:800)
+
+In this example, the new `SaveGame` class is called `MySaveGame`.
+
+### Header
+
+In the header file for your `SaveGame` object, you can declare any variables you want your `SaveGame` to store. 
+	
+	UPROPERTY(VisibleAnywhere, Category = Basic)
+	FString PlayerName;
+
+[REGION:note]
+In this example, there are also variables declared that will be used to store default values for the `SaveSlotName` and the `UserIndex`, so that each class that saves to this
+`SaveGame` object will not have to independently set those variables. This step is optional, and will cause there to be one save slot that gets overwritten if the default values are not changed.
+[/REGION]
+
+[REGION:codetitlebar]
+MySaveGame.h
+[/REGION:codetitlebar]
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+	#pragma once
+
+	#include "GameFramework/SaveGame.h"
+	#include "MySaveGame.generated.h"
+
+	/**
+	 * 
+	 */
+	UCLASS()
+	class [PROJECTNAME]_API UMySaveGame : public USaveGame
+	{
+		GENERATED_BODY()
+
+		public:
+
+		UPROPERTY(VisibleAnywhere, Category = Basic)
+		FString PlayerName;
+
+		UPROPERTY(VisibleAnywhere, Category = Basic)
+		FString SaveSlotName;
+	
+		UPROPERTY(VisibleAnywhere, Category = Basic)
+		uint32 UserIndex;
+
+		UMySaveGame();
+	};
+
+### Source
+
+Generally, the `SaveGame` object's source file does not need any particular code to function, unless your particular save system has additional functionality you would like to set up
+here. 
+
+This example does define the values of `SaveSlotName` and `UserIndex` in the class constructor, so they can be read out and used by other gameplay classes.
+
+[REGION:codetitlebar]
+MySaveGame.cpp
+[/REGION:codetitlebar]
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+	#include "[ProjectName].h"
+	#include "MySaveGame.h"
+
+	UMySaveGame::UMySaveGame()
+	{
+		SaveSlotName = TEXT("TestSaveSlot");
+		UserIndex = 0;
+	}
+
+### Module Header File
+
+To be able to easily access both your `SaveGame` object and the creating, saving, and loading functions from `GameplayStatics`, you should add the following lines to your game module's header file,
+under any other `#include` statements. Your module header file will be named [ProjectName].h.
+
+[REGION:codetitlebar]
+MyProject.h
+[/REGION:codetitlebar]
+	#include "MySaveGame.h"
+	#include "Kismet/GameplayStatics.h"
+[REGION:warning]
+Ensure that these #include statements are added after `#include "Engine.h"` as the compilation will fail otherwise
+[/REGION]
+
+## Saving a Variable
+
+Whenever you want to save out a variable to your `SaveGame` object, you must create an instance of your `SaveGame` object, and then set the variable within it.
+
+	PlayerName = TEXT("PlayerOne");
+	UMySaveGame* SaveGameInstance = Cast<UMySaveGame>(UGameplayStatics::CreateSaveGameObject(UMySaveGame::StaticClass()));
+	SaveGameInstance->PlayerName = MyPlayerName;
+	UGameplayStatics::SaveGameToSlot(SaveGameInstance, SaveGameInstance->SaveSlotName, SaveGameInstance->UserIndex);
+
+## Loading a Variable
+
+To load a variable, you must first load the `SaveGame` object using `UGameplayStatics::LoadGameFromSlot`. This creates a new instance of the `SaveGame` object.
+
+Again, in this case, an empty `SaveGame` object is first created, so the default `SaveSlotName` and `UserIndex` can be read from it. This is an optional step and may not apply in all game implementations.
+
+Once the new `SaveGame` object has been loaded from the hard drive, the variable values can be read from it and assigned to the necessary Actors or classes, or used directly as shown here.
+
+	UMySaveGame* LoadGameInstance = Cast<UMySaveGame>(UGameplayStatics::CreateSaveGameObject(UMySaveGame::StaticClass()));
+	LoadGameInstance = Cast<UMySaveGame>(UGameplayStatics::LoadGameFromSlot(LoadGameInstance->SaveSlotName, LoadGameInstance->UserIndex));
+	FString PlayerNameToDisplay = LoadGameInstance->PlayerName;
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow, PlayerNameToDisplay);
+	}

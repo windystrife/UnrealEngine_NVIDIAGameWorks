@@ -1,0 +1,138 @@
+﻿INTSourceChangelist:3474032
+Availability:Public
+Crumbs: %ROOT%
+Title:Blendables
+Description:Blendable アセットはスムーズに補間し、レンダリングに影響を与えるために使用することができます (例、ポスト プロセス、フォグ、アンビエント キューブマップ、アンビエント オクルージョン)。
+Type:Overview
+SkillLevel:Beginner
+Version:4.16
+Parent:Engine/Rendering/PostProcessEffects
+Order:3
+Tags:Post Process
+Topic-image:Blendables_topic.png
+
+[EXCERPT:Blendables_Desc]
+**Blendable** は他のブレンド可能なもの (blendable) とスムーズに補間 (ブレンド) できるプロパティを持つアセットです。ほとんど PostProcessMaterials のブレンド可能なものを使用しますが、
+このシステムはビューに依存 (通常はカメラ位置に依存) するものなら何にでも使用可能です。
+[/EXCERPT:Blendables_Desc]
+
+
+## Blendable
+
+**Blendable** はこれまでにもエンジンに存在していましたが、PostprocessMaterils / PostprocessMaterialInstances に対してのみ使用されていました。しかし、そのコンセプトは一般的な用途を対象にしています。
+任意のデータ (線形値やカラーが最適) を何らかの最終データにブレンドできるからです。任意のサブシステムがビューにあるデータをピックアップし、レンダリングに影響を及ぼすことができます。データはビュー毎にブレンドされるため、
+分割スクリーンの場合、各ビューに対して異なる設定をブレンドすることが可能です (例、ポスト プロセスに影響を与えるヒット インジケータ)。
+
+**Blendable** は IBlendableInterface を持つオブジェクトです。現在、以下のアセットタイプによって実装されています。
+* PostprocessMaterials (todo: link)
+* PostprocessMaterialInstances (todo: link)
+* LightPropagationVolumeBlendable (以下参照)
+
+**Blendable** コンテナは以下のオブジェクトに組み込まれている PostProcessSettings にあります。
+* PostProcessVolume
+* PostProcessComponent
+* SceneCaptureActor
+* CameraComponent
+
+**LightPropagationVolumeBlendable** アセットは新規 Blendable の作成方法と既存の PostProcessSettings を置き換える方法を示すために作られました。既存システムは、
+小さな場合にうまく機能しますが、設定が大量になると、高度なシステムが必要になることがわかりました。
+
+[REGION:imagetable]
+| ![](CreateBlendableAsset.png) |
+| ------ |
+| Blendable アセットはコンテンツ ブラウザで **Blendable** カテゴリに表示されます。**[Add New (新規追加)]** を使用するか、またはこのカテゴリでアセットをフィルタリングすることができます。 |
+[/REGION]
+
+この新システムの利点は以下の通りです。
+* エンジンの変更に伴う拡張や維持が簡単になりました (ひとつの中心的な構造体を変更する必要なく、独自のモジュール内で存在可能)。
+* パッケージへの間接参照は、レベルにアクセス (バージョン コントロール) せずにコンテンツの調整を可能にします。
+* 間接参照とは単一のアセットを多くのケースで再利用できることを意味します (冗長性を減らし、より強力に)。
+* 各 blendable に対するカスタム UI が可能です (これを単一の構造体で行うのははるかに困難です)。
+* 各 blendable 参照は独自のウェイトを持つことが可能であり、そのアセットはウェイトを持つことが可能で (LightPropagationVolumeBlendable を参照)、プロパティ毎のウェイトを持つことも簡単です。
+* 大きな構造体を分けると、ブループリントとのインタラクションが効率的かつシンプルになります。
+
+## Blendable コンテナ
+
+Blendable コンテナはウェイトの配列と IBlendableInterface の参照として実装されます。 
+
+PostProcessVolume 設定を開き、Blendable の配列を見ると、Blendable アセットへの参照を持つウェイトの配列があることがわかります。ウェイトは通常、 0..1 の範囲であり、
+参照先はパッケージに存在するアセット (コンテンツ ブラウザで作成) または Blendable 配列を含むオブジェクトに存在するものになります。
+
+[REGION:imagetable]
+| ![](BlendablesUI.png) |
+| ------ |
+| Blendable コンテナはポストプロセス設定にあります (ここではポストプロセス ボリュームにあります)。この場合の配列には以下の 3 つの要素があります。LightPropagationVolumeBlendable (ボリューム オブジェクトに存在)、未使用の配列要素、および LPV0 というアセット (パッケージに存在) への参照。両方の blendable でウェイトは 1.0 になります。 |
+[/REGION]
+
+配列で新規要素を作成する場合、特定タイプの Blendable (現時点では LightPropagationVolumeBlendable のみ) を作成するか、または
+アセット参照 (例、LightPropagationVolumeBlendable、マテリアル、マテリアル インスタンス) を使用するかを選択できます。将来的には、さらに多くの Blendable タイプ (例、Bloom, SceneColor, DepthOfField, ...) を作成するつもりです。参照は 
+Blendable (IBlendableInterface を実装) ならどのようなタイプでも可能です。配列内の順序はレイヤーのスタック順序とは反対になります。ブレンディングは一番上から一番下に適用され、
+それまで存在していたデータを上書きします。多数のボリューム (またはその他のオブジェクト) のデータはウェイトと優先度を考慮して結合されます。
+
+注意："global" というレベル内で優先度が低い境界を持たない (unbound) PostProcessVolume を持つことはグッドプラクティスです。既存レベルを十分に制御するために、
+高優先度で境界を持たないボリュームを追加することができます。Blendable の効果の有無をチェックするには、ウェイトを 0 に調整し、戻ります。
+
+## パッケージ内で、オブジェクト (例、ボリューム) の一部として、またはブループリントで動的に作成してブレンド可能 
+
+必要に応じて選択できますが、パッケージ (パッケージ内で名前が付けられたアセットを参照) をお勧めします。後で簡単にバルク調整が可能で、バージョン管理のコンフリクトを最小限に抑えるからです。
+最大限プログラミングしやすくするために、ブループリントで blendable を作成することが可能です。ブループリントはプログラミングの一形態であり、UI に設定を入れたり、
+コードでハードコーディングするのに似ています。コードを使う方法は複雑であり、他の人が設定を微調整するのは難しくなります。 
+
+[REGION:imagetable]
+| ![](AssetWithDifferentOuter.png) |
+| ------ |
+| LightPropagationVolumeBlendable は、エディタ内で見ることができるため詳細です。blendable がコンテンツ ブラウザ (左) で作成またはオブジェクトで作成 (例、ポスト プロセス ボリューム) のいずれであっても、ユーザー インターフェースは似たものになります。各プロパティにチェックボックス (weight=0 または weight=1) を付けて、構造体全体にブレンドのウェイトを与えるのはグッド プラクティスです。 |
+[/REGION]
+
+注意：LightPropagationVolumeBlendable プロパティは後方互換性の理由から今でも PostProcessSettings に存在します。しかし、将来的にはこの設定をなくし、blendable を唯一の方法とする予定です。
+
+## 独自の Blendable の作成方法(C++ )
+
+現時点では、LightPropagationVolumeBlendable プラグインをコピーすることをお勧めします。アセット作成後は、Light Propagation System が行うのと同じようにブレンドされたデータをピックアップできます。
+メソッド **GetSingleFinalDataConst()** を使用してブレンド後にデータを取得できます。最高のパフォーマンスを得るには、この関数を不必要に (頻繁に) 呼び出すことは避けたほうがよいでしょう。
+
+## ブループリント
+
+PostProcessSettings がある場所で **AddOrUpdateBlendable** ブループリント関数をエクスポーズします。Blendable コンテナに便利にアクセスできるようになります。Blendable コンテナ、ウェイト、Blendable への
+参照を持つオブジェクトを引数にします。参照がコンテナで既に見つかっていたら、単にウェイトを更新します。コンテナの要素は取り除きません。
+これは、コンテナをトラバースする他のコードに混乱を招き、ガーベジ コレクションを示唆することになるためです。ウェイト 0 の blendable 参照には、実際のパフォーマンス負荷はなく、
+この要素を取り除く必要は決してありません。
+
+以下はコンテンツ ブラウザで blendable アセットを参照する方法です。
+
+[REGION:imagetable]
+| ![](AddBlendableVar.png) |
+| ------ |
+| タイプ LightPropagationVolumeBlendable (Object Reference) の変数 'BlendableVar' を使用して 'LPV0' という LightPropagationVolumeBlendable アセットを参照することができます。 |
+[/REGION]
+
+**ConstructObjectFromClass** ブループリント関数を使用して、ブループリントで新規 blendable を作成することができます。新規オブジェクトの **Outer** を blendable コンテナを持つオブジェクトに設定すると、
+UI でオブジェクトを作成した場合と (オブジェクトの一部として blendable を作成) 同じようなビヘイビアになります。
+
+[REGION:imagetable]
+| ![](AddBlendableConstruct.png) |
+| ------ |
+| ここでは、LightpropagationVolumeBlendable タイプのオブジェクトを作成し、設定を取得し、いくつかのメンバを **SetMembersIn...** 関数で作成します。 |
+[/REGION]
+
+注意：現時点では、手動でオーバーライド フラグを true にする (チェックボックスをチェック) 必要があります。そうしないと、同じ名前のプロパティがピックアップされません。
+
+実験的に、表示フラグ **VisualizeLPV** (エディタ内では Visualize/Light Propagation Volume) を使用してブレンドしたプロパティを表示することができます。
+これは C++ コードで、このタイプの blendable に対してのみ実装されました。しかし、コード変更する必要なく後でどのプロパティであってもエクスポーズできます。
+
+[REGION:imagetable]
+| ![](VisualizeLPV.png) |
+| ------ |
+| 表示フラグ **VisualizeLPV** は、デバッグで役立つブレンドした値を表示します。 |
+[/REGION]
+
+
+## 今後のこと
+* 関数、AddOrUpdateBlendable をブラウズする場合にコンテキスト センシティブな機能はまだ動作しません (回避策、'context sensitive' チェックボックスを無効にします)。
+* すべての PostprocessSettings を LightPropagationVolumeBlendable のようなオブジェクトに分けるつもりです。したがって、PostProcessSettings はいずれ取り除きます。古いレベルは読み込み時に
+データを損失することなく変換できます。多くのアセットがコンテンツのパッケージをスパムするのを防ぐために、レベルの一部としてオブジェクトを作成します。 
+* ブループリントのインタラクションにさらに磨きをかけて、一段と簡単に使えるようにしたいと考えています。
+* ワールド設定とプロジェクト設定で Blendable 配列を簡単にエクスポーズできます。
+* どの Blendable が適用されているかをわかりやすくするために、ウェイトとアセット / オブジェクト名およびタイプを示すデバッグ ビューを用意します。
+
+

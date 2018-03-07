@@ -1,0 +1,177 @@
+Availability: Public
+Title:2. Control Camera View in C++
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/AutoCamera
+Description:Coding a class to change camera views
+version: 4.9
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[Previous Step](Programming\Tutorials\AutoCamera\1 "%Programming\Tutorials\AutoCamera\1:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[](Programming\Tutorials\AutoCamera)
+	[/PARAM]
+	[PARAM:next]
+		[Next Step](Programming\Tutorials\AutoCamera\3 "%Programming\Tutorials\AutoCamera\3:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+1. We're ready to create a C++ class to control our camera view. For this tutorial, we can extend **Actor** into a new class which we'll call CameraDirector.
+
+	![](NameActorClass.png)
+
+1. In CameraDirector.h, add the following code to the bottom of the ACameraDirector class definition:
+
+		UPROPERTY(EditAnywhere)
+		AActor* CameraOne;
+
+		UPROPERTY(EditAnywhere)
+		AActor* CameraTwo;
+
+		float TimeToNextCameraChange;
+
+	[REGION:note]The **UPROPERTY** macro makes our variables visible to **Unreal Engine**. This way, values set in these variables will not be reset when we launch the game or reload our level or project in a future work session. We have also added the **EditAnywhere** keyword, which will allow us to set CameraOne and CameraTwo in the **Unreal Editor**.[/REGION]
+
+1. In CameraDirector.cpp, add the following line of code to the top of the file, right underneath the other #include lines:
+
+		#include "Kismet/GameplayStatics.h"
+
+	The GameplayStatics header file gives us access to some useful general-purpose functions, one of which we will need for this tutorial. When that is done, add the following code to the bottom of **ACameraDirector::Tick**:
+
+		const float TimeBetweenCameraChanges = 2.0f;
+		const float SmoothBlendTime = 0.75f;
+		TimeToNextCameraChange -= DeltaTime;
+		if (TimeToNextCameraChange <= 0.0f)
+		{
+			TimeToNextCameraChange += TimeBetweenCameraChanges;
+		
+			// Find the actor that handles control for the local player.
+			APlayerController* OurPlayerController = UGameplayStatics::GetPlayerController(this, 0);
+			if (OurPlayerController)
+			{
+				if ((OurPlayerController->GetViewTarget() != CameraOne) && (CameraOne != nullptr))
+				{
+					// Cut instantly to camera one.
+					OurPlayerController->SetViewTarget(CameraOne);
+				}
+				else if ((OurPlayerController->GetViewTarget() != CameraTwo) && (CameraTwo != nullptr))
+				{
+					// Blend smoothly to camera two.
+					OurPlayerController->SetViewTargetWithBlend(CameraTwo, SmoothBlendTime);
+				}
+			}
+		}
+
+	This code will cause us to switch the default player's view between two different cameras every three seconds.
+
+1. Our code is now ready to be compiled, so we can return to the **Unreal Editor** and press the **Compile** button.
+
+----
+
+No further code is needed. We can set up our CameraDirector in our world now.
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    code
+    [/PARAMLITERAL]
+    [PARAM:heading]
+	    Finished Code
+    [/PARAM]
+    [PARAM:content]
+		**MyPawn.h**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "GameFramework/Actor.h"
+			#include "CameraDirector.generated.h"
+
+			UCLASS()
+			class HOWTO_AUTOCAMERA_API ACameraDirector : public AActor
+			{
+				GENERATED_BODY()
+	
+			public:	
+				// Sets default values for this actor's properties
+				ACameraDirector();
+
+			protected:
+				// Called when the game starts or when spawned
+				virtual void BeginPlay() override;
+	
+			public:
+				// Called every frame
+				virtual void Tick( float DeltaSeconds ) override;
+
+				UPROPERTY(EditAnywhere)
+				AActor* CameraOne;
+
+				UPROPERTY(EditAnywhere)
+				AActor* CameraTwo;
+
+				float TimeToNextCameraChange;
+			};
+
+		**MyPawn.cpp**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_AutoCamera.h"
+			#include "CameraDirector.h"
+			#include "Kismet/GameplayStatics.h"
+
+			// Sets default values
+			ACameraDirector::ACameraDirector()
+			{
+ 				// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
+				PrimaryActorTick.bCanEverTick = true;
+
+			}
+
+			// Called when the game starts or when spawned
+			void ACameraDirector::BeginPlay()
+			{
+				Super::BeginPlay();
+	
+			}
+
+			// Called every frame
+			void ACameraDirector::Tick( float DeltaTime )
+			{
+				Super::Tick( DeltaTime );
+
+				const float TimeBetweenCameraChanges = 2.0f;
+				const float SmoothBlendTime = 0.75f;
+				TimeToNextCameraChange -= DeltaTime;
+				if (TimeToNextCameraChange <= 0.0f)
+				{
+					TimeToNextCameraChange += TimeBetweenCameraChanges;
+		
+					//Find the actor that handles control for the local player.
+					APlayerController* OurPlayerController = UGameplayStatics::GetPlayerController(this, 0);
+					if (OurPlayerController)
+					{
+						if ((OurPlayerController->GetViewTarget() != CameraOne) && (CameraOne != nullptr))
+						{
+							//Cut instantly to camera one.
+							OurPlayerController->SetViewTarget(CameraOne);
+						}
+						else if ((OurPlayerController->GetViewTarget() != CameraTwo) && (CameraTwo != nullptr))
+						{
+							//Blend smoothly to camera two.
+							OurPlayerController->SetViewTargetWithBlend(CameraTwo, SmoothBlendTime);
+						}
+					}
+				}
+			}
+
+
+    [/PARAM]
+[/OBJECT]
+
+%Steps%

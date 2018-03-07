@@ -1,0 +1,137 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	LandscapeGrassWeightVertexShader.usf: Vertex shader to dump the weight map for Landscape Grass
+=============================================================================*/
+
+#define RENDERING_LANDSCAPE_GRASS 1
+
+#include "Common.ush"
+#include "/Engine/Generated/Material.ush"
+#include "/Engine/Generated/VertexFactory.ush"
+
+struct FLandscapeGrassWeightInterpolantsVSToPS
+{
+	FVertexFactoryInterpolantsVSToPS FactoryInterpolants;
+	float  Height			: TEXCOORD9;
+	float4 Position : SV_POSITION;
+};
+
+#if VERTEXSHADER
+
+float2 RenderOffset;
+
+/** Vertex Shader */
+void VSMain(
+	FVertexFactoryInput Input,
+	out FLandscapeGrassWeightInterpolantsVSToPS Output
+	)
+{
+	ResolvedView = ResolveView();
+
+	FVertexFactoryIntermediates VFIntermediates = GetVertexFactoryIntermediates(Input);
+	float4 WorldPositionExcludingWPO = VertexFactoryGetWorldPosition(Input, VFIntermediates);
+	float4 WorldPosition = WorldPositionExcludingWPO;
+	float4 RasterizedWorldPosition = VertexFactoryGetRasterizedWorldPosition(Input, VFIntermediates, WorldPosition);
+	Output.Position = mul(RasterizedWorldPosition, ResolvedView.TranslatedWorldToClip);
+
+	half3x3 TangentToLocal = VertexFactoryGetTangentToLocal(Input, VFIntermediates);
+	FMaterialVertexParameters VertexParameters = GetMaterialVertexParameters(Input, VFIntermediates, WorldPosition.xyz, TangentToLocal);
+	Output.FactoryInterpolants = VertexFactoryGetInterpolantsVSToPS(Input, VFIntermediates, VertexParameters);
+
+	float2 Height2 = LandscapeVertexFactorySampleHeight(Input, VFIntermediates);
+	float Height = DecodePackedTwoChannelValue(Height2);
+
+	half3 WorldPositionOffset = GetMaterialWorldPositionOffset(VertexParameters);
+	Height = Height + mul(WorldPositionOffset, (MaterialFloat3x3)(Primitive.WorldToLocal)).z / TERRAIN_ZSCALE;
+	Output.Height = Height;
+
+	Output.Position.xy += RenderOffset;
+}
+
+#elif PIXELSHADER
+
+int OutputPass;
+
+// Pixel Shader
+void PSMain( 
+	FLandscapeGrassWeightInterpolantsVSToPS Interpolants,
+	in float4 SvPosition : SV_Position
+	OPTIONAL_IsFrontFace,
+	out half4 OutColor	: SV_Target0
+	)
+{
+	ResolvedView = ResolveView();
+
+	FMaterialPixelParameters MaterialParameters = GetMaterialPixelParameters(Interpolants.FactoryInterpolants, SvPosition);
+	FPixelMaterialInputs PixelMaterialInputs;
+	CalcMaterialParameters(MaterialParameters, PixelMaterialInputs, SvPosition, bIsFrontFace); 
+
+	float Height = clamp(round(Interpolants.Height), 0, 65535);
+	float2 PackedHeight = float2(floor(Height / 256), fmod(Height, 256)) / 255;
+
+#if NUM_MATERIAL_OUTPUTS_GETGRASSWEIGHT > 2
+	switch(OutputPass)
+	{
+	case 0:
+#endif
+		// Height, outputs 1 & 2
+		OutColor.xy = PackedHeight;
+		#if NUM_MATERIAL_OUTPUTS_GETGRASSWEIGHT > 0
+			OutColor.z = GetGrassWeight0(MaterialParameters);
+			#if NUM_MATERIAL_OUTPUTS_GETGRASSWEIGHT > 1
+				OutColor.w = GetGrassWeight1(MaterialParameters);
+			#else
+				OutColor.w = 0;
+			#endif
+		#else
+			OutColor.z = 0;
+			OutColor.w = 0;
+		#endif
+#if NUM_MATERIAL_OUTPUTS_GETGRASSWEIGHT > 2
+		break;
+	case 1:
+		OutColor.x = GetGrassWeight2(MaterialParameters);
+		#if NUM_MATERIAL_OUTPUTS_GETGRASSWEIGHT > 3
+			OutColor.y = GetGrassWeight3(MaterialParameters);
+		#else
+			OutColor.y = 0;
+		#endif
+		#if NUM_MATERIAL_OUTPUTS_GETGRASSWEIGHT > 4
+			OutColor.z = GetGrassWeight4(MaterialParameters);
+		#else
+			OutColor.z = 0;
+		#endif
+		#if NUM_MATERIAL_OUTPUTS_GETGRASSWEIGHT > 5
+			OutColor.w = GetGrassWeight5(MaterialParameters);
+		#else
+			OutColor.w = 0;
+		#endif
+		break;
+#if NUM_MATERIAL_OUTPUTS_GETGRASSWEIGHT > 6
+	case 2:
+		OutColor.x = GetGrassWeight6(MaterialParameters);
+		#if NUM_MATERIAL_OUTPUTS_GETGRASSWEIGHT > 7
+			OutColor.y = GetGrassWeight7(MaterialParameters);
+		#else
+			OutColor.y = 0;
+		#endif
+		#if NUM_MATERIAL_OUTPUTS_GETGRASSWEIGHT > 8
+			OutColor.z = GetGrassWeight8(MaterialParameters);
+		#else
+			OutColor.z = 0;
+		#endif
+		#if NUM_MATERIAL_OUTPUTS_GETGRASSWEIGHT > 9
+			OutColor.w = GetGrassWeight9(MaterialParameters);
+		#else
+			OutColor.w = 0;
+		#endif
+		break;
+#endif // NUM_MATERIAL_OUTPUTS_GETGRASSWEIGHT > 6
+	default:
+		OutColor = float4(0,0,0,0);
+		break;
+	}
+#endif // NUM_MATERIAL_OUTPUTS_GETGRASSWEIGHT > 2
+}
+#endif

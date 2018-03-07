@@ -1,0 +1,55 @@
+﻿INTSourceChangelist:2713401
+Availability:Public
+Title:条件付きプロパティのレプリケーション
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking, Gameplay/Networking/Actors, Gameplay/Networking/Actors/Properties
+Description:Actor プロパティを条件付きでレプリケートする方法
+version:4.9
+
+レプリケーションを行うプロパティとして一度登録すると、このプロパティの登録解除はできません。登録を解除できない理由は、可能な限りの情報をベイクするため、同一セットのプロパティは多数接続先にわたって共有作業を活用するためです。共有によりたくさんの演算処理時間を短縮できます。
+
+プロパティのレプリケート方法をより精密にコントロールするにはどうすればよいのでしょう？そんな時に条件付きプロパティを使用します。
+
+デフォルト設定で、各レプリケートプロパティには条件がビルトインされています。
+
+プロパティのレプリケーションを厳密にコントロールするための、補助的な条件を追加する特別なマクロがあります。
+
+このマクロは  `DOREPLIFETIME_CONDITION` と呼ばれます。以下で使用方法を確認してください：
+
+	void AActor::GetLifetimeReplicatedProps( TArray< FLifetimeProperty > & OutLifetimeProps ) const
+	{
+		DOREPLIFETIME_CONDITION( AActor, ReplicatedMovement, COND_SimulatedOnly );
+	}
+
+条件マクロに渡された `COND_SimulatedOnly` フラグは、このプロパティのレプリケーションを検討する前に余分なチェックを実行してしまいます。この場合は、このアクタのシミュレーションコピーがあるクライアントのみにレプリケートします。
+
+このアクタの自動プロキシバージョンがあるクライアントはプロパティについて知る必要がないと判断したため、大きな利点の一つは帯域幅を節約できることです。その他の利点として、このプロパティを受け取らないクライアントに対して、サーバーはクライアントのローカルコピーを上書きしません。
+
+以下は現在サポートしている条件が一目でわかるリストです。「 `Engine\Source\Runtime\CoreUObject\Public\UObject\CoreNet.h` 」の「 `ELifetimeCondition` 」列挙型変数に指定されています：
+
+| 条件 | 説明 |
+|-----------|-------------|
+| `COND_InitialOnly`		| このプロパティは初回パケットのみへ転送を試みます。|
+| `COND_OwnerOnly`			| このプロパティはアクタのオーナーのみに送信します |
+| `COND_SkipOwner`			| このプロパティはオーナー以外のすべての接続先に送信します |
+| `COND_SimulatedOnly`		| このプロパティはシミュレートされたアクタのみに送信します |
+| `COND_AutonomousOnly`		| このプロパティは自立したアクタのみに送信します |
+| `COND_SimulatedOrPhysics`	| このプロパティはシミュレートされたアクタまたは bRepPhysics アクタに送信します |
+| `COND_InitialOrOwner`		| このプロパティは初回パケットまたはアクタのオーナーに送信します |
+| `COND_Custom`				| このプロパティには特定の条件はありませんが、 SetCustomIsActiveOverride 経由でオン/オフの切り替え機能が必要です |
+
+これまでは既知のステートに基づいた条件について話してきました。プロパティのレプリケーションに十分なコントロールを提供する一方で、エンジンに必要な最適化を簡単に行えます。
+
+十分なコントロールが得られない場合はどうでしょうか？このテーマについて話さなくてはいけないことがもう一つあります。ユーザーが自身の好きなカスタム条件を使用して、プロパティのレプリケートを行う時間や行わない時間を完全に制御できる `DOREPLIFETIME_ACTIVE_OVERRIDE` という名前のマクロがあります。ただし、これはアクタごとに有効で接続先ごとではないことに注意してください。つまり、カスタム条件で接続先ごとに変更可能なステートの使用は安全ではありません。以下がその例となります：
+
+	void AActor::PreReplication( IRepChangedPropertyTracker & ChangedPropertyTracker )
+	{
+		DOREPLIFETIME_ACTIVE_OVERRIDE( AActor, ReplicatedMovement, bReplicateMovement );
+	}
+
+プロパティ ReplicatedMovement は bReplicateMovement が true の場合のみレプリケートするようになりました。
+
+なぜこのマクロを常に使用しないのでしょうか？この手法を避ける理由は主に2つあります：
+* カスタム条件の値が頻繁に変更すると、これが原因で動作が遅くなってしまいます。
+* 接続先ごとに変更可能な条件は使用できません (RemoteRole をチェックしないでください)。
+
+プロパティのレプリケーション条件はコントロールとパフォーマンスをバランスよく保ちます。プロパティのレプリケート方法とタイミングをプログラマーが細かくコントロールしながら、多数の接続先のチェックとプロパティの送信にかかる時間をエンジンで最適化することができます。

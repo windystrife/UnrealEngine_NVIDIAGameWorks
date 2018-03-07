@@ -1,0 +1,121 @@
+﻿INTSourceChangelist:2714483
+Title: 可视化日志 Visual Logger
+Availability:Public
+Crumbs:
+Description: 该工具可捕捉 actor 的状态，然后在游戏或编辑器中进行可视显示。
+
+有一类游戏缺陷很难通过用户报告来追溯。这种缺陷通常涉及复杂步骤，在这些步骤中，AI 会根据游戏中的即时状态来进行决策。报告此类问题的用户只能报告可见的结果。这使得追溯特定游戏状态的相关问题变得非常困难。UE4 带有一款可解决这一问题的工具。我们称之为 Visual Logger。其核心功能类似于您之前见过的记录系统，可捕捉已记录 actor 的状态，并在游戏中进行显示，或事后在编辑器中显示。这是一款强大的工具，可查看发生问题时的游戏状态以及用户报告。通过查看该数据，您可将所需的效果与数据和相应的代码作比较。
+
+若要在运行中查看 Visual Logger，请使用菜单中的 **Windows | Developer Tools（开发工具） | Visual Logger**。在 4.7 之前的版本中，使用的是控制台命令 “VisLog”。以下是 StrategyGame 中的一个会话。第一个图像显示的是 Visual Logger，第二个图像取自编辑器中的视区。请注意，图中有一个紫线表示所选 AI 的路径，在时间轴的选定点上有一个红色的位置标记。
+
+![image alt text](image_0.png)
+[REGION:caption]运行中的 Visual Logger[/REGION]
+
+![image alt text](image_1.png)
+[REGION:caption]编辑器中的场景视区显示了 Visual Logger 所呈现的信息[/REGION]
+
+图像中高亮显示的区域显示了记录会话过程中在 Visual Logger 中已记录了信息的 actor 列表。另外还有一个搜索栏，可按照名称快速搜索 actor 的记录信息。
+
+![image alt text](image_2.png)
+[REGION:caption]Actor 列表和搜索栏[/REGION]
+
+下一个图像高亮显示了时间轴视图。该图中的时间标记位于 23.53 秒的位置。StrategyAIController_1 被选定，因此其他区域中的所有信息都取自该时间点的 actor。彩色横条是已记录的事件。时间条可前后移动，以使用时间中的特定快照更新其他区域。
+
+![image alt text](image_3.png)
+[REGION:caption]时间轴区域[/REGION]
+
+在下图左下方的强调显示部分中，Visual Logger 显示了在时间轴上指定时间为该 actor 捕捉到的所有快照数据。当 actor 使用 UE_VLOG() 宏请求可视记录条目时，将在指定的帧捕捉一次该数据。同一帧内的多次可视记录调用将重复使用该帧的同样数据。可对作为快照的一部分捕捉到的数据进行归类及定制，以便在您的游戏中使用（有关代码示例，请参见后续章节）。
+
+![image alt text](image_4.png)
+[REGION:caption]Actor 快照区域（定制类别已展开）[/REGION]
+
+下图强调显示的区域包含了 Visual Logger 的记录区域。其中显示了写入了日志的类别，以及日志消息本身。如果每个帧有多个日志消息，则在该区域内将显示一张列表。
+
+![image alt text](image_5.png)
+[REGION:caption]显示了消息的日志区域[/REGION]
+
+既然您已经了解了 Visual Logger 的主要区域，接下来让我们来看一下如何在游戏中为其提供辅助。在下图中，第一人称模板用于新建一个名为 GDC 的项目，该项目用于在 GDC 中进行演示。其中加入了一个函数，以捕捉 actor 的状态信息，另外还加入了一个 UE_VLOG() 宏调用，以触发可视记录的捕捉。
+
+![image alt text](image_6.png)
+[REGION:caption]包含数据示例的 Visual Logger[/REGION]
+
+若要填充工具的快照区域，您需要替代一个虚拟函数 GrabDebugSnapshot()。该函数作为 actor 的一部分执行，因此如果您不想提供定制信息，可跳过此步骤。您可根据 build 设置对 Visual Logger 进行编译，因此您必须用相应的标头包含函数声明。以下是 GDCCharacter.h 中添加的代码，以辅助快照：
+
+	#if ENABLE_VISUAL_LOG
+		/** Appends information about this actor to the visual logger */
+		virtual void GrabDebugSnapshot(FVisualLogEntry* Snapshot) const override;
+	#endif
+
+以下实施方式在该类别中添加了一个类别和一个条目。此外，当 build （构造）设置对 Visual Logger 进行了编译时，类别的前后将加上相应的 #ifdef。该代码被添加到 GDCCharacter.cpp 中。
+
+	#if ENABLE_VISUAL_LOG
+	void AGDCCharacter::GrabDebugSnapshot(FVisualLogEntry* Snapshot) const
+	{
+		Super::GrabDebugSnapshot(Snapshot);
+		const int32 CatIndex = Snapshot->Status.AddZeroed();
+		FVisualLogStatusCategory& PlaceableCategory = Snapshot->Status[CatIndex];
+		PlaceableCategory.Category = TEXT("GDC Sample");
+		PlaceableCategory.Add(TEXT("Projectile Class"), ProjectileClass != nullptr ? ProjectileClass->GetName() : TEXT("None"));
+	}
+	#endif
+
+仅当 actor 在 Visual Logger 中记录数据时，才会调用该函数。作为示例，我们记录了抛掷物的开火，以便对其进行触发并将其添加到第一人称模板代码中。在下面的 OnFire() 函数中，请注意 UE_VLOG() 宏的用法。因为要通过这个宏来告诉 Visual Logger 您想要捕捉某个 actor 的数据。正如之前所说的那样，初次使用这个宏时，Visual Logger 会调用 GrabDebugSnapshot()，以收集在快照窗格中显示所需的数据。这个宏会像其他 UE_LOG() 宏一样进行编译，因此无需在其前后加上 #ifdef。
+
+	void AGDCCharacter::OnFire()
+	{
+		// try and fire a projectile
+		if (ProjectileClass != NULL)
+		{
+			const FRotator SpawnRotation = GetControlRotation();
+
+			// MuzzleOffset is in camera space, so transform it to world space before offsetting from the character location to find the final muzzle position
+			const FVector SpawnLocation = GetActorLocation() + SpawnRotation.RotateVector(GunOffset);
+			UWorld* const World = GetWorld();
+			if (World != NULL)
+			{
+				// spawn the projectile at the muzzle
+				World->SpawnActor<AGDCProjectile>(ProjectileClass, SpawnLocation, SpawnRotation);
+				UE_VLOG(this, LogFPChar, Verbose, TEXT("Fired projectile (%s) from location (%s) with rotation (%s)"), 
+					*ProjectileClass->GetName(),
+					*SpawnLocation.ToString(), 
+					*SpawnRotation.ToString());
+			}
+		}
+
+		// try and play the sound if specified
+		if (FireSound != NULL)
+		{
+			UGameplayStatics::PlaySoundAtLocation(this, FireSound, GetActorLocation());
+		}
+
+		// try and play a firing animation if specified
+		if(FireAnimation != NULL)
+		{
+			// Get the animation object for the arms mesh
+			UAnimInstance* AnimInstance = Mesh1P->GetAnimInstance();
+			if(AnimInstance != NULL)
+			{
+				AnimInstance->Montage_Play(FireAnimation, 1.f);
+			}
+		}
+	}
+
+您不仅可以记录文本信息，还可以记录可视形状信息，就像之前在 StrategyGame 关卡视区中看到的那样。这是一项强大的功能，它可以帮助您查看游戏进行过程中的情况。下图显示了您可记录的不同类型的形状。
+
+![image alt text](image_7.jpg)
+[REGION:caption]示例形状：路径信息、圆柱体、锥体、胶囊、盒体[/REGION]
+
+以下宏为记录形状提供辅助。
+
+* UE_VLOG_SEGMENT
+* UE_VLOG_LOCATION
+* UE_VLOG_BOX (axis aligned box)
+* UE_VLOG_OBOX (oriented box)
+* UE_VLOG_CONE
+* UE_VLOG_CYLINDER
+* UE_VLOG_CAPSULE
+
+上述每个宏都需要不同参数来记录形状信息。您可在 VisualLogger.h 中找到这些宏，并查看每个宏进行记录所需的参数。
+
+对于 Visual Logger 最后要说一下，您可将这些文件保存到磁盘中，以便将来对会话进行调试。如果您让您的 QA 人员一直记录这些会话，则他们可在已创建的缺陷追溯条目中附带这些会话。接着，您就可以加载相应的场景和 Visual Logger 文件来查看具体情况。这款工具应该可以极大地提高您的调试效率。
+

@@ -1,0 +1,314 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	FlatTessellation.usf: Shader fragments for flat tessellation
+=============================================================================*/
+
+#if DISPLACEMENT_ANTICRACK
+#define IN_CONTROL_POINTS 12
+#else
+#define IN_CONTROL_POINTS 3
+#endif
+
+
+
+struct FHullShaderConstantOutput
+{
+	// Tess factor for the FF HW block
+	float TessFactor[3]    : SV_TessFactor;
+	float InsideTessFactor : SV_InsideTessFactor;
+};
+
+struct FFlatTessellationHSToDS
+{
+	FPassSpecificVSToDS PassSpecificData;
+
+	// scale factors in tangent space
+	float3 DisplacementScale : Flat_DisplacementScales;
+
+	// Tessellation multiplier.
+	float TessellationMultiplier : Flat_TessellationMultiplier;
+
+#if DISPLACEMENT_ANTICRACK
+	// dominant edge and vertex data used to avoid cracking when displacing
+	FHullShaderConstantDominantVertexData DominantVertex : Flat_DominantVertex;
+	FHullShaderConstantDominantEdgeData DominantEdge : Flat_DominantEdge;
+#endif
+};
+
+// GLSL needs those on the domain shader, HLSL on the hull shader, so we replicate them for both
+#define TESSELLATION_ATTRIBUTES [partitioning("fractional_odd")][outputtopology("triangle_cw")]
+
+#if HULLSHADER
+
+	FHullShaderConstantOutput HS_FlatTrianglesConstant( const OutputPatch<FFlatTessellationHSToDS, 3> I )
+	{
+		FHullShaderConstantOutput O = (FHullShaderConstantOutput)0;
+
+		#if INSTANCED_STEREO
+			ResolvedView = ResolveView(GetEyeIndex(I[0].PassSpecificData.FactoryInterpolants.InterpolantsVSToPS.PackedEyeIndex));
+		#else
+			ResolvedView = ResolveView();
+		#endif
+	    
+#if DISABLE_TESSELLATION_OVERRIDE
+		O.TessFactor[0] = 1.0f; // 1->2 edge
+		O.TessFactor[1] = 1.0f; // 2->0 edge
+		O.TessFactor[2] = 1.0f; // 0->1 edge
+		O.InsideTessFactor = 1.0f;
+// WaveWorks Start
+#elif WITH_GFSDK_QUAD_TREE_WAVEWORKS
+		O.TessFactor[0] = GFSDK_WaveWorks_GetEdgeTessellationFactor(I[1].PassSpecificData.Position, I[2].PassSpecificData.Position);
+		O.TessFactor[1] = GFSDK_WaveWorks_GetEdgeTessellationFactor(I[2].PassSpecificData.Position, I[0].PassSpecificData.Position);
+		O.TessFactor[2] = GFSDK_WaveWorks_GetEdgeTessellationFactor(I[0].PassSpecificData.Position, I[1].PassSpecificData.Position);
+		O.InsideTessFactor = (O.TessFactor[0] + O.TessFactor[1] + O.TessFactor[2]) / 3.0f;
+#else // #if DISABLE_TESSELLATION_OVERRIDE
+// WaveWorks End
+		float3 WorldPostion0 = I[0].PassSpecificData.Position.xyz;
+		float3 WorldPostion1 = I[1].PassSpecificData.Position.xyz;
+		float3 WorldPostion2 = I[2].PassSpecificData.Position.xyz;
+
+		float4 TessellationMultipliers;
+		TessellationMultipliers.x = 0.5 * (I[1].TessellationMultiplier + I[2].TessellationMultiplier);
+		TessellationMultipliers.y = 0.5 * (I[2].TessellationMultiplier + I[0].TessellationMultiplier);
+		TessellationMultipliers.z = 0.5 * (I[0].TessellationMultiplier + I[1].TessellationMultiplier);
+		TessellationMultipliers.w = 0.333 * (I[0].TessellationMultiplier + I[1].TessellationMultiplier + I[2].TessellationMultiplier);
+
+		//@todo: This should be vectorized and done in the MainHull shader.
+		float4 CompositeTessellationFactors = TessellationMultipliers * CalculateCompositeTessellationFactors(WorldPostion0,WorldPostion1,WorldPostion2);
+		CompositeTessellationFactors = clamp( CompositeTessellationFactors, 1, 15 );
+
+		O.TessFactor[0] = CompositeTessellationFactors.x; // 1->2 edge
+		O.TessFactor[1] = CompositeTessellationFactors.y; // 2->0 edge
+		O.TessFactor[2] = CompositeTessellationFactors.z; // 0->1 edge
+		O.InsideTessFactor = CompositeTessellationFactors.w;
+#endif // #if DISABLE_TESSELLATION_OVERRIDE
+
+		return O;
+	}
+
+	[domain("tri")]
+	[patchconstantfunc("HS_FlatTrianglesConstant")]
+	[outputcontrolpoints(3)]
+	[maxtessfactor(15)]
+	TESSELLATION_ATTRIBUTES
+	FFlatTessellationHSToDS MainHull( InputPatch<FPassSpecificVSToDS, IN_CONTROL_POINTS> I, uint ControlPointID : SV_OutputControlPointID )
+	{
+		#if INSTANCED_STEREO
+			ResolvedView = ResolveView(GetEyeIndex(I[0].FactoryInterpolants.InterpolantsVSToPS.PackedEyeIndex));
+		#else
+			ResolvedView = ResolveView();
+		#endif
+
+		FFlatTessellationHSToDS O = (FFlatTessellationHSToDS) 0;
+		
+		float3x3 TangentToLocal = VertexFactoryGetTangentToLocalDS(I[ControlPointID].FactoryInterpolants);
+		O.DisplacementScale = GetTangentSpaceNonUniformScales(TangentToLocal);
+
+		const uint NextControlPointID = ControlPointID < 2 ? ControlPointID + 1 : 0; // (ControlPointID + 1) % 3
+
+		O.PassSpecificData = I[ControlPointID];
+		O.TessellationMultiplier = GetTessellationMultiplier( I[ControlPointID] );
+
+#if DISPLACEMENT_ANTICRACK
+		// NextControlPointID is first opposite edge vert
+		// NextNextControlPointID is second opposite edge vert
+		const uint NextNextControlPointID = NextControlPointID < 2 ? NextControlPointID + 1 : 0;
+
+		// We also need the neghbors of the opposite edge verts
+		const uint NextNeighborControlPointID = 3 + 2 * NextControlPointID;	// neighbor for first opposite edge vert
+		const uint NextNeighborNextControlPointID = NextNeighborControlPointID + 1; // neighbor for second opposite edge vert
+
+		// Dominant vertex is provided explicitly
+		const uint DominantVertexControlPointID = 9 + ControlPointID;
+		O.DominantVertex = GenerateDominantVertexData(I[DominantVertexControlPointID]);
+
+		// we need the other verts from each prim to generate the edges, clock wise winding
+		O.DominantEdge = GenerateDominantEdgeData(I[NextControlPointID],I[NextNextControlPointID],I[NextNeighborControlPointID],I[NextNeighborNextControlPointID]);
+#endif	// DISPLACEMENT_ANTICRACK
+		
+		return O;
+	}
+#endif
+
+#if DOMAINSHADER
+
+// WaveWorks Start
+#if WITH_GFSDK_WAVEWORKS
+	// Performs WaveWorks specific interpolation
+	FPassSpecificVSToDS PassWaveWorksInterpolate(
+		FPassSpecificVSToDS Interpolants, 
+		float4 nv_waveworks_attr36, 
+		float4 nv_waveworks_attr37, 
+		float4 nv_waveworks_attr38, 
+		float3 nv_waveworks_attr39,
+		float3 world_pos_undisplaced,
+		float2 gerstner_sdfUV,
+		float  gerstner_multiplier,
+		float  distanceToShoreline)
+	{
+		FPassSpecificVSToDS Output = Interpolants;
+
+		Output.FactoryInterpolants.InterpolantsVSToPS.nv_waveworks_attr36 = nv_waveworks_attr36;
+		Output.FactoryInterpolants.InterpolantsVSToPS.nv_waveworks_attr37 = nv_waveworks_attr37;
+		Output.FactoryInterpolants.InterpolantsVSToPS.nv_waveworks_attr38 = nv_waveworks_attr38;
+		Output.FactoryInterpolants.InterpolantsVSToPS.nv_waveworks_attr39 = nv_waveworks_attr39;
+		Output.FactoryInterpolants.InterpolantsVSToPS.world_pos_undisplaced = world_pos_undisplaced;
+		Output.FactoryInterpolants.InterpolantsVSToPS.gerstner_sdfUV = gerstner_sdfUV;
+		Output.FactoryInterpolants.InterpolantsVSToPS.gerstner_multiplier = gerstner_multiplier;
+		Output.FactoryInterpolants.InterpolantsVSToPS.distanceToShoreline = distanceToShoreline;
+
+		return Output;
+	}
+#endif
+// WaveWorks End
+
+	[domain("tri")]
+	TESSELLATION_ATTRIBUTES
+	FPassSpecificVSToPS MainDomain(
+		FHullShaderConstantOutput HSConstantData,
+		const OutputPatch<FFlatTessellationHSToDS, 3> I,
+		float3 BarycentricCoords : SV_DomainLocation 
+#if USE_GLOBAL_CLIP_PLANE
+		, out float OutGlobalClipPlaneDistance : SV_ClipDistance
+#endif
+#if INSTANCED_STEREO && !MULTI_VIEW
+		, out float OutClipDistance : SV_ClipDistance1
+#endif
+		)
+	{
+		#if INSTANCED_STEREO
+			ResolvedView = ResolveView(GetEyeIndex(I[0].PassSpecificData.FactoryInterpolants.InterpolantsVSToPS.PackedEyeIndex));
+			#if !MULTI_VIEW
+				OutClipDistance = 0.0;
+			#endif
+		#else
+			ResolvedView = ResolveView();
+		#endif
+
+		// Get the barycentric coords
+		float U = BarycentricCoords.x;
+		float V = BarycentricCoords.y;
+		float W = BarycentricCoords.z;
+		
+		// Interpolate world position according to our tessellation scheme
+		float4 WorldPosition = I[0].PassSpecificData.Position * U + I[1].PassSpecificData.Position * V + I[2].PassSpecificData.Position * W;
+		
+		// Interp remaining attributes (construct barycentric interp from bilerp primitives)
+		// NB: the HLSL compiler resolves the 1.f to something efficient (i.e. no-op)
+		FPassSpecificVSToDS Interp = PassInterpolate(
+			PassInterpolate( I[0].PassSpecificData, U, I[1].PassSpecificData, V ), 1.f,
+			I[2].PassSpecificData, W );
+							
+		// Forward the eye index along	
+		#if INSTANCED_STEREO
+		Interp.FactoryInterpolants.InterpolantsVSToPS.PackedEyeIndex = I[0].PassSpecificData.FactoryInterpolants.InterpolantsVSToPS.PackedEyeIndex;
+		#endif
+																		
+
+// WaveWorks Start
+#if WITH_GFSDK_WAVEWORKS
+		// Get displaced position and send to Vertex Factory for storing
+#if WITH_GFSDK_QUAD_TREE_WAVEWORKS
+		GFSDK_WAVEWORKS_VERTEX_OUTPUT NV_ocean = GFSDK_WaveWorks_GetDisplacedVertexAfterTessellation(WorldPosition.xyz / 100.0);		
+#else
+		GFSDK_WAVEWORKS_VERTEX_OUTPUT NV_ocean = GFSDK_WaveWorks_GetDisplacedVertex((WorldPosition.xyz - View.PreViewTranslation.xyz) / 100.0);
+#endif
+		float3 gerstnerDisplacement = float3(0, 0, 0);
+		float2 gerstnerSdfUV = float2(0, 0);
+		float  gerstnerMultiplier = 0;
+		float  distanceToShoreline = 1;
+
+		if (WaveWorksShorelineParameters.bUseShoreline)
+		{
+			GFSDK_WaveWorks_GetGerstnerVertexAttributes(NV_ocean.pos_world_undisplaced.xyz, gerstnerSdfUV, gerstnerDisplacement, gerstnerMultiplier, distanceToShoreline);
+			gerstnerDisplacement *= 100;	// unit from 'm' to 'cm'
+		}
+		NV_ocean.world_displacement *= 1.0 - 0.7 * gerstnerMultiplier;
+		NV_ocean.world_displacement += gerstnerDisplacement.xyz * gerstnerMultiplier * clamp(distanceToShoreline + 0.3,0,1);
+		NV_ocean.pos_world = NV_ocean.pos_world_undisplaced + NV_ocean.world_displacement;
+
+		Interp = PassWaveWorksInterpolate(Interp, 
+			NV_ocean.interp.nv_waveworks_attr36, NV_ocean.interp.nv_waveworks_attr37,
+			NV_ocean.interp.nv_waveworks_attr38, NV_ocean.interp.nv_waveworks_attr39, 
+			NV_ocean.pos_world_undisplaced,gerstnerSdfUV, gerstnerMultiplier, distanceToShoreline);
+
+		WorldPosition.xyz = NV_ocean.pos_world_undisplaced + View.PreViewTranslation.xyz;
+#endif
+// WaveWorks End
+
+		FMaterialTessellationParameters MaterialParameters = GetMaterialTessellationParameters(Interp.FactoryInterpolants, WorldPosition.xyz);
+
+// WaveWorks Start
+#if WITH_GFSDK_WAVEWORKS
+		// Store the actual displacement value for use in the material editor
+		MaterialParameters.WaveWorksDisplacement = NV_ocean.world_displacement;
+#endif
+// WaveWorks End
+
+// WaveWorks Start
+#if DISPLACEMENT_ANTICRACK && !WITH_GFSDK_WAVEWORKS
+// WaveWorks End
+		float2 DisplacementTexCoords = 0;
+#if NUM_MATERIAL_TEXCOORDS
+		DisplacementTexCoords = GetTextureCoordinateDS( Interp );
+#endif
+		
+		FMaterialTessellationParameters DisplacementMaterialParameters = MaterialParameters;
+		
+		float3x3 TangentToLocal = VertexFactoryGetTangentToLocalDS(Interp.FactoryInterpolants);
+
+		// Override to dominant data if along edge or at control vert.  This is necessary to avoid cracks caused by primitives
+		// from disjoint locations in UV space abutting each other.
+		ApplyDominantData(
+			DisplacementTexCoords, DisplacementMaterialParameters.TangentToWorld,
+			GetNormalDS( TangentToLocal ), GetTangentDS( TangentToLocal ),
+			U, V, W,
+			I[0].DominantEdge, I[1].DominantEdge, I[2].DominantEdge,
+			I[0].DominantVertex, I[1].DominantVertex, I[2].DominantVertex );
+							
+		// Override texture coordinate 0.
+#if NUM_MATERIAL_TEXCOORDS
+		DisplacementMaterialParameters.TexCoords[0].xy = DisplacementTexCoords.xy;
+#endif
+
+#else
+
+		FMaterialTessellationParameters DisplacementMaterialParameters = MaterialParameters;
+
+#endif	// DISPLACEMENT_ANTICRACK
+
+		// tangent space displacement scaling
+		DisplacementMaterialParameters.TangentToWorldPreScale = I[0].DisplacementScale*U + I[1].DisplacementScale*V + I[2].DisplacementScale*W;
+
+		// world space displacement value.  This will likely use the tangent2world transform.
+		float3 WorldDisplacement = GetMaterialWorldDisplacement(DisplacementMaterialParameters);
+
+		WorldPosition.xyz += WorldDisplacement;
+
+		#if USE_GLOBAL_CLIP_PLANE
+			OutGlobalClipPlaneDistance = dot(ResolvedView.GlobalClippingPlane, float4(WorldPosition.xyz - ResolvedView.PreViewTranslation.xyz, 1));
+		#endif
+
+		FPassSpecificVSToPS Result = PassFinalizeTessellationOutput(Interp, WorldPosition,MaterialParameters);
+
+		#if INSTANCED_STEREO && !MULTI_VIEW
+		BRANCH
+		if (IsInstancedStereo(I[0].PassSpecificData.FactoryInterpolants.InterpolantsVSToPS.PackedEyeIndex))
+		{
+			const uint EyeIndex = GetEyeIndex(I[0].PassSpecificData.FactoryInterpolants.InterpolantsVSToPS.PackedEyeIndex);
+
+			// Clip at the center of the screen
+			OutClipDistance = dot(Result.Position, EyeClipEdge[EyeIndex]);
+			
+			// Scale to the width of a single eye viewport
+			Result.Position.x *= 0.5 * ResolvedView.HMDEyePaddingOffset;
+
+			// Shift to the eye viewport
+			Result.Position.x += (EyeOffsetScale[EyeIndex] * Result.Position.w) * (1.0f - 0.5 * ResolvedView.HMDEyePaddingOffset);
+		}
+		#endif
+
+		return Result;
+	}
+#endif

@@ -1,0 +1,104 @@
+﻿INTSourceChangelist:3426963
+Availability:Public
+Title:블루프린트 네이티브화 고급
+Crumbs:%ROOT%
+Description:블루프린트에 게임플레이 요소를 노출시키는 게임플레이 프로그래머를 위한 기술 안내서입니다.
+Related: Engine/Blueprints/TechnicalGuide/NativizingBlueprints
+Parent: Engine/Blueprints/TechnicalGuide
+Version:4.16
+type:reference
+tags:Blueprints
+SkillLevel:Advanced
+prereq:Engine/Blueprints/TechnicalGuide/NativizingBlueprints
+
+[TOC(start:2)]
+
+## 언리얼 자동화 툴로 빌드
+
+명령줄에서 Unreal Automation Tool (언리얼 자동화 툴)로 빌드를 하면서 블루프린트를 네이티브화 시키기 위해서는, BuildCookRun 명령줄에 `-nativizeAssets` 스위치를 추가합니다.
+
+## 헤더 선언
+
+네이티브화된 블루프린트는 새로운 별도의 모듈에 저장되는데, 게임플레이 모듈에서 온 헤더를 이제 원래 모듈 밖에서도 사용할 수 있다는 뜻입니다.
+모든 헤더에 사용되는 클래스와 구조체 전부가 선언되었는지, 헤더를 포함시켜서든 직접 선언을 해서든 확인해 줘야 합니다.
+
+### 없는 헤더 수정
+
+여러 프로젝트에 통합 헤더가 있는데, `[GameName]/[GameName].h` 아니면 `[GameName]/Public/[GameName].h` 입니다.
+* 이 헤더의 `DefaultEditor.ini` 내 `[BlueprintNativizationSettings]` 섹션의 `FilesToIncludeInModuleHeader` 에 경로를 추가하면, 헤더가 없어서 발생하는 문제가 
+많이 해결될 수 있습니다.
+
+##코드 협동 작업
+
+손수 작성한 코드와 네이티브화된 코드 사이 협동의 안정성과 효율성을 높이는 데 알아두면 좋을 제약 사항이 몇 가지 있습니다.
+지원되지 않는 구현은 다음과 같습니다:
+
+- `BlueprintPure` 또는 `BlueprintCallable` 로 마킹된 Private 및 Protected 함수
+- `noexport` 구조체 및 클래스
+- `BlueprintVisible` 또는 `Editable` 태그가 붙은 비트필드 변수
+- Private 비트필드 변수
+- `UBlueprintGeneratedClass`, `UUserDefinedStruct`, `UUserDefinedEnum` 변수 (또는 이 변수를 기반으로 한 유형)
+
+## 기술적 세부사항
+
+컴파일러 또는 링커 (LNK1000 또는 LNK1248 같은) 오류가 발생하면, `DefaultEngine.ini` 환경설정 파일에서 블루프린트 유형 또는 특정 블루프린트들을 제외시켜 
+프로젝트에서 네이티브화되는 블루프린트 양을 줄여 보시기 바랍니다. 블루프린트를 네이티브화 대상에서 제외시키는 방법 관련 상세 정보는 
+[](Engine/Blueprints/TechnicalGuide/NativizingBlueprints) 문서를 참고하세요.
+
+블루프린트 네이티브화 프로세스가 내부적으로 어떻게 작동되는지 궁금하신 분들은, 다음 모듈을 살펴보시기 바랍니다:
+
+`BlueprintCompilerCppBackend` 모듈(이 있는 위치는 `Engine\Source\Developer\BlueprintCompilerCppBackend\`) 은 블루프린트 문법 트리를 C++ 로 변환합니다.
+`BlueprintNativeCodeGen` 모듈(이 있는 위치는 `Engine\Source\Developer\BlueprintNativeCodeGen\`) 은 쿠킹과 패키징 도중 여러가지 마법같은 작업을 합니다.
+
+[PUBLISH:Licensee]
+
+## 윈도우에서 변환된 코드 디버깅
+
+C++ 코드가 이미 포함된 프로젝트 작업을 하는 경우, 기존 프로젝트 솔루션을 사용하여 코드를 디버깅하면 됩니다. 하지만 프로젝트가 원래 블루프린트 전용인 경우, `GenerateProjectFiles.bat` 파일을 사용해야 프로젝트가 Visual Studio 솔루션 파일이 생길 것입니다.
+
+[REGION:warning]
+이 솔루션(이나 메인 UE4 솔루션 아래 새로운 프로젝트 파일)을 사용해서 프로젝트를 컴파일하거나 에디터 버전을 빌드하지 마세요.
+[/REGION]
+
+###단계
+
+다음은 프로젝트를 이미 쿠킹, 빌드, 스테이지에 올렸다 가정한 상태의 단계별 안내입니다.
+
+1.	NativizedAssets 플러그인 폴더로 이동합니다. 게임의 Intermediate 폴더에 있을 것입니다 (예: `[GameDirectory]\Intermediate\WindowsNoEditor\NativizedAssets`).
+
+	![](NativizedAssetsFolder_Loc.png)(w:863)
+
+1.	NativizedAssets 플러그인 폴더를 게임의 Plugins 폴더로 이동합니다 (예: `[GameDirectory]\Plugins`).
+
+	[REGION:lightbox]
+		[![](NativizedAssetsMove_Loc.png)(w:863)](NativizedAssetsMove_Loc.png)
+	[/REGION]
+	
+	[REGION:caption]
+		클릭하면 원본 이미지를 확인합니다.
+	[/REGION]
+
+1.	이제 UE4 를 Development (또는 Development-Client, Development-Server) 실행파일 환경설정으로 컴파일합니다. 명령줄 파라미터에 `-basedir="[쿠킹된 게임 경로]\Binaries\Win64"` 를 전달하면 됩니다.
+
+	[REGION:note]
+	명령줄 파라미터에 `-basedir=""` 를 전달하면 UE4 에 게임의 쿠킹된 빌드 위치를 알려줍니다.
+	[/REGION]
+
+이 시점에서 원하는 대로 네이티브화된 코드를 디버깅하고 수정할 수 있을 것입니다.
+
+[/PUBLISH:Licensee]
+
+<!--Commented out per SME; however, it's being preserved for future review.
+
+1. 다음 줄을 실행시킵니다. 네이티브화된 빌드가 패키징되면 출력 로그에서 찾을 수 있으니, 스위치가 자신의 환경에 맞게끔 붙어있는지 확인하려면 거기서 직접 복사하는 방법이 가장 쉽습니다.
+`Development` 스위치만 `Debug` 로 바꿔주면 됩니다. 
+
+		<UE4>\Engine\Binaries\DotNET\UnrealBuildTool.exe" <프로젝트 이름> Win64 Debug -Project=<프로젝트 경로>\<프로젝트 이름>.uproject  <프로젝트 경로>\<프로젝트 이름>.uproject  -PLUGIN "<프로젝트 경로>\Intermediate\<플랫폼>\NativizedAssets\NativizedAssets.uplugin" -remoteini="<프로젝트 경로>" -noxge -generatemanifest -NoHotReloadFromIDE -ignorejunk
+
+		<UE4>\Engine\Binaries\DotNET\UnrealBuildTool.exe" <프로젝트 이름> Win64 Debug -Project=<프로젝트 경로>\<프로젝트 이름>.uproject  <프로젝트 경로>\<프로젝트 이름>.uproject  -PLUGIN "<프로젝트 경로>\Intermediate\<플랫폼>\NativizedAssets\NativizedAssets.uplugin" -remoteini="<프로젝트 경로>" -noxge -NoHotReloadFromIDE -ignorejunk
+
+2. Visual Studio 프로젝트 (debug 환경설정) 의 작업 디렉토리를 `<패키징된 폴더>\<플랫폼>\<프로젝트 이름>\Binaries\Win64\` 로 변경합니다.
+
+3. Visual Studio 에서 디버그를 실행하되, Visual Studio 에서 프로젝트를 리컴파일하지는 마십시오.
+
+-->

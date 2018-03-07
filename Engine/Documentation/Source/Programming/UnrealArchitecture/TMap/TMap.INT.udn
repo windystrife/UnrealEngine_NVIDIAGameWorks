@@ -1,0 +1,552 @@
+Title:TMap
+Crumbs:
+Description:TMaps are primarily defined by two types - a key type and a value type - which are stored as associated pairs in the map. 
+Availability:Public
+Version:4.14
+Related:Engine/UI/LevelEditor/Details/Properties/Map
+
+[TOC]
+
+After TArray, the most commonly used container in **Unreal Engine 4** (UE4) is **TMap**.  This container is an associative container, which means that every key has an associated value, and you can efficiently look up a value object by its key.
+
+There are two types of map: TMap and **TMultiMap**.  TMap's keys are unique, and inserting a new key-value pair when the key already exists will cause the existing pair to be replaced.  TMultiMap's keys are not unique and so existing pairs will not be replaced by new additions.
+
+## TMap
+
+TMaps are primarily defined by two types - a key type and a value type - which are stored as associated pairs in the map.  It is convenient to refer to these pairs as the element type of the map as if it was an individual object.  In this document, element means a key-value pair, while individual components are referred to as the element's key or the element's value.  The element type is actually a `TPair< KeyType, ElementType >`, though it should be rare to need to refer to the TPair type directly.
+
+Like TArray, TMap is a homogeneous container, meaning that all of its elements are strictly the same type.  TMap is also a value type, and supports the usual copying, assignment and destructor operations, as well as strong ownership of its elements, which will be destroyed when the map is destroyed.  The key type and value type must also be value types.
+
+TMap is a hashing container which means that, by default, the key type must support the `GetTypeHash` function and provide an `operator==` for comparing keys for equality.  Hashing is covered in more detail later.
+
+TMap can also take an optional allocator to control the memory allocation behavior.  Standard UE4 allocators (e.g. `FHeapAllocator`, `TInlineAllocator`) cannot be used as allocators for TMap.  It instead uses set allocators, which define how many hash buckets the map should use and which standard UE4 allocators should be used for hash and element storage.  See `TSetAllocator` for more information.
+
+The final TMap template parameter is **KeyFuncs**, which tells the map how to retrieve the key from the element type, how to compare two keys for equality and how to hash the key.  These have defaults which will just return a reference to the key, use operator== for equality and the non-member GetTypeHash function for hashing.  If your key type supports these functions, it is usable as a map key without the need to provide a custom KeyFuncs.
+
+Unlike TArray, the relative order of TMap elements in memory cannot be relied upon, and iterating over the elements is likely to return them in a different order from the order in which they were added. Elements are also unlikely to be laid out contiguously in memory. The backing data structure of a map is a sparse array, which is an array with holes. As elements are removed from the map, holes in the sparse array will appear. These holes are then filled when future elements are added. However, even though TMap doesn't shuffle elements to fill holes, pointers to map elements may still be invalidated, as the entire storage can be reallocated when it is full and new elements are added.
+
+## Creating and filling a map
+
+Creating a TMap can be done like this:
+
+	TMap<int32, FString> FruitMap;
+
+This creates an empty TMap designed to map integers to strings.  We have specified neither an allocator nor a KeyFuncs, so the map will do standard heap allocation and compare the key (int32) using == and hash it using GetTypeHash.  No memory has been allocated at this point.
+
+The standard way to populate a map is to use the **Add** function and provide a key and value:
+
+	FruitMap.Add(5, TEXT("Banana"));
+	FruitMap.Add(2, TEXT("Grapefruit"));
+	FruitMap.Add(7, TEXT("Pineapple"));
+	// FruitMap == [
+	// 	{ Key: 5, Value: "Banana"     },
+	// 	{ Key: 2, Value: "Grapefruit" },
+	// 	{ Key: 7, Value: "Pineapple"  }
+	// ]
+
+While the elements are listed here in the order of insertion, there is no real guarantee as to the order of these elements.  For a new map, they are likely to be in order of insertion, but the more insertions and removals the map has been subject to, the more likely it is that new elements will not appear at the end.
+
+This is not a TMultiMap, so keys are guaranteed to be unique.  We can see what happens if we attempt to add a duplicate key:
+
+	FruitMap.Add(2, TEXT("Pear"));
+	// FruitMap == [
+	// 	{ Key: 5, Value: "Banana"    },
+	// 	{ Key: 2, Value: "Pear"      },
+	// 	{ Key: 7, Value: "Pineapple" }
+	// ]
+
+The map still contains 3 elements, but the previous "Grapefruit" value with a key of 2 has been replaced with "Pear".
+
+The Add function is overloaded to take a key without a value.  If only a key is provided, the value will be default constructed:
+
+	FruitMap.Add(4);
+	// FruitMap == [
+	// 	{ Key: 5, Value: "Banana"    },
+	// 	{ Key: 2, Value: "Pear"      },
+	// 	{ Key: 7, Value: "Pineapple" },
+	// 	{ Key: 4, Value: ""          }
+	// ]
+
+Like TArray, we can also use **Emplace** instead of Add to avoid the creation of temporaries when inserting into the map:
+
+	FruitMap.Emplace(3, TEXT("Orange"));
+	// FruitMap == [
+	// 	{ Key: 5, Value: "Banana"    },
+	// 	{ Key: 2, Value: "Pear"      },
+	// 	{ Key: 7, Value: "Pineapple" },
+	// 	{ Key: 4, Value: ""          },
+	// 	{ Key: 3, Value: "Orange"    }
+	// ]
+
+Here, the two arguments are passed directly to the constructors of the key type and value type respectively.  This has no real effect for the int32 here, but it does avoid the creation of a temporary FString for the value.  Unlike TArray, it's only possible to emplace elements into a map with single-argument constructors.
+
+It's also possible to insert all the elements from another map by using the Append function to merge them:
+
+	TMap<int32, FString> FruitMap2;
+	FruitMap2.Emplace(4, TEXT("Kiwi"));
+	FruitMap2.Emplace(9, TEXT("Melon"));
+	FruitMap2.Emplace(5, TEXT("Mango"));
+	FruitMap.Append(FruitMap2);
+	// FruitMap == [
+	// 	{ Key: 5, Value: "Mango"     },
+	// 	{ Key: 2, Value: "Pear"      },
+	// 	{ Key: 7, Value: "Pineapple" },
+	// 	{ Key: 4, Value: "Kiwi"      },
+	// 	{ Key: 3, Value: "Orange"    },
+	// 	{ Key: 9, Value: "Melon"     }
+	// ]
+
+In the above example, the resulting map is equivalent to using Add/Emplace to add them individually, so that duplicate keys from the source map replace ones in the target.
+
+
+If you mark the TMap with the `UPROPERTY()` macro and one of the editable keywords (`EditAnywhere`, `EditDefaultsOnly`, `EditInstanceOnly`), you can [add and edit elements in Unreal Editor](Engine/UI/LevelEditor/Details/Properties/Map).
+
+	UPROPERTY(Category = MapsAndSets, EditAnywhere)
+	TMap<int32, FString> FruitMap;
+
+## Iteration
+
+Iteration over TMaps is similar to TArrays.  You can use C++'s ranged-for feature, remembering that the element type is a TPair:
+
+	for (auto& Elem : FruitMap)
+	{
+		FPlatformMisc::LocalPrint(
+			*FString::Printf(
+				TEXT("(%d, \"%s\")\n"),
+				Elem.Key,
+				*Elem.Value
+			)
+		);
+	}
+	// Output:
+	// (5, "Mango")
+	// (2, "Pear")
+	// (7, "Pineapple")
+	// (4, "Kiwi")
+	// (3, "Orange")
+	// (9, "Melon")
+
+Maps also provide their own iterator type for more direct control over iteration.  The **CreateIterator** function provides read-write access to the elements and the **CreateConstIterator** function provides read-only access. The iterator objects themselves provide **Key()** and **Value()** functions for key and value access.  You may see either form used in code:
+
+	for (auto It = FruitMap.CreateConstIterator(); It; ++It)
+	{
+		FPlatformMisc::LocalPrint(
+			*FString::Printf(
+				TEXT("(%d, \"%s\")\n"),
+				It.Key(),   // same as It->Key
+				*It.Value() // same as *It->Value
+			)
+		);
+	}
+
+## Queries
+
+We can ask the map how many elements it holds by using the **Num** function:
+
+	int32 Count = FruitMap.Num();
+	// Count == 6
+
+We can use the indexing operator[] with a key to retrieve a reference to a value associated with a given key.  Calling operator[] on a non-const map will return a non-const reference and calling it on a const map will return a const reference.  If the key doesn't exist then an assert will fire:
+
+	FString Val7 = FruitMap[7];
+	// Val7 == "Pineapple"
+	FString Val8 = FruitMap[8]; // assert!
+
+We can check if a particular key exists in the map using the **Contains** function:
+
+	bool bHas7 = FruitMap.Contains(7);
+	bool bHas8 = FruitMap.Contains(8);
+	// bHas7 == true
+	// bHas8 == false
+
+Most of the time, you will want to look up elements without knowing whether or not the key exists.  Using Contains followed by operator[] means a double lookup of the key, which we don't really want to do.  The **Find** function will allow you to do a single lookup, returning a pointer to the value of the found element rather than a reference, and returning null when the key does not exist:
+
+	FString* Ptr7 = FruitMap.Find(7);
+	FString* Ptr8 = FruitMap.Find(8);
+	// *Ptr7 == "Pineapple"
+	//  Ptr8 == nullptr
+
+If called on a const map, the returned pointer will also be const.
+
+The **FindOrAdd** function will search for a given key and return a reference to the associated value; if the key doesn't exist, it will add it with a default constructed value before returning a reference to that.  Because it may need to add, this function cannot be called on a const map:
+
+	FString& Ref7 = FruitMap.FindOrAdd(7);
+	// Ref7     == "Pineapple"
+	// FruitMap == [
+	// 	{ Key: 5, Value: "Mango"     },
+	// 	{ Key: 2, Value: "Pear"      },
+	// 	{ Key: 7, Value: "Pineapple" },
+	// 	{ Key: 4, Value: "Kiwi"      },
+	// 	{ Key: 3, Value: "Orange"    },
+	// 	{ Key: 9, Value: "Melon"     }
+	// ]
+	FString& Ref8 = FruitMap.FindOrAdd(8);
+	// Ref8     == ""
+	// FruitMap == [
+	// 	{ Key: 5, Value: "Mango"     },
+	// 	{ Key: 2, Value: "Pear"      },
+	// 	{ Key: 7, Value: "Pineapple" },
+	// 	{ Key: 4, Value: "Kiwi"      },
+	// 	{ Key: 3, Value: "Orange"    },
+	// 	{ Key: 9, Value: "Melon"     },
+	// 	{ Key: 8, Value: ""          }
+	// ]
+
+[REGION:note]
+Note that here the Ref7 reference may have been invalidated by the call to FruitMap.FindOrAdd(8) if a reallocation occurred.
+[/REGION]
+
+Despite its name, the **FindRef** function searches for a key and returns a value rather than a reference.  If the key was found, a copy of the associated value is returned, otherwise a default-constructed value type is returned.  This results in similar behavior to FindOrAdd but, because FindRef function returns a value rather than a reference, the map will not be modified and so can be called on a const object:
+
+	FString Val7 = FruitMap.FindRef(7);
+	FString Val6 = FruitMap.FindRef(6);
+	// Val7     == "Pineapple"
+	// Val6     == ""
+	// FruitMap == [
+	// 	{ Key: 5, Value: "Mango"     },
+	// 	{ Key: 2, Value: "Pear"      },
+	// 	{ Key: 7, Value: "Pineapple" },
+	// 	{ Key: 4, Value: "Kiwi"      },
+	// 	{ Key: 3, Value: "Orange"    },
+	// 	{ Key: 9, Value: "Melon"     },
+	// 	{ Key: 8, Value: ""          }
+	// ]
+
+The **FindKey** function allows you to perform a reverse lookup (find a key given a value).  Be aware when using this function since, unlike keys, values are not hashed and therefore looking up a key is a linear operation.  Also, values are not guaranteed to be unique, so the key returned for a particular value will be arbitrary if the map contains duplicate values:
+
+	const int32* KeyMangoPtr   = FruitMap.FindKey(TEXT("Mango"));
+	const int32* KeyKumquatPtr = FruitMap.FindKey(TEXT("Kumquat"));
+	// *KeyMangoPtr   == 5
+	//  KeyKumquatPtr == nullptr
+
+The **GenerateKeyArray** and **GenerateValueArray** functions populate a TArray with a copy of all the keys and values respectively.  In both cases, the array being passed is emptied before population, so the resulting number of elements will always equal the number of elements in the map:
+
+	TArray<int32>   FruitKeys;
+	TArray<FString> FruitValues;
+	FruitKeys.Add(999);
+	FruitKeys.Add(123);
+	FruitMap.GenerateKeyArray  (FruitKeys);
+	FruitMap.GenerateValueArray(FruitValues);
+	// FruitKeys   == [ 5,2,7,4,3,9,8 ]
+	// FruitValues == [ "Mango","Pear","Pineapple","Kiwi","Orange",
+	//                  "Melon","" ]
+
+## Removal
+
+Elements can be removed from maps by using the **Remove** function and providing the key of the element to remove:
+
+	FruitMap.Remove(8);
+	// FruitMap == [
+	// 	{ Key: 5, Value: "Mango"     },
+	// 	{ Key: 2, Value: "Pear"      },
+	// 	{ Key: 7, Value: "Pineapple" },
+	// 	{ Key: 4, Value: "Kiwi"      },
+	// 	{ Key: 3, Value: "Orange"    },
+	// 	{ Key: 9, Value: "Melon"     }
+	// ]
+
+[REGION:note]
+Removing elements actually leaves holes in the data structure, which you can see when visualizing the map in Visual Studio's watch window, but they have been omitted here for clarity.
+[/REGION]
+
+The **FindAndRemoveChecked** function can be used to remove an element from the map and return its value.  The "checked" part of the name means that the key will be checked for existence and assert if it doesn't exist:
+
+	FString Removed7 = FruitMap.FindAndRemoveChecked(7);
+	// Removed7 == "Pineapple"
+	// FruitMap == [
+	// 	{ Key: 5, Value: "Mango"  },
+	// 	{ Key: 2, Value: "Pear"   },
+	// 	{ Key: 4, Value: "Kiwi"   },
+	// 	{ Key: 3, Value: "Orange" },
+	// 	{ Key: 9, Value: "Melon"  }
+	// ]
+
+	FString Removed8 = FruitMap.FindAndRemoveChecked(8); // assert!
+
+The **RemoveAndCopyValue** function does a similar job, but takes a reference to a value type to be passed out and returns a bool to say whether or not the key was found.  This allows it to be used with missing keys without a runtime error.  If the key was not found, the call returns false and the passed object and map remain unchanged:
+
+	FString Removed;
+	bool bFound2 = FruitMap.RemoveAndCopyValue(2, Removed);
+	// bFound2  == true
+	// Removed  == "Pear"
+	// FruitMap == [
+	// 	{ Key: 5, Value: "Mango"  },
+	// 	{ Key: 4, Value: "Kiwi"   },
+	// 	{ Key: 3, Value: "Orange" },
+	// 	{ Key: 9, Value: "Melon"  }
+	// ]
+	bool bFound8 = FruitMap.RemoveAndCopyValue(8, Removed);
+	// bFound8  == false
+	// Removed  == "Pear", i.e. unchanged
+	// FruitMap == [
+	// 	{ Key: 5, Value: "Mango"  },
+	// 	{ Key: 4, Value: "Kiwi"   },
+	// 	{ Key: 3, Value: "Orange" },
+	// 	{ Key: 9, Value: "Melon"  }
+	// ]
+
+Finally, all elements can be removed by using the **Empty** function:
+
+	TMap<int32, FString> FruitMapCopy = FruitMap;
+	// FruitMapCopy == [
+	// 	{ Key: 5, Value: "Mango"  },
+	// 	{ Key: 4, Value: "Kiwi"   },
+	// 	{ Key: 3, Value: "Orange" },
+	// 	{ Key: 9, Value: "Melon"  }
+	// ]
+	
+	FruitMapCopy.Empty();
+	// FruitMapCopy == []
+
+Like TArray, Empty takes an optional slack value which can be used to optimize the case when you are about to repopulate the map with a given number of elements.
+
+## Sorting
+
+TMaps can temporarily be sorted.  The next iteration over the map will present the elements in sorted order, though future modifications to the map will likely result in the map being unsorted again.  Sorting is unstable, so equivalent elements may appear in any order.
+
+You can sort by key or by value using the **KeySort** and **ValueSort** functions respectively, and both functions take a binary predicate which specifies the sort order:
+
+	FruitMap.KeySort([](int32 A, int32 B) {
+		return A > B; // sort keys in reverse
+	});
+	// FruitMap == [
+	// 	{ Key: 9, Value: "Melon"  },
+	// 	{ Key: 5, Value: "Mango"  },
+	// 	{ Key: 4, Value: "Kiwi"   },
+	// 	{ Key: 3, Value: "Orange" }
+	// ]
+	
+	FruitMap.ValueSort([](const FString& A, const FString& B) {
+		return A.Len() < B.Len(); // sort strings by length
+	});
+	// FruitMap == [
+	// 	{ Key: 4, Value: "Kiwi"   },
+	// 	{ Key: 5, Value: "Mango"  },
+	// 	{ Key: 9, Value: "Melon"  },
+	// 	{ Key: 3, Value: "Orange" }
+	// ]
+
+## Operators
+
+Like TArray, TMap is a regular value type and as such can be copied via the standard copy constructor or assignment operator.  As maps strictly own their elements, copying a map is deep and so the new map will have its own copy of the elements:
+
+	TMap<int32, FString> NewMap = FruitMap;
+	NewMap[5] = "Apple";
+	NewMap.Remove(3);
+	// FruitMap == [
+	// 	{ Key: 4, Value: "Kiwi"   },
+	// 	{ Key: 5, Value: "Mango"  },
+	// 	{ Key: 9, Value: "Melon"  },
+	// 	{ Key: 3, Value: "Orange" }
+	// ]
+	// NewMap == [
+	// 	{ Key: 4, Value: "Kiwi"  },
+	// 	{ Key: 5, Value: "Apple" },
+	// 	{ Key: 9, Value: "Melon" }
+	// ]
+
+TMap also supports move semantics which can be invoked using the **MoveTemp** function.  After a move, the source map is guaranteed to be left empty:
+
+	FruitMap = MoveTemp(NewMap);
+	// FruitMap == [
+	// 	{ Key: 4, Value: "Kiwi"  },
+	// 	{ Key: 5, Value: "Apple" },
+	// 	{ Key: 9, Value: "Melon" }
+	// ]
+	// NewMap == []
+
+## Slack
+
+TMaps also have a notion of **slack**, and this can be used to optimize the population of the map.  The **Reset** function acts like an Empty() call, but does not free the memory that was previously used by the elements:
+
+	FruitMap.Reset();
+	// FruitMap == [<invalid>, <invalid>, <invalid>]
+
+Here the map is emptied in the same way as Empty would, but the memory used for storage is not freed and remains as slack.
+
+TMap does not provide a way of checking how many elements are preallocated, like TArray::Max() does, but still supports preallocating slack.  The Reserve function can be used to preallocate slack for a particular number of elements before adding:
+
+	FruitMap.Reserve(10);
+	for (int32 i = 0; i < 10; ++i)
+	{
+		FruitMap.Add(i, FString::Printf(TEXT("Fruit%d"), i));
+	}
+	// FruitMap == [
+	// 	{ Key: 9, Value: "Fruit9" },
+	// 	{ Key: 8, Value: "Fruit8" },
+	// 	...
+	// 	{ Key: 1, Value: "Fruit1" },
+	// 	{ Key: 0, Value: "Fruit0" }
+	// ]
+
+[REGION:note]
+Note that the slack happens to have caused the new elements to be added in reverse order. This is an example of why element order in maps should not be relied upon in any way.
+[/REGION]
+
+The **Shrink** function also works like the TArray equivalent in that it removes any wasted slack from the end of the container.  However, as TMap allows holes in its data structure, this will only remove slack from holes left at the end of the structure:
+
+	for (int32 i = 0; i < 10; i += 2)
+	{
+		FruitMap.Remove(i);
+	}
+	// FruitMap == [
+	// 	{ Key: 9, Value: "Fruit9" },
+	// 	<invalid>,
+	// 	{ Key: 7, Value: "Fruit7" },
+	// 	<invalid>,
+	// 	{ Key: 5, Value: "Fruit5" },
+	// 	<invalid>,
+	// 	{ Key: 3, Value: "Fruit3" },
+	// 	<invalid>,
+	// 	{ Key: 1, Value: "Fruit1" },
+	// 	<invalid>
+	// ]
+	FruitMap.Shrink();
+	// FruitMap == [
+	// 	{ Key: 9, Value: "Fruit9" },
+	// 	<invalid>,
+	// 	{ Key: 7, Value: "Fruit7" },
+	// 	<invalid>,
+	// 	{ Key: 5, Value: "Fruit5" },
+	// 	<invalid>,
+	// 	{ Key: 3, Value: "Fruit3" },
+	// 	<invalid>,
+	// 	{ Key: 1, Value: "Fruit1" }
+	// ]
+
+Note that only one invalid element has been removed by the Shrink call, because there was only one hole at the end.  The **Compact** function can be used to remove all the holes before shrinking:
+
+	FruitMap.Compact();
+	// FruitMap == [
+	// 	{ Key: 9, Value: "Fruit9" },
+	// 	{ Key: 7, Value: "Fruit7" },
+	// 	{ Key: 5, Value: "Fruit5" },
+	// 	{ Key: 3, Value: "Fruit3" },
+	// 	{ Key: 1, Value: "Fruit1" },
+	// 	<invalid>,
+	// 	<invalid>,
+	// 	<invalid>,
+	// 	<invalid>
+	// ]
+	FruitMap.Shrink();
+	// FruitMap == [
+	// 	{ Key: 9, Value: "Fruit9" },
+	// 	{ Key: 7, Value: "Fruit7" },
+	// 	{ Key: 5, Value: "Fruit5" },
+	// 	{ Key: 3, Value: "Fruit3" },
+	// 	{ Key: 1, Value: "Fruit1" }
+	// ]
+
+## KeyFuncs
+
+As long as a type has an operator== and a non-member GetTypeHash overload then it can be used as a KeyType for a TMap without any changes.  However, it may be useful to use types as keys where it is undesirable to overload those functions.  In these cases, you can provide your own custom **KeyFuncs**.
+
+KeyFuncs requires the definition of 2 typedefs and 3 static functions:
+
+* **KeyInitType** - Used to pass keys around.
+* **ElementInitType** - Used to pass elements around.
+* **KeyInitType GetSetKey(ElementInitType Element)** - Returns the key of an element.
+* **bool Matches(KeyInitType A, KeyInitType B)** - Returns if A and B are equivalent.
+* **uint32 GetKeyHash(KeyInitType Key)** - Returns the hash value of Key.
+
+KeyInitType and ElementInitType are typedefs to the normal passing convention of the key type and element type.  Usually these will be a value for trivial types and a const reference for non-trivial types.  Remember that the element type of a map is a TPair.
+
+An example of a custom KeyFuncs might look like this:
+
+	struct FMyStruct
+	{
+		// String which identifies our key
+		FString UniqueID;
+	
+		// Some state which doesn't affect struct identity
+		float SomeFloat;
+	
+		explicit FMyStruct(float InFloat)
+			: UniqueID (FGuid::NewGuid().ToString())
+			, SomeFloat(InFloat)
+		{
+		}
+	};
+	template <typename ValueType>
+	struct TMyStructMapKeyFuncs :
+		BaseKeyFuncs<
+			TPair<FMyStruct, ValueType>,
+			FString
+		>
+	{
+	private:
+		typedef BaseKeyFuncs<
+			TPair<FMyStruct, ValueType>,
+			FString
+		> Super;
+	
+	public:
+		typedef typename Super::ElementInitType ElementInitType;
+		typedef typename Super::KeyInitType     KeyInitType;
+
+		static KeyInitType GetSetKey(ElementInitType Element)
+		{
+			return Element.Key.UniqueID;
+		}
+	
+		static bool Matches(KeyInitType A, KeyInitType B)
+		{
+			return A.Compare(B, ESearchCase::CaseSensitive) == 0;
+		}
+	
+		static uint32 GetKeyHash(KeyInitType Key)
+		{
+			return FCrc::StrCrc32(*Key);
+		}
+	};
+
+Here, we have a type which has a unique identifier as part of its state, but also has some other state that does not contribute to its identity.  GetTypeHash and operator== would be inappropriate here, as it would be a lie for operator== to ignore part of the state and GetTypeHash needs to match operator==, which it couldn't if operator== was defined properly.  However, for the purpose of identifying this type in a map, we are happy to just use the UniqueID part of the state.
+
+1. First, we inherit **BaseKeyFuncs** as it helpfully defines some types for us, including KeyInitType and ElementInitType.  We pull these directly from Super into the derived class so that we can use them in the rest of the implementation.
+
+	BaseKeyFuncs takes two template parameters: the element type of the map and the type of our key: the object being returned from GetSetKey.  As with all maps, the element type is a TPair, taking FMyStruct as its KeyType and TMyStructMapKeyFuncs's template parameter as its ValueType.  We make our replacement KeyFuncs a template to allow the ValueType to be specified on a per-map basis, rather than needing to define a new KeyFuncs every time we want to create a TMap keyed on FMyStruct.  The second BaseKeyFuncs argument is the type of the key, not to be confused with TPair's 'KeyType', which is what is being stored in the Key field of the element.  As we want to use FMyStruct::UniqueID as our key, we specify FString here.
+
+1. We then define our three required KeyFuncs static functions.  The first is GetSetKey which, given an element type, returns the key.  Our element type is TPair, and our key is UniqueID, so we simply return that directly.
+
+	The second static function is Matches which takes the keys of two elements, having already been extracted from the element types using GetSetKey, and compares them to see if they are equivalent.  FString's operator== is case-insensitive, and we want a case sensitive search, so we use the FString::Compare function with an appropriate option.
+
+1. Finally, the GetKeyHash static function takes an extracted key and returns a hashed value for it.  Again, the GetTypeHash behavior for FString is to ignore case, so we call a case-sensitive FCrc function to calculate our hash for us.
+
+1. Now we can create a TMap using our new KeyFuncs.  We also need to provide an allocator, because the KeyFuncs parameter is last, but we'll just substitute the default:
+
+		TMap<
+			FMyStruct,
+			int32,
+			FDefaultSetAllocator,
+			TMyStructMapKeyFuncs<int32>
+		> MyMapToInt32;
+	
+		// Add some elements
+		MyMapToInt32.Add(FMyStruct(3.14f), 5);
+		MyMapToInt32.Add(FMyStruct(1.23f), 2);
+	
+		// MyMapToInt32 == [
+		// 	{
+		// 		Key: {
+		// 			UniqueID:  "D06AABBA466CAA4EB62D2F97936274E4",
+		// 			SomeFloat: 3.14f
+		// 		},
+		// 		Value: 5
+		//	},
+		// 	{
+		// 		Key: {
+		// 			UniqueID:  "0661218447650259FD4E33AD6C9C5DCB",
+		// 			SomeFloat: 1.23f
+		// 		},
+		// 		Value: 5
+		//	}
+		// ]
+
+A note about providing your own KeyFuncs: be aware that TMap assumes that two items that compare equal using KeyFuncs::Matches return the same value from KeyFuncs::GetKeyHash.  In addition, modifying the key of an existing map element in a way which will change the results from either of these functions is considered undefined behavior, as this will invalidate TMap's internal hash.  These rules also apply to the overloads of operator== and GetKeyHash when using the default KeyFuncs.
+
+## Misc
+
+The **CountBytes** and **GetAllocatedSize** functions are used to estimate how much memory is currently being utilized by the internal array.  CountBytes takes an FArchive and GetAllocatedSize can be called directly.  They are typically used for stats reporting.
+
+The **Dump** function takes an FOutputDevice and writes out some implementation information about the contents of the map.  It's usually used for debugging.
+

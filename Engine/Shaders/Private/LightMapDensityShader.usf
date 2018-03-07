@@ -1,0 +1,237 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	LightMapDensityShader.hlsl: Shader for rendering lightmap density as a color
+=============================================================================*/
+
+#define NEEDS_LIGHTMAP_COORDINATE					(HQ_TEXTURE_LIGHTMAP || LQ_TEXTURE_LIGHTMAP)
+
+#include "Common.ush"
+#include "/Engine/Generated/Material.ush"
+#include "/Engine/Generated/VertexFactory.ush"
+
+struct FLightMapDensityVSToPS
+{
+	FVertexFactoryInterpolantsVSToPS FactoryInterpolants;
+	float4 WorldPosition	: TEXCOORD6;
+	float4 Position			: SV_POSITION;
+};
+
+#if USING_TESSELLATION	
+	struct FLightMapDensityVSToDS
+	{
+		FVertexFactoryInterpolantsVSToDS FactoryInterpolants;
+		float4 Position	: TEXCOORD7;
+		OPTIONAL_VertexID_VS_To_DS
+	};
+	
+	#define FLightMapDensityVSOutput FLightMapDensityVSToDS
+#else
+	#define FLightMapDensityVSOutput FLightMapDensityVSToPS
+#endif
+
+#if USING_TESSELLATION	
+	#define FPassSpecificVSToDS FLightMapDensityVSToDS
+	#define FPassSpecificVSToPS FLightMapDensityVSToPS
+	
+	FLightMapDensityVSToDS PassInterpolate(FLightMapDensityVSToDS a, float aInterp, FLightMapDensityVSToDS b, float bInterp)
+	{
+		FLightMapDensityVSToDS O;
+		
+		O.FactoryInterpolants = VertexFactoryInterpolate(a.FactoryInterpolants, aInterp, b.FactoryInterpolants, bInterp);
+
+		return O;
+	}
+
+	FLightMapDensityVSToPS PassFinalizeTessellationOutput(FLightMapDensityVSToDS Interpolants, float4 WorldPosition, FMaterialTessellationParameters MaterialParameters)
+	{
+		FLightMapDensityVSToPS O;
+		
+		O.FactoryInterpolants = VertexFactoryAssignInterpolants(Interpolants.FactoryInterpolants);
+		
+		// Finally, transform position to clip-space
+		ISOLATE
+		{
+			O.Position = mul(WorldPosition, ResolvedView.TranslatedWorldToClip);
+		}
+
+		O.WorldPosition = WorldPosition;
+		
+		return O;
+	}
+	
+	#include "Tessellation.ush"
+#endif
+
+/*=============================================================================
+	Vertex Shader
+=============================================================================*/
+#if VERTEXSHADER
+void MainVertexShader(
+	FVertexFactoryInput Input,
+	OPTIONAL_VertexID
+	out FLightMapDensityVSOutput Output
+#if USE_GLOBAL_CLIP_PLANE && !USING_TESSELLATION
+	, out float OutGlobalClipPlaneDistance : SV_ClipDistance
+#endif
+	)
+{
+	ResolvedView = ResolveView();
+
+	FVertexFactoryIntermediates VFIntermediates = GetVertexFactoryIntermediates(Input);
+	float4 WorldPosition = VertexFactoryGetWorldPosition(Input, VFIntermediates);
+	float3x3 TangentToLocal = VertexFactoryGetTangentToLocal(Input, VFIntermediates);
+
+	FMaterialVertexParameters VertexParameters = GetMaterialVertexParameters(Input, VFIntermediates, WorldPosition.xyz, TangentToLocal);
+	WorldPosition.xyz += GetMaterialWorldPositionOffset(VertexParameters);
+
+#if USING_TESSELLATION
+	Output.Position = WorldPosition;
+	Output.FactoryInterpolants = VertexFactoryGetInterpolantsVSToDS(Input, VFIntermediates, VertexParameters);
+	
+#else // !USING_TESSELLATION
+
+	Output.WorldPosition = WorldPosition;
+	ISOLATE
+	{
+		float4 RasterizedWorldPosition = VertexFactoryGetRasterizedWorldPosition(Input, VFIntermediates, Output.WorldPosition);
+		Output.Position = mul(RasterizedWorldPosition, ResolvedView.TranslatedWorldToClip);
+	}
+
+#if USE_GLOBAL_CLIP_PLANE
+	OutGlobalClipPlaneDistance = dot(ResolvedView.GlobalClippingPlane, float4(WorldPosition.xyz - ResolvedView.PreViewTranslation.xyz, 1));
+#endif
+	Output.FactoryInterpolants = VertexFactoryGetInterpolantsVSToPS(Input, VFIntermediates, VertexParameters);
+
+#endif // USING_TESSELLATION
+
+	OutputVertexID( Output );
+}
+#endif
+
+/*=============================================================================
+	Pixel Shader
+=============================================================================*/
+
+float4		LightMapDensityParameters;
+float2		LightMapResolutionScale;
+
+/**
+ *	Tagging built vs. unbuilt lighting on objects.
+ *	x = 1.0, y = 0.0 for built lighting
+ *	x = 0.0, y = 1.0 for unbuilt lighting
+ *	z = 1.0 if the object is selected
+ */
+float3		BuiltLightingAndSelectedFlags;
+
+/** 
+ *	X = scalar to multiply density against...
+ *  Y = scalar to multiply calculatated color against...
+ *      So, to enable greyscale density mode - set X != 0, Y = 0
+ *		Standard color mode - set X = 0, Y = 1
+ *	Z = texture lightmap scalar
+ *		Set to 1.0 if texture mapped to leave texture mapped colors alone.
+ *		Set to 0.0 if vertex mapped
+ *	W = vertex lightmap scalar
+ *		Set to 0.0 if texture mapped
+ *		Set to 1.0 if vertex mapped
+ */
+float4		LightMapDensityDisplayOptions;
+
+/**
+ *	The color to apply to vertex mapped objects
+ */
+float4		VertexMappedColor;
+
+/**
+ *	The color to apply to selected objects
+ */
+float4		DensitySelectedColor;
+
+/** The 'Grid' texture to show resolution */
+Texture2D 	GridTexture;
+SamplerState	GridTextureSampler;
+/** The 'Grid' texture normal map texture */
+Texture2D 	GridNormalTexture;
+SamplerState	GridNormalTextureSampler;
+
+/**
+ *	The 'main' for the PixelShader
+ */
+void MainPixelShader(
+	FVertexFactoryInterpolantsVSToPS FactoryInterpolants,
+	float4 WorldPosition	: TEXCOORD6,
+	in float4 SvPosition	: SV_Position
+	OPTIONAL_IsFrontFace,
+	out float4 OutColor		: SV_Target0
+	)
+{
+	ResolvedView = ResolveView();
+
+	FMaterialPixelParameters MaterialParameters = GetMaterialPixelParameters(FactoryInterpolants, SvPosition);
+	FPixelMaterialInputs PixelMaterialInputs;
+	CalcMaterialParameters(MaterialParameters, PixelMaterialInputs, SvPosition, bIsFrontFace);
+	GetMaterialCoverageAndClipping(MaterialParameters, PixelMaterialInputs);
+
+	float2 LightMapUV,LightMapUV1;
+#if HQ_TEXTURE_LIGHTMAP || LQ_TEXTURE_LIGHTMAP
+	GetLightMapCoordinates(FactoryInterpolants,LightMapUV,LightMapUV1);
+#else
+	LightMapUV = LightMapUV1 = float2(0.1,0.1);
+#endif
+
+	// Area of parallelogram, in world space units.
+	float WorldSpaceArea = length( cross( ddx(WorldPosition.xyz), ddy(WorldPosition.xyz) ) );
+	WorldSpaceArea = max( WorldSpaceArea, 0.00000001f );
+
+	float MinDensity = LightMapDensityParameters.y;
+	float IdealDensity = LightMapDensityParameters.z;
+	float MaxDensity = LightMapDensityParameters.w;
+
+	float Density = MinDensity;
+
+	float2 TexCoord = LightMapUV * (LightMapResolutionScale.xy * 2.0);	// In texels
+	float2 A = ddx(TexCoord);
+	float2 B = ddy(TexCoord);
+	float2 C = A.xy * B.yx;
+
+	// Area of parallelogram, in texels.
+	float TexelArea = abs( C.x - C.y );
+	Density = TexelArea / WorldSpaceArea;
+	// Clamp the density to the max
+	Density = min( Density, MaxDensity );
+
+	float4 TintColor;
+	float4 TintGrayScale;
+	if ( Density > IdealDensity )
+	{
+		float Range = MaxDensity - IdealDensity;
+		Density -= IdealDensity;
+ 		TintColor = RETURN_COLOR( float4( Density/Range, (Range-Density)/Range, 0.0f, 1.0f ) );
+	}
+	else
+	{
+		float Range = IdealDensity - MinDensity;
+		Density -= MinDensity;
+ 		TintColor = RETURN_COLOR( float4( 0.0f, Density/Range, (Range-Density)/Range, 1.0f ) )	;
+	}
+
+	float GrayScaleRange = MaxDensity - MinDensity;
+	TintGrayScale = RETURN_COLOR(float4(Density/GrayScaleRange,Density/GrayScaleRange,Density/GrayScaleRange,1.0f));
+
+	// Disable the color tinting if the option is set
+	TintColor *= LightMapDensityDisplayOptions.y;
+	// Enable 'grayscale' mode if desired
+ 	TintColor += (TintGrayScale * LightMapDensityDisplayOptions.x);
+ 	TintColor *= BuiltLightingAndSelectedFlags.x;
+ 	TintColor += BuiltLightingAndSelectedFlags.yyyy;
+	// Override the coloring if vertex mapped
+ 	TintColor *= LightMapDensityDisplayOptions.z;
+ 	TintColor += (VertexMappedColor * LightMapDensityDisplayOptions.w);
+ 	// Override the coloring if selected...
+ 	TintColor *= (1.0f - BuiltLightingAndSelectedFlags.z);
+ 	TintColor += (DensitySelectedColor * BuiltLightingAndSelectedFlags.z);
+
+	LightMapUV *= LightMapResolutionScale.xy;
+	OutColor = Texture2DSample(GridTexture, GridTextureSampler,LightMapUV) * TintColor;
+}

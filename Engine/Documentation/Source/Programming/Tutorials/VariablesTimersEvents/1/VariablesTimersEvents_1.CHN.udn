@@ -1,0 +1,221 @@
+﻿INTSourceChangelist:2621690
+Availability:Public
+Title:1.创建使用定时器的 Actor
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/VariablesTimersEvents
+Description:开启和停止以固定频率运行代码的定时器。
+version:4.9
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[](Programming\Tutorials\VariablesTimersEvents)
+	[/PARAM]
+	[PARAM:next]
+		[Next Step](Programming\Tutorials\VariablesTimersEvents\2 "%Programming\Tutorials\VariablesTimersEvents\2:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+[REGION:tip]如您刚接触 **虚幻引擎 4**，建议先阅读 [%Programming\QuickStart:title% tutorial](Programming\QuickStart)。理解此教程的前提是您已熟悉项目创建和 C++ 代码的添加。[/REGION]
+
+1. 首先，我们将新建一个包含新手内容的基础代码项目，命名为 HowTo_VTE，然后为其添加一个 **Actor** 类。在此教程中，我们将其命名为 Countdown。
+
+	[![](ChooseParentClass.png)](ChooseParentClass.png)
+
+	[![](NameYourActor.png)](NameYourActor.png)
+
+1. 首先，我们创建一个游戏中可见的简单倒计时定时器。在 Countdown.h 中将以下代码行添加到类定义的末端：
+
+		int32 CountdownTime;
+
+		UTextRenderComponent* CountdownText;
+
+		void UpdateTimerDisplay();
+
+1. 在 Countdown.cpp 中，创建可渲染文本 **组件** 并将倒计时时间初始化为 3 秒。可将此类 **Actor** 的 **Ticking** 关闭，因为我们并不需要。**ACountdown::ACountdown** 应和以下代码相似：
+
+		PrimaryActorTick.bCanEverTick = false;
+
+		CountdownText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("CountdownNumber"));
+		CountdownText->SetHorizontalAlignment(EHTA_Center);
+		CountdownText->SetWorldSize(150.0f);
+		RootComponent = CountdownText;
+
+		CountdownTime = 3;
+
+1. **ACountdown::UpdateTimerDisplay** 将更新文本显示以表现剩余时间，或在倒计时结束后进行清零。在游戏中生成 ACountdown 时，此代码应按每秒一次的频率开始运行，直到 CountdownTime 变量归零。
+
+		void ACountdown::UpdateTimerDisplay()
+		{
+			CountdownText->SetText(FString::FromInt(FMath::Max(CountdownTime, 0)));
+		}
+
+1. 指定 **定时器** 运行函数时，我们将获得一个 **定时器句柄**。我们需要抓住此句柄，以便在倒计时结束时关闭定时器。为倒计时、需要控制的定时器句柄、Countdown.h 中的类定义添加函数。还可在此添加另一个函数，在倒计时结束后执行特殊操作：
+
+		void AdvanceTimer();
+
+		void CountdownHasFinished();
+
+		FTimerHandle CountdownTimerHandle;
+
+	现在还可在 `Countdown.cpp` 中编写 **ACountdown::AdvanceTimer** 和 **ACountdown::CountdownHasFinished** 的主体：
+
+		void ACountdown::AdvanceTimer()
+		{
+			--CountdownTime;
+			UpdateTimerDisplay();
+			if (CountdownTime < 1)
+			{
+				//倒计时结束，停止运行定时器。
+				GetWorldTimerManager().ClearTimer(CountdownTimerHandle);
+				CountdownHasFinished();
+			}
+		}
+
+		void ACountdown::CountdownHasFinished()
+		{
+			//改为一个特殊的读出
+			CountdownText->SetText(TEXT("GO!"));
+		}
+
+1. 初始化 **ACountdown::BeginPlay** 中的文字显示 - 为新的更新函数添加一个调用，并设置一个定时器按每秒一次的频率前进和更新倒计时：
+
+		UpdateTimerDisplay();
+		GetWorldTimerManager().SetTimer(CountdownTimerHandle, this, &ACountdown::AdvanceTimer, 1.0f, true);
+
+	[REGION:note]我们更新的是 ACountdown::BeginPlay 中显示（而非 ACountdown::ACountdown），因为在 **虚幻编辑器** 中设为变量的数值将在构建函数之后，**BeginPlay** 之前进行指定。我们之后将 CountdownTime 公开到编辑器时，需要遵守这些数值。[/REGION]
+
+1. 前往 **虚幻编辑器** 并按下 **Compile** 即可查看当前进度。
+
+	[![](CompileFromEditor.png)](CompileFromEditor.png)
+
+	现在即可将更新的 ACountdown 类从 **内容浏览器** 放入 **关卡编辑器**。
+
+	[![](ClassInContentBrowser.png)](ClassInContentBrowser.png)
+
+	[![](LevelEditorText.png)](LevelEditorText.png)
+
+	[REGION:note]因为倒计时文本是在 ACountdown::BeginPlay 中进行设置（而非 ACountdown::ACountdown 中），默认文本将显示在 **关卡编辑器** 中。[/REGION]
+	按下 **Play** 后，倒计时将按设置进行，3、2、1、开始！
+
+----
+
+此时，我们便成功创建了使用定时器的简单类。如非编程用户能设置倒计时时间或变更倒计时结束后的行为，则可实现更多功能。之后，我们将把这些功能公开到编辑器。
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    code
+    [/PARAMLITERAL]
+    [PARAM:heading]
+	    半成品代码
+    [/PARAM]
+    [PARAM:content]
+		**Countdown.h**
+			// 版权所有 1998-2017 Epic Games, Inc. 保留所有权利。
+
+			#pragma once
+
+			#include "GameFramework/Actor.h"
+			#include "Countdown.generated.h"
+
+			UCLASS()
+			class HOWTO_VTE_API ACountdown : public AActor
+			{
+				GENERATED_BODY()
+	
+			public:	
+				// 设置该 actor 属性的默认值
+				ACountdown();
+
+				// 游戏开始时或生成时调用
+				virtual void BeginPlay() override;
+	
+				// 每帧调用
+				virtual void Tick( float DeltaSeconds ) override;
+
+				//倒计时运行时长，按秒计
+				int32 CountdownTime;
+
+				UTextRenderComponent* CountdownText;
+
+				void UpdateTimerDisplay();
+
+				void AdvanceTimer();
+
+				void CountdownHasFinished();
+
+				FTimerHandle CountdownTimerHandle;
+			};
+
+
+		**Countdown.cpp**
+			// 版权所有 1998-2017 Epic Games, Inc. 保留所有权利。
+
+			#include "HowTo_VTE.h"
+			#include "Countdown.h"
+
+			// 设置默认值
+			ACountdown::ACountdown()
+			{
+ 				// 将此 actor 设为每帧调用 Tick()。不需要时可将此关闭，以提高性能。
+				PrimaryActorTick.bCanEverTick = false;
+	
+				CountdownText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("CountdownNumber"));
+				CountdownText->SetHorizontalAlignment(EHTA_Center);
+				CountdownText->SetWorldSize(150.0f);
+				RootComponent = CountdownText;
+
+				CountdownTime = 3;
+			}
+
+			// 游戏开始时或生成时调用
+			void ACountdown::BeginPlay()
+			{
+				Super::BeginPlay();
+	
+				UpdateTimerDisplay();
+				GetWorldTimerManager().SetTimer(CountdownTimerHandle, this, &ACountdown::AdvanceTimer, 1.0f, true);
+			}
+
+			// 每帧调用
+			void ACountdown::Tick( float DeltaTime )
+			{
+				Super::Tick( DeltaTime );
+
+			}
+
+			void ACountdown::UpdateTimerDisplay()
+			{
+				CountdownText->SetText(FString::FromInt(FMath::Max(CountdownTime, 0)));
+			}
+
+			void ACountdown::AdvanceTimer()
+			{
+				--CountdownTime;
+				UpdateTimerDisplay();
+				if (CountdownTime < 1)
+				{
+					// 倒计时结束，停止运行定时器。
+					GetWorldTimerManager().ClearTimer(CountdownTimerHandle);
+					//在定时器结束时按需要执行特殊操作。
+					CountdownHasFinished();
+				}
+			}
+
+			void ACountdown::CountdownHasFinished()
+			{
+				//改为一个特殊的读出
+				CountdownText->SetText(TEXT("GO!"));
+			}
+
+
+    [/PARAM]
+[/OBJECT]
+
+%Steps%

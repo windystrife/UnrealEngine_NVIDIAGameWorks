@@ -1,0 +1,253 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	ParticleBeamTrailVertexFactory.hlsl: Particle vertex factory shader code.
+=============================================================================*/
+
+#include "VertexFactoryCommon.ush"
+
+struct FVertexFactoryInput
+{
+	float4	Position				: ATTRIBUTE0;
+	float3	OldPosition				: ATTRIBUTE1;
+	float4	SizeRotSubImage			: ATTRIBUTE2;
+	float4	TexCoord				: ATTRIBUTE3;
+	float4	Color					: ATTRIBUTE4;
+#if USE_DYNAMIC_PARAMETERS
+	float4 DynamicParameter0		: ATTRIBUTE5;
+#endif	//USE_DYNAMIC_PARAMETERS
+
+/** Optional instance ID for vertex layered rendering */
+#if FEATURE_LEVEL >= FEATURE_LEVEL_SM4 && ONEPASS_POINTLIGHT_SHADOW && USING_VERTEX_SHADER_LAYER
+	uint InstanceId	: SV_InstanceID;
+#endif
+};
+
+struct FVertexFactoryInterpolantsVSToPS
+{
+	// First row of the tangent to world matrix
+	float3	TangentToWorld0	: TANGENTTOWORLD0;
+	// Last row of the tangent to world matrix in xyz
+	float4	TangentToWorld2	: TANGENTTOWORLD2;
+
+	float4	TexCoord			: TEXCOORD2;
+
+#if NEEDS_PARTICLE_COLOR
+	float4  Color				: TEXCOORD3;
+#endif
+
+#if USE_DYNAMIC_PARAMETERS
+	float4 DynamicParameter0	: TEXCOORD4;
+#endif	//USE_DYNAMIC_PARAMETERS
+
+#if INSTANCED_STEREO
+	nointerpolation uint PackedEyeIndex : PACKED_EYE_INDEX;
+#endif
+};
+
+struct FVertexFactoryIntermediates
+{
+	/** The color of the sprite. */
+	float4 Color;
+};
+
+/** Converts from vertex factory specific interpolants to a FMaterialPixelParameters, which is used by material inputs. */
+FMaterialPixelParameters GetMaterialPixelParameters(FVertexFactoryInterpolantsVSToPS Interpolants, float4 SvPosition)
+{
+	// GetMaterialPixelParameters is responsible for fully initializing the result
+	FMaterialPixelParameters Result = MakeInitializedMaterialPixelParameters();
+
+#if NUM_MATERIAL_TEXCOORDS
+	#if NUM_MATERIAL_TEXCOORDS >= 1
+		Result.TexCoords[0] = Interpolants.TexCoord.xy;
+	#if NUM_MATERIAL_TEXCOORDS >= 2
+		Result.TexCoords[1] = Interpolants.TexCoord.zw;
+	#endif	// >= 2
+	#endif	// >= 1
+	#if NUM_MATERIAL_TEXCOORDS > 2
+		UNROLL
+		for(int CoordinateIndex = 2;CoordinateIndex < NUM_MATERIAL_TEXCOORDS;CoordinateIndex++)
+		{
+			Result.TexCoords[CoordinateIndex] = Interpolants.TexCoord.xy;
+		}
+	#endif	// > 2
+#endif
+	Result.VertexColor = 1;
+
+#if NEEDS_PARTICLE_COLOR
+	Result.Particle.Color = Interpolants.Color;
+#endif
+
+	half3 TangentToWorld0 = Interpolants.TangentToWorld0.xyz;
+	half4 TangentToWorld2 = Interpolants.TangentToWorld2;
+	Result.TangentToWorld = AssembleTangentToWorld( TangentToWorld0, TangentToWorld2 );
+	Result.UnMirrored = 1;
+
+#if LIGHTMAP_UV_ACCESS
+	Result.LightmapUVs = Interpolants.TexCoord.xy;
+#endif
+
+	Result.TwoSidedSign = 1;
+
+#if USE_DYNAMIC_PARAMETERS
+	Result.Particle.DynamicParameter = Interpolants.DynamicParameter0;
+#endif	//USE_DYNAMIC_PARAMETERS
+
+	return Result;
+}
+
+/** Converts from vertex factory specific input to a FMaterialVertexParameters, which is used by vertex shader material inputs. */
+FMaterialVertexParameters GetMaterialVertexParameters(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates, float3 WorldPosition, float3x3 TangentToLocal)
+{
+	FMaterialVertexParameters Result = (FMaterialVertexParameters)0;
+	Result.WorldPosition = WorldPosition;
+	Result.VertexColor = Input.Color;
+	Result.TangentToWorld = mul(TangentToLocal, GetLocalToWorld3x3()); 
+	Result.Particle.Color = Intermediates.Color;
+	Result.PreSkinnedPosition = Input.Position.xyz;
+	Result.PreSkinnedNormal = TangentToLocal[2].xyz;
+
+#if NUM_MATERIAL_TEXCOORDS_VERTEX
+	for(int CoordinateIndex = 0; CoordinateIndex < NUM_MATERIAL_TEXCOORDS_VERTEX; CoordinateIndex++)
+	{
+		Result.TexCoords[CoordinateIndex] = Input.TexCoord.xy;
+	}
+#endif
+	return Result;
+}
+
+void GetLightMapCoordinates(FVertexFactoryInterpolantsVSToPS Interpolants, out float2 LightmapUV0, out float2 LightmapUV1)
+{
+	LightmapUV0 = LightmapUV1 = 0;
+}
+
+half2 GetShadowMapCoordinate(FVertexFactoryInterpolantsVSToPS Interpolants)
+{
+	return 0;
+}
+
+float3 SafeNormalize(float3 V)
+{
+	return V / sqrt(max(dot(V,V),0.01));
+}
+
+void GetTangents(FVertexFactoryInput Input,out float4 Right,out float4 Up)
+{
+	float4	Position			= TransformLocalToTranslatedWorld(Input.Position.xyz),
+			OldPosition			= TransformLocalToTranslatedWorld(Input.OldPosition.xyz);
+
+	float3	CameraDirection		= SafeNormalize(ResolvedView.WorldCameraOrigin - Position.xyz),
+			ParticleDirection	= SafeNormalize(Position.xyz - OldPosition.xyz);
+
+	float4	Right_Square		= BeamTrailVF.CameraRight,
+			Up_Square			= BeamTrailVF.CameraUp;			
+			
+	float4	Right_Rotated		= (-1.0 * cos(Input.SizeRotSubImage.z) * Up_Square) + (sin(Input.SizeRotSubImage.z) * Right_Square),
+			Up_Rotated			= (       sin(Input.SizeRotSubImage.z) * Up_Square) + (cos(Input.SizeRotSubImage.z) * Right_Square);
+
+	float4	Right_Velocity		= float4( SafeNormalize( cross( CameraDirection, ParticleDirection	) ), 0.0 ),
+			Up_Velocity			= float4( ParticleDirection, 0.0 );
+
+	//	enum EParticleScreenAlignment
+	//	{
+	//		PSA_Square,
+	//		PSA_Rectangle,
+	//		PSA_Velocity
+	//	};
+	Right				= BeamTrailVF.ScreenAlignment.x > 1.5f ? Right_Velocity : Right_Rotated;
+	Up					= BeamTrailVF.ScreenAlignment.x > 1.5f ? Up_Velocity	: Up_Rotated;
+}
+
+float4 CalcWorldPosition(FVertexFactoryInput Input)
+{
+	return TransformLocalToTranslatedWorld(Input.Position.xyz);
+}
+
+/** derive basis vectors */
+float3x3 CalcTangentBasis(FVertexFactoryInput Input)
+{
+	float4	Right,
+			Up;
+	GetTangents(Input,Right,Up);
+	return float3x3(
+			Right.xyz,
+			Up.xyz,
+			-normalize(cross(Right.xyz,Up.xyz))
+			);
+}
+
+FVertexFactoryIntermediates GetVertexFactoryIntermediates(FVertexFactoryInput Input)
+{
+	FVertexFactoryIntermediates Intermediates;
+	Intermediates.Color = Input.Color;
+	return Intermediates;
+}
+
+float4 VertexFactoryGetWorldPosition(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates)
+{
+	return CalcWorldPosition(Input);
+}
+
+float4 VertexFactoryGetRasterizedWorldPosition(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates, float4 InWorldPosition)
+{
+	return InWorldPosition;
+}
+
+float3 VertexFactoryGetPositionForVertexLighting(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates, float3 TranslatedWorldPosition)
+{
+	return TranslatedWorldPosition;
+}
+
+FVertexFactoryInterpolantsVSToPS VertexFactoryGetInterpolantsVSToPS(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates, FMaterialVertexParameters VertexParameters)
+{
+	FVertexFactoryInterpolantsVSToPS Interpolants;
+	Interpolants.TexCoord	= Input.TexCoord;
+
+#if NEEDS_PARTICLE_COLOR
+	Interpolants.Color		= Intermediates.Color;
+#endif
+
+#if USE_DYNAMIC_PARAMETERS
+	Interpolants.DynamicParameter0 = Input.DynamicParameter0;
+#endif	//USE_DYNAMIC_PARAMETERS
+
+	float3x3 TangentToLocal = CalcTangentBasis(Input);
+	float3x3 TangentToWorld = mul(TangentToLocal, GetLocalToWorld3x3());
+
+	Interpolants.TangentToWorld0 = TangentToWorld[0];
+	Interpolants.TangentToWorld2 = float4(TangentToWorld[2], sign(determinant(TangentToLocal)));
+
+#if INSTANCED_STEREO
+	Interpolants.PackedEyeIndex = 0;
+#endif
+
+	return Interpolants;
+}
+
+float4 VertexFactoryGetPreviousWorldPosition(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates)
+{
+	return VertexFactoryGetWorldPosition(Input, Intermediates);
+}
+
+/**
+* Get the 3x3 tangent basis vectors for this vertex factory
+*
+* @param Input - vertex input stream structure
+* @return 3x3 matrix
+*/
+float3x3 VertexFactoryGetTangentToLocal( FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates )
+{
+	return CalcTangentBasis(Input);
+}
+
+#if INSTANCED_STEREO
+uint VertexFactoryGetEyeIndex(uint InstanceId)
+{
+	return InstanceId & 1;
+}
+#endif
+
+float4 VertexFactoryGetTranslatedPrimitiveVolumeBounds(FVertexFactoryInterpolantsVSToPS Interpolants)
+{
+	return 0;
+}

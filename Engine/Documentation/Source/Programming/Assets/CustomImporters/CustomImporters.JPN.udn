@@ -1,0 +1,189 @@
+﻿INTSourceChangelist:2638771
+Availability:Docs
+Title:カスタム インポーター テクニカル ガイド
+Crumbs: %ROOT%, Engine, Engine/UI, Programming
+Description:カスタム仕様のアセットタイプ用インポーターのプログラマー向けライティング ガイド
+
+[REGION:todo]
+	このページはアンリアル エンジン 3 のドキュメントから転載され現在見直しがされています。古い情報が含まれる場合もありますので予めご了承ください。
+[/REGION]
+
+[TOC(start:2)]
+
+UFactory クラスは、新しい資産の作成用のエディタで使用され、通常、外部ファイルに基づいています。
+
+UFactory の姉妹版クラスの UExporter は、コピーや複製操作を行う際に資産を出力します。エクスポータ記述方法の詳細については、[カスタム エクスポータの作成](Programming/Assets/CustomExporters) をご覧ください。
+
+
+
+## 新規 New UFactory クラスの追加
+
+ゲーム エディタ プロジェクトで、独自の UFactory を作成してみます。アンリアル エンジン 4 で出荷する UFactory から派生したタイプのサンプルについては、 Editor/UnrealEd/Classes/Factories に記載されているクラスでご確認ください。
+
+
+
+## 注意すべき UFactory メンバ
+
+ユーザーからの入力が必要なファクトリーは、通常はカテゴリを UPROPERTY() 宣言に追加してメンバをエクスポーズします。それらの UProperty オブジェクトは、「インポート/作成」ダイアログでプロパティウィンドウに値を設定するため使用されます。
+
+以下は、コンストラクタの UFactory 派生タイプで通常設定される UFactory メンバのリストです。
+
+
+### SupportedClass (サポートクラス)
+
+このファクトリで作成されたオブジェクトのタイプです。NULL は、ファクトリが複数のタイプをサポートし、曖昧な部分を削除するため、 ResolveSupportedClass を実装しなければなりません。 -- 詳細は下記の通りです。
+
+
+### Description
+
+このファクトリでサポートされているタイプの記述。エディタ UI のユーザーに提供される。 
+
+
+### bText
+
+_true_ の場合、ファクトリが FactoryCreateText (ファクトリ作成テキスト) を通してテキストをインポートします。_false_ の場合は、ファクトリが FactoryCreateBinary (ファクトリ作成バイナリ) を通してバイナリをインポートします。
+
+
+### bCreateNew
+_true_ の場合、ファクトリは、 FactoryCreateText または FactoryCreateBinary でデータをインポートするより、 FactoryCreateNew を実装することでオブジェクトを作成します。
+
+
+### bEditorImport
+
+_true_ の場合、ファクトリは、インポートデータのファクトリとして UI にみなされる。 -- 言い換えれば、ファクトリは外部データを基にして、資産タイプを作成します。
+
+
+### AutoPriority (自動優先)
+
+任意の、同じタイプをサポートするファクトリの優先順位を決めるために使用される整数。
+
+
+
+## 単一タイプをサポートするファクトリ
+
+ほとんどの UFactory 派生タイプは、 ファクトリクラス、 「StaticConstructor()」 オーバーライドにある SupportedClass メンバを設定することにより特定された単一タイプのオブジェクトをインポートまたは作成します。下記は、新しく UDecalMaterial オブジェクトを作成するのに使用された、簡単なファクトリの実装例です。
+
+
+    
+	UCurveFactory::UCurveFactory(const FObjectInitializer& ObjectInitializer)
+		:Super(ObjectInitializer)
+	{
+		// Property initialization
+		bCreateNew = true;
+		bEditAfterNew = true;
+		SupportedClass = UCurveBase::StaticClass();
+		Description = TEXT("Curve");
+
+		CurveClass = UCurveFloat::StaticClass();
+	}
+    
+    UObject* UCurveFactory::FactoryCreateNew(UClass* Class,
+												UObject* InParent,
+												FName Name,
+												EObjectFlags Flags,
+												UObject* Context,
+												FFeedbackContext* Warn)
+	{
+		UCurveBase* NewCurve = NULL;
+		if(CurveClass != NULL)
+		{
+			NewCurve = CastChecked<UCurveBase>(StaticConstructObject(CurveClass,InParent,Name,Flags));		
+		}
+
+		return NewCurve;
+	}
+    
+
+
+
+
+
+## 複数のタイプをサポートするファクトリ
+
+複数のタイプをサポートするファクトリは、 NULL を SupportedClass として宣言することにより実装できます。インポート前にクラスを解決するため ResolveSupportedClass() を実装します。
+
+例として、 ficticous .ABC テキストファイルフォーマットで読み込むファクトリ用の下記のコードを検討し、ユーザーの選択によりますが、タイプ A または、タイプ Bのオブジェクトを作成するため、それを使用します。
+
+
+    
+	UCLASS(hidecategories=Object)
+	class UYourFactory : public UFactory
+	{
+		GENERATED_UCLASS_BODY()
+    
+        // Flag indicating whether the input file should be
+        // treated as type A or type B.  This will be set by
+        // the user in the Import Dialog, and examined in
+        // ResolveSupportedClass() to determine the type of
+        // object to create.
+		UPROPERTY(Category=ABCOptions)
+        bool bTreatAsTypeA;
+
+	#if CPP
+		// UFactory implementation
+		UClass* ResolveSupportedClass();
+		UObject* FactoryCreateText(UClass* Class, /* more args */, FFeedbackContext* Warn);
+
+		/** Creates an object of type A */
+		UObject* UYourFactory::CreateTypeA(UClass* Class, /* more args */, FFeedbackContext* Warn)
+
+		/** Creates an object of type B */
+		UObject* UYourFactory::CreateTypeB(UClass* Class, /* more args */, FFeedbackContext* Warn)
+	#endif // CPP
+    }
+
+    UYourFactory::UYourFactory(const FObjectInitializer& ObjectInitializer)
+		:Super(ObjectInitializer)
+	{
+		// Property initialization
+
+		// Indicate that this factory should be considered by "Import" UI.
+        bEditorImport = true;
+
+		// Declaring no supported classes indicates that the import
+        // path should call ResolveSupportedClass() after 'OK' is
+        // selected in the Import Dialog is closed.
+        SupportedClass = NULL;
+
+        // Register that this factory is interested in .ABC files.
+        new(Formats) FString( TEXT("abc;Ye Olde ABC Type") );
+
+        bCreateNew = false;
+        bText = true;          // Indicates ABC is a text file format.
+	}
+    
+    // This is called by the import dialog when SupportedClass is NULL.
+    UClass* UYourFactory::ResolveSupportedClass()
+    {
+        UClass* UserSpecifiedClass = bTreatAsTypeA ?UTypeA::StaticClass() :UTypeB::StaticClass();
+        return UserSpecifiedClass;
+    }
+    
+    UObject* UYourFactory::FactoryCreateText(UClass* Class, /* more args */, FFeedbackContext* Warn)
+    {
+        UObject* NewObject;
+        if ( bTreatAsTypeA )
+        {
+            NewObject = CreateTypeA( Class, /* more args */, Warn );
+        }
+        else
+        {
+            NewObject = CreateTypeB( Class, /* more args */, Warn );
+        }
+        return NewObject;
+    }
+    
+    UObject* UYourFactory::CreateTypeA(UClass* Class, /* more args */, FFeedbackContext* Warn)
+    { ... }
+    UObject* UYourFactory::CreateTypeB(UClass* Class, /* more args */, FFeedbackContext* Warn)
+    { ... }
+    
+    
+
+
+
+ 
+
+
+
+

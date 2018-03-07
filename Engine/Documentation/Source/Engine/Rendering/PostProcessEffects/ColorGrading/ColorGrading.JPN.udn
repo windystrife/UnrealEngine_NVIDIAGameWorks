@@ -1,0 +1,128 @@
+﻿INTSourceChangelist:2688263
+Availability:Public
+Title:カラーグレーディング
+Crumbs: %ROOT%, Engine, Engine/Rendering/PostProcessEffects
+Description:シーンカラーを調整するためのトーンマッピングと色補正エフェクト
+Version:4.9
+
+アンリアル エンジンでは、 **カラー グレーディング** という用語は トーンマッピング 機能 (HDR から LDR への変換) とそれに続く カラー修正 (LDR カラーからスクリーン カラーへの変換) を意味します。
+
+## トーン マッピング
+
+[EXCERPT:ToneMapping_Desc]
+**Tone Mapping (トーン マッピング)** 機能の目的は、広範囲の HDR (ハイダイナミック レンジ) カラーを局所的な LDR (ローダイナミック レンジ) にマップすることによって、モニターでカラー表示を可能にすることです。これはポストプロセス処理中の通常のレンダリング後に実行されます。グローバル トーンマッパとは、 3 つの入力値 (RGB) と 3 つの出力値 (RGB) を伴う機能です。ローカル トーンマッパでは、ピクセルの周辺も考慮されますが、より集中的な計算が行われます (つまり速度が遅くなります)。優れたトーンマッパ機能は、カラーが高輝度な場合でも、ピクセルのカラー情報を保持しようとします。
+[/EXCERPT:ToneMapping_Desc]
+
+以下のグラフは、0 から 5 の範囲の各チャンネルが、0 から 1 のチャンネルにマップされる様子を示したものです。
+
+![Tone Mapping Graphs](newtone.jpg)
+
+以下の関数を使用しました。
+
+	GammaColor = LinearColor / (LinearColor + 0.187) * 1.035;
+
+暗い色よりも明るい色が、輝度の上昇がかなりゆっくりであることに注目してください。黒は黒のままです。ほとんど直線状になっている箇所がカーブにありますが、それでもトーンマッピングされないカーブよりは幾分傾斜がきつくなっています。これにより、コントラストがいくぶん強調されます。トーンマッパの使用時は異なる外観となるのは正常ですが、良い結果を得るにはソース画像がより広いダイナミックな範囲でなくてはいけません。結果、フィルムの見た目が一層リアルになるのです。 
+
+提示されたトーンマッパの公式には、すでに微調整可能な定数が 2 つ設定されています。数的処理を増やすほど詳細な微調整が可能ですが、品質、柔軟性、そしてパフォーマンスを検討する必要があるため、適切な関数を発見するのは容易ではありません。そこで 1 つの単純な公式を使用し、その結果の LDR をシンプルなカラー ルックアップ (色対応表) で修正することにしました。すでに HDR カラーを限られた範囲ですでにマッピングしたので、暗色の多様な表現だけでなく明色の修正も可能なままです。この方法は理解しやすく、ローカル制御と安定したパフォーマンスを保つことで柔軟性を提供します。 
+
+| プロパティ | 説明 |
+| -------- | ----------- |
+| **Scene Color Tint** | HDR シーンカラーに適用されるフィルター カラー (乗算) です。 [INCLUDE:#SceneColorTint] |
+| **Tonemapper Toe Factor** | トーンマッパに含まれる暗色の微調整を可能にします。値は [0.0, 1.0] の範囲です。 [INCLUDE:#TonemapperToeFactor] |
+
+<!--
+[EXCERPT:SceneColorTint]
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Scene Color Tint - (1.0, 1.0, 1.0)](scene_tint_full_small.png)(w:600)
+	[/PARAM]
+	[PARAM:after]
+	![Scene Color Tint - (0.25, 0.25, 0.25)](scene_tint_quarter_small.png)(w:600)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:SceneColorTint]
+
+[EXCERPT:TonemapperToeFactor]
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Toe Factor - 0](toe_factor_0_small.png)(w:600)
+	[/PARAM]
+	[PARAM:after]
+	![Toe Factor - 1](toe_factor_1_small.png)(w:600)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:TonemapperToeFactor]
+-->
+
+## 色補正
+
+[EXCERPT:LookupTexture]
+色補正は色対応表 (LUT) を使用して実装されます。3D の色対応表により色変換がさらに洗練されたものになるため (デサチュレーションなど)、1D の色対応表を 3 つ使用する代わりに、 3D の色対応表を 1 つを利用することにしました。以下の画像は、 16x16x16 のカラーニュートラルな LUT (色対応表) が 256x16 のテクスチャにアンラップされたものです (テクスチャ ブラウザでは現在このように見えます)。
+
+[REGION:raw]
+![Neutral LUT](RGBTable16x1.png)
+[/REGION]
+
+[REGION:note]
+このページに表示されている RGBTable16x1.png 画像を使用しても構いませんが、モニターに表示されている画像は必ずしも実際の画像とは限りません。コピーや貼り付けはしないでください。 
+
+* [LUT テクスチャのサンプル](RGBTable16x1.png) - 右クリックして **[Save As (名前を付けて保存)]** を選択します。
+
+[/REGION]
+
+修正したテクスチャは以下のような見た目となります。
+
+[REGION:raw]
+![Sepia Tone LUT](LUT_Sepia.png)
+[/REGION]
+
+LUT を使用するには、使用するポストプロセスボリュームで LUT テクスチャを割り当てる必要があります。 
+
+| プロパティ | 説明 |
+| -------- | ----------- |
+| **Color Grading Intensity** | 色補正のエフェクトを制御するスケーリング係数です。 |
+| **Color Grading LUT** | 色補正の色対応表として使用する LUT テクスチャです。[INCLUDE:Engine/Rendering/PostProcessEffects/ColorGrading#ColorGradingLUT]  |
+
+<!--
+[EXCERPT:ColorGradingLUT]
+[REGION:imagetable]
+| ![Natural Scene](lut_none.png)(w:265) | ![Greenish Scene](lut_green.png)(w:265) | ![Reddish Scene](lut_red.png)(w:265) |
+| ------ | ------ | ------ |
+| ![Neutral LUT](RGBTable16x1.png) | ![Greenish LUT](LUT_Greenish.png) | ![Reddish LUT](LUT_Reddish.png) |
+[/REGION:imagetable]
+[/EXCERPT:ColorGradingLUT]
+-->
+
+### LUT テクスチャの作成
+
+以下の手順に従います。
+
+1. 調整したいシーンを見本としてスクリーンショットで作成し、それらをまとめて 1 つの Photoshop ドキュメンに置きます。
+1. neutral (ニュートラル) 256x16 LUT を Photoshop へ読み込みます。
+
+	[REGION:note]
+	このページに表示されている RGBTable16x1.png 画像を使用しても構いませんが、モニターに表示されている画像は必ずしも実際の画像とは限りません。コピーや貼り付けはしないでください。 
+
+	* [LUT テクスチャのサンプル](RGBTable16x1.png) - 右クリックして **[Save As (名前を付けて保存)]** を選択します。
+
+	[/REGION]
+
+1. スクリーンショットと一緒に LUT を Photoshop ドキュメントへ挿入します (LUT ドキュメントで [All] を選択して、コピー、スクリーンショットに切り替え、そして貼り付けします)。
+1. カラー操作を適用します (調整レイヤを追加するのが最善策です。追加しないと、先にあらゆるものをフラット補正する必要があるため、後から 256x16 を切り取る作業がますます大変になってしまいます)。
+1. 256x16 の LUT を選択します (レイヤーパネルで LUT レイヤーを選択、メニューから [Select/Load Selection] を選択して [OK] を選びます)。
+1. LUT のコンテンツを [Copy Merged] します (メニューの[Edit/Copy Merged])。
+1. 256x16 のテクスチャを貼り付けして、エンジンが読み取れる非圧縮フォーマットで保存します (メニュー：[File/New]、メニュー：[Edit/Paste]、 メニュー:[File/Save As])。
+1. エディタでテクスチャをインポートして、ColorLookupTable Texture Group を指定します。 
+
+
+さまざまな色補正が可能です。いくつか例を紹介します。
+
+* 輝度
+* サチュレーション (彩度をあげる)
+* 簡素なコントラスト (クランプをともなった線形)
+* 高品質コントラスト (中央部に急勾配な線形部分をともなった曲線など)
+* 画像の暗い部分、ミッドトーン部、明るい部分を選んで変更 (曲線など)
+* 特定の色を選んで変更 (輝度が別のチャンネルにある色空間で最もよく表現される色。LAB など)
+* 異なるカラー空間でも調整可能（例、LAB は輝度と独立した色を保つため非常に便利です） 
+
+[/EXCERPT:LookupTexture]

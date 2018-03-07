@@ -1,0 +1,267 @@
+﻿INTSourceChangelist:2693703
+Availability:Public
+Title:距离场环境遮挡
+Crumbs: %ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description:可移动天空光照的动态环境遮挡。
+Version:4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/DistanceFieldAmbientOcclusion:title%](DistanceFieldAmbientOcclusion_Topic.jpg)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/DistanceFieldAmbientOcclusion:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/DistanceFieldAmbientOcclusion:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/DistanceFieldAmbientOcclusion]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/DistanceFieldAmbientOcclusion:title%](DistanceFieldAmbientOcclusion_Topic.jpg)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/DistanceFieldAmbientOcclusion:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/DistanceFieldAmbientOcclusion:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/DistanceFieldAmbientOcclusion]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:fullwidth raw]
+![](DistanceFieldAmbientOcclusion_Header.jpg)
+[/REGION]
+
+[TOC(start:2 end:2)]
+
+
+
+一个新功能可从有向距离场体（沿每个刚性物体预计算）生成中量的环境遮挡。该功能也将生成可移动天空光照的阴影。它支持动态场景变化 - 可移动或隐藏刚性网格体并影响遮挡。与屏幕空间环境遮挡不同，遮挡是从世界空间遮挡器进行计算，因此画外丢失数据将不会形成穿帮。
+
+此动态环境遮挡解决方案存在一些扩散限制，以便支持动态场景变化，因此并不适用于所有项目。需要特别指出的是，只支持轻微的非等分缩放（挤压）。此外，映射到每个物体上的体积纹理较小，因此大型静态网格体的精度较差。
+
+只有静态网格体组件、范例静态网格体组件、植物和地形可形成遮挡。植物必须在设定中启用“Affect Distance Field Lighting”。其他物体仍可接受遮挡。
+
+## 设置过程
+* 首先，启用项目设置 **Generate Mesh Distance Fields**（在 Rendering 下）并重启编辑器。下次加载时，背景中将生成距离场。该处理为多线程进行，多核处理的速度将更快。
+* 将 Engine Scalability 设为 Epic，以便形成阴影。较低的设置下将禁用距离场环境遮蔽。
+* 放置一个 **Skylight**，将 Mobility 设为 **Movable**。 
+* 现在即可从动态更新的静态网格体对关卡和环境遮蔽进行编辑。
+
+生成的距离场分辨率默认较低，可导致光斑的出现。可提高静态网格体上的 **Distance Field Resolution Scale** 进行补偿。
+
+## 结果
+
+#### 弥散遮蔽
+
+距离场环境遮蔽生成一个环境法线（最少遮挡的方向），用于结合遮蔽因子修改天空光照弥散计算。 
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![No Distance Field Ambient Occlusion](Original2.jpg)(w:600)
+	[/PARAM]
+	[PARAM:after]
+	![Distance Field Ambient Occlusion](DistanceFieldAO2.jpg)(w:600)
+	[/PARAM]
+[/OBJECT]
+_正午的 Fortnite 关卡。在 Fortnite 中，玩家可以随时推倒任何墙壁、地板或天花板并重新建造，因此光照必须随之进行更新。距离场环境遮蔽支持这些变化。_
+
+[_Video of interaction with objects in the level editor, with Distance Field AO updating in realtime._](http://youtu.be/FmbrnbpHT9E)
+
+#### 镜面遮蔽
+
+距离场环境遮蔽在天空光照上形成近似镜面的遮蔽。定向遮蔽锥形和反射锥形（尺寸取决于材质的粗糙度）相交即可进行计算。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![](0Original.jpg)(w:600)
+	[/PARAM]
+	[PARAM:after]
+	![](0SpecularOcclusion.jpg)(w:600)
+	[/PARAM]
+[/OBJECT]
+
+_管道上的镜面遮蔽。_
+
+## 植物遮蔽
+
+尽管距离场遮蔽在表面上进行，但其仍可对诸多小叶片组成的片状植物进行处理。在植物网格体上启用 _Generate Distance Field As If Two Sided_ 将柔化计算的遮挡，可获得最佳效果。天空光照上的 _Min Occlusion_ 可有效防止内部完全变黑。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Screen Space Ambient Occlusion only](NoDFAO2.jpg)(w:600)
+	[/PARAM]
+	[PARAM:after]
+	![Distance Field Ambient Occlusion on foliage](DFAO2.jpg)(w:600)
+	[/PARAM]
+[/OBJECT]
+
+
+三角网格体在距离场中缩小时，带 LOD（细节模型级别）的植物和距离场环境遮挡之间可能出现问题，产生过度遮挡。出现此问题的原因是距离场在一段距离中仍然准确，但三角网格体却不准确。
+
+在这些 LOD 上使用使用 World Position Offset，将顶点拉出距离场即可解决此问题。对摄像机的小偏移也有效。对布告板而言，使用新的 Pixel Depth Offset 功能创建可更好地展示原始 3D 三角网格体的有效深度值。  
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![No Pixel Depth Offset ](0Billboard.jpg)(w:600)
+	[/PARAM]
+	[PARAM:after]
+	![Pixel Depth Offset](0BillboardWithPixelDepthOffset.jpg)(w:600)
+	[/PARAM]
+[/OBJECT]
+_距离树布告板显示天空光照过度遮挡，利用 Pixel Depth Offset 进行了改善。_
+
+## 它的工作原理是什么？
+
+此技术中使用的距离场是代表网格体表面的有向距离场。有向距离场在每个点保存到最近表面的距离。网格体中的点保存为负的距离。
+
+[![](DistanceField.jpg)](DistanceField.jpg)
+
+距离场首个实用属性的作用是在追踪光线时安全地跳过空白空间，因为到最近表面的距离已经明确。在区区数步中即可决定相交。对距离场进行光线追踪将生成用于投射阴影的能见度结果。
+
+[![](RayTrace.jpg)](RayTrace.jpg)
+
+距离场第二个实用属性的作用是在追踪光线时获得近似的锥形相交（而不产生额外消耗）。对距离场进行光线追踪即可形成非常柔和的区域阴影。该属性是距离场环境遮挡的关键，因为少量的锥形即可为接收器点的整个半球计算出柔和的可见性。
+
+[![](ConeTrace.jpg)](ConeTrace.jpg)
+
+整个关卡由存储在体积纹理中的范例距离场展示。地形通过高度场单独展示。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Scene View](TriangleScene.jpg)(w:600)
+	[/PARAM]
+	[PARAM:after]
+	![Mesh Distance Fields View](MeshDistanceFieldScene.jpg)(w:600)
+	[/PARAM]
+[/OBJECT]
+
+
+[使用距离场进行灯光设置的延伸阅读。](http://iquilezles.org/www/articles/raymarchingdf/raymarchingdf.htm)
+
+## 设置
+
+### 天空光照 
+
+ * **Cast Shadow** - 光线投射阴影时才会计算距离场环境遮挡。
+ * **Occlusion Max Distance** - 进行遮挡计算的最大遮挡物距离。增大该数值将增加距离场环境遮挡的消耗，但可实现远处的遮挡。
+ * **Contrast** - 用于增加计算遮挡的对比度。
+ * **Min Occlusion** - 可根据需求防止遮挡出现全黑区域。可用于模拟多反射光照，在现实中不会出现全黑的区域。
+ * **Occlusion Tint** - 用于遮挡着色的常量颜色。保证物理正确需设为黑色，其他的值可构成艺术风格效果。
+
+### 原始组件
+
+ * **Affect Distance Field Lighting** - 可禁用距离场灯光法的原始影响。
+
+### 网格体构建设置
+
+[![](MeshSettings.jpg)](MeshSettings.jpg)
+
+ * **Distance Field Resolution Scale** - 距离场被指派到每个静态网格体的默认前提是假定它们放置在世界场景中的默认标度为 1。利用此设置可对放置在不同标度的网格体进行补偿，或单纯增强距离场环境遮挡效果。
+ * **Generate Distance Field As If Two Sided** - 如网格体三角形的两面均可被看到（如植物），勾选此标记。完成此设置后，网格体的自身阴影穿帮将减少，并对植物动画进行限制。
+ * **Distance Field Replacement Mesh** - 一个替代静态网格体，用于生成照亮此网格体的距离场。World Position Offset 从其起点位置对网格体形状产生巨大改变时，此替代网格体十分实用。
+
+## 限制
+
+**技术限制**
+* 高端功能，仅支持 DX11。
+* 只生成环境遮挡，与天空遮挡不同（因其遮挡距离受限）。
+* 虽然可进行动态移动，但只从刚性网格体投射阴影。
+* 材质通过 World Position Offset 或置换进行网格体变形时将出现穿帮，因为距离场表现无法获悉这些变形。
+
+**当前版本的限制（会在之后进行改善）**
+* 无法正确处理非等分缩放（反射为正常）。然而， 2 倍或更小的缩放通常不明显。
+只支持静态网格体组件、范例静态网格体组件、植物和地形。必须在植物设置上启用 bAffectDistanceFieldLighting。
+* 在动态场景变化中更新环境遮挡存在一定延迟，因为运算将在多个帧上进行。生成新样本时，遮挡可能出现一点偏移。
+* 体积纹理将被映射到每个网格体，因此较大物体的距离场分辨率不高，环境遮挡效果较差。
+
+## 性能
+
+距离场环境遮挡的消耗主要是 GPU 时间和显示内存。距离场环境遮挡已对此进行优化，可在中配 PC 和 PS4 上运行。其现有消耗更为可靠，因此较为恒定，对物体密度的依赖较小。
+
+使用静态相机和较平表面时，与之前相比新方法快 1.6 倍。在拥有植物和快速移动摄像机的复杂场景中，新方法快 5.5 倍。PS4 完整游戏场景的距离场环境遮挡消耗为 3.7ms。
+
+
+之前的方法进行了自适应抽样，因此平坦表面进行的运算较少，但也引起干净环境中出现许多斑点。
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Old Method - Adaptive](DFAO_Scene_OldMethod.png)(w:700)
+	[/PARAM]
+	[PARAM:after]
+	![New Method - Smooth](DFAO_Scene_NewMethod.png)(w:700)
+	[/PARAM]
+[/OBJECT]
+
+环境遮挡当前的计算速度足以消除自适应抽样，因此遮挡更为流畅。
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Old Method - Adaptive](DFAO_View_OldMethod.png)(w:700)
+	[/PARAM]
+	[PARAM:after]
+	![New Method - Smooth](DFAO_View_NewMethod.png)(w:700)
+	[/PARAM]
+[/OBJECT]
+
+由此可以了解，新方法需要较长的历史过滤，可能出现重影（尤其是阴影投射物被移除后）。我们将争取在之后对此进行改善。
+
+<!---
+距离场环境遮挡的消耗主要是 GPU 时间和显示内存。在一个较大的 Fortnite 关卡中，摄像机静止不动，Radeon 7870 显卡在 1080p 分辨率下的消耗为 3.5ms。最差的情况（摄像机快速旋转）约为 6ms。此设置下屏幕空间环境遮挡的消耗为 1ms。使用的距离场体积纹理约为 150mb。
+
+着色将适应性地进行，因此平坦表面和静止表面的消耗较低。相反，场景中小型表面（如植物）较多，或较多资源在每帧中移动时 GPU 消耗较高。 
+
+距离场环境遮挡的主要消耗来自物体密度，因为每个物体必单独进行遮挡。布满数目的茂密森林就是最差的情况。
+--->
+
+## 技术细节
+
+主要利用跟随摄像机的全局距离场进行优化。它的创建方法为：将所有常规单个物体距离场合成为一些集中围绕摄像机的体积纹理（称之为裁剪图）。只有新的可见区域和受场景修改影响的区域需要更新，因此合成消耗并不大。
+
+裁剪图纹素尺寸的示例图 - 每个裁剪图颜色均不相同。
+
+![](DF_ClipMap.png)(w:700)
+
+全局距离场的分辨率比物体距离场低，因此无法用于所有物体。为天空遮挡计算锥形追踪时，物体距离场在被着色点附近被取样，而更快速的全局物体距离场被取样的位置更远。
+
+以下是全局距离场和物体距离场光线追踪的对比示例图。全局距离场中的表面布满斑点，较薄的物体将消失。
+
+![](DF_GlobalDF.png)(w:700)
+
+## 疑难排解和精度
+
+精度的主要因素是有效的距离场分辨率。可通过 `DistanceFieldResolutionScale` 进行修改。关卡中网格体尺寸相近，精度越高，因为较大的网格体容易出现较多错误。在 Fortnite 中，网格体顺应一个网格，或是四处放置的道具，借此可以达到最佳效果。对地形进行单独处理，不受距离场分辨率影响。
+
+ * 使用 **View->LightingFeatures** 下的“Distance Field AO”显示标识开关编辑器中的功能。在游戏中，此命令为“show distancefieldao”。  
+ * 使用 **View->Visualize** 下的“Distance Field AO”显示标识隔绝从此功能中产生的环境遮挡。  
+ * 使用 **View->Visualize** 下的“Mesh Distance Fields”显示标识查看场景的距离场展示。  
+
+[![](VisualizeMeshDistanceFields.jpg)(w:600)](VisualizeMeshDistanceFields.jpg)  
+_一个关卡中网格体距离场的示例图_
+
+[![](Mesh.jpg)](Mesh.jpg)  
+_原始网格体_
+
+[![](LowResDistanceField.jpg)](LowResDistanceField.jpg)  
+_距离场分辨率过低，重要功能缺失，环境遮挡将出现穿帮_
+
+[![](HighResDistanceField.jpg)](HighResDistanceField.jpg)  
+_DistanceFieldResolutionScale 被设为 3，重要功能已展示_
+
+## 简易反射光照
+
+在天空光照上取消勾选“Lower Hemisphere Is Black”并在立方体贴图上绘制一些底色，即可获得与太阳反射光照相似的效果而无需额外消耗。这将使灯光泄露到室内，因其并不遵循定向光源的投影，在室外场景中较为有效。

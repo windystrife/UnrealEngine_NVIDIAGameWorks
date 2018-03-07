@@ -1,0 +1,149 @@
+﻿Availability:Public
+Title: Assertions
+Crumbs:
+Description:
+Version:4.9
+
+Assertions are tool to verify assumptions that a given piece of code relies on. This can be as simple as verifying that a pointer is not NULL or as complicated as verifying a particular function is not reentered. UE4 provides a series of macros to perform these types of validations. They are macros so that they can compile out in certain build configurations, either for performance reasons or because they aren't needed in a final build. If you want to see the macros for yourself, you can find them in:
+
+`/UE4/Engine/Source/Runtime/Core/Public/Misc/AssertionMacros.h.`
+
+The runtime assertion macros fall into three categories: halt execution, halt execution in debug builds, and report errors without halting execution. The first and third types are compiled depending on the DO_CHECK define. The second type are compiled using the DO_GUARD_SLOW define. If either of those defines are set to 0, the macros are disabled and won't affect execution.
+
+Let's take a look at the first class of assertion macros. The macros below all halt execution when the assertion fails to be true. If you are running within a debugger, the assertion will cause a breakpoint to occur so that you can inspect how you got to that point.
+
+**check(expression);**
+
+This macro executes the expression and, if it results in a false assertion, halts execution. The expression is only executed if the macro is compiled into the build (DO_CHECK=1). This is the simplest form of the check() macros.
+
+Examples:
+
+	check(Mesh != nullptr);
+	check(bWasInitialized && "Did you forget to call Init()?");
+
+**verify(expression);**
+
+When DO_CHECK is enabled, this macro behaves exactly the same as check(). However, when DO_CHECK is disabled, the expression is still executed. You can use this to verify the assignment of a variable meets your assumptions.
+
+Examples:
+
+	verify((Mesh = GetRenderMesh()) != nullptr);
+
+**checkf(expression, ...);**
+
+The checkf() macro allows you to assert an expression is true and print extra information to aid during debugging. It behaves the same as check() in terms of compilation behavior.
+
+Examples:
+
+	checkf(WasDestroyed, TEXT( "Failed to destroy Actor %s (%s)"), *Actor->GetClass()->GetName(), *Actor->GetActorLabel());
+	checkf( TCString<ANSICHAR>::Strlen( Key ) >= KEYLENGTH( AES_KEYBITS ), TEXT( "AES_KEY needs to be at least %d characters" ), KEYLENGTH( AES_KEYBITS ) );
+
+**verifyf(expression, ...);**
+
+Just like the verify() macro always executes the expression, so does verifyf(). Similarly, it halts execution with an additional debug message, just like checkf();
+
+Example:
+
+	verifyf(Module_libeay32, TEXT("Failed to load DLL %s"), *DLLToLoad);
+
+**checkCode(expression);**
+
+This macro is a little bit more complicated than the usual check(). This macro executes expression inside a do/while loop that executes once. The expression is placed inside the do/while brackets scoping it. This not often used in the engine, but is available if you need it. Just like a standard check() macro, this macro compiles out when DO_CHECK is disabled. Because of this do not use an expression that has needed side effects, since the code is removed when DO_CHECK is disabled.
+
+Example:
+
+	checkCode( if( Object->HasAnyFlags( RF_PendingKill ) ) { UE_LOG(LogUObjectGlobals, Fatal, TEXT("Object %s is part of root set though has been marked RF_PendingKill!"), *Object->GetFullName() ); } );
+
+**checkNoEntry();**
+
+This macro doesn't take an expression and is used to mark code paths that should never execute.
+
+Example:
+
+	switch (MyEnum)
+	{
+		case MyEnumValue:
+			break;
+		default:
+			checkNoEntry();
+			break;
+	}
+
+**checkNoReentry();**
+
+The checkNoReentry() macro is used to prevent calls from being reentrant to a given function. Use it for functions that should only be called once and must be completed before being called again.
+
+Example:
+
+	void NoReentry()
+	{
+		checkNoReentry();
+	}
+
+**checkNoRecursion();**
+
+Performs the same check as checkNoReentry(), but uses a name that is more clear to its intent.
+
+Example:
+
+	int32 Recurse(int32 A, int32 B)
+	{
+		checkNoRecursion();
+		return Recurse(A - 1, B - 1);
+	}
+
+**unimplemented();**
+
+The last macro in the first class of DO_CHECK macros is used to mark a function that should be overridden or not to be called on a specific class because the function is contains no implementation.
+
+Example:
+
+	class FNoImpl
+	{
+		virtual void DoStuff()
+		{
+			// You must override this
+			unimplemented();
+		}
+	};
+
+The second class of assertion macros are only executed when DO_GUARD_SLOW is enabled. DO_GUARD_SLOW is typically enabled only for debug builds, though you can change that for your project. These are expected to be slower, more pedantic checks that aren't needed in development or shipping builds. These macros all perform the same as their non-Slow counterparts. The macros are checkSlow(), checkfSlow(), and verifySlow(). 
+
+Examples:
+
+	checkSlow(List->HasCycle());
+	checkfSlow(Class->IsA(AActor::StaticClass()), TEXT("Class (%s) is wrong type"), Class->GetName());
+	verifySlow(LastValue == Current);
+
+The final class of runtime assertions do not halt execution, but instead are used to create a callstack report to aid in tracking down issues. The expression in these macros is always executed and can be placed inside conditionals. These macros are enabled with the DO_CHECK define.
+
+**ensure(expression);**
+
+Verifies the expression and if it fails generates a callstack leading to that point.
+
+Example:
+
+	if (ensure( InObject != NULL ))
+	{
+	InObject->Modify();
+	}
+
+**ensureMsg(expression, message);**
+
+Verifies the expression and generates a callstack with the additional message as part of the report.
+
+Example:
+
+	ensureMsg(Node != nullptr, TEXT("Node is invalid"));
+
+**ensureMsgf(expression, message, ...);**
+
+Verifies the expression and includes even more information coupled with the callstack for the generated report. Just like checkf() or verifyf(), you can include contextual information to aid in tracking down the issue.
+
+Example:
+
+	if (ensureMsgf(!bModal, TEXT("Could not create dialog because modal is set to (%d)"), int32(bModal)))
+	{
+		...
+	}
+

@@ -1,0 +1,187 @@
+Availability: Public
+Title:2. Configuring Input and Creating a Pawn Movement Component
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/Components
+Description:Setting up input and building a custom Pawn Movement Component to define how our Pawn will move.
+version:4.9
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[Previous Step](Programming\Tutorials\Components\1 "%Programming\Tutorials\Components\1:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[](Programming\Tutorials\Components\)
+	[/PARAM]
+	[PARAM:next]
+		[Next Step](Programming\Tutorials\Components\3 "%Programming\Tutorials\Components\3:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+1. Returning to the **Unreal Editor**, it's time to configure our project's input settings. These settings can be found under **Project Settings** in the **Edit** dropdown menu.
+
+	![](EditProjectSettings.png)
+
+	Once there, we can select **Input** from the **Engine** section in the left panel. We will need an **Action Mapping** to set up our particle-system toggle, two **Axis Mappings** to move our **Pawn**, and one more **Axis Mapping** to turn our Pawn.
+
+	| ----- | ----- | ----- |
+	| Action Mapping | | |
+	| ParticleToggle | Space Bar | |
+
+	| ----- | ----- | ----- |
+	| Axis Mapping | | |
+	| MoveForward | W | 1.0 |
+	|  | S | -1.0 |
+	| MoveRight | A | -1.0 |
+	|  | D | 1.0 |
+	| Turn | Mouse X | 1.0 |
+
+	![](InputSettings.png)
+
+1. Instead of handling all our movement in our Pawn class directly, we will create a **Movement Component** to manage it for us. For this tutorial, we'll extend the **Pawn Movement Component** class. We'll start by selecting the **Add Code to Project** command from the **File** dropdown menu.
+
+	![](AddCPPCode.png)
+
+	Unlike our Pawn class, Pawn Movement Component is not visible by default. To find it, we need to check the **Show All Classes** option.
+
+	![](ShowAllClasses.png)
+
+	Typing "movement" into the search bar can help narrow the list quickly.
+
+	![](ChooseParentClass.png)
+
+	[REGION:tip]Pawn Movement Components have some powerful, built-in features to help with common physics functionality, and are a good way to share movement code between many Pawn types. Using Components to separate functionality is a good practice to reduce clutter as your project grows and your Pawns become more complex.[/REGION]
+
+	Since we called our Pawn class CollidingPawn, let's call this CollidingPawnMovementComponent.
+
+	![](NameComponent.png)
+
+----
+
+We have just defined our input configuration and created a custom Pawn Movement Component. We're ready to go back to **Visual Studio** and write code to define how Pawns will move when our Pawn Movement Component is in use.
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    code
+    [/PARAMLITERAL]
+    [PARAM:heading]
+	    Work-In-Progress Code
+    [/PARAM]
+    [PARAM:content]
+		**CollidingPawn.h**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "GameFramework/Pawn.h"
+			#include "CollidingPawn.generated.h"
+
+			UCLASS()
+			class HOWTO_COMPONENTS_API ACollidingPawn : public APawn
+			{
+				GENERATED_BODY()
+
+			public:
+				// Sets default values for this pawn's properties
+				ACollidingPawn();
+
+			protected:
+				// Called when the game starts or when spawned
+				virtual void BeginPlay() override;
+	
+			public:
+				// Called every frame
+				virtual void Tick( float DeltaSeconds ) override;
+
+				// Called to bind functionality to input
+				virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override;
+
+				UParticleSystemComponent* OurParticleSystem;
+			};
+
+		**CollidingPawn.cpp**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_Components.h"
+			#include "CollidingPawn.h"
+
+			// Sets default values
+			ACollidingPawn::ACollidingPawn()
+			{
+ 				// Set this pawn to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
+				PrimaryActorTick.bCanEverTick = true;
+
+				// Our root component will be a sphere that reacts to physics
+				USphereComponent* SphereComponent = CreateDefaultSubobject<USphereComponent>(TEXT("RootComponent"));
+				RootComponent = SphereComponent;
+				SphereComponent->InitSphereRadius(40.0f);
+				SphereComponent->SetCollisionProfileName(TEXT("Pawn"));
+
+				// Create and position a mesh component so we can see where our sphere is
+				UStaticMeshComponent* SphereVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualRepresentation"));
+				SphereVisual->SetupAttachment(RootComponent);
+				static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereVisualAsset(TEXT("/Game/StarterContent/Shapes/Shape_Sphere.Shape_Sphere"));
+				if (SphereVisualAsset.Succeeded())
+				{
+					SphereVisual->SetStaticMesh(SphereVisualAsset.Object);
+					SphereVisual->SetRelativeLocation(FVector(0.0f, 0.0f, -40.0f));
+					SphereVisual->SetWorldScale3D(FVector(0.8f));
+				}
+
+				// Create a particle system that we can activate or deactivate
+				OurParticleSystem = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("MovementParticles"));
+				OurParticleSystem->SetupAttachment(SphereVisual);
+				OurParticleSystem->bAutoActivate = false;
+				OurParticleSystem->SetRelativeLocation(FVector(-20.0f, 0.0f, 20.0f));
+				static ConstructorHelpers::FObjectFinder<UParticleSystem> ParticleAsset(TEXT("/Game/StarterContent/Particles/P_Fire.P_Fire"));
+				if (ParticleAsset.Succeeded())
+				{
+					OurParticleSystem->SetTemplate(ParticleAsset.Object);
+				}
+
+				// Use a spring arm to give the camera smooth, natural-feeling motion.
+				USpringArmComponent* SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraAttachmentArm"));
+				SpringArm->SetupAttachment(RootComponent);
+				SpringArm->RelativeRotation = FRotator(-45.f, 0.f, 0.f);
+				SpringArm->TargetArmLength = 400.0f;
+				SpringArm->bEnableCameraLag = true;
+				SpringArm->CameraLagSpeed = 3.0f;
+
+				// Create a camera and attach to our spring arm
+				UCameraComponent* Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("ActualCamera"));
+				Camera->SetupAttachment(SpringArm, USpringArmComponent::SocketName);
+
+				// Take control of the default player
+				AutoPossessPlayer = EAutoReceiveInput::Player0;
+			}
+
+			// Called when the game starts or when spawned
+			void ACollidingPawn::BeginPlay()
+			{
+				Super::BeginPlay();
+	
+			}
+
+			// Called every frame
+			void ACollidingPawn::Tick( float DeltaTime )
+			{
+				Super::Tick( DeltaTime );
+
+			}
+
+			// Called to bind functionality to input
+			void ACollidingPawn::SetupPlayerInputComponent(class UInputComponent* InputComponent)
+			{
+				Super::SetupPlayerInputComponent(InputComponent);
+
+			}
+
+
+    [/PARAM]
+[/OBJECT]
+
+%Steps%

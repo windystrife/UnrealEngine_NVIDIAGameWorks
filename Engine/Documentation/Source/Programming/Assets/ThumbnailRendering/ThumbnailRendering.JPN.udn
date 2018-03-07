@@ -1,0 +1,79 @@
+﻿INTSourceChangelist:2638758
+Availability:Docs
+Title:サムネイル レンダリングの技術ガイド
+Crumbs: %ROOT%, Engine, Engine/UI, Programming
+Description:コンテンツ ブラウザ内でアセット タイプのサムネイルをレンダリングするプログラマー向けガイド
+バージョン：4.9
+
+[REGION:todo]
+	このページはアンリアル エンジン 3 のドキュメントから転載され現在見直しがされています。古い情報が含まれる場合もありますので予めご了承ください。
+[/REGION]
+
+[TOC(start:2)]
+
+これまでのレンダリング システムは、対象となるオブジェクトの一部であり、サムネイルのレンダリングに必要なレンダリング インターフェースへアクセスできない Core で定義されていました。そのため、アーキタイプなどのオブジェクトではサムネイル ビューを表示する方法がないという問題が発生しました。さらに、このエディタのみの関数はコンソールに含まれているので、スペースの無駄使いに過ぎませんでした。システムに関する別の問題として、同じ方法 (つまりサムネイル用アイコン) でサムネイルをレンダリングしたアイテムをうまく再利用できない点があります。
+
+コードの重複を軽減させ、コードをエディタ内にのみ存在させ、システムを遅延バウンドにするために、 ThumbnailManager およびサポート インターフェースである ThumbnailRenderer と ThumbnailLabelRenderer を作成しました。ThumbnailManager はオブジェクト登録システムを使って、特定のリソースタイプに対して適切なレンダリング コンポーネントを一致させます。これは GenericBrowserTypes も同様ですが、全ての関連情報がネイティブ クラス ディレクトリ経由ではなくて「MyGameEditor.ini」ファイルから渡される点が異なります。ThumbnailRenderers はサムネイル領域で関連づいているオブジェクトをレンダリングします。ThumbnailLabelRenderers はサムネイルの下に表示されるテキストのビルドとレンダリングを行います。柔軟性および再利用性を最大限にするために、オブジェクトは別々にされています。ほとんどのオブジェクトで同じラベル レンダラを使用し、インターフェースを別々にすることで、ユニークなサムネイル レンダリング オブジェクトと共通したラベル レンダリング オブジェクトが可能になります。提案されたラベル レンダラをメモリ使用量を計算するラベル レンダラでオーバーライドするなど、実行時には面白いオプションも可能になります。
+
+
+
+##ThumbnailRenderer を作成する
+
+自分のサムネイル レンダラを作成するには、 ThumbnailRenderer をサブクラス化し、 3 つの関数を実行します。それは、 GetThumbnailSize() 、 Draw() 、 SupportThumbnailRendering() です。3 つ目の関数は、オブジェクトのチェックの際にリソースタイプが必要とする場合、例えば、特別なプロパティ セットのあるオブジェクトのサムネイルをレンダリングする場合のみ必要になります。 
+例としては、対象オブジェクトに RF_ArchetypeObject フラグセットがある場合にサムネイルをレンダリングするアーキタイプのサムネイル レンダラです。GetThumbnailSize() はインターフェースのコンシューマーによって使用されるので、対象のアイテムの位置を調整することができます。これで、 Draw() が思うような動きをするようになります。
+
+
+### 既存のレンダラ
+
+以下の ThumbnailRenderers は、タイプを新規作成せずにニーズを満たしてくれます。または、タスクに特化したニーズに対して素晴らしい基本クラスとなるかも知れません。 
+
+IconThumbnailRenderer -- サムネイル用の「アイコン」として特定のテクスチャをレンダリングする実装を提供します。
+
+DefaultSizedThumbnailRenderer -- 固有のサイズを持たないレンダリング オブジェクト (パーティクル、マテリアル インスタンスなど) に共通データを提供します。 
+
+TextureThumbnailRenderer -- UTexture インターフェースをサポートするすべてのオブジェクトの基本クラスとして使用します。
+
+
+### ThumbnailHelpers.h
+
+このヘッダファイルには、スタティックメッシュやマテリアルなどのヘルパ クラスが含まれています。Draw() 手法の実装により、または自分のヘルパ クラスを作成する基底として使用することができます。
+
+
+
+##ThumbnailLabelRenderer を作成する
+
+カスタム仕様のラベル レンダラはとても簡単に作成できます。ThumbnailLabelRenderer から抽出し、 BuildLabelList() 手法にオーバーライドします。配列にパスされて追加されたそれぞれの文字列は、ラベルとしてレンダリングされます。基本クラスが残りの作業を処理します。
+
+
+### 既存のラベル レンダラ
+
+GenericThumbnailLabelRenderer -- オブジェクト名を追加し、 GetDesc() 関数を読んでラベル リストをビルドします。最もよく使用されるレンダラです。
+
+MemCountThumbnailLabelRenderer -- オブジェクトのメモリ使用量を計算し、オブジェクト名の下にその情報を表示します。
+
+
+
+## ThumbnailManager でレンダラを登録する
+
+ThumbnailManager は UObject config システムを使って、サムネイル レンダリングがサポートされているクラスの登録をします。クラスはすべて名前で登録されます。これにより、パッケージ依存を避け、ライセンシーは Epic コードを修正するのではなく、 MyGameUnrealEd パッケージで自分のクラスを作成することができます。以下のスニペットは、カスタム レンダラの追加方法を示しています。2 つ目のエントリは、カスタム レンダラを提供するのではなく、既存のアイコン レンダラの使用方法を示しています。注記：読みやすくするために改行してありますが、実際にカスタマイズでは「DefaultEditor.ini」に入れてはいけません。
+
+
+    
+    [UnrealEd.ThumbnailManager]
+    +RenderableThumbnailTypes=
+       (ClassNeedingThumbnailName="MyGame.CustomResource",
+       RendererClassName="MyGameUnrealEd.CustomResourceThumbnailRenderer")
+    +RenderableThumbnailTypes=
+       (ClassNeedingThumbnailName="MyGame.CustomResourceEx",
+       RendererClassName="UnrealEd.IconThumbnailRenderer")
+    
+
+
+
+ClassNeedingThumbnailName は、サムネイル レンダラを必要とするクラス名です。RendererClassName は、サムネイルのレンダリング時に使用するオブジェクトを指定します。ThumbnailManager は起動時に、これらのエントリに基いてオブジェクトの全てのインスタンスを作成します。マップ内の全ての関連性をキャッシュして、ルックアップを高速化します。GC が発生するとマップは、古い Uclass ポインタへのアクセスを防ぐために無効にされます。
+
+ 
+
+
+
+

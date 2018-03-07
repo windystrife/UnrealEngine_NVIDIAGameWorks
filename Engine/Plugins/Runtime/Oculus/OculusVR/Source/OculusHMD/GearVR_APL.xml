@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--GearVR plugin additions-->
+<root xmlns:android="http://schemas.android.com/apk/res/android">
+	<!-- init section is always evaluated once per architecture -->
+	<init>
+		<log text="GearVR init"/>
+		<!-- currently only support armv7 -->
+		<setBool result="bSupported" value="false"/>
+		<isArch arch="armeabi-v7a">
+			<setBool result="bSupported" value="true"/>
+		</isArch>
+
+		<!-- remove Oculus Signature Files by default -->
+		<setBool result="bRemoveOSIG" value="true"/>
+
+		<!-- get packaging for GearVR from ini and reset it if architecture not supported -->
+		<setBoolFromProperty result="bPackageForGearVR" ini="Engine" section="/Script/AndroidRuntimeSettings.AndroidRuntimeSettings" property="bPackageForGearVR" default="false"/>
+		<if condition="bPackageForGearVR">
+			<true>
+				<if condition="bSupported">
+					<true>
+						<if condition="Distribution">
+							<true>
+								<setBoolFromProperty result="bRemoveOSIG" ini="Engine" section="/Script/AndroidRuntimeSettings.AndroidRuntimeSettings" property="bRemoveOSIG" default="false"/>
+								<if condition="bRemoveOSIG">
+									<true>
+										<log text="GearVR entitlement checks are enabled"/>
+									</true>
+								</if>
+							</true>
+							<false>
+								<!-- if not using entitlement checks need to keep the osig files -->
+								<setBool result="bRemoveOSIG" value="false"/>
+							</false>
+						</if>
+					</true>
+					<false>
+						<setBool result="bPackageForGearVR" value="false"/>
+						<log text="GearVR not supported for this architecture, disabled."/>
+					</false>
+				</if>
+			</true>
+		</if>
+
+		<if condition="bRemoveOSIG">
+			<true>
+				<log text="Oculus Signature Files (osig) will be removed from APK"/>
+			</true>
+		</if>
+
+		<!-- package for GearVR and for distribution -->
+		<setBool result="bGearDistribution" value="false"/>
+		<if condition="bPackageForGearVR">
+			<true>
+				<isDistribution>
+					<setBool result="bGearDistribution" value="true"/>
+					<log text="Building with GearVR for distribution"/>
+				</isDistribution>
+			</true>
+		</if>
+
+		<!-- entitlements check if package GearVR for distribution and removing OSIGs -->
+		<setBoolAnd result="bEntitlementCheck" arg1="$B(bRemoveOSIG)" arg2="$B(bGearDistribution)"/>
+	</init>
+
+	<!-- optional updates applied to AndroidManifest.xml -->
+	<androidManifestUpdates>
+		<if condition="bGearDistribution">
+			<true>
+				<!-- distribution builds can install internal or SD card -->
+				<addAttribute tag="manifest" name="android:installLocation" value="auto"/>
+
+				<!-- update the GameActivity activity -->
+				<loopElements tag="activity">
+					<setStringFromAttribute result="activityName" tag="$" name="android:name"/>
+					<setBoolIsEqual result="bGameActivity" arg1="$S(activityName)" arg2="com.epicgames.ue4.GameActivity"/>
+					<if condition="bGameActivity">
+						<true>
+							<!-- do not want application to show in recents -->
+							<addAttribute tag="$" name="android:excludeFromRecents" value="true"/>
+
+							<!-- distribution builds should not be launched from home screen so remove LAUNCHER -->
+							<loopElements tag="category">
+								<setStringFromAttribute result="categoryName" tag="$" name="android:name"/>
+								<setBoolIsEqual result="bLauncher" arg1="$S(categoryName)" arg2="android.intent.category.LAUNCHER"/>
+								<if condition="bLauncher">
+									<true>
+										<removeElement tag="$"/>
+									</true>
+								</if>
+							</loopElements>
+
+							<!-- add INFO intent category instead -->
+							<setElement result="intentInfo" value="category"/>
+							<addAttribute tag="$intentInfo" name="android:name" value="android.intent.category.INFO"/>
+							<addElement tag="intent-filter" name="intentInfo"/>
+						</true>
+					</if>
+				</loopElements>
+			</true>
+		</if>
+		<if condition="bPackageForGearVR">
+			<true>
+				<addElements tag="application">
+					<meta-data android:name="com.samsung.android.vr.application.mode" android:value="vr_only"/>
+				</addElements>
+				<addPermission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+				<addFeature android:name="android.hardware.usb.host"/>
+			</true>
+		</if>
+	</androidManifestUpdates>
+
+	<!-- optional additions to proguard -->
+	<proguardAdditions>
+		<insert>
+-keep class com.oculus.** {
+   *;
+}
+-keep class android.app.** {
+   *;
+}
+		</insert>
+	</proguardAdditions>
+
+	<!-- optional files or directories to copy to Intermediate/Android/APK -->
+	<resourceCopies>
+		<isArch arch="armeabi-v7a">
+			<copyFile src="$S(EngineDir)/Source/ThirdParty/Oculus/OVRPlugin/OVRPlugin/ExtLibs/libvrapi.so"
+						dst="$S(BuildDir)/libs/armeabi-v7a/libvrapi.so" />
+      <log text="Copying libOVRPlugin.so"/>
+      <copyFile src="$S(EngineDir)/Source/ThirdParty/Oculus/OVRPlugin/OVRPlugin/Lib/armeabi-v7a/libOVRPlugin.so"
+            dst="$S(BuildDir)/libs/armeabi-v7a/libOVRPlugin.so" />
+		</isArch>
+
+		<copyFile src="$S(EngineDir)/Source/ThirdParty/Oculus/OVRPlugin/OVRPlugin/ExtLibs/VrApi.jar"
+					dst="$S(BuildDir)/libs/VrApi.jar" />
+
+		<copyFile src="$S(EngineDir)/Source/ThirdParty/Oculus/OVRPlugin/OVRPlugin/ExtLibs/SystemUtils.jar"
+					dst="$S(BuildDir)/libs/SystemUtils.jar" />
+
+		<if condition="bEntitlementCheck">
+			<true>
+				<copyFile src="$S(EngineDir)/Source/ThirdParty/Oculus/OVRPlugin/OVRPlugin/ExtLibs/vrplatlib.jar"
+							dst="$S(BuildDir)/libs/vrplatlib.jar" />
+			</true>
+		</if>
+
+		<if condition="bRemoveOSIG">
+			<true>
+				<deleteFiles filespec="assets/oculussig_*" />
+			</true>
+		</if>
+	</resourceCopies>
+
+	<!-- optional additions to the GameActivity imports in GameActivity.java
+	<gameActivityImportAdditions>
+	</gameActivityImportAdditions>
+	-->
+
+	<!-- optional additions to the GameActivity class in GameActivity.java -->
+	<gameActivityClassAdditions>
+		<insert>
+	/** Whether this application was packaged for GearVR or not */
+	public boolean PackagedForGearVR = false;
+
+	// check the manifest to determine if we are a GearVR application
+	public boolean AndroidThunkJava_IsGearVRApplication()
+	{
+		return PackagedForGearVR;
+	}
+		</insert>
+	</gameActivityClassAdditions>
+
+	<!-- optional additions to GameActivity onCreate metadata reading in GameActivity.java -->
+	<gameActivityReadMetadataAdditions>
+		<if condition="bSupported">
+			<true>
+				<insert>
+			if (bundle.containsKey("com.samsung.android.vr.application.mode"))
+			{
+				PackagedForGearVR = true;
+				String VRMode = bundle.getString("com.samsung.android.vr.application.mode");
+				Log.debug("Found GearVR mode = " + VRMode);
+				</insert>
+				<if condition="bEntitlementCheck">
+					<true>
+						<!-- add entitlement check if osig files are removed -->
+						<insert>
+				com.oculus.svclib.OVREntitlementChecker.doAutomatedCheck(this);
+						</insert>
+					</true>
+				</if>
+				<insert>
+			}
+			else
+			{
+				PackagedForGearVR = false;
+				Log.debug("No GearVR mode detected.");
+			}
+				</insert>
+			</true>
+		</if>
+	</gameActivityReadMetadataAdditions>
+
+	<!-- optional additions to GameActivity onCreate in GameActivity.java
+	<gameActivityOnCreateAdditions>
+	</gameActivityOnCreateAdditions>
+	-->
+
+	<!-- optional additions to GameActivity onDestroy in GameActivity.java
+	<gameActivityOnDestroyAdditions>
+	</gameActivityOnDestroyAdditions>
+	-->
+
+	<!-- optional additions to GameActivity onStart in GameActivity.java
+	<gameActivityOnStartAdditions>
+	</gameActivityOnStartAdditions>
+	-->
+
+	<!-- optional additions to GameActivity onStop in GameActivity.java
+	<gameActivityOnStopAdditions>
+	</gameActivityOnStopAdditions>
+	-->
+
+	<!-- optional additions to GameActivity onPause in GameActivity.java
+	<gameActivityOnPauseAdditions>
+	</gameActivityOnPauseAdditions>
+	-->
+
+	<!-- optional additions to GameActivity onResume in GameActivity.java
+	<gameActivityOnResumeAdditions>
+	</gameActivityOnResumeAdditions>
+	-->
+
+	<!-- optional additions to GameActivity onActivityResult in GameActivity.java
+	<gameActivityOnActivityResultAdditions>
+	</gameActivityOnActivityResultAdditions>
+	-->
+
+	<!-- optional libraries to load in GameActivity.java before libUE4.so -->
+	<soLoadLibrary>
+		<!-- need this if plugin enabled and supported architecture, even if not packaged for GearVR -->
+		<if condition="bSupported">
+			<true>
+				<loadLibrary name="vrapi" failmsg="GearVR library not loaded and required!" />
+        <loadLibrary name="OVRPlugin" failmsg="OVRPlugin library not loaded and required!" />
+      </true>
+		</if>
+	</soLoadLibrary>
+</root>

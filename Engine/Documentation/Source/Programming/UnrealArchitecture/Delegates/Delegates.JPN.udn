@@ -1,0 +1,155 @@
+﻿INTSourceChangelist:2728710
+Availability:Public
+Title:デリゲート
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture/Reference, Programming/UnrealArchitecture/Reference/Functions
+Description: C++ オブジェクト上でメンバ関数を参照し実行するデータタイプ
+Version:4.9
+
+[TOC(start:2)]
+
+[EXCERPT:Overview]
+デリゲートは、汎用的でありながら型安全な方法で C++ オブジェクト上でメンバ関数の呼び出しを可能にします。デリゲートを使用すると、呼び出す側がオブジェクトのタイプを知らない場合でも、任意のオブジェクトのメンバ関数を動的に結合し、 
+オブジェクト上で関数を呼び出すことができます。
+
+デリゲートオブジェクトは完全に安全にコピーできます。デリゲートは値で渡すことができますが、 
+ヒープ上にメモリを割り当てる必要があるので通常はお勧めしません。可能な限り、デリゲートは常に参照により渡すことが望ましいです。
+
+安全にディスクにシリアル化できる動的デリゲートに加え、シングルキャスト デリゲートとマルチキャスト デリゲートにも対応しています。
+
+* シングルキャスト
+* [マルチキャスト](Programming/UnrealArchitecture/Delegates/Multicast)
+	* [イベント](Programming/UnrealArchitecture/Delegates/Events)
+* [ダイナミック (Uobject、直列可能)](Programming/UnrealArchitecture/Delegates/Dynamic)
+
+
+[/EXCERPT:Overview]
+
+## デリゲートの宣言
+
+提供された宣言用マクロの一つを使ってデリゲートを宣言します。デリゲートと結合する関数のシグネチャで使用するマクロが決定されます。デリゲートタイプの宣言をしたり、 
+必要なタイプにかかわらず戻り値とパラメータに対しタイプ名を記入する汎用的な関数シグネチャの様々な組み合わせを、 
+システムが事前に定義します。現在、以下の組み合わせを使用しているデリゲートシグネチャに対応しています。
+
+* 値を返す関数
+* 4 つまでの "ペイロード" 変数
+* 8 つまでの関数パラメータ
+* `const` として宣言された関数
+
+
+下表を使用してデリゲートの宣言に使う宣言用マクロを探してください。
+
+| 関数シグネチャ | 宣言用マクロ |
+| --- | --- |
+| `void Function()` | `DECLARE_DELEGATE( DelegateName )` |
+| `void Function( <Param1> )` | `DECLARE_DELEGATE_OneParam( DelegateName, Param1Type )` |
+| `void Function( <Param1>, <Param2> )` | `DECLARE_DELEGATE_TwoParams( DelegateName, Param1Type, Param2Type )` |
+| `void Function( <Param1>, <Param2>, ... )` | `DECLARE_DELEGATE_<Num>Params( DelegateName, Param1Type, Param2Type, ... )` |
+| `<RetVal> Function()` | `DECLARE_DELEGATE_RetVal( RetValType, DelegateName )` |
+| `<RetVal> Function( <Param1> )` | `DECLARE_DELEGATE_RetVal_OneParam( RetValType, DelegateName, Param1Type )` |
+| `<RetVal> Function( <Param1>, <Param2> )` | `DECLARE_DELEGATE_RetVal_TwoParams( RetValType, DelegateName, Param1Type, Param2Type )` |
+| `<RetVal> Function( <Param1>, <Param2>, ... )` | `DECLARE_DELEGATE_RetVal_<Num>Params( RetValType, DelegateName, Param1Type, Param2Type, ... )` |
+
+
+マルチキャスト、動的、ラップされたデリゲートように、上記のマクロのバリエーションも提供されます:
+
+* DECLARE_MULTICAST_DELEGATE...
+* DECLARE_DYNAMIC_DELEGATE...
+* DECLARE_DYNAMIC_MULTICAST_DELEGATE...
+* DECLARE_DYNAMIC_DELEGATE...
+* DECLARE_DYNAMIC_MULTICAST_DELEGATE...
+
+
+ネームスペースやクラス宣言 (関数ボディではなくて) 内では、デリゲートシグネチャ宣言はグローバルスコープで存在することが可能です。
+
+これらのタイプのデリゲートの宣言についての詳細は [](Programming/UnrealArchitecture/Delegates/Dynamic) と [](Programming/UnrealArchitecture/Delegates/Multicast)  
+をご覧ください。
+
+## デリゲートの結合
+
+デリゲートシステムはある一定のオブジェクトタイプを理解し、これらのオブジェクトを使用する場合に追加機能が有効になります。UObject のメンバあるいはシェアードポインタ クラスにデリゲートを結合させた場合、 
+デリゲートシステムはそのオブジェクトとの弱い参照を保つことができるので、 
+オブジェクトがデリゲート側から破棄されても、IsBound() または ExecuteIfBound() 関数を呼び出せば処理することができます。サポートされているオブジェクトのタイプ別の特別な結合記法に注意してください。
+
+| 関数 | 説明 |
+| --- | --- |
+| `Bind()` | 既存のデリゲートオブジェクトに結合します。 |
+| `BindStatic()` | RAW C++ ポインタのグローバル関数デリゲートを結合します。 |
+| `BindRaw()` | RAW C++ ポインタ デリゲートを結合します。オブジェクト RAW ポインタはいかなるタイプの参照も使用しないので、オブジェクトがデリゲート側から破棄された場合の呼び出しが安全ではない場合があります。Execute()! の呼び出しには注意してください! |
+| `BindSP()` | シェアードポインタ ベースのメンバ関数デリゲートと結合します。シェアードポインタはオブジェクトに対する弱い参照を保ちます。`ExecuteIfBound()` を使用して呼び出します。 |
+| `BindUObject()` | UObject ベースのメンバ関数デリゲートと結合します。UObject デリゲートはオブジェクトに対する弱い参照を保ちます。`ExecuteIfBound()` を使用して呼び出します。 |
+| `UnBind()` | このデリゲートの結合を解除します。 |
+
+これらの関数のバリエーション、引数、実装については、 `DelegateSignatureImpl.inl` (`..\UE4\Engine\Source\Runtime\Core\Public\Templates\`) をご覧ください。
+
+### ペイロード データ
+
+デリゲートを結合する時、ペイロード データも一緒に渡すことができます。呼び出されると結合した関数に直接渡される任意の変数です。これは、 
+結合時にデリゲートそのものにパラメータを格納することができるので、非常に便利です。全てのデリゲートタイプ (動的なタイプを除く) は、ペイロード変数に自動的に対応しています。  
+このサンプルでは、 bool と int32 という 2 つのカスタム変数をデリゲートに渡します。デリゲートが呼び出されると、これらのパラメータが結合関数に渡されます。デリゲートタイプの宣言をしたり、 
+デリゲートタイプ パラメータ引数の後に、変数引数を常に余分に受け取る必要があります。
+
+	MyDelegate.BindRaw( &MyFunction, true, 20 );
+
+## デリゲートの実行
+
+[EXCERPT:ExecutingDelegates]
+デリゲートと結合している関数は、デリゲートの Execute() 関数を呼ぶと実行されます。デリゲートが結合しているかどうかを実行前に確認する必要があります。デリゲートに戻り値があり、初期化されていないため後にアクセスされるパラメータを出力する場合があるため、 
+コードをより安全にするためです。結合していないデリゲートを実行すると、 
+インスタンスによってはメモリ上に実際に書き込こまれることがあります。デリゲートの実行が安全かどうかは IsBound() で確認できます。デリゲートに戻り値がない場合も ExecuteIfBound() を呼び出せますが、 
+初期化されていない可能性のある出力パラメータに注意してください。
+
+| 実行関数 | 説明 |
+| --- | --- |
+| `Execute()` |  |
+| `ExecuteIfBound()` |  |
+| `IsBound()` |  |
+
+マルチキャスト デリゲートの実行に関する詳細は [](Programming/UnrealArchitecture/Delegates/Multicast) をご覧ください。
+[/EXCERPT:ExecutingDelegates]
+
+##使用例
+
+どこからでも呼び出せるメソッドでクラスを持つとします。 
+
+	class FLogWriter
+	{
+		void WriteToLog( FString );
+	};
+
+WriteToLog 関数を呼ぶためには、その関数のシグネチャに対してデリゲートタイプを作成する必要があります。そのためには、 
+まず以下のマクロの 1 つを使ってデリゲートを宣言します。例えば、簡単なデリゲートタイプにはこれを使います:
+
+	DECLARE_DELEGATE_OneParam( FStringDelegate, FString );
+
+`FString` というタイプの単一パラメータを受け取る `FStringDelegate` と呼ばれるデリゲートタイプが作成されます。
+
+この `FStringDelegate` をどのようにクラスで使うのかを以下に示します。
+
+	class FMyClass
+	{
+		FStringDelegate WriteToLogDelegate;
+	};
+
+これにより、クラスは任意のクラスのメソッドに対してポインターを保持できるようになります。クラスは、このデリゲートが関数シグネチャであるということしか分かっていません。
+
+デリゲートを割り当てるために、テンプレートパラメータとしてメソッドを所有しているクラスを渡して、デリゲートクラスのインスタンスを作成します。オブジェクトのインスタンスと 
+メソッドの実際の関数アドレスも渡します。`FLogWriter` クラスのインスタンスを作成し、 
+そのオブジェクトインスタンスの `WriteToLog` メソッドに対してデリゲートを作成します。
+
+	FSharedRef< FLogWriter > LogWriter( new FLogWriter() );
+
+	WriteToLogDelegate.BindSP( LogWriter, &FLogWriter::WriteToLog );
+
+クラスのメソッドにデリゲートを動的に結合しました!とてもシンプルですよね?
+
+シェアードポインタが所有するオブジェクトへ結合したので、`BindSP` の SP の部分は「シェアードポインタ」を表していることにご注意ください。BindRaw() や BindUObject() など 
+オブジェクトタイプには異なるバージョンがあります。
+
+`WriteToLog` メソッドは、 `FLogWriter` クラスについて何も知らなくても FMyClass で呼び出すことができます。デリゲートの呼び出しには、 `Execute()` メソッドを使うだけです。
+
+	WriteToLogDelegate.Execute( TEXT( "Delegates are spiffy!" ) );
+
+関数をデリゲートに結合する前に Execute() を呼ぶと、アサーションがトリガーされます。こちらを使いたくなる場合が多いでしょう。
+
+	WriteToLogDelegate.ExecuteIfBound( TEXT( "Only executes if a function was bound!" ) );
+

@@ -1,0 +1,173 @@
+﻿INTSourceChangelist:2841213
+Availability: Public
+Title: 在虚幻 4 中使用 Perforce 作为版本控制软件
+Crumbs: %ROOT%, Engine, Engine\Basics\SourceControl
+Description: 如何设置 Perfoce 来和团队成员进行资源共享。
+Related: Engine/UI/SourceControl
+Related: Engine/Content/Browser
+Related: Engine/Basics/Redirectors
+Related: Engine/UI/ProjectSettings
+Related: Programming/Basics/ConfigurationFiles
+version: 4.9
+
+[TOC(start:2)]
+
+
+虚幻引擎 4 已经整合了一个叫做 Perforce 的版本控制软件，以便让大家能够在项目上协同工作。
+版本控制软件能够为团队成员提供一个共享资源和代码的方式，并且还提供了文件的备份以及历史记录查询，这样便能在当有问题发生时将某部分回滚到一个早先的版本上。
+
+## 工作流程 
+在虚幻编辑器中，对于资源的工作流程基本上都是遵循了 Perforce 的流程。文件，或者叫资源文件（扩展名为 .uasset 和 .umap）是编辑器主要的工作对象。
+由于这些文件是二进制的格式，因此并不能被作为文本文件打开，也不能在文本合并工具中合并。因此，当对一个文件进行改动时，编辑器将会锁定该文件（在 Perforce 中被叫做 **Check Out**），
+这样其他用户就无法对它同时也进行修改。当该用户完成了对这个锁定的文件的修改编辑，则需要签入（check in 或者 commit）那些文件，将文件上传到服务器上，并且释放文件的锁定状态。
+
+## 在虚幻引擎 4 中使用 Perforce
+
+### 在本地机器上设置 Perforce 服务器
+
+[Region:tip]
+可以在 [这里](http://www.perforce.com/p4d) 下载到 Perforce 服务器工具。一旦下载后，运行安装文件并选择服务器的路径地址和名称。
+[/region]
+
+运行 Perforce 服务器又两种方式，**P4D** 和 **P4S**。P4D 运行时是一个命令行命令，因此它通常被用来做维护工作时使用。P4S 是一个和 P4D 相同功能的服务，这能让服务器程序在后台运行。
+当安装 Perforce 服务器工具后，P4S 通常都会被安装并在后台启动。
+
+[Region:note]
+有时候服务并没有自动启动。要先在 **Control Panel -> Administrative Tools ->Services applet** 的 列表中找到 Perforce Service 并启动它：
+
+![](SC_Enable_P4_Service.png)
+[/region]
+
+一旦服务运行后，可以通过 **P4Admin** 连接到服务器上。这是该服务器上第一个链接，然后就可以在初始连接对话框中创建新用户了。
+
+![](SC_P4_Setup.png)
+
+将服务器的连接信息填入，并点击 OK。一旦在 P4Admin 中连接道服务器后，就可以很容易的创建新的 Depot，用户，用户组。然后就能在 P4V 或者虚幻编辑器中使用新创建的认证信息来连接服务器。
+
+[region:tip]
+阅读 [P4Admin 文档](http://www.perforce.com/perforce/doc.current/manuals/p4admin/p4admin.pdf) 来获取进一步关于 Perforce 使用的信息。
+[/region]
+
+### P4 Typemap
+
+在向新的 Depot 添加文件前，应当先设置 **P4 Typemap** 来让 Perforce 了解如何对待虚幻文件类型。typemap 的设置能够在 Perforce 中控制文件的只读和可写的形式。
+然后要做这件事情，需要先在命令行下设置 P4 的环境变量。
+
+	p4 set P4USER=your.username
+	p4 set P4PORT=localhost:1666
+
+将上面相应的部分替换为您的用户名和连接地址，并用下面的命令打开 typemap 设置。
+
+	p4 -P YourPassword typemap
+
+然后将会看到一个文本窗口，这就是当前服务器的 typemap。下面是我们以前用过的 typemap 示例：
+
+	# Perforce File Type Mapping Specifications.
+	#
+	#  TypeMap:             a list of filetype mappings; one per line.
+	#                       Each line has two elements:
+	#
+	#                       Filetype: The filetype to use on 'p4 add'.
+	#
+	#                       Path:     File pattern which will use this filetype.
+	#
+	# See 'p4 help typemap' for more information.
+
+	TypeMap:
+					binary+w //depot/....exe
+					binary+w //depot/....dll
+					binary+w //depot/....lib
+					binary+w //depot/....app
+					binary+w //depot/....dylib
+					binary+w //depot/....stub
+					binary+w //depot/....ipa
+					binary //depot/....bmp
+					text //depot/....ini
+					text //depot/....config
+					text //depot/....cpp
+					text //depot/....h
+					text //depot/....c
+					text //depot/....cs
+					text //depot/....m
+					text //depot/....mm
+					text //depot/....py
+					binary+l //depot/....uasset
+					binary+l //depot/....umap
+					binary+l //depot/....upk
+					binary+l //depot/....udk
+
+完成编辑后，点击键盘上的 **Ctrl+S** 保存并退出。命令行应该会提示 **Typemap saved**。
+
+### 局域网的服务器
+可以在本地局域网中设置一个服务器便于团队成员协同工作。只需要遵循上述的过程搭建服务并在客户端使用该服务器的连接信息即可。
+
+### 云服务商
+有一些云服务商提供了 Perforce 的云端架设服务以便于远程协作。可以先快速浏览以下搜索引擎中的 **Perforce Hosting** 结果。
+每个主机服务商都有些不同，但总的来说都是会提供一组验证信息供你连接。查看下面的 **从虚幻编辑器中连接** 的部分来了解连接到 Perforce 云服务的信息。
+
+### 设置本地的 Workspace
+要在 Perforce 管理下的文件进行工作，需要在本机设置一个 Workspace 这样 Perforce 才能管理这些文件。
+可以在 P4V 界面的主菜单中，View 菜单下的打开 Workspace 分页然后便能创建 Workspace 了：
+
+![](SC_View_Workspace.png)
+
+要创建一个新的 Workspace，**右键点击** Workspace 窗口空白处，选择 **新建 Workspace** 选项。然后输入要创建的 Workspace 的名称，以及你希望文件存储在本机的位置目录，即 Workspace 的根目录。
+
+![](SC_New_Workspace.png)
+
+一旦有了服务器以及一个本地的 workspace 设定，便可以开始添加文件了。目前这必须在编辑器外，通过 P4V 来完成。
+如果 workspace 中已经有了其他成员设置过的文件，则可以先跳过这一步。在创建一个新项目时，可以选择是 C++ 项目还是纯蓝图项目。
+如果选择了 C++ 项目，则可以在项目目录中可以看到有 **Source/** 目录。下面这些项目目录初始就应当被添加到版本管理中：
+
+![](SC_P4_Files_To_Add.png)
+
+被高亮为 **绿色** 的目录和文件应该被添加到项目的 Depot 中。Binaries 目录高亮为 **黄色**，可以选择是否要加入到版本管理中，这取决于团队自生的工作需要。
+如果团队中每个人都准备自己来编译引擎和游戏的话，那么 Binaries 则无需加入到版本管理中，但如果团队中有人只是想获取一个版本就能直接在编辑器中工作的话，则需要把 Binaries 添加上去。
+请留意先前的 server typemap 的设置，能够让程序员们直接重新编译版本而不受在默认的 Perforce 管理配置下这些文件只读属性的限制。
+
+### 向 Perforce 添加文件
+
+向 Perforce 添加文件可以通过以下几个步骤完成。
+
+1. 要添加文件/目录到 Perforce的话，先在 P4V 中选择这些文件/目录，然后 **点击右键** 并选择 **标记为添加 Mark For Add** 选项。
+
+	![](SC_P4_Mark_For_Add.png)
+
+1. 这将会在默认的 changelist 中添加这些文件。所有添加的文件都可以在待上传 Changelist 分页中查看到：
+
+	![](SC_View_Pending_Changelists.png)
+
+1. 要提交文件的话，首先在 changelist 上 **点击右键** 并选择 **Submit**。然后就可以填写上传的描述信息，并点击 Submit 按钮完成提交。
+
+	![](SC_P4_Submit_Files.png)
+
+如果要在一个其他人已经开始的项目中工作，可以直接在 P4V 中从 Perforce 上获取最新版本。
+只需要在 P4V 的 Depot 视图中找到相应的项目目录，然后再该项目上 **点击右键** 并选择 **获取最新版本**。
+然后将会根据当前 workspace 的根目录设置来获取该项目的所有文件到本地硬盘中。
+
+### 从虚幻编辑器中连接
+可以在编辑器中直接连接 Perforce 服务器，只需点击 **工具栏** 的 **版本控制** 按钮：
+
+![](SC_UE4_SC_Enable.png)
+
+打开后，选择 Perforce 作为软件版本管理软件的提供商，并输入登录验证信息。
+如果已经设置过 workspace 的话（当前项目正在该 Workspace 内），登录信息将会自动填上。
+
+![](SC_P4_UE4_Setup.png)
+
+[region:note]
+对于有些服务器，也包括很多云端的服务，可能会需要手动输入主机和密码信息才能在编辑器中访问 Depot。可以在 Perforce 的登录对话框中打开高级选项即能看到：
+
+![](SC_P4_UE4_Setup_Advanced.png)
+[/region]
+
+
+
+
+
+
+
+
+
+
+

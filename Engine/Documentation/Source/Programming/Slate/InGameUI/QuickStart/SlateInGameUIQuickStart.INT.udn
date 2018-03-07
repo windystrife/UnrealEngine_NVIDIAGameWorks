@@ -1,0 +1,561 @@
+Title:Slate In-Game UI Quick Start
+Crumbs:
+Description:
+Availability:Docs
+Version:4.9
+
+## Project Setup
+
+To start off, create a new basic code project:
+
+[REGION:fullwidth]
+![](image001.png)
+[/REGION]
+
+This provides the following classes by default:
+
+![](image003.png)
+
+## Getting something on screen
+
+1. In addition to the default classes, I added a new class called "MainMenu" to encapsulate the menus I would create.  The first thing I did to just get something to show up on screen was to create a few simple functions to construct the menu, and some to open and close (hide and show) it. I also added a member variable SWidget Shared Pointer to keep a reference to the top most Slate Widget in the menu hierarchy.
+
+		#pragma once
+
+		#include "Slate.h"
+
+		class MainMenu : public TSharedFromThis<MainMenu>
+		{
+		public:
+			/** Construct our widgets etc that we need for the menus */
+			void ConstructMenu();
+
+			/** Display the menu by adding our root widget to the GameViewport's widget content */
+			void OpenMenu();
+
+			/** Close the menu by removing our root widget from the GameViewport's widget content */
+			void CloseMenu();
+
+		private:
+
+			/** This is the root-most Slate Widget of our menu.  Everything else is a child of this. */
+			TSharedPtr<SWidget> MenuRoot;
+		};
+
+	The MainMenu class derives from the TSharedFromThis template because it is helpful for passing safe references to "this" for delegate functions for Slate Menu events, but we will get into that more later.
+
+1. Add basic implementation for the functions of the menu class:
+
+		#include "SlateGameMenuExample.h"
+		#include "MainMenu.h"
+
+
+		#define LOCTEXT_NAMESPACE "MainMenu"
+
+
+		void MainMenu::ConstructMenu()
+		{
+			MenuRoot = SNew(SSearchBox)
+				.HintText(LOCTEXT("FilterSearch", "Search..."))
+				.ToolTipText(LOCTEXT("FilterSearchHint", "Type here to search").ToString());
+		}
+
+		void MainMenu::OpenMenu()
+		{
+			if (GEngine && GEngine->GameViewport)
+			{
+				GEngine->GameViewport->AddViewportWidgetContent(MenuRoot.ToSharedRef());
+				FSlateApplication::Get().SetKeyboardFocus(MenuRoot.ToSharedRef());
+			}
+		}
+
+		void MainMenu::CloseMenu()
+		{
+			if (GEngine && GEngine->GameViewport)
+			{
+				GEngine->GameViewport->RemoveViewportWidgetContent(MenuRoot.ToSharedRef());
+				FSlateApplication::Get().ClearKeyboardFocus(EFocusCause::Cleared);
+			}
+		}
+
+		#undef LOCTEXT_NAMESPACE
+
+Just to get something to show up on screen I picked a random Slate Widget from elsewhere in the code to be our temporary MenuRoot.  This then gets added the the GameViewport's ViewportWidgetContent so it will be displayed. Also we make sure to give the SlateMenu keyboard focus so it can respond to input.  Note the use of the LOCTEXT macros, it is important to always use these for any text that will have to be localized to other languages. This is discussed more in this blog post:
+
+[Creating A Localization Ready Game In UE4: Part 1 - Text](https://www.unrealengine.com/blog/creating-a-localization-ready-game-in-ue4-part-1-text)
+
+Next I added a new GameMode to represent the state of the player being at the main menu called "MainMenuGameMode". This just defines the type of PlayerController we are using for this game mode, uses the BeginPlay event to open the main menu, and keeps a reference to the MainMenu in a Shared Pointer.
+
+	#pragma once
+
+	#include "GameFramework/GameModeBase.h"
+	#include "MainMenuGameMode.generated.h"
+
+	class MainMenu;
+
+	/**
+	 * 
+	 */
+	UCLASS()
+	class AMainMenuGameMode : public AGameModeBase
+	{
+		GENERATED_UCLASS_BODY()
+
+	protected:
+
+		virtual void BeginPlay() override;
+
+	public:
+
+		TSharedPtr<MainMenu> MainMenuPtr;
+	
+	};
+
+Note here that GameMode is a UClass, and thus requires the standard #include for the generated header, the UCLASS() macro before the class definition, and the GENERATED_UCLASS_BODY() at  the start of the class definition.
+
+	#include "SlateGameMenuExample.h"
+	#include "MainMenuGameMode.h"
+	#include "SlateGameMenuExamplePlayerController.h"
+
+	#include "MainMenu.h"
+
+	AMainMenuGameMode::AMainMenuGameMode(const FObjectInitializer& ObjectInitializer)
+		: Super(ObjectInitializer)
+	{
+		PlayerControllerClass = ASlateGameMenuExamplePlayerController::StaticClass(); 
+	}
+
+	void AMainMenuGameMode::BeginPlay()
+	{
+		MainMenuPtr = MakeShareable(new MainMenu());
+		MainMenuPtr->ConstructMenu();
+		MainMenuPtr->OpenMenu();
+	}
+
+Now we have to specify this new GameMode as the one to use.  This can be done either in the World Settings on a per-level basis like so:
+
+![](image005.png)
+
+Or via the Default GameMode setting in Project Settings > Maps & Modes:
+
+[REGION:fullwidth]
+![](image007.png)
+[/REGION]
+
+With that, we are able to get some content on the screen:
+
+[REGION:fullwidth]
+![](image009.png)
+[/REGION]
+
+The single search box widget I added is taking up the entire viewport, but this is a good starting point.
+
+Adding some buttons
+
+Now let us make this menu closer to what one would conceivably want for a Main Menu.  Maybe a simple layout like so:
+
+![](image011.png)
+
+Here there are three buttons contained in a larger region. The Play button starts the game, the Exit button quits the application, and the Options button takes you to another menu.  To achieve this, I modified the ConstructMenu function to look like this:
+
+	#include "StyleDefaults.h"
+
+	void MainMenu::ConstructMenu()
+	{
+		const FSlateBrush* NoBorderBrush = FStyleDefaults::GetNoBrush();
+
+		MenuRoot =
+			SNew(SBorder)
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot()
+				.FillHeight(1.f)
+				.HAlign(HAlign_Center)
+				[
+					SNew(SBorder)
+					.HAlign(HAlign_Center)
+					.VAlign(VAlign_Center)
+					.BorderImage(NoBorderBrush)
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("SlateGameMenuTitle", "Slate Game Menu!"))
+					]
+				]
+				+ SVerticalBox::Slot()
+				.FillHeight(1.f)
+				.HAlign(HAlign_Center)
+				[
+					SNew(SBorder)
+					.HAlign(HAlign_Center)
+					.VAlign(VAlign_Center)
+					.BorderImage(NoBorderBrush)
+					[
+						SNew(SButton)
+						.OnClicked(FOnClicked::CreateSP(this, &MainMenu::StartGame))
+						.HAlign(HAlign_Center)
+						.VAlign(VAlign_Center)
+						.Text(LOCTEXT("StartGameButtonText", "Start Game"))
+					]
+				]
+				+ SVerticalBox::Slot()
+				.FillHeight(1.f)
+				.HAlign(HAlign_Center)
+				[
+					SNew(SBorder)
+					.HAlign(HAlign_Center)
+					.VAlign(VAlign_Center)
+					.BorderImage(NoBorderBrush)
+					[
+						SNew(SButton)
+						.HAlign(HAlign_Center)
+						.VAlign(VAlign_Center)
+						//.OnClicked(FOnClicked::CreateSP(this, &MainMenu::OpenOptionsMenu))
+						.Text(LOCTEXT("OptionsButtonText", "Options..."))
+					]
+				]
+				+ SVerticalBox::Slot()
+				.FillHeight(1.f)
+				.HAlign(HAlign_Center)
+				[
+					SNew(SBorder)
+					.HAlign(HAlign_Center)
+					.VAlign(VAlign_Center)
+					.BorderImage(NoBorderBrush)
+					[
+						SNew(SButton)
+						.HAlign(HAlign_Center)
+						.VAlign(VAlign_Center)
+						.OnClicked(FOnClicked::CreateSP(this, &MainMenu::QuitGame))
+						.Text(LOCTEXT("QuitButtonText", "Quit Game"))
+					]
+				]
+			]
+		;
+	}
+
+As you can see here, Slate has some special syntax to allow you to use various operators to modify the properties (There is a little information about the Declarative Syntax and Composition of Slate at those links). You can set the properties of Slate Widget with the "." operator after using SNew(SWidget), and you can nest child widget inside of other widgets with the bracket operators.
+
+The above example has an SBorder around everything, and inside of that there is an SVerticalBox that has 4 slots including some menu title text and our three buttons.  Various alignments and sizing is used to get the desired look.  There is more information about how Layout in slate works at that link. These additions ended up with a menu looking like this:
+
+![](image013.png)
+
+This is looking a lot closer to what we want. Notice that the SButtons in the code above have their OnClicked property being set.  This is a delegate that will call a function of your choosing when the button is clicked. The "Start Game" button's OnClicked declaration looks like this:
+
+	.OnClicked(FOnClicked::CreateSP(this, &MainMenu::StartGame))
+
+FOnClicked is a kind of delegate that is invoked when widgets want to notify a user that they have been clicked, and it is intended for use by buttons and other button-like widgets. To hook up a delegate, you need to specify an object on which to call the function, the function to call, and optionally parameters to pass to the function.  There are different functions you can use to specify the delegate, here I have used CreateSP, which is a shared pointer-based member function delegate (this is why MainMenu derives from TSharedFromThis, so I can use the safer shared-pointer option). You can also use raw C++ pointers with CreateRaw, or you can use static functions with CreateStatic (these do not require you to specify an object to call the function on).
+
+So now the delegates for the Start Game and Quit Game button have been specified, the functions they call need to be defined.  These are pretty simple functions. 
+
+	FReply MainMenu::StartGame()
+	{
+		if (Controller.IsValid())
+		{
+			Controller->GetWorld()->ServerTravel("/Game/GameLevel");
+		}
+		CloseMenu();
+
+		return FReply::Handled();
+	}
+
+This function uses ServerTravel to tell the engine to change to a different map to start the game.  Then we close the menu.  You might have noticed that this function is returning an FReply.  A Reply is something that a Slate event returns to the system to notify it about certain aspect of how an event was handled. For example, a widget may handle an OnMouseDown event by asking the system to give mouse capture to a specific Widget ( To do this, return FReply::CaptureMouse( NewMouseCapture ).)
+
+	FReply MainMenu::QuitGame()
+	{
+		CloseMenu();
+		if (MyPlayerController.IsValid())
+		{
+			MyPlayerController->ConsoleCommand("quit");
+		}
+
+		return FReply::Handled();
+	}
+
+The Quit Game function just uses the console command "quit" to exit the game after closing the menu.
+
+Both of these functions use a reference to the player controller to call functions, which meant I had to modify MainMenu.cpp to keep a WeakObjectPtr to PlayerController, and set that via the constructor, like so:
+
+	MainMenu::MainMenu(TWeakObjectPtr<class APlayerController> InController)
+	:	MyPlayerController(InController)
+	{
+	}
+
+The MainMenuGameMode just grabs the first PlayerController and passes that to the MainMenu class like so:
+
+	#include "../../../../../../Engine/Source/Runtime/Engine/Classes/Kismet/GameplayStatics.h"
+	void AMainMenuGameMode::BeginPlay()
+	{
+		APlayerController* FirstPC = NULL;
+		if (GetWorld() != NULL)
+		{
+			// player 0 gets to own the UI
+			FirstPC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+		}
+		MainMenuPtr = MakeShareable(new MainMenu(TWeakObjectPtr<APlayerController>(FirstPC)));
+		MainMenuPtr->ConstructMenu();
+		MainMenuPtr->OpenMenu();
+	}
+
+Two other issues we have here is that by default no mouse cursor is drawn, so it is hard for the player to click on the buttons we just made.  Also, the PlayerController is still using the mouse and keyboard input to control the character and camera in the world, so moving the mouse around to click a button also moves the world camera behind the menu.  These are fixed by enabling CinematicMode to disable Player input temporarily and by telling the PlayerController to show the mouse cursor like so:
+
+	void MainMenu::OpenMenu()
+	{
+		if (GEngine && GEngine->GameViewport)
+		{
+			// Add our menu widget content to the game viewport so it is displayed
+			UGameViewportClient* const GVC = GEngine->GameViewport;
+			GVC->AddViewportWidgetContent(MenuRoot.ToSharedRef());
+			if (MyPlayerController.IsValid())
+			{
+				// Enable the mouse cursor and disable other input (moving the mouse will not rotate the camera, etc).
+				MyPlayerController->SetCinematicMode(true, false, false, true, true);
+				MyPlayerController->bShowMouseCursor = true;
+			}
+		}
+	}
+
+Close Menu does the opposite:
+
+	void MainMenu::CloseMenu()
+	{
+		if (GEngine && GEngine->GameViewport)
+		{
+			// Remove our menu widget content from the game viewport so it is no longer displayed
+			UGameViewportClient* const GVC = GEngine->GameViewport;
+			GVC->RemoveViewportWidgetContent(MenuRoot.ToSharedRef());
+			FSlateApplication::Get().ClearKeyboardFocus(EFocusCause::Cleared);
+			if (MyPlayerController.IsValid())
+			{
+				// Re-enable other input and remove the mouse cursor
+				MyPlayerController->SetCinematicMode(false, false, false, true, true);
+				MyPlayerController->bShowMouseCursor = false;
+			}
+		}
+	}
+
+Defining and Using Slate Styles
+
+Next we want to define and use some Slate Styles so we can quickly and easily change the styling of our menus. Styles really just consist of some text strings used to refer to brushes (which are a containers for information about how to draw a slate element), widget styles, Slate font information, etc.
+
+For example, you could define styles for a toolbar button like so:
+
+	// Normal button
+	FButtonStyle Button = FButtonStyle()
+		.SetNormal(BOX_BRUSH("Button", FVector2D(32, 32), 8.0f / 32.0f))
+		.SetHovered(BOX_BRUSH("Button_Hovered", FVector2D(32, 32), 8.0f / 32.0f))
+		.SetPressed(BOX_BRUSH("Button_Pressed", FVector2D(32, 32), 8.0f / 32.0f))
+		.SetDisabled(BOX_BRUSH("Button_Disabled", 8.0f / 32.0f))
+		.SetNormalPadding(FMargin(2, 2, 2, 2))
+		.SetPressedPadding(FMargin(2, 3, 2, 1));
+	Style->Set("MyButtonStyle ", Button);
+
+Or a text style, like so:
+
+	const FTextBlockStyle NormalText = FTextBlockStyle()
+		.SetFont(TTF_FONT("Fonts/Roboto-Regular", 9))
+		.SetColorAndOpacity(FSlateColor::UseForeground())
+		.SetShadowOffset(FVector2D::ZeroVector)
+		.SetShadowColorAndOpacity(FLinearColor::Black)
+		.SetHighlightColor(FLinearColor(0.02f, 0.3f, 0.0f))
+		.SetHighlightShape(BOX_BRUSH("TextBlockHighlightShape", FMargin(3.f / 8.f)));
+	Style->Set("NormalText", NormalText); 
+
+For completeness, the above BRUSH and FONT macros are defined like this to keep the definitions simpler:
+
+	#define IMAGE_BRUSH( RelativePath, ... ) FSlateImageBrush( Style->RootToContentDir( RelativePath, TEXT(".png") ), __VA_ARGS__ )
+	#define BOX_BRUSH( RelativePath, ... ) FSlateBoxBrush( Style->RootToContentDir( RelativePath, TEXT(".png") ), __VA_ARGS__ )
+	#define BORDER_BRUSH( RelativePath, ... ) FSlateBorderBrush( Style->RootToContentDir( RelativePath, TEXT(".png") ), __VA_ARGS__ )
+	#define TTF_FONT( RelativePath, ... ) FSlateFontInfo( Style->RootToContentDir( RelativePath, TEXT(".ttf") ), __VA_ARGS__ )
+	#define OTF_FONT( RelativePath, ... ) FSlateFontInfo( Style->RootToContentDir( RelativePath, TEXT(".otf") ), __VA_ARGS__ )
+
+These styles can then be used on a button like this:
+
+	SNew(SButton)	// Start Game button
+	.ButtonStyle(&FMySlateStyle::Get().GetWidgetStyle<FButtonStyle>("MyButtonStyle"))
+	.TextStyle(&FMySlateStyle::Get().GetWidgetStyle<FTextBlockStyle>("NormalText"))
+	.OnClicked(FOnClicked::CreateSP(this, &MainMenu::StartGame))
+	.HAlign(HAlign_Center)
+	.VAlign(VAlign_Center)
+	.Text(LOCTEXT("StartGameButtonText", "Start Game"))
+
+For the example slate menu, I created a separate class called MySlateStyle that created two FSlateStyleSets (groups  of styles), which define the same styles, but just define their visual look differently.  That way I can switch between the two style sets easily. The above "Style" variable is an FLateStyleSet that is created, has a bunch of styles on it set like above, and then registered in the Slate Style Registry like this:
+
+	FSlateStyleRegistry::RegisterSlateStyle(NewStyle);
+
+Initially I threw together some random styles and came up with this:
+
+![](image015.png)
+
+Sure is ugly, but now it can be easily iterated on to make it look good.
+
+Adding a second menu
+
+Above I explained how to get the Start Game and Quit Game buttons working, but the Options button is still not functional.  This button is supposed to bring the player to another menu when clicked.  It would certainly be possible to use ServerTravel to move to another level that opened up a different menu, and then travel back to the MainMenu level when "back" was clicked, but I went with a different method.
+
+I wanted to just have the options menu pop-up over the main menu, so wrapped the main menu in a SOverlay, which allows you to define different slots of content, which can be overlapping. This overlay became the new root widget of our menu. 
+
+In the construct function, I construct both menus:
+
+	void MainMenu::ConstructMenu()
+	{
+		// ...
+
+		HeaderFontInfo = FMySlateStyle::Get().GetFontStyle("RichText.Header");
+	
+		// Set up the main menu widget contents
+		MenuRoot =
+			SNew(SOverlay)	// Overlay used to allow the Options menu to be "overlayed" or displayed on top of this menu
+			+SOverlay::Slot()	// New Slot for the overlay.  This contains just the Main Menu content
+			[
+				// ...
+				// Main menu widgets
+				/ ...
+			]
+		;
+
+		// ...
+
+		// Build options menu widgets
+		OptionsMenuRoot = SNew(SBorder)
+			.Cursor(EMouseCursor::Default)
+			.HAlign(HAlign_Center)
+			.VAlign(VAlign_Center)
+			[
+				// ...
+				// Main menu widgets
+				/ ...
+			]
+			;
+
+	}
+
+When I want to display the options menu, I put the root widget of the options menu into a new slot in the root SOverlay:
+
+	FReply MainMenu::OpenOptionsMenu()
+	{
+		SOverlay* MenuRootOverlay = (SOverlay*)MenuRoot.Get();
+
+		if (MenuRootOverlay)
+		{
+			// Add another slot to the Main Menu's overlay and put our Options menu content in it
+			OptionsMenuSlot = &MenuRootOverlay->AddSlot()
+				[
+					OptionsMenuRoot.ToSharedRef()
+				]
+			;
+		}
+
+		return FReply::Handled();
+	}
+
+And when I want to hide the options menu, I remove that slot:
+
+	FReply MainMenu::CloseOptionsMenu()
+	{
+		SOverlay* MenuRootOverlay = (SOverlay*)MenuRoot.Get();
+
+		if (MenuRootOverlay != NULL)
+		{
+			// Remove option menu overlay slot
+			MenuRootOverlay->RemoveSlot(OptionsMenuSlot->Widget);
+		}
+
+		return FReply::Handled();
+	}
+
+Creating further random styles for the options menu, things looked about like this:
+
+![](image017.png)
+
+Changing options
+
+In the above screenshot, you can see there are options to change the menu style and the font style.
+
+These again use some simple delegates, which call these functions.
+
+	void MainMenu::StyleComboBoxSelectionChanged(TSharedPtr<FString> StringItem, ESelectInfo::Type SelectInfo)
+	{
+		if (StringItem->Equals("Style1"))
+		{
+			FMySlateStyle::SetStyle1();
+		}
+		else
+		{
+			FMySlateStyle::SetStyle2();
+		}
+
+		// After making these changes, close the menu, reconstruct it, and open it again
+		CloseOptionsMenu();
+		CloseMenu();
+		ConstructMenu();
+		OpenMenu();
+		OpenOptionsMenu();
+	}
+
+	void MainMenu::FontSize_ValueChanged(int32 InValue)
+	{
+		HeaderFontInfo.Size = InValue;
+		MenuHeaderText->SetFont(HeaderFontInfo);
+		OptionsMenuHeaderText->SetFont(HeaderFontInfo);
+	}
+
+References to the STextBlock objects are maintained by using SAssignNew  in the Construct function to assign the resulting widget object to a member variable, which can be referenced in the delegate functions:
+
+	SAssignNew(OptionsMenuHeaderText, STextBlock)	// Header text
+	.TextStyle(&FMySlateStyle::Get().GetWidgetStyle<FTextBlockStyle>("RichText.Header"))
+	.Text(LOCTEXT("OptionsMenuTitle", "Options!"))
+
+Since changing the Style Combo Box selection results in the menu getting rebuilt, a little extra code was necessary to ensure the correct style was selected when the menu got rebuilt, so this bit of code is also in the Construct function:
+
+	// Holds the list of Styles
+	StyleList.Empty();
+	StyleList.Add(MakeShareable(new FString("Style1")));
+	StyleList.Add(MakeShareable(new FString("Style2")));
+
+	// Since Construct Menus is called when the menu style changes, make sure the selection in the Menu Style combo box is up to date with the new selection
+	FString CurrentStyleName = FMySlateStyle::Get().GetStyleSetName().ToString();
+	TSharedPtr<FString> CurrentlySelectedStyle;
+	for (TSharedPtr<FString> StyleString : StyleList)
+	{
+		if (StyleString->Equals(CurrentStyleName))
+		{
+			CurrentlySelectedStyle = StyleString;
+		}
+	}
+	if (!CurrentlySelectedStyle.IsValid() && StyleList.Num() > 0)
+	{
+		CurrentlySelectedStyle = StyleList[0];
+	}
+
+Now changing the style drop down results in a different style (though the styles themselves still need work):
+
+![](image019.png)
+
+And now changing the font slider also changes the font size:
+
+![](image021.png)
+
+After making some decent backgrounds and styles, the final menu looked like this:
+
+[REGION:imagetable]
+|![](image023.png)(w:460) | ![](image025.png)(w:460) |
+| ------ | ------ |
+| Main Menu with Style 1 | Options Menu with Stye 2 |
+[/REGION]
+ 
+## Using the Widget Reflector
+
+One tool that is especially useful when designing Slate menus is the Widget Reflector, which can be accessed from the Developer Tools menu.
+
+[REGION:fullwidth]
+![](image027.png)
+![](image029.png)
+[/REGION]
+ 
+This shows you every Slate widget that exists, in the hierarchy it exists in, and even shows you its visibility, and the code file and line where it was created.  This information can be really helpful when debugging your menus, or to investigate other menus to see how they were made.  Also the "Pick Widget" button allows you to find whatever widget your mouse is over in the widget hierarchy:
+
+[REGION:fullwidth]
+![](image031.png)
+[/REGION]
+
+You can also press the button again (or hit escape) to freeze on the widget you have currently selected.

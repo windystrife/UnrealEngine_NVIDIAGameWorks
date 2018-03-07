@@ -1,0 +1,262 @@
+﻿INTSourceChangelist:3356804
+Availability:Public
+Title:BuildGraph スクリプトのエレメント
+Crumbs:
+Description:BuildGraph のエレメントについて学習しましょう。
+version:4.13
+parent:Programming/Development/BuildGraph
+type:Reference
+tags:Programming
+tags:BuildGraph
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Programming/Development/BuildGraph/ScriptAnatomy/Elements%](elements_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/reference_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Programming/Development/BuildGraph/ScriptAnatomy/Elements:title%
+	[/PARAM]
+	[PARAM:description]
+		%Programming/Development/BuildGraph/ScriptAnatomy/Elements:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Programming/Development/BuildGraph/ScriptAnatomy/Elements]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[TOC(start:1 end:2)]
+
+[EXCERPT:BuildGraphScriptElements]
+
+BuildGraph スクリプトは XML で記述されます。このドキュメントでは、BuildGraph スクリプト内にあるデータの種類と全体的な構造について説明します。
+
+## エレメント
+
+エレメントは、そこに含まれるデータを表し、BuildGraph スクリプトの基本的な構成要素になります。
+以下の表には、メタデータとして提供され、ビルド システムで実行するとエクスポートされるアイテムがあります。これらは、 
+ローカルでタスクを実行する場合は、BuildGraph によって直接使用されませんが、`[META]` とタグ付けされます。
+
+## グラフ構造
+
+BuildGraph スクリプトは、通常以下のエレメントで定義されます。
+
+* `<Node>`
+* `<Aggregate>`
+* `<Agent>`
+* `<Trigger>`
+
+### Node
+
+`<Node>` は、入力と出力のセットを持つ BuildGraph の最小実行単位です。各 `<Node>` は、 
+順番に実行されるタスクのシーケンスで構成されます。
+
+| 属性| 型 | 必須？ | 説明 |
+| ---------------- | ------------ | ------------ | ---------------- |
+| Name             | Name         | 必須     | ノード名。 |
+| Requires         | Target List  | オプション     | このノードが実行する必要がある他のノードによって生成されたノード、集成体 (aggregate)、タグ付けしたファイル。セミコロンで区切られます。 |
+| Produces         | Tag List     | オプション     | このノードが他のノードに対して利用可能にするタグ付けされたファイル セット。セミコロンで区切られます。 |
+| After            | Target List  | オプション     | カレント ターゲットの一部である場合 (そうでない場合は無視)、このノードがその後で実行すべきノードのリスト。セミコロンで区切られます。 |
+| NotifyOnWarnings | Boolean      | オプション     | false の場合、このノードは警告の通知を生成しません。ビルド システムのみが使用します。デフォルトで `true`。`[META]` |
+| If               | Condition    | オプション     | 評価する条件式。条件式の結果が `true` でなければ、そのエレメントは無視されます。 |
+
+### Aggregate
+
+`<Aggregate>` は、他のノードのセットの同義として使用可能な名前付けした aggregate を宣言します。
+
+| 属性| 型 | 必須？ | 説明 |                                                                                            |
+| ---------------- | ------------ | ------------ | -------------- |
+| Name             | Name         | 必須     | aggregate の名前 |
+| Requires         | Target List  | 必須     | aggregate の依存関係のリスト。ノード、タグ付けしたファイル セット、agent のグループなどがあります。 |
+| If               | Condition    | オプション     | 評価する条件式。条件式の結果が `true` でなければ、そのエレメントは無視されます。 |
+
+### Agent
+
+`<Agent>` は、シーケンスで実行される (中間ディレクトリをクリーニングせずに) ノードのエージェントの要件を定義します。 
+ローカルでビルドする場合、`<Agent>` の要件は無視されますが、指定しなければなりません。
+
+| 属性| 型 | 必須？ | 説明 |
+| ---------------- | --------------- | ------------ | -----------  |
+| Name             | Name            | 必須     | グループの名前 |
+| Type             | Identifier List | オプション     | 実行する agent のタイプ。この文字列の意味は、ホストのビルド システムによって推測されます。固有の意味は持ちません。`[META]` |
+| If               | Condition       | オプション     | 評価する条件式。条件式の結果が `true` でなければ、そのエレメントは無視されます。 |
+
+### Trigger
+
+`<Trigger>` は、グラフの一部のコンテナの役割を果たします。ユーザーが明示的に操作する場合に限り実行されます。 
+トリガーの後にノードを実行するには、 `-Trigger=<Name>` をコマンドラインに渡します。 
+
+| 属性| 型 | 必須？ | 説明 |
+| ---------------- | --------------- | ------------ | ------------------ |
+| Name             | Name            | 必須     | トリガーの名前 |
+| If               | Condition       | オプション     | 評価する条件式。条件式の結果が `true` でなければ、そのエレメントは無視されます。 |
+
+## プロパティの操作
+
+BuildGraph のプロパティは、以下のエレメントで修正することができます。
+
+* `<Property>`
+* `<Option>`
+* `<EnvVar>`
+
+### Property
+
+`<Property>` は、プロパティの値を設定します。外部のスコープにあるプロパティが既に同じ名前で宣言されている場合、
+`<Property>` がそれを上書きします。そうでなければ、カレント スコープで新しいプロパティが宣言されます。
+
+| 属性| 型 | 必須？ | 説明 |
+| ---------------- | ---------- | -------- | -------------- |
+| Name             | Name       | 必須 | 設定するプロパティの名前 |
+| Value            | String     | 必須 | プロパティの新しい値 |
+| If               | Condition  | オプション | 評価する条件式。条件式の結果が `true` でなければ、そのエレメントは無視されます。 |
+
+### Option
+
+`<Option>` は、コマンドラインから設定可能なユーザー オプションを定義します。 `<Option>` はグローバル スコープでのみ表示されます。
+
+| 属性| 型 | 必須？ | 説明 |
+| ------------ | --------- | ------------ | ------------- |
+| Name         | Name      | 必須     | オプションの値で初期化するオプション名 (およびプロパティ)。 |
+| Description  | String    | 必須     | -ListOnly 引数で BuildGraph を実行する場合に表示するオプションの説明。 |
+| Restrict     | Regex     | オプション     | このオプションに対して有効な値にマッチする Regex (例、 `[a-zA-Z]+`, `true | false`)。 |
+| DefaultValue | String    | 必須     | ユーザーが明示的に設定しない場合のこのオプションのデフォルト値。 |
+| If           | Condition | オプション     | 評価する条件式。条件式の結果が `true` でなければ、そのエレメントは無視されます。 |
+
+### EnvVar
+
+`<EnvVar>` は、環境変数のコンテンツを含めるプロパティを宣言します (または設定されていない場合は空の文字列)。
+`<EnvVar>` はグローバル スコープでのみ表示されることがあります。
+
+| 属性| 型 | 必須？ | 説明 |
+| ------------ | --------- | ------------ | ------------- |
+| Name             | Name        | 必須 | プロパティとして導入する環境変数名。 |
+| If               | Condition   | オプション | 評価する条件式。条件式の結果が `true` でなければ、そのエレメントは無視されます。 |
+
+## フロー制御
+
+以下のエレメントで BuildGraph スクリプトのフローを制御することができます、
+
+* `<Include>`
+* `<Do>`
+* `<Switch>`
+* `<ForEach>`
+
+### Include
+
+`<Include>` は、別の BuildGraph スクリプトのコンテンツをこのファイル内で表示されているかのように処理します。
+`<Include>` はグローバル スコープでのみ表示されることがあります。
+
+| 属性| 型 | 必須？ | 説明 |
+| ------------ | --------- | ------------ | ------------- |
+| Script           | String          | 必須     | インクルードしたいスクリプトへのパス (カレント スクリプトに相対的) |
+| If               | Condition       | オプション     | 評価する条件式。条件式の結果が `true` でなければ、そのエレメントは無視されます。 |
+
+### Do
+
+エレメント`<Do>` はエレメントのシーケンスをグループ化し、条件式の結果が true の場合のみこうしたものを処理します。
+
+| 属性| 型 | 必須？ | 説明 |
+| ------------ | --------- | ------------ | ------------- |
+| If | Condition | オプション | 評価する条件式。条件式の結果が `true` でなければ、そのエレメントは無視されます。 |
+
+### Switch
+
+`<Switch>` は、 [C](http://www.open-std.org/jtc1/sc22/wg14/www/standards) の switch 文に類似しています。 
+ブランチのシーケンスの条件を評価し、結果が true になった最初の文を処理するからです。
+
+`<Switch>` 文のサンプル:
+
+	<Switch>
+		<Case If=X>
+			<Elements go here>
+		</Case>
+		<Case If=Y>
+			<Elements go here>
+		</Case>
+		<Default>
+			<Elements go here>
+		</Default>
+	</Switch>
+
+| 属性| 型 | 必須？ | 説明 |
+| ------------ | --------- | ------------ | ------------- |
+| If | Condition | オプション | 評価する条件式。条件式の結果が `true` でなければ、そのエレメントは無視されます。 |
+
+### ForEach
+
+`<ForEach>` は、エレメントのボディを、セミコロンで区切られるリストの各アイテムに割り当てられた 
+任意のプロパティで展開します。
+
+`<ForEach>` 文のサンプル:
+
+	<ForEach Name="Counter" Values="1;2;3;4;5">
+		<Log Message="Counter=$(Counter)"/>
+	</ForEach>
+
+| 属性| 型 | 必須？ | 説明 |
+| ------------ | --------- | ------------ | ------------- |
+| Name             | Name            | 必須     | リストの各値に割り当てるプロパティ。 |
+| Values           | String List     | 必須     | セミコロンで区切られる値のリスト。 |
+| If               | Condition       | オプション     | 評価する条件式。条件式の結果が `true` でなければ、そのエレメントは無視されます。 |
+
+## 診断
+
+以下のエレメントで BuildGraph スクリプトの診断を行うことができます、
+
+* `<Warning>`
+* `<Error>`
+
+### Warning
+
+`<Warning>` はグラフ実行前に警告メッセージを出力します。 `<Warning>` は、node、 agent、 trigger またはグローバル スコープに含まれる場合があります。 
+`<Warning>` は実行されているターゲットにトリムされた後、 
+まだグラフの一部である場合に出力します。
+
+| 属性| 型 | 必須？ | 説明 |
+| ------------ | --------- | ------------ | ------------- |
+| Message          | String          | 必須     | ログに出力するテキストです。 |
+| If               | Condition       | オプション     | 評価する条件式。条件式の結果が `true` でなければ、そのエレメントは無視されます。 |
+
+### Error
+
+`<Error>`はエラー メッセージを出力します。 `<Error>` node、 agent、 trigger またはグローバル スコープに含まれる場合があります。 
+`<Error>` は、実行されているターゲットにトリムされた後、まだグラフの一部であれば出力します。
+
+| 属性| 型 | 必須？ | 説明 |
+| ------------ | --------- | ------------ | ------------- |
+| Message          | String          | 必須     | ログに出力するテキストです。 |
+| If               | Condition       | オプション     | 評価する条件式。条件式の結果が `true` でなければ、そのエレメントは無視されます。 |
+
+[/EXCERPT:BuildGraphScriptElements]
+
+[EXCERPT:BuildGraphScriptTasks]
+### タスク
+
+通常、プロジェクト固有のユーティリティ スクリプトが AutomationTool BuildCommand クラスとして実装されます。しかし、場合によっては 
+プロジェクト用にカスタム タスクを自動化する必要があるでしょう。そんなとき、BuildGraph が役立ちます。BuildGraph は、任意の数のタスクで拡張可能であり、 
+各自の特定のニーズに合うようなやりかたでビルド自動化タスクをカスタマイズすることができます。以下のセクションでは、BuildGraph を使ってカスタム タスクを作成する方法を説明します。 
+カスタム タスク作成の優れた開始点となる定義済みタスクの一覧も示します。
+
+## カスタム タスク
+
+新しいカスタム タスクを作成するには、`CustomTask` クラスから派生したクラスを実装し、それに `[TaskElement]` 属性を適用します。 
+`TaskElement` コンストラクタには、2 つの引数があります。それが表される XML エレメントの名前と 
+そのパラメータを含むクラスの型 (ロード時にコンストラクタに渡されます) の 2 つです。
+
+XML ファイルからパラメータのクラス フィールドを読み出す場合は、タスクに `[TaskParameter]` 属性をアタッチします。`TaskParameter` 属性をアタッチするということは、 
+パラメータが必須であるか任意であるかを示します。 
+これには、引数に適用すべき追加のバリデーションが含まれます。
+
+## 定義済みタスク
+
+タスク作成の開始点として、テンプレートに多様な定義済みタスクがあります。 
+単純な定義済みタスクを求めている場合は、`LogTask` から始めることをお勧めします。BuildGraph の最新の改善情報が必要な場合は、 
+このページをブックマークしてください。以下の定義済みタスクの一覧が定期的に更新されます。 
+
+[INCLUDE:Programming/Development/BuildGraph/ScriptAnatomy/Tasks/PredefinedTasks]
+
+[/EXCERPT:BuildGraphScriptTasks]

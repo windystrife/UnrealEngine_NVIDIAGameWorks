@@ -1,0 +1,98 @@
+﻿Availability: Public
+Title:风格化后期处理
+Crumbs:%ROOT%, Resources, Resources/Showcases/Stylized
+Description:虚幻引擎4包含的风格化展示的后期处理特效概述。
+
+[TOC(start:2 end:3)]
+
+[REGION:fullwidth]
+![](PostProcessHeader.png)
+[/REGION]
+
+本展示的显著特性之一是对后期处理的使用，这主要用来创建场景中物体周围类似卡通的轮廓。 它同时被用来在场景中提供类似于纸的贴图覆盖层，以及在视图外的附近创建艺术化的胶带效果。 后期处理效果完全在单个后期处理体积内进行处理。 后期处理体积包含后期处理特效最重要的部分： 后期处理材质。 将材质进行后期特效处理分两步进行，我们在下方进行详解：
+
+[INCLUDE:Resources/Showcases/Stylized#InstanceNote]
+
+[INCLUDE:Engine/Rendering\PostProcessEffects\PostProcessMaterials#PostMatWarning]
+
+如果您是新用户，并且您想要获得设置后期处理材质的教程，请参阅[后期处理材质文件](Engine/Rendering\PostProcessEffects\PostProcessMaterials)。
+
+
+## 风格化的后期处理材质
+
+[REGION:fullwidth]
+![](PostStylized.png)
+[/REGION]
+
+此材质被细分为一系列特效。 总体来说，这些特效包括：
+
+* 创建物体周围的轮廓。
+* 选择性地仅在无环境遮挡的区域处对线进行描画。
+* 使场景中物体周围的线条的总体颜色变得饱和。
+* 在视图边缘让颜色变得饱和。
+* 对视图的边缘进行遮挡，从而创建出艺术化的胶带效果。
+* 创建类似于纸张的贴图覆盖层。
+
+[REGION:note]
+后期处理材质相对比较有技术性，可能对刚使用虚幻引擎4的材质创建的新用户比较困难。我们此处的目标是对材质如何发挥作用的目的和本质进行概述，而不是对重建过程进行按部就班的指导。 
+[/REGION]
+
+** 我们推荐您打开 _M_PostProcess_Base_  以及 _M_PostProcess_Paper_ 材质以查看每部分特效是如何进行创建的。**
+
+### 卡通轮廓
+
+![](Outline.png)
+
+[REGION:note]
+**上图中** ，我们对处理轮廓的后期处理网络部分进行解压缩，并通过其本身来显示它以使得特效更为清晰。
+[/REGION]
+
+此特效可在M_PostProcess_Base材质内被观察到，主要在进行注释的 **Line Render** （线性渲染器）部分处。
+
+[REGION:lightbox fullwidth]
+[![](LineRender.png)](LineRender.png)
+[/REGION]
+
+[REGION:lightbox fullwidth]
+[![](LineRender02.png)](LineRender.png)
+[/REGION]
+
+**对以上的每张图片来说** ，如果您想要以完整大小来查看它们，最好能对每张图片右键点击然后选择另存为来进行保存（材质网络也可以在风格化示例中找到）。
+
+场景中物体周围的轮廓由采样场景深度的SceneTexture表达式来处理。 然后通过对UV坐标进行正负方向的轻微打乱来进行水平和垂直方向上的偏移。 随后将结果进行组合并用来定义轮廓的位置。 
+
+然而，在线条被实际渲染前，在环境遮挡处将会对第二个SceneTexture进行计算。 这被用来对轮廓进行隐藏。 目的是防止内部线条出现在线框边缘。 您可以通过以下图片查看区别：
+
+[REGION:imagetable]
+|![](PostProcessLines_2.png)(w:450) | ![](PostProcessLines_1.png)(w:450)|
+|:---:|:---:|
+| 在应用环境遮挡蒙板之前 | 在应用环境遮挡蒙板之后 |
+[/REGION]
+
+### 纸张特效
+
+视图周围的轮廓实际上是2部分组成的特效。 屏幕最远的边缘被转换为类似于纸张的贴图。 位于其内的区域进行了过饱和处理，以使得屏幕的边缘更具可视性。
+
+这主要是通过使用特殊的屏幕对齐贴图来实现的。 此贴图使用R，G，B通道来保存蒙板。 以下是RGB贴图以及每个单独的通道贴图。
+
+[REGION:imagetable]
+|![](T_MaskedPaper_Screen_RGB.png)(%foo%) | ![](T_MaskedPaper_Screen_R.png)(%foo%)| ![](T_MaskedPaper_Screen_G.png)(%foo%)| ![](T_MaskedPaper_Screen_B.png)(%foo%)|
+|:---:|:---:|:---:|:---:|
+| RGB | 只有R|只有G|只有B|
+[/REGION]
+
+[VAR:foo]
+w:225
+[/VAR]
+
+通过对屏幕边缘使用绿色通道进行遮盖并随后采用具有噪点的类似于纸张的贴图和颜色进行重叠，此特效使得场景看起来像是在纸张上进行的描画。 
+
+除此之外，类似于纸张的贴图在整个视图中进行了大量叠加，使得整个场景具有纸张颗粒效果。
+
+![](StylizedPaper.png)
+
+这个系统的核心内容位于 **Paper Mask** （纸张蒙板）注释区域内。 此网络使用以上显示的贴图，但使用 **ScreenAlignedUVs** 材质函数。 这样可以采用贴图坐标并将它们应用到屏幕的范围，从而将贴图有效地横跨整个屏幕。 当将其作为后期处理材质的一部分来使用时，其结果是完美填充视图的贴图。
+
+[REGION:fullwidth]
+![](PaperMaskNetwork.png)
+[/REGION]

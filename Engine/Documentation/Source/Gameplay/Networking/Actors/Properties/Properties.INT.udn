@@ -1,0 +1,64 @@
+Availability:Public
+Title:Property Replication
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking, Gameplay/Networking/Actors
+Description:Detailed information about how Actor properties are replicated.
+Related: Gameplay/Networking/Actors/Properties/ObjectReferences
+Related: Gameplay/Networking/Actors/Properties/Conditions
+Related: Gameplay/Networking/Actors/RPCs
+Version:4.11
+type: Reference
+parent: Gameplay/Networking/Actors
+order: 1
+
+[TOC(start:1 end:4)]
+
+Each actor maintains a list of properties that can be marked for replication to clients. Whenever the value of the variable changes on the server side, the server sends the client the updated value. The variable may have changed on the client side, in which case the new value will overwrite it. Property updates only come from the server (i.e., the client will never send property updates to the server).
+
+Some properties replicate by default (e.g., Location, Rotation, Owner, etc.). These are properties that the framework generally depends on to make basic multiplayer work. From there, you can mark additional properties to replicate as needed.
+
+Actor property replication is reliable. This means that the property of the client version of the Actor will eventually reflect the value on the server - but it's possible that some individual property value changes will be skipped.
+
+## Setting up properties for replication
+
+To replicate a property, you need to do a few things:
+In the header of the actor class where the property is defined, you need to make sure you have the `replicated` keyword as one of the parameters to the UPROPERTY declaration:
+
+	class ENGINE_API AActor : public UObject
+	{
+		UPROPERTY( replicated )
+		AActor * Owner;
+	};
+
+In the implementation of the actor class, you need to implement the GetLifetimeReplicatedProps function:
+
+	void AActor::GetLifetimeReplicatedProps( TArray< FLifetimeProperty > & OutLifetimeProps ) const
+	{
+		DOREPLIFETIME( AActor, Owner );
+	}
+
+In the actor's constructor, make sure you have the bReplicates flag set to true:
+
+	AActor::AActor( const class FPostConstructInitializeProperties & PCIP ) : Super( PCIP )
+	{ 
+		bReplicates = true;
+	}
+
+The member variable `Owner` will now be synchronized to all connected clients for every copy of this actor type that is currently instantiated (in this case, the base actor class).
+
+## Network Update Optimization
+
+### Data-Driven Network Update Frequency
+
+Actors will observe a maximum update frequency set in their `NetUpdateFrequency` variable. By reducing this variable on less-important or less-frequently-changing Actors, network updates can be made more efficient, potentially leading to smoother play experiences in limited-bandwidth scenarios. Common update frequency values are 10 (updating every 0.1 seconds) for important, unpredictable Actors like player-controlled characters in a shooter, 5 (updating every 0.2 seconds) for slower-moving characters like AI-controlled monsters in cooperative games, or 2 (updating every 0.5 seconds) for background Actors that are not very important to gameplay, but are still synced over the network and/or are controlled by server-side logic and thus need replication.
+
+### Adaptive Network Update Frequency
+
+With Adaptive Network Update Frequency, we can save CPU cycles that would normally be wasted in redundant attempts to replicate an actor when nothing is really changing. When this feature is enabled, the system will dynamically adapt the update frequencies of individual Actors based on whether or not their updates are meaningful. In this context, a "meaningful" update is any update which initializes the Actor, adds or removes a subobject (i.e. an owned Component), or changes the value of a replicated field on the Actor or any of its subobjects. Each Actor’s possible range of update rates is determined by two variables on the Actor itself: `NetUpdateFrequency` and `MinNetUpdateFrequency`. `NetUpdateFrequency` indicates the maximum number of times per second that the Actor will attempt to update itself, while `MinNetUpdateFrequency` indicates the minimum number of update attempts per second. Using this feature can result in massive replication performance improvement.
+
+#### (Advanced) Update Frequency Decrease Algorithm
+
+During update attempts, Actors determine how long it has been since the most recent meaningful update was sent, and record the new time if they send a meaningful update. If an Actor being considered for update has not sent a meaningful update for more than two seconds, it will start decreasing its update frequency, reaching its minimum frequency after seven seconds without a meaningful update. For example, if an Actor with an update delay between 0.1 and 0.6 seconds had no meaningful updates for 3 seconds, it would attempt its next update in 0.2 seconds.
+
+#### (Advanced) Update Frequency Increase Algorithm
+
+After sending a meaningful update, an Actor will schedule its next update to happen in 30-percent less time than the time between the last two meaningful updates, clamped between the minimum and maximum update frequencies. For example, if an Actor went exactly one second between meaningful updates, it would schedule its next update attempt for 0.7 seconds in the future (or a time near the specified minimum and maximum update frequencies). With each successive meaningful update, this calculation will be repeated, quickly reducing the time between updates if an Actor starts to have frequent data or subobject changes.

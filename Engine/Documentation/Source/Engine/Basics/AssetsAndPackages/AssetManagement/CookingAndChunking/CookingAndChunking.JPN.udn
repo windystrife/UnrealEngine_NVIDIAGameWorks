@@ -1,0 +1,54 @@
+﻿INTSourceChangelist:3588288
+Availability:Docs
+Crumbs: %ROOT%
+Title:クックとチャンキング
+Description:コンテンツをクックし、配布のために .pak ファイルをビルドします。
+Type:Overview
+SkillLevel:Intermediate
+Version:4.17
+Parent:Engine/Basics/AssetsAndPackages/AssetManagement
+Order:0
+Tags:Assets
+Tags:Asset Management
+Tags:Cooking
+Tags:Chunking
+Related:Engine/Basics/AssetsAndPackages/AssetManagement
+
+[TOC (start:2 end:3)]
+
+リリースに向けてゲームをクックする場合や、エディタ外のプラットフォームでテストする場合、**チャンキング** を使ってデータをいくつかの .pak ファイルに分割してから、個別にデプロイすることができます。チャンキングはアセット マネージャに統合されました。**Primary Asset Labels (プライマリ アセット ラベル)** または **Rules Overrides (ルールのオーバーライド)** を使ってセットアップすることができます。チャンキングの最適な例としては、ShooterGame サンプル プロジェクトがあります。ShooterGame では、以下の 3 つのチャンクを設定しています。チャンク 1 は "Sanctuary" マップ、チャンク 2 は "Highrise" マップ、チャンク 0 は他の全てのデータ用です。[ShooterGame (Resources/SampleGames/ShooterGame)] では、プライマリ アセット ラベルが選択されますが、両方の方法について説明します。
+
+## プライマリ アセットのルール
+
+**Primary Asset Rules** を使ってどのプライマリ アセットがどのセカンダリ アセットに対する管理権限を持つか、およびクック プロセス中のアセットの処理方法を決めることができます。こうしたルールは `FPrimaryAssetRules` 構造体によって定義され、 [Asset Manager](Engine\Basics\AssetsAndPackages\AssetManagement) によって使用されクック時のアセット処理方法を決めます。`FPrimaryAssetRules` 内で利用可能なオプションについての詳細情報は、その  [API ページ](API:FPrimaryAssetRules) をご覧ください。[`EPrimaryAssetCookRule` API Page](API:EPrimaryAssetCookRule) で定義されているクック ルールをご覧いただくこともできます。
+
+## プライマリ アセット ラベル
+
+**プライマリ アセット ラベル** は、チャンキングとクックのために他のアセットを指定するためにセットアップされる `UPrimaryDataAsset` の最小限のオーバーライドです。これらは通常、ゲーム中はロードされませんが、クックおよびチャンキング時に使用されて、他のプロジェクトのアセットに対して独自のルール、リスト、優先順位を設定することができます。ShooterGame の場合は、ラベルが作成されて様々なチャンクに配置されるアセットを指定します。
+
+![](HighriseLabel.png)
+
+[REGION:caption]"HighriseLabel" という名前のプライマリ アセット ラベルは、ゲームの "Highrise" マップ アセットを明示的に管理し、チャンク 2 に属することを示します。[/REGION]
+
+この時点では、"Highrise" のアセットは独自の Primary Asset ID、 "Map:/Game/Maps/Highrise"、および "HighriseLabel" の Primary Asset ID、"PrimaryAssetLabel:HighriseLabel" に関連付けられます。マップには独自の Chunk ID がないため、チャンキング プロセスでは "HighriseLabel" で見つかった Chunk ID である 2 を使用します。さらに、マップ内のすべてのセカンダリ アセットは チャンク 2 と関連付けられます。類似のセットアップを "Sanctuary" マップとチャンク 1 に対して行う必要があります。Chunk ID (or a negative Chunk ID) を持たないアセットはデフォルトの .pak ファイル、Chunk 0 に入ります。これは、プロジェクトのスタートアップ マップ、"ShooterEntry" の保存先でもあります。複数のプライマリ アセット ラベルによって参照されるセカンダリ アセットは、こうしたラベルの中でも最高の優先度に関連付けられます。最高の優先度に複数のラベルが関連付けられている場合、アセットは各ラベルに関連付けられます。
+
+![](ReferenceViewer.png)
+
+[REGION:caption]リファレンス ビューアは、プライマリ アセット ラベルとレベル マップの管理関係を示します。[/REGION]
+
+![](Management.png)
+
+[REGION:caption]"Map:/Game/Maps/Highrise" 上でダブルクリックすると、"PrimaryAssetLabel:HighriseLabel" によって管理されていることがわかります。[/REGION]
+
+## ルールのオーバーライド
+
+**Rules Overrides (ルールのオーバーライド)** を使って特定のプライマリ アセットに対して優先度とチャンク設定を確立することができます。プライマリ アセット ラベルの代わりにルールのオーバーライドを使って ShooterGame に対して 3 チャンクのセットアップをビルドするには、以下のセクションを `DefaultGame.ini` に作成します。
+
+	[/Script/Engine.AssetManagerSettings]
+	+PrimaryAssetRules=(PrimaryAssetId="Map:/Game/Maps/Sanctuary",Rules=(Priority=-1,ChunkId=1,CookRule=Unknown))
+	+PrimaryAssetRules=(PrimaryAssetId="Map:/Game/Maps/Highrise",Rules=(Priority=-1,ChunkId=2,CookRule=Unknown))
+	+PrimaryAssetRules=(PrimaryAssetId="Map:/Game/Maps/ShooterEntry",Rules=(Priority=-1,ChunkId=0,CookRule=AlwaysCook))
+
+[REGION:caption]クックとチャンキングのルールは、 `DefaultGame.ini` ファイルにあります。スタートアップ マップ、この例では "ShooterEntry" に対する明示的な参照を追加しました。[/REGION]
+
+これは、メイン ゲーム マップを特定のチャンクに設定するだけでなく、その参照のすべてをこうしたチャンクに追加します。チャンク 0 を規定する最後のエントリは、ゲームの最初の起動時に読み込まれるマップによって参照されるものが、デフォルトのチャンクでもあるチャンク 0 に確実に入るようにします。優先度 -1 はデフォルト値に優先度を設定しますが、これは 1 になります。

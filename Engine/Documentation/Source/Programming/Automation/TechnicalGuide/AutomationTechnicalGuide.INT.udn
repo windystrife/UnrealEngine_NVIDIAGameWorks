@@ -1,0 +1,167 @@
+Availability:Public
+Title:Automation Technical Guide
+Crumbs: %ROOT%, Programming, Programming/Automation
+Description:Programmer's guide to creating new automation tests.
+Version: 4.9
+
+Automation tests come in two main flavors: Simple and Complex. Simple Tests are used to describe 
+single atomic tests, while Complex Tests are used to run the same code on a number of inputs. 
+
+Simple tests are useful for confirming that specific functionality is operating as expected. These are 
+generally unit tests or feature tests. For example, simple tests can be used to test if the current map 
+loads in Play In Editor or whether text wrapping is working properly in Slate.
+
+Complex tests are useful for iterating through a collection of items and perform the same functionality 
+on each item. These are generally content stress tests. For instance, loading all maps or compiling all 
+Blueprints would be good fits for complex automation tests.
+
+## Architecture and Execution
+
+All automation tests derive from the **FAutomationTestBase** class which defines generic functionality for 
+performing a set of commands. The important functions of the FAutomationTestBase class used when setting 
+up a new automation test are:
+
+| Member Functions | Description |
+| ---------------- | ----------- |
+| `GetTests()` | Fills the command list with the parameters to be passed to `RunTest()` one by one. |
+| `RunTest()` | Performs the test logic using the command string passed in. |
+
+The general flow for executing an automation test is:
+
+	/-----------------\       /--------------\       /---------------\
+	|  Automation UI  |       |  GetTests()  |       |   RunTest()   |
+	+-----------------+       +--------------+       +---------------+
+	|                 |       |              |       |               |
+	|         o Start +-------+ o Commands   +---+-->+ o Parameters  +--\
+	|                 |       |              |   |   |               |  |
+	\-----------------/       \--------------/   |   \---------------/  |
+	                                             |                      |
+	                                             \----------------------/
+
+## Directories
+
+The current convention is to put all Automation Tests into the `Private\Tests` directory within the relevant 
+module.  When your test matches one-to-one with a particular class, please name the test file `[ClassFilename]Test.cpp`.
+
+## Creating tests
+
+Each automation test is declared using a special macro. The macro differs depending on whether the test is a 
+simple test or a complex test, but each macro is identical in the parameters it requires:
+
+| Parameter | Description |
+| --------- | ----------- |
+| `TClass` | The Class Name of the test. |
+| `PrettyName` | A string specifying the hierarchical test name that will appear in the UI. |
+| `TFlags` | An `EAutomationTestFlags` for specifying automation test requirements/behavior (See `AutomationTest.h` for details). |
+
+### Simple Tests
+
+Simple Tests are declared using the `IMPLEMENT_SIMPLE_AUTOMATION_TEST` macro:
+
+	IMPLEMENT_SIMPLE_AUTOMATION_TEST( TClass, PrettyName, TFlags )
+
+These tests define their functionality solely by implementing the `RunTest()` function and the `Parameters` string 
+will always be an empty string.
+
+**Example:**
+
+For example, the declaration of a new simple test for the `SetRes` command functionality might be:
+
+	IMPLEMENT_SIMPLE_AUTOMATION_TEST( FSetResTest, "Windows.SetResolution", ATF_Game )
+
+Using the SetRes example above, the implementation would be:
+
+	bool FSetResTest::RunTest(const FString& Parameters)
+	{
+		FString MapName = TEXT("AutomationTest");
+		FEngineAutomationTestUtilities::LoadMap(MapName);
+
+		int32 ResX = GSystemSettings.ResX;
+		int32 ResY = GSystemSettings.ResY;
+		FString RestoreResolutionString = FString::Printf(TEXT("setres \%dx\%d"), ResX, ResY);
+
+		ADD_LATENT_AUTOMATION_COMMAND(FEngineWaitLatentCommand(2.0f));
+		ADD_LATENT_AUTOMATION_COMMAND(FExecStringLatentCommand(TEXT("setres 640x480")));
+		ADD_LATENT_AUTOMATION_COMMAND(FEngineWaitLatentCommand(2.0f));
+		ADD_LATENT_AUTOMATION_COMMAND(FExecStringLatentCommand(RestoreResolutionString));
+
+		return true;
+	}
+
+### Complex Tests
+
+These tests use a similar macro to the simple tests declaration macro:
+
+	IMPLEMENT_COMPLEX_AUTOMATION_TEST( TClass, PrettyName, TFlags )
+
+To define the functionality for a complex test, you must implement the `GetTests()` function to enumerate the 
+tests to the UI in addition to the `RunTest()` function to define the logic to perform on each iteration.
+
+**Example:**
+
+An example declaration of a complex test for loading all of the maps in a game is shown below:
+
+	IMPLEMENT_COMPLEX_AUTOMATION_TEST( FLoadAllMapsInGameTest, "Maps.LoadAllInGame", ATF_Game )
+
+Using the map loading example, the implementations would be:
+
+	void FLoadAllMapsInGameTest::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+	{
+		FEngineAutomationTestUtilities Utils;
+		TArray<FString> FileList;
+		FileList = GPackageFileCache->GetPackageFileList();
+
+		// Iterate over all files, adding the ones with the map extension..
+		for( int32 FileIndex=0; FileIndex< FileList.Num(); FileIndex++ )
+		{
+			const FString& Filename = FileList[FileIndex];
+
+			// Disregard filenames that don't have the map extension if we're in MAPSONLY mode.
+			if ( FPaths::GetExtension(Filename, true) == FPackageName::GetMapPackageExtension() ) 
+			{
+				if (!Utils.ShouldExcludeDueToPath(Filename))
+				{
+					OutBeautifiedNames.Add(FPaths::GetBaseFilename(Filename));
+					OutTestCommands.Add(Filename);
+				}
+			}
+		}
+	}
+
+	bool FLoadAllMapsInGameTest::RunTest(const FString& Parameters)
+	{
+		FString MapName = Parameters;
+
+		FEngineAutomationTestUtilities::LoadMap(MapName);
+		ADD_LATENT_AUTOMATION_COMMAND(FEnqueuePerformanceCaptureCommands());
+
+		return true;
+	}
+
+## Latent Commands
+
+Latent Commands allow for sections of an automation test to be run over multiple frames. These are intended to 
+be queued up during RunTest calls.
+
+The first step is declaring a Latent Command with the following syntax:
+
+	DEFINE_LATENT_AUTOMATION_COMMAND_ONE_PARAMETER(FExecStringLatentCommand, FString, ExecCommand);
+
+	bool FExecStringLatentCommand::Update()
+
+The Update call should return true when it is done executing and false if it would like to stop execution of the 
+automation test and try again next frame. Commands execute in order and execution will not continue if a latent 
+command returns false from Update.
+
+The second step is adding the latent command to the queue for execution. This is wrapped in a macro to avoid boiler 
+plate code as follows:
+
+	ADD_LATENT_AUTOMATION_COMMAND(FExecStringLatentCommand(TEXT("setres 640x480")));
+
+An example would be `FSetResTest` in `EngineAutomationTests.cpp`.  
+
+
+[REGION:warning]
+In the editor, loading maps happens immediately. In game, loading a map happens on the next frame and therefore 
+[Latent Commands](#LatentCommands) must be used.
+[/REGION]

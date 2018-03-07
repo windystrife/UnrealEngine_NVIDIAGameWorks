@@ -1,0 +1,155 @@
+﻿Availability: Public
+Title:监控摄像机切换开关按钮
+Crumbs:%ROOT%, Resources, Resources/Showcases/BlueprintExamples
+Description:监控摄像机和警报蓝图概述。
+Related: Engine/Blueprints/Overview
+Related: Engine/Blueprints/UserGuide/Variables
+Related: Engine/Animation/AnimBlueprints/EventGraph
+Related: Engine/Blueprints/UserGuide/UserConstructionScript
+Related: Engine/Blueprints/UserGuide/Components
+
+
+[EXCERPT:Overview]
+连接到现存的摄像机蓝图的是安防室。 这个房间里包含了由屏幕环绕的安全控制台。 当玩家按下控制台中心位置处的大红按钮时，屏幕会切换显示在关卡不同位置处放置的监控摄像机所采集到的图像。 这些监控摄像机同时会在玩家一进入监控范围就触发警报系统。
+[/EXCERPT:Overview]
+
+## 屏幕蓝图
+
+![](ScreenBlueprint.png)(w:600)
+
+
+屏幕蓝图-究其核心来说-是在不同的场景捕获Actors进行切换的最优化机制。 监控摄像机能产生效果是因为场景捕获Actors位于每个[相机蓝图](Resources\Showcases\BlueprintExamples\SecurityDoor)内。 场景捕获Actor设置的目的是使其具有非常类似于相机的功能，捕获它能看到的像素的图像。 随后它把图像传送到渲染对象贴图中，这个贴图类似于内部视频屏幕的功能。 在把此渲染对象贴图应用到材质之后，您就完成了有效创建材质的工作，它可以显示相机所能看到的内容。
+
+会产生什么问题吗？ 在如此多的监控摄像机同时运行的情况下，我们可能会遇到性能问题，因为所有摄像机都必须捕获并传输它们当前所看到的内容。 为缓解此问题，屏幕蓝图仅会一次激活一个场景捕获，并对之前使用的场景捕获取消激活。
+
+![](DeactivateSceneCapture.png)(w:600)
+
+
+
+###  蓝图设置
+
+此蓝图的 **组件列表** ， **构建脚本** ，以及 **事件图表** 执行以下任务：
+
+
+|蓝图内容 |目的 |
+|---|---|
+| **组件列表**  | [INCLUDE:#ScreenCL] |
+| **构建脚本** | [INCLUDE:#ScreenCS] |
+| **事件图表**  | [INCLUDE:#ScreenEG]  |
+
+
+### 可编辑变量
+
+
+
+屏幕具有以下显示的属性：
+
+![](ScreenProperties.png)
+
+| 属性 | 目的 |
+| --- | --- |
+| **Camera Blueprints** （摄像机蓝图）| 此数组存储了所有放置在场景内的摄像机蓝图，这可以让我们找到每个场景捕获Actor的位置。 |
+
+
+
+
+## 按钮蓝图
+
+![](ButtonBlueprint.png)(w:600)
+
+这个大红按钮作为摄像机切换开关，按下后切换显示来自于每个监控摄像机的不同内容。
+
+按钮通过驱动在警报和摄像机间进行互动的同一蓝图接口来进行其工作。 如同此蓝图内的另一个功能一样，可对名称为 **Monitor Camera Swap** （监视器摄像机切换）的函数进行调用。 它被作为可对特定Actors（也就是屏幕）进行调用的远程事件。 
+
+按钮蓝图同时包含了作为触发器体积使用的盒体组件。 这是用来确定玩家是否处于按钮范围内，同时用来确定玩家是否能看到出现在按钮上方的帮助文本，这些文本会指导玩家按下键盘上的 **E** 键。
+
+![](EToInteract.png)(w:600)
+
+[REGION:lightbox]
+[如果您细心的话，您会发现这里的红色大按钮和控制台曾经出现在虚幻引擎4演示-渗透者中，按钮被按下以关闭机器人工厂 :)](InfiltratorDesk.png)
+[/REGION]
+
+
+###  蓝图设置
+
+此蓝图的 **组件列表** ， **构建脚本** ，以及 **事件图表** 执行以下任务：
+
+
+|蓝图内容 |目的 |
+|---|---|
+| **组件列表**  | [INCLUDE:#ButtonCL] |
+| **构建脚本** | [INCLUDE:#ButtonCS] |
+| **事件图表**  | [INCLUDE:#ButtonEG]  |
+
+
+### 可编辑变量
+
+
+
+按钮具有以下显示的属性：
+
+![](ButtonProperties.png)
+
+| 属性 | 目的 |
+| --- | --- |
+| **Screen Blueprints** （屏幕蓝图）| 包含场景中存储所有屏幕蓝图的数组。 |
+| **Camera Blueprints** （摄像机蓝图）| 此数组存储放置在场景中的所有摄像机蓝图。 |
+
+
+
+
+
+
+
+<!--------------------------------
+
+
+
+[EXCERPT:ScreenCL]
+屏幕的 **Components List** （组件列表）非常简单，仅仅包含了屏幕本身的单一静态网格物体。
+[/EXCERPT:ScreenCL]
+
+
+[EXCERPT:ScreenCS]
+**Construction Script** （构建脚本）执行以下任务：
+* 对屏幕网格物体创建并应用[材质实例动态 (MID)](Engine/Rendering/Materials/MaterialInstances)。
+[/EXCERPT:ScreenCS]
+
+
+
+[EXCERPT:ScreenEG]
+**Event Graph** （事件图表）执行以下任务：
+当我们从警报器接口中收到"Camera Swap"（摄像机切换）信号时：
+* 关闭先前捕获的Actor。
+* 播放驱动屏幕上材质的噪点的时间轴。
+* 激活下一个场景捕获Actor。
+* 使用屏幕材质的特殊贴图和UV坐标来变更位于屏幕顶部的文本。
+[/EXCERPT:ScreenEG]
+
+
+
+[EXCERPT:ButtonCL]
+按钮的 **Components List** （组件列表）如下进行设置：
+![](ButtonComponents.png)
+
+[/EXCERPT:ButtonCL]
+
+
+[EXCERPT:ButtonCS]
+**Construction Script** （构建脚本）不具有函数。
+[/EXCERPT:ButtonCS]
+
+
+
+[EXCERPT:ButtonEG]
+**Event Graph** （事件图表）执行以下任务：
+* 查看玩家何时进入盒体组件。
+* 当玩家位于组件内时，创建帮助文本。
+* 使该帮助文本向玩家的方向旋转。
+* 当玩家处于盒体组件内时，处理玩家按下 **E** 键的输入。
+* 如果玩家按下了 **E** ，对按钮进行动画处理并调用所有屏幕上的监视器摄像机切换。
+* 当玩家退出盒体组件时，销毁帮助文本并停止对 **E** 按键输入的处理。
+[/EXCERPT:ButtonEG]
+
+--------------------------------->
+

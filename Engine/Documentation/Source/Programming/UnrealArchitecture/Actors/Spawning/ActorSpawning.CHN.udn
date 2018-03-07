@@ -1,0 +1,150 @@
+﻿INTSourceChangelist:2374181
+Availability:Public
+Title:生成 Actors
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture
+Description:在游戏代码中生成新的Actors替代物体的方法。
+Version: 4.5
+
+[TOC(start:2 end:3)]
+
+## SpawnActor 方法
+
+创建一个新的 _Actor_ 示例的过程称为 **生成** 。生成 _Actors_ 的过程是使用 `UWorld::SpawnActor()`  函数完成的。该函数创建指定类的一个新实例 
+并返回到那个新创建的 _Actor_ 的指针。`UWorld::SpawnActor()`  仅用于创建在继承于 _Actor_  
+的类的实例。
+
+	AActor* UWorld::SpawnActor
+	(
+		UClass*			Class,
+		FName			InName,
+		FVector const*	Location,
+		FRotator const*	Rotation,
+		AActor*			Template,
+		bool			bNoCollisionFail,
+		bool			bRemoteOwned,
+		AActor*			Owner,
+		APawn*			Instigator,
+		bool			bNoFail,
+		ULevel*			OverrideLevel,
+		bool			bDeferConstruction
+	)
+
+| 参数 | 描述 |
+| --- | --- |
+| `Class` | 一个 `UClass` ，指出了要生成的 _Actor_ 的类。|
+| `InName` | 可选的。`FName` ，用作为新生成的 _Actor_ 的 `名称` 。如果没有指定值，那么则将使用 *[Class]_[Number]* 的形式自动生成所产生的 _Actor_ 的名称。|
+| `Location` | 可选的。一个 `FVector` ，提供了生成的 _Actor_ 的初始位置。|
+| `Rotation` | 可选的。一个 ``FVector`` ，提供了生成的 _Actor_ 的初始旋转度。|
+| `Template` | 可选的。一个 `AActor` ，用作为生成新 _Actor_ 时使用的模板。所生成的 _Actor_ 将使用模板 _Actor_ 的属性值进行初始化。如果没有指定模板 _Actor_ ，那么将使用类默认对象(CDO)来初始化所生成的 _Actor_ 。|
+| `bNoCollisionFail` | 可选的。一个  `bool` 值，决定生成  _Actor_ 时是否执行碰撞测试。如果为 `true` ，那么无论根组件或模板 _Actor_ 的碰撞设置为什么，在生成 _Actor_ 时都不执行碰撞测试。|
+| `bRemoteOwned` | 可选的。`布尔值` 。|
+| `Owner` | 可选的。拥有所生成的 _Actor_ 的 `AActor` 。|
+| `Instigator` | 可选的。`APawn` ，导致所生成的 _Actor_ 施加伤害的挑衅者。|
+| `bNoFail` | 可选的。一个布尔值，决定了如果某些条件不满足，生成Actor是否失败。如果为 `true` ，那么生成过程将会失败，因为所生成的类是 `bStatic=true` ，或者因为模板 _Actor_ 和正在生成的 _Actor_ 的类不一样。|
+| `OverrideLevel` | 可选的。在其中生成 _Actor_ 的 `ULevel` ，也就是 _Actor_ 的外部容器。如果没有指定关卡，那么则使用使用 `Owner` 的 `Outer（外部容器）` 。如果没有指定  `Owner` ，则使用永久性关卡。|
+| `bDeferConstruction` | 可选的。一个布尔值，决定是否运行构建脚本。如果为 `true` ，那么将不会在生成的 _Actor_ 上运行构建脚本。仅当正在从 [蓝图](Engine/Blueprints) 中生成 _Actor_ 时适用。|
+|[REGION:tablesection]返回值[/REGION]||
+| 生成的 _Actor_ 是以 `AActor` 指针的形式呈现。返回值必须类型转换为 `Class` 参数指定的衍生类型。||
+
+### 用法
+
+	AKAsset* SpawnedActor1 = (AKAsset*) GetWorld()->SpawnActor(AKAsset::StaticClass(), NAME_None, &Location);
+
+## 生成函数的模板
+
+为了使得生成 _Actors_ 的过程更加方便，我们提供了几个常用的函数模板。这些函数使得创建 _Actor_ 变得更加简单，因为它们仅需要 
+少量的参数，并允许指定返回的 _Actor_ 的类型。
+
+### 生成T实例, 返回T指针
+
+这个函数模板在相同的位置处、以相同的旋转度生成该模板类 `T` 的实例，作为执行生成操作的 _Actor_ 的根组件，并返回 
+到和那个模板类一样类型的实例的指针，也就是 `T*` 。您可以指定拥有者 _Actor_ 、挑衅的 _Pawn_ ，及指定如果生成的 _Actor_ 会侵占或碰撞 
+另一个世界中已经存在的 _Actor_ 生成操作是否失败。
+
+	/** Spawns and returns class T, respects default rotation and translation of root component. */
+	template< class T >
+	T* SpawnActor
+	(
+		AActor* Owner=NULL,
+		APawn* Instigator=NULL,
+		bool bNoCollisionFail=false
+	)
+	{
+		return (T*)(GetWorld()->SpawnActor(T::StaticClass(), NAME_None, NULL, NULL, NULL, bNoCollisionFail, false, Owner, Instigator));
+	}
+
+#### 用法
+
+	MyHUD = SpawnActor<AHUD>(this, Instigator);
+
+### 使用变换生成T实例，返回T指针
+
+该函数模板在指定 `位置` 处使用指定的 `旋转度`生成模板类  `T` 的实例，并返回和那个模板类类型一样的实例的指针， 
+也就是  `T*` 。除了位置和旋转度外，还可以指定拥有者 _Actor_ 、挑衅的 _Pawn_ ，及指定如果生成的 _Actor_ 会侵占或碰撞 
+另一个世界中已经存在的 _Actor_ 生成操作是否失败。
+
+	/** Spawns and returns class T, forcibly sets world position. */
+	template< class T >
+	T* SpawnActor
+	(
+		FVector const& Location,
+		FRotator const& Rotation,
+		AActor* Owner=NULL,
+		APawn* Instigator=NULL,
+		bool bNoCollisionFail=false
+	)
+	{
+		return (T*)(GetWorld()->SpawnActor(T::StaticClass(), NAME_None, &Location, &Rotation, NULL, bNoCollisionFail, false, Owner, Instigator));
+	}
+
+#### 用法
+
+	Controller = SpawnActor<AController>(GetLocation(), GetRotation(), NULL, Instigator, true);
+
+###生成类实例, 返回T 指针
+
+这个函数模板在相同的位置处、以相同的旋转度生成指定 `Class（类）` 的实例，作为执行生成操作的 _Actor_ 的根组件，并返回 
+到和那个模板类一样类型的实例的指针，也就是 `T*` 。这要求指定的 `Class（类）` 必须是模板类  `T` 的子类。除了类外，您还可以指定 
+拥有者 _Actor_ 、挑衅的 _Pawn_ ，及指定如果生成的 _Actor_ 会侵占或碰撞另一个世界中已经存在的 _Actor_ 生成操作 
+是否失败。
+
+	/** Spawns given class and returns class T pointer, respects default rotation and translation of root component. */
+	template< class T >
+	T* SpawnActor
+	(
+		UClass* Class,
+		AActor* Owner=NULL,
+		APawn* Instigator=NULL,
+		bool bNoCollisionFail=false
+	)
+	{
+		return (Class != NULL) ? Cast<T>(GetWorld()->SpawnActor(Class, NAME_None, NULL, NULL, NULL, bNoCollisionFail, false, Owner, Instigator)) : NULL;
+	}
+#### 用法
+
+	MyHUD = SpawnActor<AHUD>(NewHUDClass, this, Instigator);
+
+### 使用变换生成类实例，返回T指针
+
+该函数模板在指定 `位置` 处使用指定的 `旋转度`生成指定类  `类` 的实例，并返回和那个模板类类型一样的实例的指针， 
+也就是  `T*` 。这要求指定的 `Class（类）` 必须是模板类  `T` 的子类。除了类、位置及旋转度外，还可以指定拥有者 _Actor_ 、挑衅的的 _Pawn_ ， 
+及指定如果生成的 _Actor_ 会侵占或碰撞另一个世界中已经存在的 _Actor_ 生成操作
+
+	/** Spawns given class and returns class T pointer, forcibly sets world position. */
+	template< class T >
+	T* SpawnActor
+	(
+		UClass* Class,
+		FVector const& Location,
+		FRotator const& Rotation,
+		AActor* Owner=NULL,
+		APawn* Instigator=NULL,
+		bool bNoCollisionFail=false
+	)
+	{
+		return (Class != NULL) ? Cast<T>(GetWorld()->SpawnActor(Class, NAME_None, &Location, &Rotation, NULL, bNoCollisionFail, false, Owner, Instigator)) : NULL;
+	}
+
+#### 用法
+
+	APawn* ResultPawn = SpawnActor<APawn>(DefaultPawnClass, StartLocation, StartRotation, NULL, Instigator);

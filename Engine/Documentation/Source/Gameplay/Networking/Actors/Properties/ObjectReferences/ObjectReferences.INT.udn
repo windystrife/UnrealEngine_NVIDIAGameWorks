@@ -1,0 +1,41 @@
+Availability:Public
+Title:Replicating object references
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking, Gameplay/Networking/Actors, Gameplay/Networking/Actors/Properties
+Description:Detailed information about how object reference properties are replicated.
+Related: Gameplay/Networking/Actors/Properties/Conditions
+Related: Gameplay/Networking/Actors/RPCs
+version: 4.9
+
+Generally, object references are handled automatically in the UE4 multiplayer framework. What this means is, if you have a UObject property that is replicated, the reference to that object will be sent over the network as a special ID that is assigned by the server. This special ID is a FNetworkGUID. The server is in charge of assigning this ID, and then notifying all connected clients of this assignment.
+
+To replicate object references, you simply mark a UObject property as replicated, like this:
+
+	class ENGINE_API AActor : public UObject
+	{
+		UPROPERTY( replicated )
+		AActor * Owner;
+	};
+
+In this case, the "Owner" property will be a replicated reference to the actor that this property refers to.
+
+For an object to be legally referenced over the network, it must be supported for networking. To check for this, you can call `UObject::IsSupportedForNetworking()`. This is generally considered a low level function, so it's not common to need to check this in game code.
+
+In general, these are the guidelines to go by to determine if you can reference an object over the network:
+
+* Any replicated actor can be replicated as a reference
+* Any non-replicated actor must be stably named (loaded directly from a package)
+* Any replicated component can be replicated as a reference
+* Any non-replicated component must be stably named.
+* All other UObjects (non actors or components) must come directly from loaded packages
+
+### Stably Named Objects
+
+Stably named objects are simply objects that will exist on both the server and the client, and have exactly the same name. 
+
+Actors are stably named if they were loaded directly from packages (not spawned during gameplay).
+
+Components are stably named if they were:
+* Loaded directly from a package
+* Added via simple construction scripts
+* Manually marked (via `UActorComponent::SetNetAddressable`)
+	* This should only be used when you know you are manually naming the component so that it has the same name on the server and client (a good example are components added in an `AActor` C++ constructor)

@@ -1,0 +1,58 @@
+Availability:Public
+Title:iOS Packaged Game Size
+Crumbs:%ROOT%, Platforms, Platforms/iOS
+Description:Factors that affect the size of a packaged iOS game.
+Version:4.9
+parent:Platforms/iOS
+order:2
+type:overview
+
+There are a number of things that affect the size of a packaged iOS game, from the content it references to the build configuration you choose.
+
+## Target Configuration
+
+One of the biggest changes comes from targeting the Shipping configuration instead of Development, which saves about 31 MB. The Shipping configuration uses higher optimization settings, 
+and removes debugging symbols and much of the logging and profiling code, resulting in much smaller executable sizes.
+
+## Example: TappyChicken
+
+Here are some example numbers from cooking and packaging TappyChicken for iOS in the 4.0.1 branch.
+
+[REGION:note]
+ This is listing numbers with an executable that has the symbols stripped.
+[/REGION]
+
+The overall Shipping IPA is 43.8 MB uncompressed (34.8 MB compressed), which breaks down into:
+
+* 3.9 MB - Loading screens and icons (about the same compressed)
+* 25.5 MB - Executable (never compressed)
+	[REGION:note]
+	We never compress the executable since it is encrypted when uploaded to the App Store and will not compress at all there.
+	[/REGION]
+* 10.6 MB - Engine content (4.8 MB compressed)
+* 3.7 MB - Game content (0.7 MB compressed)
+
+
+The executable is never compressed and the icons/screens are already compressed, but the game and engine content compresses quite well. 
+
+We will continue to work on reducing the amount and size of required engine content over time, as well as look at optimizing the executable size.
+
+The loading screens and icons are `.png` files that you create; you can provide fewer variations (Tappy Chicken has one for all the devices) or use simpler icons to reduce their size further.
+
+## Game Content References
+
+The size of game content is entirely in your hands; it ends up very reasonable for a small game like Tappy Chicken but it can easily blow out when you add a bunch of extra content.
+
+It is important to understand that any content referenced in your game will get cooked; some common gotchas are referring to huge otherwise unused textures as the default for a texture 
+sample in a material function or material, or referencing unused content in an disconnected node or unused variable in your blueprint. These count as referenced even if all of your material 
+instances replace them with something else. You can look in the cooked asset folder and if you spot any unexpected assets, use the **Reference Viewer** to track down who refers to it.
+
+Note: If you cook via the [Launch](Engine\Deployment\Launching) button on the toolbar, only the content referenced by your chosen maps will be cooked, but if you [package your project](Engine\Basics\Projects\Packaging), 
+all of the content in your game will be cooked, even unreferenced content.
+
+## Disabling Slate
+
+Content-only projects have a larger executable since they cannot make any assumptions about which plugins and libraries you are using. You can usually shrink your executable a little bit by 
+switching to C++, and disabling unnecessary plugins and libraries at compile time (via `EnabledPlugins` and the `Project.Build.cs` and `Project.Target.cs` files). However, we have an optimization 
+to remove more than 30 MB of Slate assets in content-only games since they cannot use Slate. If you make a C++ project that does not use Slate, you can save this space by setting `bUsesSlate = false` 
+in the constructor of your `TargetRules` class in `Project.Target.cs`.

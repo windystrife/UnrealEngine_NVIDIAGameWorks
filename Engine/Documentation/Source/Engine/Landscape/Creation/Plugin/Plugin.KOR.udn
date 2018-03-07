@@ -1,0 +1,31 @@
+﻿INTSourceChangelist:3599948
+Availability: Public
+Title:커스텀 랜드스케이프 임포터 제작
+Crumbs: %ROOT%, Engine, Engine/Landscape, Engine/Landscape/Creation
+Description:플러그인을 통한 새로운 랜드스케이프 임포트 포맷을 만드는 방법 안내입니다.
+version: 4.15
+parent:Engine/Landscape
+topic-image:CreatingCustomLandscapeImporters_topic.png
+order:8
+
+랜드스케이프 데이터 임포트를 위한 별도의 하이트맵 및 웨이트맵 제작은 플러그인을 만드는 것으로 가능합니다. 플러그인은 엔진에 새로운 포맷을 추가해 줄 뿐만 아니라, 파일에서도 데이터를 임포트할 수 있습니다.
+
+### 커스텀 임포터 작성
+
+* 새로운 임포터를 만들기 위해서는, 플러그인에서 `ILandscapeHeightmapFileFormat` 및 `ILandscapeWeightmapFileFormat` 을 구현하여 오브젝트 인스턴스를 만들고, 그 오브젝트를 `ILandscapeEditorModulemodule::RegisterHeightmapFileFormat` 및 `ILandscapeEditorModulemodule::RegisterWeightmapFileFormat` 로 각각 등록시켜야 합니다.
+
+* 플러그인에서 `ILandscapeHeightmapFileFormat` 인터페이스를 구현하기 위해서는 다음 함수를 오버라이드해야 합니다:
+1. **const FLandscapeFileTypeInfo& GetInfo() const**: 이 클래스가 어떤 파일 유형을 처리하는지 나타내는 유형 정보 및 익스포트 지원 여부를 반환합니다.
+1. **FLandscapeHeightmapInfo Validate(const TCHAR* HeightmapFilename) const** - 네임드 파일을 인증하거나, 거부하고 오류 코드와 메시지를 반환합니다.
+1. **FLandscapeHeightmapImportData Import(const TCHAR* HeightmapFilename, FLandscapeFileResolution ExpectedResolution) const** - 파일을 실제 임포트합니다.
+1. **void Export(const TCHAR* HeightmapFilename, TArrayView<const uint16> Data, FLandscapeFileResolution DataResolution, FVector Scale) const** - 이 포맷이 익스포트를 지원하는 경우, 파일을 익스포트합니다 (`GetInfo` 의 반환값 참고). 컴파일을 위해 오버라이드하지 않아도 되는 유일한 함수입니다. 하지만 오버라이드 없이 호출하면 `check` 를 호출합니다.
+1. **(Destructor)** - 이 인터페이스를 구현하는 클래스는 가상 소멸사를 사용해야 하는데, 인터페이스 클래스로의 포인터를 통해 삭제될 것이기 때문입니다.
+
+* `ILandscapeHeightmapFileFormat` 인터페이스 구현은 거의 동일하며, 일부 반환 유형에 약간의 차이가 있을 뿐입니다:
+1. **const FLandscapeFileTypeInfo& GetInfo() const** - 이 클래스가 어떤 파일 유형을 처리하는지 나타내는 형 정보 및 익스포트 지원 여부를 반환합니다.
+1. **FLandscapeWeightmapInfo Validate(const TCHAR* WeightmapFilename) const** - 네임드 파일을 인증하거나, 거부하고 오류 코드와 메시지를 반환합니다.
+1. **FLandscapeWeightmapImportData Import(const TCHAR* WeightmapFilename, FLandscapeFileResolution ExpectedResolution) const** - 파일을 실제 임포트합니다.
+1. **void Export(const TCHAR* WeightmapFilename, TArrayView<const uint16> Data, FLandscapeFileResolution DataResolution, FVector Scale) const** - 이 포맷이 익스포트를 지원하는 경우, 파일을 익스포트합니다 (`GetInfo` 의 반환값 참고). 컴파일을 위해 오버라이드하지 않아도 되는 유일한 함수입니다. 하지만 오버라이드 없이 호출하면 `check` 를 호출합니다.
+1. **(Destructor)** - 이 인터페이스를 구현하는 클래스는 가상 소멸사를 사용해야 하는데, 인터페이스 클래스로의 포인터를 통해 삭제될 것이기 때문입니다.
+
+* 자세한 정보 및 예제는, `LandscapeFileFormatInterfaces.h` 의 인터페이스, `LandscapeFileFormatPng.cpp` 및 `LandscapeFileFormatPng.h` 의 .PNG 구현, `LandscapeFileFormatRaw.cpp` 및 `LandscapeFileFormatRaw.h` 의 .RAW 구현을 참고해 보면 됩니다. 이 코드 전부 엔진 내 LandscapeEditor 모듈에 있습니다.

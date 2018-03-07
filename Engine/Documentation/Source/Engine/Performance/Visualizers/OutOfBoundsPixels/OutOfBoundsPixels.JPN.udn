@@ -1,0 +1,110 @@
+﻿INTSourceChangelist:2704715
+Availability:Public
+Title:範囲外のピクセル
+Crumbs: %ROOT%, Engine, Engine/Performance/Visualizers
+Description: アンリアル エディタ ビューポートで範囲外のピクセルを表示する
+version:4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Performance/Visualizers/OutOfBoundsPixels:title%](OOBP_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Performance/Visualizers/OutOfBoundsPixels:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Performance/Visualizers/OutOfBoundsPixels:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Performance/Visualizers/OutOfBoundsPixels]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Performance/Visualizers/OutOfBoundsPixels:title%](OOBP_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Performance/Visualizers/OutOfBoundsPixels:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Performance/Visualizers/OutOfBoundsPixels:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Performance/Visualizers/OutOfBoundsPixels]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:banner]
+
+[/REGION]
+
+[TOC(start:2)]
+
+
+オブジェクトが点滅している、あるいはオブジェクトの一部がまだスクリーン上に残っているにも関わらず消滅している状態は、 
+範囲外にあるオブジェクトの一部が原因の場合があります。一般的な理由は、シェーダー内での world position offset や displacement の使用、物理アセットのないスケルタルメッシュ、 
+オーナーの範囲を継承するためのコンポーネント設定です。
+
+これは、視推体カリング、シャドウ キャスティング、間接ライティングのキャッシュ、その他様々なレンダリング機能が正しく行えなくなる原因になります。ゲームが複数のゲームセッションの種類を持つ最も顕著なケースとしては、 
+中でも一際目立つアーティファクトは、カメラを回転させたときの点滅です。範囲がスクリーン外になった途端に正しいカリングが行えなくなります。
+
+**[Visualize (可視化)] -> [Out of Bounds Pixels (範囲外のピクセル)]** では、オブジェクトの範囲外にある全てのピクセルが表示されます。
+
+## 使用法
+
+ビューポート上でこのモードを有効にするには、ビューポート上の **[Show (表示)]** ボタンを **左クリック** し、**[Visualize (可視化)] から [Out of Bounds Pixels (範囲外のピクセル)]**を選択します。
+
+![](OOBP_showMenu.png)
+
+## オーナーの境界を継承する
+
+ブループリントは、多くの場合、親の範囲を継承する設定が可能なので、親の範囲が子よりも小さい場合に問題が発生します。
+
+以下のキューブ オブジェクトは ボックス コンポーネント (イメージ中の赤いボックス) と スタティックメッシュ コンポーネント で構成されたブループリントです。スタティック メッシュは 
+ボックスから範囲を継承するように設定されます。ボックス イベントがスタティック メッシュよりも小さい場合、 
+Visualize Out of Bounds Pixels がこれらの部分を様々な色 (青、黄色、白) で表示します。
+
+[REGION:lightbox]
+[![](OOBP_smallBounds_boxExtents.png)(w:300)](OOBP_smallBounds_boxExtents.png) [![](OOBP_smallBounds.png)(w:300)](OOBP_smallBounds.png) [![](OOBP_smallBoundsRotated.png)(w:300)](OOBP_smallBoundsRotated.png)
+
+境界ボックス (イメージ中の青いボックス) は常にワールドに合わせているので、ボックスを回転させることでメッシュの部分を境界ボックスに戻すことができます。ただし、 
+範囲外にあるメッシュの部分がカメラビューに残る場合は、境界ボックスがカメラから完全に外ればその部分が消滅します。
+
+以下は、ボックス コンポーネントの 範囲設定を正しく修正したブループリントです。
+
+[![](OOBP_correctBounds_boxExtents.png)(w:300)](OOBP_correctBounds_boxExtents.png) [![](OOBP_correctBounds.png)(w:300)](OOBP_correctBounds.png) [![](OOBP_correctBoundsRotated.png)(w:300)](OOBP_correctBoundsRotated.png)
+[/REGION]
+
+## World Position Offset または Displacement
+
+それ以外にも、シェーダーがリアルタイムで頂点のワールド位置を修正し、それがオブジェクトのオリジナルの境界ボックスの範囲より大きく外れて押し出されてしまった場合に 
+この現象が頻繁に発生します。
+
+[REGION:lightbox]
+[![](OOBP_worldPostionOffsetIssue_02.png)(h:300)](OOBP_worldPostionOffsetIssue_02.png) [![](OOBP_worldPostionOffsetIssue_01.png)(h:300)](OOBP_worldPostionOffsetIssue_01.png)
+[/REGION]
+
+このオブジェクトの部分は、境界ボックスが完全に非表示あるいはカメラから外れた後で可視化されるので、タイミングが適切でないと点滅または消滅します。
+
+このケースでは、コンポーネントの **[Details (詳細)]** パネルにある **Rendering** を展開すると出てくる **[Bounds Scale]** を使って、すべてのピクセルが含まれるように境界ボックスを広げることができます。ただし、シャドー キャスティングでこれを行う場合、 
+シャドー キャスターが大きいとパフォーマンス負荷も大きくなるので注意してください。スケルタルメッシュ上では、範囲は物理アセットから抽出され、 
+個々のボーンは範囲に貢献しているかどうかでマークされます。
+
+![](OOBP_BoundsScale.png)
+
+##スケルタル メッシュ
+
+スケルタルメッシュがその範囲から変位する主な理由は、メッシュをアクタ ルートから遠ざけてしまうアニメーションです。ただし、物理アセットのあるスケルタルメッシュは、 
+物理アセットを使って範囲を計算します。
+これを有効にするためには、 **コンテンツ ブラウザ** でスケルタルメッシュを **右クリック** して **[Create Physics Asset (物理アセットを作成)]** を選択します。デフォルト設定を使用すれば、スケルタルメッシュの範囲に起因するエラーを通過することができますが、恐らく結果は編集したいと思います。 
+**物理アセット** の編集に関する詳細は、 [物理アセットツール](Engine/Physics\PhAT) を参照してください。

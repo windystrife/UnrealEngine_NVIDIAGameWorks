@@ -1,0 +1,197 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+
+#if MSAA_SAMPLE_COUNT > 1
+Texture2DMS<float4, MSAA_SAMPLE_COUNT> EditorPrimitivesColor;
+Texture2DMS<float, MSAA_SAMPLE_COUNT> EditorPrimitivesDepth;
+#else
+Texture2D EditorPrimitivesColor;
+//SamplerState EditorPrimitivesColorSampler;
+Texture2D<float> EditorPrimitivesDepth;
+#endif
+
+// depth in the red channel in DeviceZ
+Texture2D		FilteredSceneDepthTexture;
+SamplerState	FilteredSceneDepthTextureSampler;
+
+// r. value of r.Editor.OpaqueGizmo .g:r.Editor.MovingPattern ba: unused
+float4 EditorRenderParams;
+
+float4 GetScrColorAt(int2 PixelPos, out float OutDeviceZ)
+{
+	// furthest device Z or 0 if there is no
+	OutDeviceZ = 0;
+
+	float4 Ret = 0;
+	
+#if MSAA_SAMPLE_COUNT > 1
+
+	{
+		float SumWeight = 0.00001f;
+
+		for( uint SampleIndex = 0; SampleIndex < MSAA_SAMPLE_COUNT; ++SampleIndex )
+		{
+			float4 Sample = EditorPrimitivesColor.Load( PixelPos, SampleIndex );
+			float SampleDeviceZ = EditorPrimitivesDepth.Load( PixelPos, SampleIndex ).r;
+
+			// Check if any color was applied to this pixel.  Note  this prevents actual black pixels from being visible
+			float Weight = Sample.a;
+
+			// if not far plane (we use inverted z)
+			if(Weight == 0 && SampleDeviceZ > 0.0f)
+			{
+				// We want MSAA wireframe rendering but the basepass outputs 0 as alpha value so we fix that here
+				Weight = 1;
+			}
+
+			FLATTEN if(Weight)
+			{
+				OutDeviceZ = max(OutDeviceZ, SampleDeviceZ);
+				
+				// fix gamma (better quality)
+	//			Sample.rgb = pow(Sample.rgb, 2.2f);
+
+//				Ret += float4(Sample.rgb, 1) * Weight;	// input is converted to premultipled alpha (transparent layer has a color) good
+				Ret += float4(Sample.rgb, Weight);		// input is already premultipled alpha (transparent layer is black)
+
+				SumWeight += Weight;
+			}
+		}
+
+		Ret.rgb /= MSAA_SAMPLE_COUNT;
+		Ret.a /= MSAA_SAMPLE_COUNT;
+
+		// fix gamma (better quality)
+//		Ret.rgb = pow( Ret.rgb, 1.0f / 2.2f );
+	}
+
+#else
+//	Ret = Texture2DSample(EditorPrimitivesColor, EditorPrimitivesColorSampler, UV);
+	Ret = EditorPrimitivesColor.Load(int3(PixelPos, 0));
+
+	OutDeviceZ = EditorPrimitivesDepth.Load(int3(PixelPos, 0)).r;
+
+	if(Ret.a == 0 && OutDeviceZ > 0.0f)
+	{
+		// We want MSAA wireframe rendering but the basepass outputs 0 as alpha value so we fix that here
+		Ret.a = 1;
+	}
+
+	// make premultiplied alpha (if input isn't yet)
+//	Ret.rgb *= Ret.a;
+
+#endif
+
+	// bring out of premultiplied
+	Ret.rgb /= max(Ret.a, 0.0001f);		
+	// fix gamma
+	Ret.rgb = pow( Ret.rgb, 1.0f / 2.2f );
+	// bring back to premultiplied
+	Ret.rgb *= Ret.a;
+
+	return Ret;
+}
+
+void MainPS(noperspective float4 UVAndScreenPos : TEXCOORD0, out float4 OutColor : SV_Target0)
+{
+	float2 UV = UVAndScreenPos.xy;
+	float2 PixelPosF = UVAndScreenPos.zw * ScreenPosToPixel.xy + ScreenPosToPixel.zw + 0.5f;
+	int2 PixelPos = int2(PixelPosF);
+
+	float4 DestColor = Texture2DSample(PostprocessInput0, PostprocessInput0Sampler, UV);
+
+	// furthest device Z or 0 if there is no
+	float MaxDeviceZ;
+
+	float4 SrcColor = GetScrColorAt(PixelPos, MaxDeviceZ);
+
+/* disabled for now
+
+	// UE3 wireframe style outline (non MSAA and slower)
+	float Opacity = 1.0f;
+
+	UNROLL for(int dy = -1; dy <= 1; ++dy)
+	{
+		UNROLL for(int dx = -1; dx <= 1; ++dx)
+		{
+			float LocalDeviceZ;
+			GetScrColorAt(PixelPos + int2(dx, dy), LocalDeviceZ);
+			
+			// get the difference between the current pixel and the neighbor
+			float DepthDistanceDelta = ConvertFromDeviceZ(MaxDeviceZ) - ConvertFromDeviceZ(LocalDeviceZ);
+//			float DepthDistanceDelta = -(MaxDeviceZ - LocalDeviceZ);
+
+			// if the neighboring pixel is closer to the camera than the current pixel
+			if (DepthDistanceDelta > 0)
+			{
+				const float FadeStartDistance = 100.0f;
+				const float FadeGradientDistance = 0.2f;
+
+				// find percent along the domain of "StartFadeDistance - CompleteFadeDistance", (x - start)/distance
+				float RawTransparency = (DepthDistanceDelta - FadeStartDistance) / FadeGradientDistance;
+				
+				// clamp that value to 0.0 - 1.0f and invert
+				float TempOpacity = 1.0f - saturate(RawTransparency);
+				
+				// take the minimum so far
+				Opacity = min(Opacity, TempOpacity);
+			}
+		}
+	}
+	
+	SrcColor.a *= Opacity;
+*/
+
+	// debugging functionality 
+//	OutColor = float4(SrcColor.aaa*0.18f,0) + float4(0.13,0.13,0.13,0) * (1-SrcColor.a);	return;
+//	OutColor = float4(SrcColor.rgb,0) + float4(0.13,0.13,0.13,0) * (1-SrcColor.a);	return;
+//	OutColor = SrcColor  / (0.001f+SrcColor.a);	return;
+//	OutColor = SrcColor.a;	return;
+
+	// dejitter the sample position and make a filtered lookup - for planes this allows to reconstruct a much less jittery depth comparison function, it however doesn't fix silhuetes
+	float DeviceZ = Texture2DSampleLevel(FilteredSceneDepthTexture, FilteredSceneDepthTextureSampler, (PixelPosF - View.TemporalAAParams.zw) * View.BufferSizeAndInvSize.zw, 0).r;
+
+	// Soft Bias with DeviceZ for best quality
+	const float DeviceDepthFade = 0.00005f;
+	float DepthMask = saturate(1.0f - (DeviceZ - MaxDeviceZ) / DeviceDepthFade);
+
+	// moving diagonal lines
+//	float PatternMask = saturate(sin((PixelPos.x + PixelPos.y) * 0.8f + 8.0f * View.RealTime * EditorRenderParams.g));
+	// non moving high frequency pattern
+//	float PatternMask = ((PixelPos.x + PixelPos.y) % 2) * 0.7f;
+	float PatternMask = ((PixelPos.x/2 + PixelPos.y/2) % 2) * 0.7f;
+
+	// the contants express the two opacity values we see when the primitive is hidden
+	float LowContrastPatternMask = lerp(0.2, 1, PatternMask);
+
+	// temporary
+	LowContrastPatternMask = saturate(lerp(LowContrastPatternMask, 1, EditorRenderParams.r));
+
+	//
+	float HiddenMask = lerp(0.7f, 1.0f, DepthMask);
+	float DarkenMask = lerp(LowContrastPatternMask, 1.0f, DepthMask);
+
+	// Dest color has gamma applied so we need to remove it before applying linear color
+//	DestColor.rgb = pow( DestColor.rgb, 2.2f );
+
+	// fade if occluded
+//	OutColor.rgb = lerp(DestColor.rgb, DarkenMask * SrcColor.rgb / max(0.001f, SrcColor.a), SrcColor.a * HiddenMask );
+	// darken if occluded
+//	OutColor.rgb = lerp(DestColor.rgb, DarkenMask * SrcColor.rgb * HiddenMask, SrcColor.a );
+
+	// SrcColor is in premultipied alpha
+
+	OutColor.rgb = DestColor.rgb * (1 - SrcColor.a) + SrcColor.rgb * (DarkenMask * HiddenMask);
+
+	// Re-apply gamma corrrection
+//	OutColor.rgb = pow( OutColor.rgb, 1/2.2f );
+
+#if POST_PROCESS_ALPHA
+	OutColor.a = lerp(DestColor.a, 1, SrcColor.a * DarkenMask * HiddenMask);
+#else
+	OutColor.a = 0;
+#endif
+}

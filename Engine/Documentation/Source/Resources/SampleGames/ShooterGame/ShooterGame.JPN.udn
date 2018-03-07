@@ -1,0 +1,233 @@
+﻿INTSourceChangelist:2723410
+Availability:Public
+Title:シューティング ゲーム
+Crumbs:%ROOT%, Resources
+Description:C++ で作成したファーストパーソンシューティング ゲーム プロジェクトサンプルのドキュメント
+Related:Programming/Basics
+Related:Gameplay/ClassCreation/CodeOnly
+Related:Programming/UnrealArchitecture/Reference/Functions
+Related:Gameplay/Networking/Actors/Components
+Related:Gameplay/Networking/Actors/RPCs
+Related:Engine/Blueprints/Editor
+Related:Engine/Animation/AnimMontage
+Related:Engine/Animation/Blendspaces
+Related:Engine/Audio/Overview
+Related:Programming/Slate
+Related:Gameplay/Input
+Related:Engine/Rendering/ParticleSystems
+Version:4.9
+
+
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Resources/SampleGames/ShooterGame:title%](Shooter_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%\anim_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/ShooterGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/ShooterGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/ShooterGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Resources/SampleGames/ShooterGame:title%](Shooter_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%\anim_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/ShooterGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/ShooterGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/ShooterGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+
+[REGION:fullwidth]
+![](ShooterGame.png)
+[/REGION]
+
+[TOC(start:2)]
+
+ファーストパーソンシューティング ゲームのサンプルは PC 向けのマルチプレイ FPS ゲームのサンプルです。このサンプルには、簡単なフロントメニュー システムに沿った、 
+武器やゲームタイプの基本的な実装方法が含まれています。
+
+取り上げているコンセプトの全リストは以下となります。
+
+* 速射武器 (ShooterWeapon_Instant)
+* 発射物ベースの武器 (ShooterWeapon_Projectile + ShooterProjectile)
+* Feee-for-all のゲームモード (ShooterGame_FreeForAll)
+* チーム対戦型のゲームモード (ShooterGame_TeamDeathMatch)
+* ピックアップ アイテム (ShooterPickup)
+* メインメニュー (ShooterHUD_Menu)
+
+
+## 武器の Fire (発砲) システム
+
+武器の基本的な発砲機能です。弾薬の管理、リロード (再充填)、 
+レプリケーションは `AShooterWeapon` クラスで実装されます。
+
+武器はローカル クライアントとサーバーで発砲ステートへ切り替えられます (RPC 呼出し経由)。 
+`DetermineWeaponState()` は、武器のステートを決定するためにあるロジックを実行する `StartFire()`/`StopFire()` で呼ばれ、 
+その後武器を適切なステートへセットするために `SetWeaponState()` を呼びます。一度発砲ステートになると、ローカルクライアントは繰り返し 
+ `HandleFiring()` を呼びだし、今度は `FireWeapon()` を呼び出します。そして弾薬を更新して、サーバーで同様の処理をさせるために 
+ `ServerHandleFiring()` を呼びます。サーバー上の処理は、 `BurstCounter` 変数を通じて、発砲されたそれぞれの弾を 
+リモート クライアントへ通知する役割も果たします。
+
+リモート クライアントに実行されるアクションは単に表面的なものです。武器の発射は、リモート クライアントがアニメーションやスポーン エフェクトを再生できるように `BurstCounter` プロパティを使用してレプリケートされます。 
+武器の発砲に関する全ての 
+ビジュアル面を実行します。
+
+### 速射武器の発射
+
+ライフルやレーザー銃のような発砲や投射が早いタイプの武器は、ヒット検出に速射タイプを利用します。基本コンセプトは、 
+プレイヤーが武器を発砲すると、インスタンスに狙いが定まっている方向にラインチェックが実行され、ヒットの有無を確認します。
+
+このメソッドは、高精度な測定とサーバー側に存在しないアクタとの連動を有効にします。ローカル クライアントは 
+演算を実行し、何がヒットされたかをサーバーへ通知します。その後サーバーがヒットを照合し、必要であればそれを 
+レプリケートします。
+
+`FireWeapon()` で、ローカル クライアントは照準線上で最初にブロックしたヒットをカメラ位置から追跡をして、 
+その結果を `ProcessInstantHit()` へ渡します。ここから以下の 3 つのうちどれかが起こります。
+
+* ヒットは照合のためサーバーへ送信されます (`ServerNotifyHit()` --> `ProcessInstantHit_Confirmed()`)。
+* ヒット アクタがサーバーに存在しない場合、ヒットはローカルで処理されます(`ProcessInstantHit_Confirmed()`)。
+* 何もヒットしなかった場合、サーバーにその由を通知します (`ServerNotifyMiss()`)。
+
+
+確認されたヒットは、ヒット アクタへダメージを適用し、トレイルのスポーン、衝撃エフェクト、 
+そして`HitNotify` 変数にヒットに関するデータを設定して、リモート クライアントへ通知します。スポーンされたばかりのトレイルを見逃して、リモート クライアントに `HitNotify` を設定します。 
+この通知は `HitNotify` の変更を検索して、ローカル クライアントとして同トレースを実行し、必要に応じてトレイルや衝撃をスポーンします。
+
+速射タイプの実装は武器の拡散も扱っています。トレース / 照合の一貫性を保つため、ローカルクライアントは  
+`FireWeapon()` が実行されるたびにランダム シードを使用し、すべての RPC と `HitNotify` パックへ送信します。
+
+### 発射ベースタイプの武器の発砲
+
+発射ベースタイプは弾を発砲する武器のシミュレーションに使用します。比較的遅い動作で、衝撃時に爆発し、 
+重力などの影響を受けます。手榴弾の投下など、武器を使用した瞬間の発射結果を 
+断定できない場合などに使用します。このようなタイプの武器、実際の物理オブジェクト、または _発射物_ はスポーンされ、 
+武器の狙いが定められた方向へ送信されます。ヒットは、発射物と別のオブジェクトがワールドで衝突すると断定されます。
+
+発射ベースタイプは、ローカル クライアントがカメラからトレースして、 `FireWeapon()` の照準線上にあるアクタをチェックします。 
+速射タイプと似ています。プレイヤーが何かに狙いを定めている場合、そのスポットにヒットするように発射方向を調整して、 
+武器の照準方向へ発射物アクタをスポーンさせるためにサーバーで `ServerFireProjectile()` を呼びます。
+
+発射物の動作コンポーネントがサーバーでヒットを検出すると、イベントをクライアントへ通知するために、ダメージ、スポーンエフェクト、 
+レプリケーションからの削除を処理して爆発します。そして発射物はコリジョン、動作、可視性をオフにして、 
+レプリケーションの更新時間を 1 秒間クライアントに与えてから自身を破壊します。
+
+クライアント側では、爆発エフェクトは `OnRep_Exploded()` 経由でレプリケートされます。
+
+## プレイヤーのインベントリ
+
+プレイヤーのインベントリは、プレイヤーのポーン (`AShooterCharacter`) の Inventory プロパティに格納された  
+`AShooterWeapon` 参照の配列です。現在装備されている武器はサーバーからレプリケートされます。追加で、 `AShooterCharacter` も 
+現在保持する武器をローカルの `CurrentWeapon` で格納します。これにより、新しい武器が装備されると 
+以前の武器を装備されていない状態にします。
+
+プレイヤーが武器を装備すると、一人称はローカル、三人称はその他でポーンに適切な武器メッシュがアタッチされ、
+武器のアニメーションが再生されます。アニメーションが再生される間は、武器は装備ステートへ 
+切り替わります。
+
+## プレイヤーのカメラ
+
+一人称モードでは、腕の位置が常にプレイヤーのビューに相対的になるように、ポーンのメッシュはカメラにハードアタッチされます。 
+このアプローチの不都合な点は、メッシュ全体がカメラのヨー (左右回転) とピッチ (上下動) プレイヤーに合致するように回転するため、 
+プレイヤーのビューから足が見えないことが挙げられます。
+
+カメラ更新の基本フローは以下となります。
+
+* `AShooterCamera::UpdateCamera()` は各ティックで実行されます。
+* プレイヤーの入力に基づいてカメラ回転の更新に `APlayerCamera::UpdateCamera()` が呼ばれます。
+* カメラと合致させて一人称メッシュを回転させる際に必要な計算の実行に `AShooterCharacter::OnCameraUpdate()` が呼ばれます。
+
+
+プレイヤーが死ぬと、 `AShooterPlayerController::PawnDied()` ハンドラーに固定位置と回転が設定された 
+ _death_ カメラに切り替わります。この関数は、いくつかの異なる位置を循環する `AShooterPlayerController::FindDeathCameraSpot()` を呼び、 
+レベルのジオメトリに妨害されない最初の位置を使用します。
+
+## オンライン マルチプレイ
+
+オンライン マルチプレイのバトルは 3 ステージに分けられます。 
+
+* ウォームアップ
+* マッチプレイ バトル
+* ゲームオーバー
+
+
+最初のプレイヤーがゲームに参加すると、 **ウォームアップ** ステージが開始します。カウントダウン タイマーを表示し、 
+他のプレイヤーに参加のチャンスを与える短時間のステージです。このステージ中は、プレイヤーは _スペクテーター (観戦者) _ モードとなり、 
+マップ内を飛び回ることができます。カウントダウン タイマーが終了すると、全プレイヤーの再起動とプレイヤーのポーンをスポーンするために 
+ `StartMatch()` が呼ばれます。 
+
+バトルは、サーバーの `AShooterGameMode::DefaultTimer()` 関数でゲーム時間を計算して記録されます。 
+この関数は、1 _ゲーム_ 秒間に一回と同等の現在の時間の遅れに相当するレートを適用したループタイマーを使用して実行されます。 
+これはゲームのレプリケーション情報クラス (`AShooterGRI`) の `RemainingTime` プロパティに格納され、 
+その後クライアントへレプリケートされます。残り時間が 0 になると、 `FinishMatch()` が呼ばれてゲームセッションは終了します。全プレイヤーにバトルの終了が告げられ、 
+動作とヘルスは無効となります。
+
+## メニュー システム
+
+メニュー システムは [スレート UI フレームワーク](Programming/Slate) を使用して作成します。**メニュー** 、 **メニュー ウィジェット** 、 **メニュー アイテム** で構成されています。 
+各メニューには、全てのメニュー アイテムに対応するレイアウト、内部イベント処理、そしてアニメーションに関与する 
+単一のメニューウィジェット (`SSHooterMenuWidget`) があります。メニューアイテム (`SSHooterMenuItem`) は、アクションを実行しその他のメニューアイテムをいくつでも格納することができる 
+複合オブジェクトです。これらは、その他のメニューアイテムを構成するサブメニュー一式を含む、ラベルやボタン、もしくは「タブ」のように簡単なものです。 
+このメニューはキーボードやコントローラで操作しますが、現時点でのマウスのサポートには制限があります。
+
+各メニューは `Construct()` 関数によって _構成_ されています。この関数は、 
+サブアイテムを含む必要不可欠のメニューアイテムを全て追加し、必要な箇所へデリゲートをアタッチします。これは、 `AddMenuItem()` や `AddMenuItemSP()` など、ヘルパーメソッドを使用して処理され、 
+「`SShooterMenuWidget.h`」ファイルの `MenuHelper` ネームスペースで定義されます。
+
+前回のメニューへのナビゲーションはメニューへの共有ポインタの配列を使用し、メニュー ウィジェットの `MenuHistory` 変数に格納されます。 
+`MenuHistory` 変数はこれまでに入力されたメニューを保持するスタックのような振る舞いをし、復元を簡単にします。このメソッドを使用することによって、 
+メニュー間に直接的な関係は構築されず、必要に応じて同メニューは別の場所で再利用されます。
+
+アニメーションは `SShooterMenuWidget::SetupAnimations()` で定義された補間カーブを使用して実行します。それぞれのカーブには、開始時間、 
+継続時間、そして補間メソッドがあります。アニメーションは再生や逆再生が可能で、それらの属性は指定した時間に `GetLerp()` を使用してアニメートすることができます。 
+これにより 0.0f から 1.0f の値が返されます。「`SlateAnimation.h`」 の `ECurveEaseFunction::Type` で定義された 
+いくつかの異なる補間メソッドがあります。
+
+
+### メイン メニュー
+
+![](menu.png)
+
+メインメニューは、デフォルトで _ShooterEntry_ マップを指定してゲームを開始すると自動的に開きます。そして、特別なゲームモードである `AShooterGameMode` を読み込みます。 
+このモードは、 `PostInitializeComponents()` 関数内の `FShooterMainMenu` クラスの新規インスタンスを作成してメインメニューを開く  
+`AShooterPlayerController_Menu` クラスを使用します。
+
+### インゲーム メニュー
+
+![](ingame_menu.png)
+
+インゲームメニューは `AShooterPlayerController` クラスの `PostInitializeComponents()` 関数で作成され、 
+ `OnToggleInGameMenu()` 関数を経由して開いたり閉じたりします。
+
+### オプション メニュー
+
+オプション メニューは、メイン メニューとインゲーム メニュー両方のサブメニューとして利用できます。唯一の違いは変更の適用方法です。
+
+* メインメニューからのアクセス時は、プレイヤーがゲームを開始した時に変更が適用されます。 
+* インゲーム メニューからのアクセス時は、メニューが閉じられた直後に変更が適用されます。
+
+
+* オプションメニューの設定は `GameUserSettings.ini` に保存されて、起動時に自動的に読み込まれます。

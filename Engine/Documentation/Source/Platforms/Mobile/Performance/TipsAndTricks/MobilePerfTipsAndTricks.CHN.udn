@@ -1,0 +1,191 @@
+﻿INTSourceChangelist:2806926
+Title:移动性能提示与技巧
+Description:用于 Unreal Match 3 中的优化和技术，确保支持移动设备上的最佳性能。
+Crumbs:
+Parent:Platforms/Mobile/Performance
+Availability:Public
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Platforms/Mobile/Performance/TipsAndTricks:title%](Platforms/Mobile/Performance/TipsAndTricks/perf_topic.png)
+	[/PARAM]
+	[PARAM:title]
+		%Platforms/Mobile/Performance/TipsAndTricks:title%
+	[/PARAM]
+	[PARAM:description]
+		%Platforms/Mobile/Performance/TipsAndTricks:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Platforms/Mobile/Performance/TipsAndTricks]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Platforms/Mobile/Ads:title%](Platforms/Mobile/Performance/TipsAndTricks/perf_topic.png)
+	[/PARAM]
+	[PARAM:title]
+		%Platforms/Mobile/Performance/TipsAndTricks:title%
+	[/PARAM]
+	[PARAM:description]
+		%Platforms/Mobile/Performance/TipsAndTricks:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Platforms/Mobile/Performance/TipsAndTricks]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+此指南包含应用到 Unreal Match 3 的优化和技术，确保在支持设备上运行时的最佳性能。
+
+## 默认设备描述
+
+为确保尽量多的移动设备支持 Unreal Match 3，须对 **DefaultDeviceProfiles.ini** 文件进行修改，在低端移动设备上运行 Unreal Match 3 时调低其渲染设置。这样游戏便可在众多移动设备上运行，而无需牺牲整体观感。以下部分将讲解部分设置，以及如何在虚幻引擎 4 移动项目中进行使用。
+
+打开 `Match3\Config\DefaultDeviceProfiles.ini` 路径下的 Unreal Match 3 DefaultDeviceProfiles.ini 文件。
+
+DefaultDeviceProfiles.ini 打开后，找到以下 iOS 和安卓段：
+
+	[IOS DeviceProfile]
+	+CVars=r.Streaming.PoolSize=160
+	+CVars=r.Streaming.UseFixedPoolSize=1
+	+CVars=p.EnableAsyncScene=0
+	+CVars=r.Scalability.MaxTextureQualityForLowVirtualMemory=3
+	+CVars=r.MaxAnisotropy=1 
+
+	[Android DeviceProfile]
+	+CVars=r.Streaming.PoolSize=160
+	+CVars=r.Streaming.UseFixedPoolSize=1
+	+CVars=p.EnableAsyncScene=0
+	+CVars=r.Scalability.MaxTextureQualityForLowVirtualMemory=3
+	+CVars=r.MaxAnisotropy=1 
+
+[region:tip]
+对于 Unreal Match 3 而言，我们并未在基础设备描述中进行添加，只对每种设备单独的设备描述进行了修改。
+[/region]
+
+以上两个文本段负责每种设备系列默认启用的基础渲染设置。放入此处的 Cvars 可用于项目支持的每台移动设备。只能添加移动设备支持的 Cvars，项目在不支持的移动设备上运行时性能极差。为避免这种情况的发生，在设备描述中只可添加设备特定的 CVars。以下是 iPhone 4s 和 iPhone 6s 的设备描述对比。
+
+	[iPhone4s DeviceProfile]
+	+CVars=r.MobileContentScaleFactor=1.0
+	+CVars=r.ParticleLODBias=1
+	+CVars=sg.EffectsQuality=2
+	+CVars=fx.MaxCPUParticlesPerEmitter 50
+
+	[iPhone6 DeviceProfile]
+	+CVars=r.MobileContentScaleFactor=2.0
+	+CVars=r.ParticleLODBias=0
+	+CVars=sg.EffectsQuality=3
+	+CVars=fx.MaxCPUParticlesPerEmitter 1000
+
+iPhone 6 性能远强于 iPhone 4，因此 6 诸多设置的数值均高于 4。在 iOS 下方的安卓段中，高端和低端设备之间存在同样的差异。
+
+	[Android_Low DeviceProfile]
+	+CVars=r.MobileContentScaleFactor=1.0
+	+CVars=r.ParticleLODBias=1
+	+CVars=sg.EffectsQuality=2
+	+CVars=fx.MaxCPUParticlesPerEmitter 50
+	BaseProfileName=Android
+
+	[Android_High DeviceProfile]
+	+CVars=r.MobileContentScaleFactor=1.0
+	+CVars=r.ParticleLODBias=0
+	+CVars=sg.EffectsQuality=3
+	+CVars=fx.MaxCPUParticlesPerEmitter 1000
+	BaseProfileName=Android
+
+以下是 Unreal Match 3 中的设置详解及其作用。
+
+| 设置名称 | 描述 |
+| ------------ | ----------- |
+| r.MobileContentScaleFactor | 控制内容在设备中的缩放方式。如设为 0，将使用设备的原始分辨率。如将 DPI 缩放曲线用于 UI 缩放，须将此设为 0。|
+| r.ParticleLODBias | 控制显示的粒子 LOD。数值 0 为基础，1 使用第一个 LOD，2 使用第二个 LOD，以此类推。在 Unreal Match 3 中只使用了第一个 LOD，在低端设备上将粒子生成数量减半。|
+| sg.EffectsQuality | 控制每次 tick 的粒子生成率。范围 0 - 3，默认值为 3。数字越低，每次 tick 生成的粒子数量越少。数字设为 1 后生成粒子数量极少，只推荐在非常低端的设备上使用。数字设为 0 后将完全不生成粒子。|
+| fx.MaxCPUParticlesPerEmitter | 控制每个发射器发射 CPU 粒子的方式。|
+
+## 以不同方式应用 LOD
+
+![](ULOD_00.png)
+
+细节级别（LOD）是一种渲染技巧，可减少离玩家摄像机较远物体的渲染开销。LOD 的工作方式是：保存物体的多个低精度版本，然后基于物体到摄像机的距离在这些版本之间切换。从以下视频可了解 LOD 如何进行切换。
+
+[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:videoid]
+	ZtJt5GhaNhI
+	[/PARAMLITERAL]
+	[PARAMLITERAL:width]
+	640
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	390
+	[/PARAMLITERAL]
+[/OBJECT]
+
+Unreal Match 3 未使用静态网格体 LOD，但使用了粒子特效 LOD，降低低端设备上的渲染需求。操作方法为：首先新建一个将一颗粒子作为起始点的 LOD。之后，新建 LOD 中生成的粒子量将减半。在某些情况下，特效的整个模块将被禁用。下图为实际操作中的 VFX LOD。 
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Base](PLOD_Base_00.png)(w:320)
+	[/PARAM]
+	[PARAM:after]
+	![LOD 1](PLOD_LOD_00.png)(w:320)
+	[/PARAM]
+[/OBJECT]
+
+<!--
+[REGION:imagetable]
+| ![](PLOD_Base_00.png) | ![](PLOD_LOD_00.png) |
+| --- | --- |
+| 基础 | LOD 1 |
+[/REGION]
+-->
+
+上图中，显示当前所选宝石的 **P_Selected_Title** 粒子特效已针对低端设备进行优化。左图为 **P_Selected_Title** 粒子特效的基础效果，针对高端设备使用。仔细查看图片会发现粒子特效中存在一些白色小方块。右图中也为相同的 **P_Selected_Title** 特效，但不存在白色小方块。它们已从特效 LOD 中完全移除，以提升 Unreal Match 3 在低端移动设备上的运行性能。然而，现在操作只完成了一半。下一步需要定义哪些移动设备使用主粒子特效，哪些移动设备使用基于主粒子特效的 LOD。首先在文本编辑器中打开 DefaultDeviceProfiles.ini，找到 **Android_Low DeviceProfile** 输入，如下图所示。
+
+![](ULOD_Android_Low_Profile.png)
+
+在 Android_Low Device Profile 段中添加以下 Cvar 并将其设为 1，强制粒子特效使用第一个 LOD。
+
+	+CVars=r.ParticleLODBias=1
+	
+Android Device Profile 段中的中低设备输入表明中低端安卓移动设备均使用粒子特效 LOD，而高端安卓设备使用基础特效，而非 LOD。下图说明如何使低端、中端和高端安卓设备显示不同 LOD 的粒子特效。
+
+![](ULOD_Android_Effect_LOD_Settings.png)
+
+[region:note]
+此处以安卓为例，相同的概念和命令也可用于 iOS 段。
+[/region]
+
+## 在安卓设备上录制视频
+
+在特定安卓设备上打开控制台窗口，输入以下命令行参数后即可录制视频。
+
+	adb shell screenrecord /sdcard/(Insert Name Here).mp4 --bit-rate 8000000
+
+可对设备进行最长 180 秒的录屏。在 ADB 控制台窗口按下 **Ctrl + C** 即可立即停止视频录制。
+
+视频文件通常保存在手机的根目录中，也可在设备插入开发电脑后搜索视频命名进行查找。 
+
+## 为角色打光
+
+Unreal Match 3 的角色材质使用默认照亮光照模型，而非开销更低的不照亮光照模型。购买并启用夜晚主题后，火把的光线便会对角色进行动态着色和阴影投射。如材质为不照亮，动态阴影互动便无法实现。动态光照的开销较高，在移动设备上尤其如此。Unreal Match 3 使用的是单个动态点光源，降低了资源使用，不会产生明显的性能区别。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Default Theme](Lighting_Default_Theme.png)(w:320)
+	[/PARAM]
+	[PARAM:after]
+	![Night Theme](Lighting_Night_Theme.png)(w:320)
+	[/PARAM]
+[/OBJECT]
+
+<!--
+[REGION:imagetable]
+| ![](Lighting_Default_Theme.png)(w:320) | ![](Lighting_Night_Theme.png)(w:320) |
+| --- | --- |
+| 默认主题 | 夜晚主题 |
+[/REGION]
+-->

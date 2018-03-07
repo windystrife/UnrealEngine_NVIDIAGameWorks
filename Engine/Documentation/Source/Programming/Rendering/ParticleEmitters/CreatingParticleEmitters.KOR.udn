@@ -1,0 +1,396 @@
+﻿INTSourceChangelist:3151855
+Availability:Docs
+Title:파티클 이미터 테크니컬 가이드
+Crumbs:%ROOT%, Programming, Programming/Rendering
+Description:새로운 파티클 이미터 유형 추가법에 대한 프로그래머용 안내서입니다.
+Version: 4.9
+tags:Rendering
+
+[TOC (start:2 end:3)]
+
+새로운 이미터 유형을 생성하는 데는 커스텀 `ParticleEmitterInstance`, `ParticleModuleTypeData` 가 필요합니다. 이 가이드는 이들 각각의 핵심적인 면에 대한 설명과 함께 새로운 커스텀 이미터 유형을 만들어 봅니다.
+
+## 파티클 이미터 레퍼런스
+
+`ParticleEmitterInstance` 변수와 함수는 물론 `ParticleModuleTypeData` 클래스에 대한 설명해 보겠습니다.
+
+### ParticleEmitterInstance 구조체
+
+`ParticleEmitterInstance` 는 `ParticleSystemComponent` 의 이펙트 인스턴스를 나타내는 단일 파티클 이미터입니다.
+
+
+#### 멤버 변수
+
+`ParticleEmitterInstance` 구조체에는 다음과 같은 공용 변수가 있습니다:
+
+| 변수 | 설명 |
+| ---- | ---- |
+| `StaticType` | 이미터 인스턴스 유형 식별자입니다. 이미터 식별은 물론 안전한 형변환(casting) 함수성을 제공하는 데 사용됩니다. |
+| `SpriteTemplate` | 인스턴스가 기반을 두고 있는 `UParticleSpriteEmitter` 템플릿에 대한 포인터입니다. 커스텀 이미터 유형의 경우 필요한 전용 데이터는 보통 `TypeDataModule` 에 저장되며, 이에 대해서는 나중에 자세히 다루겠습니다. |
+| `Component` | 이미터 인스턴스를 _소유한_ (own) `UParticleSystemComponent` 로의 포인터입니다. |
+| `CurrentLODLevelIndex` | 현재 설정된 LOD 레벨 인덱스입니다. |
+| `CurrentLODLevel` | 현재 활성 상태인 `UParticleLODLevel` 로의 포인터입니다. |
+| `TypeDataOffset` | 파티클 데이터 내 `TypeData` 페이로드로의 오프셋입니다. 해당 이미터 유형에만 속하는 파티클별 데이터를 쉽게 구하기 위해 사용됩니다. |
+| `SubUVDataOffset` | 파티클 데이터 내 SubUV 관련 페이로드로의 오프셋입니다. SubUV 보간 모드가 `NONOE` 이외의 것으로 설정되어 있을 때만 관련이 있습니다. |
+| `Location` | 이미터 인스턴스의 위치를 나타내는 FVector 입니다. |
+| `KillOnDeactivate` | _True_ 면 이미터 인스턴스는 비활성화될 때 삭제됩니다. |
+| `bKillOnCompleted` | _True_ 면 이미터 인스턴스는 사이클 완료시 삭제됩니다. |
+| `ParticleData` | 파티클 데이터 배열로의 포인터입니다. |
+| `ParticleIndices` | 파티클 인덱스 배열로의 포인터입니다. 파티클 데이터를 사용하는 순차 순환 대기식(round-robin) 시스템을 제공하기 위해 사용됩니다. |
+| `ModuleOffsetMap` | 모듈 포인터를 자신의 파티클 페이로드 데이터에 대한 오프셋으로 매핑시킵니다. |
+| `InstanceData` | 인스턴스별 데이터 배열로의 포인터입니다. |
+| `InstancePayloadSize` | 인스턴스별 데이터 배열 크기입니다. |
+| `ModuleInstanceOffsetMap` | 모듈 포인터를 자신의 파티클 페이로드 데이터에 대한 오프셋으로 매핑시킵니다. |
+| `PayloadOffset` | 파티클 페이로드 데이터 시작으로의 오프셋입니다. |
+| `ParticleSize` | 바이트 단위 파티클 총 크기입니다. |
+| `ParticleStride` | ParticleData 배열 내 파티클 사이의 (정렬을 위해 필요할 수도 있는) 보폭입니다. |
+| `ActiveParticles` | 현재 이미터에 활성화되어 있는 파티클 수입니다. |
+| `MaxActiveParticles` | 파티클 데이터 배열에 담을 수 있는 파티클 최대 수입니다. |
+| `SpawnFraction` | 지난 스폰 프레임에서 남은 시간 일부입니다. |
+| `SecondsSinceCreation` | 인스턴스 생성 이후 경과된 초 단위 시간입니다. |
+| `EmitterTime` | 이미터 루프 한 번의 시간 _위치_ 입니다. |
+| `OldLocation` | 이미터의 이전 위치입니다. |
+| `ParticleBoundingBox` | 이미터의 바운딩 박스입니다. |
+| `BurstFired` | 버스트 발사 추적용 항목 배열입니다. |
+| `LoopCount` | 인스턴스가 끝낸 루프 횟수입니다. |
+| `IsRenderDataDirty` | 렌더 데이터가 더티 상태인지를 나타내는 플래그입니다. |
+| `Module_AxisLock` | 존재한다면 **AxisLock** 모듈입니다. 각 틱마다 검색을 피하기 위해 유지됩니다. |
+| `EmitterDuration` | 인스턴스 현재 기간입니다. |
+| `EmitterDurations` | 인스턴스 각 LOD 레벨에서의 기간 배열입니다. |
+| `TrianglesToRender` | 이미터가 이 프레임에 렌더링할 트라이앵글 수입니다. |
+| `MaxVertexIndex` | 렌더링시 이미터가 접근할 최대 버텍스 인덱스입니다. |
+
+#### 멤버 변수
+
+ParticleEmitterInstance 구조체에서 기본 함수성을 덮어쓸 수 있는 멤버 함수는 다음과 같습니다:
+
+| 함수 | 설명 |
+| ---- | ---- |
+| [REGION:wrap]`void SetKillOnDeactivate(bool bKill)`[/REGION] | `KillOnDeactivate` 플래그를 주어진 값으로 설정합니다. |
+| [REGION:wrap]`void SetKillOnCompleted(bool bKill)`[/REGION] | `bKillOnCompleted` 플래그를 주어진 값으로 설정합니다. |
+| [REGION:wrap]`void InitParameters(UParticleEmitter* InTemplate, UParticleSystemComponent* InComponent, bool bClearResources = true)`[/REGION] | `ParticleEmitter` 템플릿과 _부모_ `ParticleSystemComponent` 가 제공된 경우 구조체의 파라미터를 초기화시킵니다. |
+| [REGION:wrap]`void Init()`[/REGION] | 인스턴스를 초기화시키기 위해 호출됩니다. |
+| [REGION:wrap]`void Resize(int32 NewMaxActiveParticles, bool bSetMaxActiveCount = true)`[/REGION] | 파티클 데이터 배열 크기를 주어진 `MaxActiveParticles` 수치로 조절하기 위해 호출됩니다. |
+| [REGION:wrap]`void Tick(float DeltaTime, bool bSuppressSpawning)`[/REGION] | 주어진 시간 단위별로 인스턴스를 틱 시킵니다. `bSuppressSpawning` 이 _True_ 면 새 파티클을 스폰하지 않습니다. |
+| [REGION:wrap]`void Rewind()`[/REGION] | 이미터 인스턴스를 되감습니다. |
+| [REGION:wrap]`FBox GetBoundingBox()`[/REGION] | 인스턴스에 대한 바운딩 박스를 반환합니다. |
+| [REGION:wrap]`void UpdateBoundingBox(float DeltaTime)`[/REGION] | 인스턴스에 대한 바운딩 박스를 업데이트합니다. **여기서 프레임의 파티클 최종 위치가 결정되는데, 현 시점에서 모든 업데이트가 완료되어야 하기 때문입니다.** |
+| [REGION:wrap]`uint32 RequiredBytes()`[/REGION] | 이미터가 요하는 파티클별 바이트 수를 구합니다. |
+| [REGION:wrap]`uint8* GetModuleInstanceData(UParticleModule* Module)`[/REGION] | 주어진 모듈에 대해 할당된 인스턴스별 데이터에 대한 포인터를 구합니다. |
+| [REGION:wrap]`uint32 CalculateParticleStride(uint32 ParticleSize)`[/REGION] | 이 인스턴스에 대한 파티클 하나의 보폭을 계산합니다. |
+| [REGION:wrap]`void ResetBurstList()`[/REGION] | 인스턴스에 대한 버스트 라인 정보를 리셋시킵니다. |
+| [REGION:wrap]`float GetCurrentBurstRateOffset(float& DeltaTime, int32& Burst)`[/REGION] | 버스트 생성을 위해 임의로 `DeltaTime` 을 늘려, 현재 버스트 레이트 오프셋을 구합니다. |
+| [REGION:wrap]`float Spawn(float OldLeftover, float Rate, float DeltaTime, int32 Burst = 0, float BurstTime = 0.0f)`[/REGION] | 주어진 현재 시간 단위(DeltaTime)로 인스턴스에 대한 파티클을 스폰합니다. 지난 (OldLeftover) 에서 남은 시간을 계산에 넣습니다. |
+| [REGION:wrap]`void PreSpawn(FBaseParticle* Particle)`[/REGION] | 이 인스턴스 내 파티클에 필요한 사전 스폰 작업을 처리합니다. |
+| [REGION:wrap]`bool HasCompleted()`[/REGION] | 인스턴스가 실행을 마쳤으면 참을 반환합니다. |
+| [REGION:wrap]`void PostSpawn(FBaseParticle* Particle, float InterpolationPercentage, float SpawnTime)`[/REGION] | 이 인스턴스 내 파티클에 필요한 사후 스폰 작업을 처리합니다. |
+| [REGION:wrap]`void KillParticles()`[/REGION] | 죽은 파티클이 있으면 단순히 활성 배열에서 제거하는 식으로 없앱니다. |
+| [REGION:wrap]`void RemovedFromScene()`[/REGION] | 씬에서 인스턴스가 제거될 때 호출됩니다. |
+| [REGION:wrap]`FBaseParticle* GetParticle(int32 Index)`[/REGION] | 주어진 Index 위치의 파티클을 구합니다. |
+| [REGION:wrap]`FDynamicEmitterDataBase* GetDynamicData(bool bSelected)`[/REGION] | 이번 프레임에 이 인스턴스를 렌더링할 다이내믹 데이터를 구합니다. |
+| [REGION:wrap]`void GetAllocatedSize(int32& InNum, int32& InMax)`[/REGION] | 이미터 인스턴스 할당 크기를, 메모리 추적용으로 구합니다. |
+
+
+### ParticleModuleTypeDataBase 클래스
+
+`ParticleModuleTypeDataBase` 는 엔진에서 사용할 **ParticleSystem** 생성시 커스텀 이미터 인스턴스를 생성하는 메커니즘을 제공해 주는 클래스입니다. 예를 들어 `ParticleModuleTypeDataMesh` 클래스는 결국 **ParticleSystem** 용으로 생성되는 `FParticleMeshEmitterInstance` 가 됩니다.
+
+
+#### 멤버 함수
+
+`ParticleModuleTypeDataBase` 구조체에는 다음과 같은 커스텀 이미터 생성 도우미 공용 함수가 있습니다:
+
+| 함수 | 설명 |
+| ---- | ---- |
+| [REGION:wrap]`FParticleEmitterInstance* CreateInstance(UParticleEmitter* InEmitterParent, UParticleSystemComponent* InComponent)`[/REGION] | UE4 파티클 시스템의 최우선 이미터 인스턴스 생성에 있어서의 핵심입니다. 이 함수는 인스턴싱 중인 UParticleEmitter 에서 TypeData 모듈이 발견되면 호출됩니다. 이 함수에서는 바람직한 FParticleEmitterInstance 구조체가 생성되어 반환됩니다. 
+| [REGION:wrap]`void SetToSensibleDefaults()`[/REGION] | 모듈 첫 생성시 호출됩니다. 이 함수를 통해 상식적인 기본값을 설정할 수 있습니다.
+| [REGION:wrap]`void PreSpawn(FParticleEmitterInstance* Owner, FBaseParticle* Particle)`[/REGION] | 이미터 인스턴스의 PreSpawn 함수 도중 호출되는 함수로, 이를 통해 새로이 스폰되는 파티클의 TypeDataModule 전용 셋업이 가능합니다.
+| [REGION:wrap]`void PreUpdate(FParticleEmitterInstance* Owner, int32 Offset, float DeltaTime)`[/REGION] | 이미터 인스턴스 업데이트 이전 호출되는 함수로, 이를 통해 이미터에 포함된 각 모듈과 함께 파티클 업데이트 전 해 줘야 하는 업데이트 처리가 가능합니다.
+| [REGION:wrap]`void PostUpdate(FParticleEmitterInstance* Owner, int32 Offset, float DeltaTime)`[/REGION] | 이미터 인스턴스 업데이트 이후 호출되는 함수로, 이를 통해 이미터에 포함된 각 모듈과 함께 파티클 업데이트 후 해 줘야 하는 업데이트 처리가 가능합니다.
+| [REGION:wrap]`bool SupportsSpecificScreenAlignmentFlags() const`[/REGION] | 파티클 이미터의 화면 정렬 옵션을 덮어쓸 수 있습니다. 현재 메시 이미터에서만 사용됩니다.
+
+
+## 예제 파티클 이미터
+
+커스텀 이미터 인스턴스 작성은 두 단계 작업입니다. 먼저 자신의 이미터 인스턴스 전용 데이터를 제공하게 될 `TypeDataModule` 을 생성하되, 아무때나 아닌 적절한 때 생성해 줘야 합니다. 예로써 '부모' 파티클 시스템 컴포넌트의 회전에 추가로 이미터 인스턴스를 회전시키는 이미터 인스턴스를 만들어 보겠습니다.
+
+### TypeDataModule 선언
+
+첫 단계는 새로운 이미터 인스턴스 유형을 생성하게 될 `TypeDataModule` 을 생성하는 것입니다.
+
+	UCLASS(editinlinenew, collapsecategories, hidecategories=Object)
+	public class UParticleModuleTypeDataSpinner : public UParticleModuleTypeDataBase
+	{
+
+		/** 
+
+			*  주어진 시간에 이미터 인스턴스를 (한바퀴씩) 얼마만큼
+			*  돌릴 것인지 입니다.
+			*/
+
+		UPROPERTY(Category=Spinner)
+		rawdistributionvector Spin;
+
+	#if CPP
+		/**
+		*   커스텀 ParticleEmitterInstance 생성
+		*
+		*   @param  InEmitterParent           이 TypeData 모듈을 담는 UParticleEmitter 입니다.
+		*   @param  InComponent               생성중인 이미터 인스턴스를 '소유하는' UParticleSystemComponent 입니다.
+		*   @return FParticleEmitterInstance* 생성된 이미터 인스턴스 입니다.
+		*/
+		virtual FParticleEmitterInstance*   CreateInstance(UParticleEmitter* InEmitterParent, UParticleSystemComponent* InComponent);
+	#endif
+	}		
+
+### TypeDataModule 구현
+
+`TypeDataModule` 생성자는 `Spin` 변수에 할당할 `UDistributionVectorConstant` 를 생성합니다.
+
+	UParticleModuleTypeDataSpinner::UParticleModuleTypeDataSpinner(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+	{
+		UDistributionVectorConstant* DistributionSpin = ConstructorHelpers::CreateDefaultSubobject<UDistributionVectorConstant>(this, TEXT("DistributionSpin"));
+		DistributionSpin->Constant = FVector(0.0f, 0.0f, 0.0f);
+		Spin.Distribution = DistributionSpin;
+	}
+
+`CreateInstance()` 함수는 이미터 인스턴스를 담을 `ParticleSystemComponent` 에 의해 호출됩니다. 바로 이 곳에서 `TypeDataModule` 은 시스템에 활용될 `ParticleEmitterInstance` 를 어떤 유형이든 생성할 수 있습니다.
+	
+	FParticleEmitterInstance* UParticleModuleTypeDataSpinner::CreateInstance(UParticleEmitter* InEmitterParent, UParticleSystemComponent* InComponent)
+	{
+	   // 우리 Spinner 이미터 인스턴스를 생성합니다.
+	   FParticleSpinnerEmitterInstance* SpinnerInst = ::new FParticleSpinnerEmitterInstance();
+	   if (SpinnerInst)
+	   {
+		  // 이미터에 대한 파라미터를 초기화시킵니다.
+		  SpinnerInst->InitParameters(InEmitterParent, InComponent);
+		  return SpinnerInst;
+	   }
+
+	   // 실패했습니다. NULL 을 반환하여 기본 스프라이트 이미터든 assert 든 생성시킵니다.
+	   return NULL;
+	}
+
+이 예제에서는 `FParticleSpinnerEmitterInstance` 인스턴스가 생성됩니다. 기존 코드를 가급적이면 많이 활용할 수 있도록 `FParticleSpriteEmitterInstance` 에서 파생됩니다.
+
+### 파티클 이미터 구현
+
+`FParticleSpinnerEmitterInstance` 커스텀 이미터 인스턴스 구조체는 다음과 같이 정의됩니다:
+
+	struct FParticleSpinnerEmitterInstance : public FParticleSpriteEmitterInstance
+	{
+	   /** Spinner TypeDatModule 로의 포인터입니다.         */
+	   UParticleModuleTypeDataSpinner* SpinnerTypeData;
+	   /** Tick 호출 도중 사용되었던 로테이션입니다.     */
+	   FVector CurrentRotation;
+	   /** 컴포넌트의 로테이션입니다.      */
+	   FRotator ComponentRotation;
+
+	   /** 생성자 */
+	   FParticleSpinnerEmitterInstance();
+
+	   virtual void InitParameters(UParticleEmitter* InTemplate, UParticleSystemComponent* InComponent, bool bClearResources = true);
+	   virtual void Tick(float DeltaTime, bool bSuppressSpawning);
+	   virtual void UpdateBoundingBox(float DeltaTime);
+
+	   /**
+		*   인스턴스 로테이션을 계산에 넣기 위해 컴포넌트 로테이션을 조절합니다.
+		*/
+	   void AdjustComponentRotation();
+	   /**
+		*   컴포넌트 로테이션을 복원합니다.
+		*/
+	   void RestoreComponentRotation();
+	};
+
+다음 멤버 변수는 `FParticleSpinnerEmitterInstance` 에 들어 있습니다:
+
+| 변수 | 설명 |
+| ---- | ---- |
+| `SpinnerTypeData` | `UParticleModuleTypeDataSpinner` 로의 포인터입니다. 접근하려 할 때마다 TypeData 모듈 형변환을 피하기 위해 직접 유지합니다. |
+| `CurrentRotation` | 이미터 인스턴스의 현재 로테이션을 추적하는 `FVector` 입니다. 로테이션 업데이트를 위해 `Tick()`/`TickEditor()` 에서 잡아온 다음, `UpdateBoundingBox()` 함수 도중 사용하기 위해 저장합니다. |
+
+### 파티클 이미터 구현
+
+커스텀 이미터 인스턴스를 위해 구현된 멤버 함수는 다음과 같습니다:
+
+| 함수 ||
+| ---- | ---- |
+| [INCLUDE:#Constructor] ||
+| [INCLUDE:#InitParameters] ||
+| [REGION:wrap]`virtual void Tick(float DeltaTime, bool bSuppressSpawning)`[/REGION] | `Tick()` 함수는 인스턴스 내 파티클의 스폰과 업데이트를 담당합니다. 우선 EmitterTime 을 사용하여 `SpinnerTypeData` 분포에서 현재 로테이션을 구합니다. 다양한 모듈의 `Spawn()`/`Update()` 함수에서 _부모_ 컴포넌트의 `LocalToWorld` 가 사용될 수 있기 때문에, 이미터 인스턴스 로테이션이 계산되는지 확실히 할 필요가 있습니다. 어떻게? 컴포넌트의 `Rotation` 을 저장해 낸 다음, 거기에 이미터 인스턴스 양을 더해서. 그런 다음 컴포넌트 트랜스폼이 새로운 로테이션을 포함하도록 업데이트시킵니다. 그리고서 이미터 인스턴스의 상위(super) `Tick()` 함수를 호출하여 평소처럼 _틱_ 시킵니다. 컴포넌트 `Rotation` 은 그 후 복원되지요. [INCLUDE:#tick] |
+| [REGION:wrap]`virtual void UpdateBoundingBox(float DeltaTime)`[/REGION] | 우리의 경우 `bUseLocalSpace` 가 _True_ 일 때 이미터 인스턴스 로테이션이 계산에 들어가도록 하려면 `UpdateBoundingBox()` 함수를 덮어써야 합니다. [INCLUDE:#UpdateBoundingBox] |
+| [REGION:wrap]`void FParticleSpinnerEmitterInstance::AdjustComponentRotation()`[/REGION] | `AdjustComponentRotation()` 함수는 이미터 인스턴스 로테이션을 감안하도록 컴포넌트의 `LocalToWorld` 를 변경합니다. [INCLUDE:#AdjustComponentRotation] |
+| [REGION:wrap]`void FParticleSpinnerEmitterInstance::RestoreComponentRotation()`[/REGION] | `RestoreComponentRotation()` 함수는 컴포넌트의 LocalToWorld 에서 이미터 인스턴스 로테이션을 제거합니다. [INCLUDE:#RestoreComponentRotation] |
+
+<!--
+[EXCERPT:Constructor]
+[REGION:transparenttable]
+| --- | --- |
+| [REGION:wrap]`FParticleSpinnerEmitterInstance()`[/REGION] | 생성자 코드는 단지 `SpinnerTypeData` 를 NULL 로, `CurrentRotation` 를 `(0.0f, 0.0f, 0.0f)` 로 초기화시킵니다. |
+| [INCLUDE:#ConstructorCode] ||
+[/REGION]
+[/EXCERPT:Constructor]
+[EXCERPT:ConstructorCode]
+	FParticleSpinnerEmitterInstance::FParticleSpinnerEmitterInstance() :
+		 FParticleSpriteEmitterInstance()
+	   , SpinnerTypeData(NULL)
+	{
+	}
+[/EXCERPT:ConstructorCode]
+
+[EXCERPT:InitParameters]
+[REGION:transparenttable]
+| --- | --- |
+| [REGION:wrap]`virtual void InitParameters(UParticleEmitter* InTemplate, UParticleSystemComponent* InComponent, bool bClearResources = true)`[/REGION] | `InitParameters()` 함수는 표준 함수성 수행을 위해 Super 버전을 호출한 다음, 접근할 때마다 형변환하지 않도록 하기 위해 `TypeDataModule` 포인터를 `UParticleModuleTypeDataSpinner` 로 형변환합니다. |
+| [INCLUDE:#InitParametersCode] ||
+[/REGION]
+[/EXCERPT:InitParameters]
+[EXCERPT:InitParametersCode]
+	void FParticleSpinnerEmitterInstance::InitParameters(UParticleEmitter* InTemplate, UParticleSystemComponent* InComponent, bool bClearResources)
+	{
+	   // 상위 InitParameters 호출
+	   FParticleEmitterInstance::InitParameters(InTemplate, InComponent, bClearResources);
+
+	   // TypeData 모듈 구함
+	   UParticleLODLevel* LODLevel   = InTemplate->GetCurrentLODLevel(this);
+	   check(LODLevel);
+	   SpinnerTypeData = CastChecked<UParticleModuleTypeDataSpinner>(LODLevel->TypeDataModule);
+	}
+[/EXCERPT:InitParametersCode]
+
+[EXCERPT:Tick]
+	void FParticleSpinnerEmitterInstance::Tick(float DeltaTime, bool bSuppressSpawning)
+	{
+	   // 현재 로테이션 업데이트
+	   check(SpinnerTypeData);
+	   CurrentRotation = SpinnerTypeData->Spin.GetValue(EmitterTime, Component);
+
+	   // 컴포넌트 로테이션 조절
+	   AdjustComponentRotation();
+
+	   // 상위 Tick 호출
+	   FParticleEmitterInstance::Tick(DeltaTime, bSuppressSpawning);
+
+	   // 컴포넌트 로테이션 복원
+	   RestoreComponentRotation();
+	}
+[/EXCERPT:Tick]
+
+[EXCERPT:UpdateBoundingBox]
+	void FParticleSpinnerEmitterInstance::UpdateBoundingBox(float DeltaTime)
+	{
+		// 아쉽게도, 로테이션이 확실히 계산에 들어가도록 하려면 
+		// UpdateBoundingBox 함수를 완전 덮어써야 합니다...
+		// 
+		// (bUseLocalSpace 플래그를 계산에 넣는) 마지막 코드 조각을 빼고,
+		// 이 함수는 FParticleSpriteEmitterInstance 버전과 동일합니다.
+		// 
+		if (Component)
+		{
+			// 컴포넌트 스케일을 계산에 넣습니다.
+			FVector Scale = FVector(1.0f, 1.0f, 1.0f);
+			Scale *= Component->Scale * Component->Scale3D;
+			AActor* Actor = Component->GetOwner();
+			if (Actor && !Component->AbsoluteScale)
+			{
+				Scale *= Actor->DrawScale * Actor->DrawScale3D;
+			}			
+			float MaxSizeScale = 1.0f;
+			FVector NewLocation;
+			float NewRotation;
+			ParticleBoundingBox.Init();
+			// 각 파티클에 대해 박스에 오프셋을 적절히 줍니다.
+			for (int32 i=0; i<ActiveParticles; i++)
+			{
+				DECLARE_PARTICLE(Particle, ParticleData + ParticleStride * ParticleIndices[i]);
+				// 선형 적분기를 돌려 바운딩 박스를 업데이트합니다.
+				// 각형 적분기를 돌려 결과를 +/- 2 PI 범위 내로 감쌉니다.
+				Particle.OldLocation = Particle.Location;
+				if ((Particle.Flags & STATE_Particle_Freeze) == 0)
+				{
+					if ((Particle.Flags & STATE_Particle_FreezeTranslation) == 0)
+					{
+						NewLocation = Particle.Location + (DeltaTime * Particle.Velocity);
+					}
+					else
+					{
+						NewLocation = Particle.Location;
+					}
+					if ((Particle.Flags & STATE_Particle_FreezeRotation) == 0)
+					{
+						NewRotation = (DeltaTime * Particle.RotationRate) + Particle.Rotation;
+					}
+					else
+					{
+						NewRotation = Particle.Rotation;
+					}
+				}
+				else
+				{
+					NewLocation = Particle.Location;
+					NewRotation = Particle.Rotation;
+				}
+				FVector Size = Particle.Size * Scale;
+				MaxSizeScale = Max(MaxSizeScale, Size.GetAbsMax()); //@todo 파티클: 여기서는 SSE/ Altivec 을 사용하면 피할 수 있는 비교를 엄청 많이 합니다.
+				Particle.Rotation = appFmod(NewRotation, 2.f*(float)PI);
+				Particle.Location = NewLocation;
+				ParticleBoundingBox += NewLocation;
+			}
+			ParticleBoundingBox = ParticleBoundingBox.ExpandBy(MaxSizeScale);
+			//이미터가 로컬 스페이스 좌표계를 사용하는 경우 바운딩 박스를 월드 스페이스로 변환합니다.
+			UParticleLODLevel* LODLevel = SpriteTemplate->GetCurrentLODLevel(this);
+			check(LODLevel);
+			if (LODLevel->RequiredModule->bUseLocalSpace) 
+			{
+				// 컴포넌트 로테이션을 조절합니다.
+				AdjustComponentRotation();
+				// 바운딩 박스를 변환합니다.
+				ParticleBoundingBox = ParticleBoundingBox.TransformBy(Component->LocalToWorld);
+				// 컴포넌트 로테이션을 복원합니다.
+				RestoreComponentRotation();
+			}
+		}
+	}
+[/EXCERPT:UpdateBoundingBox]
+
+[EXCERPT:AdjustComponentRotation]
+	void FParticleSpinnerEmitterInstance::AdjustComponentRotation()
+	{
+	   // 진짜 로테이션을 저장합니다.
+	   ComponentRotation = Component->Rotation;
+	   // 컴포넌트의 LocalToWorld 는 다양한 모듈의 Update 함수에서 사용될 수 있기에,
+	   // 우리 인스턴스 로테이션이 계산에 들어가도록 도용을 해 줘야 하겠습니다.
+	   // 로테이션이 올바른 위치에서 계산에 들어갈 수 있도록 컴포넌트의 LocalToWorld 를 
+	   // 재구성해 줘야 합니다.
+	   FVector CurrRotInDegrees = CurrentRotation * 360.0f;
+	   FRotator RotationRot = FRotator::MakeFromEuler(CurrRotInDegrees);
+	   Component->Rotation += RotationRot;
+	   Component->SetTransformedToWorld();
+	}
+[/EXCERPT:AdjustComponentRotation]
+
+[EXCERPT:RestoreComponentRotation]
+	void FParticleSpinnerEmitterInstance::RestoreComponentRotation()
+	{
+	   // 컴포넌트 로테이션을 복원합니다.
+	   Component->Rotation = ComponentRotation;
+	   Component->SetTransformedToWorld();
+	}
+[/EXCERPT:RestoreComponentRotation]
+-->
+
+### 결과
+
+작동중인 Spinner 이미터 인스턴스 시연 스크린샷입니다. 세팅은 다음과 같습니다:
+
+* **Spin** 분포는 **(Time=0,X=0,Y=0,Z=0)** 와 **(Time=1,X=0,Y=0,Z=1)** 에 점이 있는 상수 커브(constant curve)로 설정, Z 축을 중심으로 이미터 수명에 걸쳐 가변 속도로 스핀하는 인스턴스가 됩니다.
+* **InitialVelocity** 모듈을 **(X=100,Y=100,Z=100)** 으로 설정된 상수 분포와 함께 사용, (인스턴스의 스핀은 무시하고) 모든 파티클이 직선으로 연속해서 뿜어져 나올 수 있도록 합니다.
+* **InitialColor** 모듈을 **(Time=0,R=1,G=0,B=0)** 와 **(Time=1,R=0,G=0,B=1)** 에 점이 있는 상수 커브(constant curve)로 설정된 **StartColor** 와 함께 사용, 이미터 수명에 걸쳐 빨강으로 방출됐다가 파랑으로 끝나는 파티클이 됩니다.
+
+[REGION:imagetable]
+| ![Spinner A](Spinner_A.png) | ![Spinner B](Spinner_B.png) |
+| --------------------------- | --------------------------- |
+|  |  |
+[/REGION]

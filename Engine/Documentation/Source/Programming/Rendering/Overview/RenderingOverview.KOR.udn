@@ -1,0 +1,210 @@
+﻿INTSourceChangelist:3599948
+Availability:Public
+Title:그래픽 프로그래밍 개요
+Crumbs:%ROOT%, Programming, Programming/Rendering
+Description:렌더링 시스템 작업과 셰이더 작성을 담당하는 그래픽 프로그래머를 위한 정보입니다.
+Version: 4.9
+Order:0
+tags:Rendering
+
+
+## 시작하기
+
+UE4 에는 수많은 렌더링 코드가 있어, 하이 레벨 관점에서 어떻게 돌아가는지 간단히 파악하기가 힘듭니다. 코드 분석을 시작하기 좋은 곳은 `FDeferredShadingSceneRenderer::Render` 로, 렌더링 스레드에서 새로운 프레임이 렌더링되는 곳입니다. 드로 이벤트를 살펴보는 것도 좋습니다. 'profilegpu' 명령을 내린 다음 Visual Studio 의 **Find in Files** 기능으로 드로 이벤트 이름을 검색하면 그에 대한 C++ 구현을 찾을 수 있습니다.
+
+* 셰이더 작업 관련 정보는 [](Programming/Rendering/ShaderDevelopment) 문서를 참고하세요.
+
+* UE4 에서 사용되는 좌표계 용어에 대한 설명은 [](Engine/Basics/CoordinateSpace) 문서를 참고하세요.
+
+렌더링 작업시 유용한 콘솔 명령입니다 (보통 ? 를 파라미터로 하고 파라미터 없이 현재 스테이트를 사용하면 도움말이 나옵니다):
+
+|콘솔 명령| 설명|
+|--|--|
+|'stat unit'|전체 프레임 시간은 물론 게임 스레드, 렌더링 스레드, GPU 시간도 표시합니다. 어디든 가장 긴 곳이 병목입니다. 하지만 GPU 시간에는 대기(idle) 시간이 포함되어 있기에, 가장 길고 독립되어 있을 때만 병목이 됩니다. |
+|Ctrl+Shift+. 또는 'recompileshaders changed'|지난 번 .usf 파일을 저장한 이후 변경된 셰이더를 다시 컴파일합니다. 로드시 자동으로 실행됩니다. |
+|Ctrl+Shift+; 또는 'profilegpu'|렌더링중인 뷰에 대한 GPU 타이밍을 측정합니다. 팝업창 UI 또는 엔진 로그에서 결과를 확인할 수 있습니다. |
+|'Vis' 또는 'VisualizeTexture'|다양한 렌더 타겟의 콘텐츠를 시각화시키며, bmp 저장도 가능합니다.|
+|'show x'|지정된 표시 플래그를 토글시킵니다. 'show' 를 치면 표시 플래그와 그 현재 스테이트 리스트가 나옵니다. 에디터에서는 뷰포트 UI 를 대신 사용합니다. |
+|'pause'|게임은 일시정지시키되, 렌더링은 계속합니다. 시뮬레이션 렌더링은 중지됩니다. |
+|'slomo x'|게임 속도를 변경합니다. 프로파일링시, 시뮬레이션 작업 생략 없이 시간을 늦출 때 매우 유용할 수 있습니다. 예: 'slomo .01'|
+|'debugcreateplayer 1'|분할화면 테스트용입니다.|
+|'r.CompositionGraphDebug'|한 프레임(의 포스트 프로세싱과 라이팅)을 이루는 그래프의 단일 프레임 덤프를 구하기 위해 실행합니다.|
+|'r.DumpShaderDebugInfo'|1 로 설정하면, 이후 컴파일되는 셰이더는 디버그 정보를 GameName/Saved/ShaderDebugInfo 에 덤핑합니다.|
+|'r.RenderTargetPoolTest'|색 누수 버그를 추적하기 위해 렌더타겟 풀에서 반환된 텍스처 중 특정한 색을 지닌 것을 비웁니다.|
+|'r.SetRes'|현재 게임 뷰에 대한 디스플레이 해상도를 설정합니다. 에디터에는 영향이 없습니다.|
+|'r.ViewportTest'|마티네/에디터 사용시 벌어질 수 있는 다른 뷰포트 사각형 환경설정을 (게임에서만) 테스트할 수 있습니다.|
+
+렌더링 작업시 유용한 콘솔 명령입니다:
+
+|명령줄| 설명|
+|--|--|
+|-d3ddebug|D3D11 디버그 레이어를 켭니다. API 오류를 잡는 데 좋습니다.|
+|-sm4|D3D11 RHI 를 가지고 피처 레벨 SM4 사용을 강제합니다.|
+|-opengl3 / -opengl4|지정된 피처 레벨의 OpenGL RHI 사용을 강제합니다.|
+|-dx11 | 현재 윈도우 기본입니다. |
+|-dx12 | 실험단계 입니다. |
+|-featureleveles2 | 에디터 실행시 무시되는데, UI 를 사용해야 합니다. |
+|-featureleveles31 | 실험단계로, 에디터 실행시 무시되는데, 에디터 개인설정 / 실험단계 / 렌더링 에서 켜줘야 합니다. |
+|-ddc=noshared|네트워크 (공유) 파생 데이터 캐시(DDC) 사용을 금지합니다. 셰이더 캐시 문제 디버깅시 유용할 수 있습니다.|
+
+## 모듈
+
+렌더러 코드는 별도의 모듈에 존재하며, 모놀리식 빌드가 아닌 경우 dll 로 컴파일됩니다. 그 덕에 렌더링 코드가 변경되어도 전체 어플리케이션을 다시 링크하지 않아도 되므로 반복처리가 빨라집니다. Renderer 모듈은 Engine 에 의존하는데, Engine 으로의 콜백이 많기 때문입니다. 하지만 Engine 이 Rendere 의 어떤 코드를 호출할 필요가 있을 때는, 인터페이스 - 보통 IRendererModule 또는 FSceneInterface 를 통해 일어납니다.
+
+## 신 표현
+
+UE4 에서, 렌더러가 보는 씬은 프리미티브 컴포넌트와 FScene 에 저장된 기타 다양한 구조체 목록으로 정의됩니다. 가속 공간 질의를 위해 프리미티브 Octree 가 유지됩니다.
+
+#### 주요 씬 클래스
+
+UE4 에는 게임 스레드와 병렬 처리되는 [렌더링 스레드](Programming/Rendering/ThreadedRendering) 가 있습니다. 게임 스레드와 렌더링 스레드 사이의 틈을 메꾸는 대부분의 클래스는, 어느 스레드가 그 스테이트의 소유권을 지녔는지에 따라 두 부분으로 나뉩니다.
+
+주요 클래스는 다음과 같습니다:
+
+|클래스| 설명|
+|--|--|
+|**UWorld**| 서로 상호작용 가능한 액터와 컴포넌트 모음이 들어있는 월드입니다. 레벨은 월드에 스트림 인/아웃 가능하며, 프로그램에 다수의 월드가 활성화될 수 있습니다. |
+|**ULevel**| 하나의 맵 파일에 함께 로드/언로드되고 저장되는 액터와 컴포넌트 모음입니다. |
+|**USceneComponent**|FScene 에 추가해야 하는 (라이트, 메시, 포그 등) 오브젝트의 베이스 클래스입니다.|
+|**UPrimitiveComponent**| 물리로 렌더링 또는 상호작용 가능한 모든 것의 베이스 클래스입니다. 비저빌리티 컬링 및 렌더링 프로퍼티 사양(그림자 드리우기 등)의 단위 역할을 하기도 합니다. 모든 UObject 와 마찬가지로, 게임 스레드는 모든 변수와 스테이트를 소유하며, 렌더링 스레드는 거기에 직접 접근해서는 안됩니다.|
+|**ULightComponent**| 광원을 나타냅니다. 렌더러는 그것의 공헌도를 계산하여 씬에 추가하는 것을 담당합니다. |
+|**FScene**|UWorld 의 렌더러 버전입니다. 오브젝트가 렌더러에 존재하는 것은 FScene 에 추가된 이후로, 컴포넌트 등록시 호출됩니다. 렌더링 스레드는 FScene 의 모든 스테이트를 소유하며, 게임 스레드는 직접 수정할 수 없습니다.|
+|**FPrimitiveSceneProxy**|UPrimitiveComponent 의 렌더러 버전으로, 렌더링 스레드에 대한 UPrimitiveComponent 스테이트를 미러링합니다. 엔진 모듈에 존재하며, 다양한 (스켈레탈, 리짓, BSP 등의) 프리미티브 유형을 지원하기 위해 서브클래싱해야 합니다. GetViewRelevance, DrawDynamicElements 와 같은 매우 중요한 함수를 몇 가지 구현합니다.|
+|**FPrimitiveSceneInfo**|UPrimitiveComponent 와 FPrimitiveSceneProxy 에 해당하는 (FRendererModule 구현 관련) 내부 렌더러 스테이트입니다. 렌더러 모듈에 존재하므로, 엔진에서는 볼 수 없습니다.|
+|**FSceneView**| FScene 에 들어가는 단일 뷰의 엔진 표현입니다. 씬은 FSceneRenderer::Render 로의 다른 호출에서 다른 뷰로 렌더링 (다수의 에디터 뷰포트) 또는 FSceneRenderer::Render 로의 동일 호출 내 다수의 뷰로 렌더링 (게임 내 분할화면) 가능합니다. 각 뷰마다 새로운 뷰가 구성됩니다.|
+|**FViewInfo**|뷰의 내부 렌더러 표현으로, 렌더러 모듈에 존재합니다.|
+|**FSceneViewState**|ViewState 는 여러 프레임에 걸쳐 필요한 뷰 관련 프라이빗 렌더러 정보를 저장합니다. 게임에서는, ULocalPlayer 마다 하나의 뷰 스테이트가 있습니다.|
+|**FSceneRenderer**|프레임간 임시파일 캡슐화를 위해 매 프레임 생성되는 클래스입니다.|
+
+주요 클래스가 들어있는 모듈별로 정리한 목록입니다. 링커 문제 해결 방법을 알아내고자 할 때 중요해 집니다.
+
+|엔진 모듈| 렌더러 모듈|
+|--|--|
+|UWorld|FScene|
+|UPrimitiveComponent / FPrimitiveSceneProxy|FPrimitiveSceneInfo|
+|FSceneView|FViewInfo|
+|ULocalPlayer|FSceneViewState|
+|ULightComponent / FLightSceneProxy|FLightSceneInfo|
+
+같은 클래스들을 어느 스레드가 그 스테이트 소유권을 가졌나에 따라 배치한 것입니다. [경쟁 조건 유발을 피하기](Programming/Rendering/ThreadedRendering) 위해서는, 코드를 작성할 때 어떤 스레드가 스테이트를 소유하는지 항상 유념해 두는 것이 중요합니다.
+
+|게임 스레드| 렌더링 스레드|
+|--|--|
+|UWorld|FScene|
+|UPrimitiveComponent|FPrimitiveSceneProxy / FPrimitiveSceneInfo|
+| |FSceneView / FViewInfo|
+|ULocalPlayer|FSceneViewState|
+|ULightComponent|FLightSceneProxy / FLightSceneInfo|
+
+#### 머티리얼 클래스
+
+|클래스 | 설명|
+|--|--|
+|**FMaterial**| 렌더링에 사용되는 머티리얼에 대한 인터페이스입니다. (블렌드 모드와 같은) 머티리얼 프로퍼티로의 접근이 제공됩니다. 렌더러에서 개별 셰이더를 구하는 데 사용되는 셰이더 맵이 들어있습니다.|
+|**FMaterialResource**| FMaterial 인터페이스의 UMaterial 구현입니다.|
+|**FMaterialRenderProxy**| 렌더링 스레드에서의 머티리얼 표현입니다. FMaterial 인터페이스 및 각 스칼라, 벡터, 텍스처 파라미터의 현재 값에 대한 접근을 제공합니다.|
+|**UMaterialInterface **| [abstract] 머티리얼 함수성에 대한 게임 스레드 인터페이스입니다. 렌더링에 사용되는 FMaterialRenderProxy 와 소스로 사용되는 UMaterial 을 구하는 데 사용됩니다. |
+|**UMaterial**|  머티리얼 애셋입니다. 노드 그래프로 저작됩니다. 셰이딩에 사용되는 머티리얼 특성 계산, 블렌드 모드 설정 등입니다.|
+|**UMaterialInstance **| [abstract] UMaterial 인스턴스입니다. UMaterial 안에 노드 그래프를 사용하나 (스칼라, 벡터, 텍스처, 스태틱 스위치 등의) 다양한 파라미터를 제공합니다. 각 인스턴스에는 부모 UMaterialInterface 가 있습니다. 그러므로 머티리얼 인스턴스의 부모는 UMaterial 또는 다른 UMaterialInstance 일 수 있습니다. 결국 UMaterial 로 통하는 체인을 만듭니다.|
+|**UMaterialInstanceConstant **| 에디터에서만 변경 가능한 UMaterialInstance 입니다. 스칼라, 벡터, 텍스처, 스태틱 스위치 파라미터를 제공할 수 있습니다.|
+|**UMaterialInstanceDynamic **|  실행시간에 변경할 수 있는 UMaterialInstance 입니다. 스칼라, 벡터, 텍스처 파라미터를 제공할 수 있습니다. 스태틱 스위치 파라미터는 제공할 수 없으며, 다른 UMaterialInstance 의 부모가 될 수 없습니다.|
+
+#### 프리미티브 컴포넌트와 프록시
+
+프리미티브 컴포넌트는 표시여부 및 연관성 결정에 있어서 기본적인 단위입니다. 예를 들어 오클루전 및 프러스텀 컬링은 프리미티브 단위에서 일어납니다. 그러므로 시스템을 디자인할 때는 컴포넌트를 얼마나 크게 만들지 생각해 보는 것이 중요합니다. 각 컴포넌트에는 컬링, 그림자 드리우기, 빛 영향력 결정과 같은 다양한 연산에 사용되는 바운드가 있습니다.
+
+컴포넌트가 씬에 보이는 (그래서 렌더링되는) 때는 등록(register)된 것일 경우만입니다. 컴포넌트의 프로퍼티를 변경하는 게임 스레드 코드는 반드시 컴포넌트에서 MarkRenderStateDirty() 를 호출해야 변경내용을 렌더링 스레드에 전파합니다.
+
+#### FPrimitiveSceneProxy 와 FPrimitiveSceneInfo
+
+FPrimitiveSceneProxy 는 컴포넌트 유형에 따라 서브클래싱하도록 의도된 UPrimitiveComponent 의 렌더링 스레드 버전입니다. 엔진 모듈에 상주해 있으며, 렌더링 패스(pass) 도중 호출되는 함수를 갖습니다. FPrimitiveSceneInfo 가 렌더러 모듈에 private 인 프리미티브 컴포넌트 스테이트입니다.
+#### 중요 FPrimitiveSceneProxy 메소드
+
+|함수| 설명|
+|--|--|
+|GetViewRelevance|프레임 시작시 InitViews 에서 호출되어, 채워진 FPrimitiveViewRelevance 를 반환합니다.|
+|DrawDynamicElements|프록시가 관련이 있는 패스(pass)에서 프록시를 그리기 위해 호출됩니다. 프록시가 동적인 연관성이 있다고 표시한 경우에만 호출됩니다.|
+|DrawStaticElements|프리미티브가 게임 스레드에 어태치중일 때 프록시에 대한 스태틱 메시 요소를 제출하기 위해 호출됩니다. 프록시가 동적인 연관성이 있다고 표시한 경우에만 호출됩니다.|
+
+#### 씬 렌더링 순서
+
+렌더러는 씬을 처리할 때 렌더 타겟에 데이터를 합성하고자 하는 순서대로 합니다. 예를 들어 뎁스 온리 패스는 베이스 패스 전에 렌더링되므로, 베이스 패스에서 셰이딩 비용을 줄이기 위해 Heirarchical Z (HiZ)가 채워집니다. 이 순서는 C++ 에서 패스 함수가 호출되는 순서대로 정적으로 정의됩니다.
+#### 연관성
+
+FPrimitiveViewRelevance 는 프리미티브에 어떤 이펙트가 (그리고 패스(pass)가) 연관성이 있는지에 대한 정보입니다. 프리미티브에는 연관성이 다른 요소가 여럿 있을 수 있으므로, FPrimitiveViewRelevance 는 사실상 모든 요소의 연관성의 논리적 OR 입니다. 즉 프리미티브가 불투명 및 반투명 연관성을 둘 다 갖거나, 동적 및 정적 연관성을 둘 다 가질 수 있다는 뜻으로, 상호 배제적이지 않다는 뜻입니다.
+
+FPrimitiveViewRelevance 는 bStaticRelevance 및 bDynamicRelevance 으로 프리미티브가 동적 및/또는 정적 렌더링 패스를 사용해야 하는지를 나타내기도 합니다.
+#### 드로잉 폴리시
+
+드로잉 폴리시(drawing policy)에는 패스(pass) 전용 셰이더를 가지로 메시를 렌더링하는 로직이 들어있습니다. FVertexFactory 인터페이스를 사용하여 메시 유형을 추상화시키고, FMaterial 인터페이스를 사용하여 머티리얼 디테일을 추상화시킵니다. 가장 낮은 레벨에서, 드로잉 폴리시는 메시 머티리얼 셰이더와 버텍스 팩토리 세트를 받아, 버텍스 팩토리의 버퍼를 RHI 에 바인딩하고, 메시 머티리얼 셰이더를 Rendering Hardware Interface (RHI)에 바인딩한 뒤, 적합한 셰이더 파라미터를 설정한 후, RHI 드로 콜 명령을 내립니다.
+#### 드로잉 폴리시 메소드
+
+|함수|설명|
+|--|--|
+|Constructor|주어진 버텍스 팩토리와 머티리얼 셰이더 맵에서 적합한 셰이더를 찾은 다음, 이 레퍼런스들을 저장합니다.|
+|CreateBoundShaderState|드로잉 폴리시에 대한 RHI 바인딩된 셰이더 스테이트를 만듭니다. |
+|Matches/Compare|드로잉 폴리시를 정적인 드로 리스트에 있는 다른 것들과 소팅하는 메소드를 제공합니다. Matches 는 반드시 DrawShared 가 의존하는 모든 요인을 비교해야 합니다.|
+|DrawShared|Matches 에서 True 를 반환하는 드로잉 폴리시 사이에서 변하지 않는 RHI 스테이트를 설정합니다. 예를 들어 대부분의 드로잉 폴리시는 머티리얼과 버텍스 팩토리에 소팅을 하여, 머티리얼에만 의존하는 셰이더 파라미터만 설정 가능하고, 버텍스 팩토리에만 속하는 버텍스 버퍼만 바인딩 가능합니다. 스테이트는 가급적 SetMeshRenderState 대신 항상 여기 설정되어 있어야 하는데, 정적인 렌더링 패스에서 DrawShared 는 덜 호출되기 때문입니다.|
+|SetMeshRenderState|이 메시, 또는 DrawShared 에 설정되지 않은 것에 속하는 RHI 스테이트를 설정합니다. DrawShared 보다 훨씬 더 많이 호출되므로, 여기서는 퍼포먼스가 특히나 중요합니다.|
+|DrawMesh|RHI 드로 콜 명령을 실제로 내립니다.|
+
+## 렌더링 패스
+
+UE4 에는 좀 더 미세한 제어가 가능하지만 횡단이 느린 동적인 패스와, 씬 횡단을 가급적 RHI 수준에 가깝게 캐시하는 정적인 렌더링 패스가 있습니다. 차이점은 거의 높은 레벨에 있는데, 둘 다 가장 낮은 레벨에서는 드로잉 폴리시를 사용하기 때문입니다. 각 렌더링 패스(pass, 드로잉 폴리시)는 필요한 경우 두 렌더링 패스 모두 처리하도록 해 줘야 합니다.
+#### 동적인 렌더링 패스
+
+동적인 렌더링 패스는 TDynamicPrimitiveDrawer 를 사용하고 렌더링할 프리미티브 씬 프록시마다 DrawDynamicElements 를 호출합니다. 렌더링하기 위해 동적인 경로를 사용해야 하는 프리미티브 세트는 FViewInfo::VisibleDynamicPrimitives 에 의해 추적됩니다. 각 렌더링 패스(pass)는 이 배열을 대상으로 반복처리한 다음, 각 프리미티브의 프록시에서 DrawDynamicElements 를 호출해야 합니다. 그러면 그 프록시의 DrawDynamicElements 는 필요한 만큼의 FMeshElements 를 조합하여 DrawRichMesh 나 TDynamicPrimitiveDrawer::DrawMesh 로 제출해야 합니다. 이는 결국 새로운 임시 드로잉 폴리시를 만드는데, CreateBoundShaderState, DrawShared, SetMeshRenderState, 마지막으로 DrawMesh 를 호출합니다.
+
+동적인 렌더링 패스는 유연성이 높은데, 각 프록시마다 DrawDynamicElements 안에 각 컴포넌트 유형에 대한 로직을 실행할 수 있는 콜백이 있기 때문입니다. 삽입 비용은 최소이지만 횡단 비용은 높은데, 스테이트 소팅이 없고 캐시되는 것이 없기 때문입니다.
+#### 스태틱 렌더링 패스
+
+스태틱 렌더링 패스는 스태틱 드로 리스트를 통해 구현됩니다. 메시는 씬에 어태치할 때 드로 리스트에 삽입합니다. 이 삽입 도장 프록시에서 DrawStaticElements 가 호출되어 FStaticMeshElements 를 모읍니다. 그러면 드로잉 폴리시 인스턴스를 생성하고 CreateBoundShaderState 결과와 함께 저장합니다. 새로운 드로잉 폴리시는 Compare 와 Matches 함수에 따라 소팅한 다음 드로 리스트의 적합한 곳에 삽입합니다 (TStaticMeshDrawList::AddMesh 참고). InitViews 에서 스태틱 드로 리스트에 대한 비저빌리티 데이터를 담고 있는 비트배열이 초기화되어 TStaticMeshDrawList::DrawVisible 속에 전달되는데, 여기서 드로 리스트가 실제로 그려집니다. DrawShared 는 서로 일치하는 드로잉 폴리시 전체에 대해 딱 한 번만 호출되는 반면, SetMeshRenderState 와 DrawMesh 는 각 FStaticMeshElement 마다 호출됩니다 (TStaticMeshDrawList::DrawElement 참고).
+
+스태틱 렌더링 패스는 많은 작업을 어태치 시간으로 이동시켜, 렌더링 시간에서의 씬 횡단 속도를 크게 향상시킵니다. 스태틱 드로 리스트 렌더링은 스태틱 메시에 대한 렌더링 스레드에서는 약 3 배 빨라, 씬에 더 많은 수의 스태틱 메시를 그릴 수 있습니다. 스태틱 드로 리스트는 어태치 시간에 데이터를 캐시하므로, 뷰 독립적 스테이트만 캐시 가능합니다. 리어태치는 거의 하지 않으나 자주 렌더링되는 프리미티브라면 스태틱 드로 리스트에 넣기에 좋은 후보입니다.
+
+스태틱 렌더링 패스는 스테이트 버킷당 DrawShared 를 한 번만 호출하는 방식 때문에 버그가 생길 수 있습니다. 이러한 버그는 검출해 내기 어려운데, 씬에서의 렌더링 순서와 메시의 어태치 순서에 따라 달라지기 때문입니다. 라이팅만, 라이팅포함 등의 특수한 뷰모드로 모든 프리미티브가 강제로 다이내믹 패스를 사용하도록 하므로, 동적인 렌더링 패스를 사용했을 때 버그가 사라졌다면, 드로잉 폴리시의 DrawShared 및/또는 Matches 함수의 구현이 잘못된 것일 확률이 높습니다.
+## 하이 레벨 렌더링 순서
+
+FDeferredShadingSceneRenderer::Render 에서 시작해서 한 프레임을 렌더링할 때의 콘트롤 흐름에 대한 설명입니다:
+
+|동작| 설명|
+|--|--|
+|GSceneRenderTargets.Allocate|필요한 경우 글로벌 씬 렌더 타겟이 현재 뷰에 충분할 만큼 커지도록 재할당합니다. |
+|InitViews|다양한 컬링 메소드를 통해 뷰에 대한 프리미티브 비저빌리티를 초기화시키고, 이 프레임에 보이는 동적인 그림자를 셋업한 다음, 필요한 경우 (전체 씬 그림자 또는 preshadow 를 위해) 그림자 절두체와 월드를 교차시킵니다.|
+|PrePass / Depth only pass|RenderPrePass / FDepthDrawingPolicy. 뎁스 버퍼에 뎁스만을 출력하여, 오클루더를 렌더링합니다. 이 패스는 꺼짐, 오클루전만, 완벽 뎁스 등, 활성화된 기능에 무엇이 필요한지에 따라 여러 모드로 작동 가능합니다. 이 패스의 일반적인 용도는 Hierarchical Z 를 초기화시켜, 픽셀 셰이더가 비싼 베이스 패스의 셰이딩 비용을 줄이는 것입니다.|
+|Base pass|RenderBasePass / TBasePassDrawingPolicy. 머티리얼 특성을 GBuffer 에 출력하여, 불투명 및 마스크드 머티리얼을 렌더링합니다. 라이트맵 공헌 및 스카이 라이팅 역시도 여기서 계산하여 씬 컬러에 집어넣습니다. |
+|Issue Occlusion Queries / BeginOcclusionTests |다음 프레임의 InitViews 에 사용할 잠복성(latent) 오클루전 쿼리를 발동시킵니다. 쿼리중인 오브젝트 주변에 바운딩 박스를 렌더링하는 식으로 이루어지며, 가끔은 드로 콜을 줄이기 위해 바운딩 박스를 그룹으로 묶기도 합니다.|
+|Lighting|섀도맵은 각 라이트별로 렌더링하여 라이트 공헌을 씬 컬러에 누산시키는데, 표준 디퍼드 셰이딩과 타일드 디퍼드 셰이딩 방식을 혼합합니다. 라이트 역시도 반투명 라이팅 볼륨에 누산됩니다.|
+|Fog|포그와 애트머스피어는 디퍼드 패스에서 불투명 표면에 대해 픽셀 단위로 계산됩니다.|
+|Translucency|반투명은 오프스크린 렌더 타겟속에 누산시켜, 씬에 통합시킬 수 있도록 버텍스 단위로 포그를 적용합니다. 라이팅된 반투명은 올바른 블렌딩을 위해 단일 패스에 최종 라이팅을 계산합니다.|
+|Post Processing|GBuffer 를 사용하여 다양한 포스트 프로세스 이펙트가 적용됩니다. 반투명은 씬에 합성됩니다.|
+
+꽤나 단순화된 하이 레벨 뷰입니다. 좀 더 자세히 살펴보려면, 'profilegpu' 의 로그 출력이나 관련 코드를 살펴보시기 바랍니다.
+
+## 렌더 하드웨어 인터페이스 (RHI)
+
+RHI 는 플랫폼 전용 그래픽 API 위의 얇은 레이어입니다. UE4 의 RHI 추상화 레벨은 가급적 낮추었는데, 대부분의 기능을 플랫폼 독립적인 코드로 작성해도 필수 피처 레벨을 지원하는 모든 플랫폼에서 '그냥 작동'할 수 있도록 하기 위해서입니다.
+
+피처 세트는 ERHIFeatureLevel 속에 양자화시켜 복잡도를 낮추었습니다. 플랫폼이 어느 한 피처 레벨에 필요한 모든 기능을 지원할 수 없는 경우, 가능할 때까지 레벨을 낮춰야 합니다.
+
+|피처 레벨| 설명|
+|--|--|
+|SM5|일반적으로 D3D11 셰이더 모델 5 에 해당하는데, 유일한 차이점은 OpenGL 4.3 제한때문에 텍스처를 16 개만 사용할 수 있다는 점입니다. 테셀레이션, 컴퓨트 셰이더, 큐브맵 배열을 지원합니다. 디퍼드 셰이딩 패스가 지원됩니다. |
+|SM4|D3D11 셰이더 모델 4 에 해당하며, 일반적으로는 SM5 와 같지만 테셀레이션, 컴퓨트 셰이더, 큐브맵 배열이 없습니다. 디퍼드 셰이딩 패스는 지원됩니다. 눈 순응도 컴퓨트 셰이더를 사용하므로 지원되지 않습니다.|
+|ES2|대부분의 OpenGL ES2 모바일 디바이스에 지원되는 피처에 해당합니다. 긴축된 포워드 셰이딩 패스를 사용합니다.|
+
+#### 렌더링 스테이트 그룹
+
+렌더 스테이트는 영향을 끼치는 파이프라인 부분에 따라 그룹을 짓습니다. 예를 들어 RHISetDepthState 는 뎁스 버퍼링에 관련된 모든 스테이트를 설정합니다.
+#### 렌더링 스테이트 디폴트
+
+렌더링 스테이트는 매우 많이 있으므로, 무언가를 그리고자 할 때마다 모두 설정하는 것은 실용적이지 못합니다. 대신 UE4 에는 디폴트로 설정되었다 가정되는 (그래서 변경된 이후에는 그 디폴트로 복원되어야 하는) 묵시적 스테이트 세트가 있으며, 명시적으로 설정되어야 하는 훨씬 작은 스테이트 세트가 있습니다. 묵시적 디폴트를 갖지 않는 스테이트 세트는 다음과 같습니다:
+
+* RHISetRenderTargets
+* RHISetBoundShaderState
+* RHISetDepthState
+* RHISetBlendState
+* RHISetRasterizerState
+* RHISetBoundShaderState 에 의해 설정된 셰이더 종속성
+
+다른 모든 스테이트는 디폴트인 것으로 간주됩니다 (연관된 TStaticState 에 정의된 대로입니다. 예를 들어 디폴트 스텐실 스테이트는 `RHISetStencilState(TStaticStencilState<>::GetRHI())` 에 의해 설정됩니다).

@@ -1,0 +1,95 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	PostProcessBokehDOF.usf: PostProcessing Lens Flares.
+=============================================================================*/
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+#include "DepthOfFieldCommon.ush"
+#include "MiniFontCommon.ush"		// for PrintFloat()
+#include "CircleDOFCommon.ush"
+
+// for the BokehDOF vertex shader, from postprocessing settings
+// .x: color threshold, .y:size threshold, zw: unused
+float4 DepthOfFieldThresholds;
+
+// .xy:tilecount, .zw:tilesize
+uint4 TileCountAndSize;
+// .xy:size in pixels, .zw:LeftTop of the original viewport in rendertaregt scaled coordiantes
+float4 KernelSize;
+
+// for VisualizeDOF only
+int2 CursorPos;
+
+// for VisualizeDOF [0]:near, [1]:far
+float4 VisualizeColors[2];
+
+// render in fullres to visualize the half res DOF input from the setup pass
+void VisualizeDOFPS(in noperspective float4 UVAndScreenPos : TEXCOORD0,
+	float4 SvPosition : SV_POSITION,
+	out float4 OutColor : SV_Target0)
+{
+	OutColor = 0;
+
+	float2 UV = UVAndScreenPos.xy; 
+	int2 PixelPos = (int2)SvPosition.xy;
+	float2 ViewLocalUV = float2(UVAndScreenPos.z * 0.5f + 0.5f, 0.5f - 0.5f * UVAndScreenPos.w);
+	
+	float SceneDepth = CalcSceneDepth(UV);
+
+	// 0..1
+	half Near = CalcUnfocusedPercentCustomBound(SceneDepth, 1, 0);
+	// 0..1
+	half Far = CalcUnfocusedPercentCustomBound(SceneDepth, 0, 1);
+
+	OutColor.rgb = lerp(OutColor.rgb, VisualizeColors[0].rgb, Near);
+	OutColor.rgb = lerp(OutColor.rgb, VisualizeColors[1].rgb, Far);
+	
+	half3 SceneColor = Texture2DSample(PostprocessInput0, PostprocessInput0Sampler, UV).rgb;
+
+	// blend in a bit of the scene color to make navigation easier
+	OutColor.rgb = lerp(saturate(OutColor.rgb), Luminance(SceneColor), 0.1f);
+
+	// draw a crosshair
+	{
+		float CrossHairMask = PixelPos.x == CursorPos.x || PixelPos.y == CursorPos.y;
+		float2 DistAbs = abs(PixelPos - CursorPos);
+		float Dist = max(DistAbs.x, DistAbs.y);
+		float DistMask = Dist >= 12;
+
+		OutColor.xyz = lerp(OutColor.xyz, float3(1, 1, 1), CrossHairMask * DistMask * 0.1f);
+	}
+
+	// value under crosshair
+	{
+		float SceneDepthAtCursor = CalcSceneDepth(CursorPos * PostprocessInput0Size.zw);
+
+		// DepthToCoc is half res do we multiply by 2, sign is used to identigy near/far wehich we don't need here
+		float CoCInPixel = abs(DepthToCoc(SceneDepthAtCursor)) * 2.0f;
+
+		// draw a circle
+		{
+			float Dist = length(PixelPos - CursorPos);
+			
+			float Mask = saturate(1 - abs(CoCInPixel - Dist));
+
+			OutColor.xyz = lerp(OutColor.xyz, float3(1, 1, 1), Mask);
+		}
+		
+		int2 PrintCursor = CursorPos + int2(28, 7 + 0 * 8);
+
+		{
+			int2 LeftTop = PrintCursor - int2(11, 0);
+			PrintCharacter(PixelPos, OutColor.xyz, float3(1, 1, 1), LeftTop, _D_);
+		}
+		PrintFloatNoFraction(PixelPos, OutColor.xyz, float3(1, 1, 1) * 0.6f, PrintCursor, SceneDepthAtCursor);
+		PrintCursor.y += 16;
+		{
+			int2 LeftTop = PrintCursor - int2(11, 0);
+			PrintCharacter(PixelPos, OutColor.xyz, float3(1, 1, 1), LeftTop, _R_);
+		}
+		PrintFloat(PixelPos, OutColor.xyz, float3(1, 1, 1)*0.6, PrintCursor, CoCInPixel);
+	}
+}
+

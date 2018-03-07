@@ -1,0 +1,67 @@
+Availability:Docs
+Title:如何创建一个新的图元类型
+Crumbs:%ROOT%, Programming, Programming/Rendering
+
+[TOC]
+
+
+
+## 概述
+
+UPrimitiveComponents 是被渲染并发生碰撞的 actor 分量。该页面会描述如何创建一个新的 UPrimitiveComponent 类型。
+
+
+
+## 渲染
+
+图元是可视单位。浏览平截头体剔除以及使用图元的边界盒进行遮挡剔除。您必须实现 UPrimitiveComponent::UpdateBounds 将图元的边界体积写入 Bounds（边界）编号。
+
+将图元渲染为网格物体元素、线、平面实例和点。图元会列举可以构成场景管理器外观的元素。
+
+创建您自己的 PrimitiveComponent 衍生类时，您还必须执行一个相应的 FPrimitiveSceneProxy。这是图元组件的渲染线程副本，应该包含您渲染该组件时会需要的所有数据。在附加/分离的过程中，从渲染线程的场景中添加/删除代理。这通常会发生在您还需要初始化这个代理需要的所有渲染资源的时候。
+
+
+### 图元场景代理
+
+渲染线程会影响游戏线程后面的一帧场景状态。必须为渲染线程复制游戏线程可以动态改变的图元属性；这样可以使游戏线程在下一帧中并行地更新它们。您的 PrimitiveComponent 必须创建一个可以镜像动态成员的图元场景代理。场景管理器会在附加图元的时候调用 UPrimitiveComponent::CreateSceneProxy，使您的图元类型提供可以创建它自己的场景代理类型。
+
+当其中一个镜像成员发生变化的时候，您必须重新附加 PrimitiveComponent，创建一个新场景代理。UPrimitiveComponent::BeginDeferredReattach 会在渲染下一帧之前重新附加这个图元，但是不需要在返回之前就附加。
+
+
+### 绘制图元
+
+场景管理器会通过调用 FPrimitiveSceneProxy::DrawDynamicElement 列举图元的元素。图元会在提供的 FPrimitiveDrawInterface 上调用 DrawMesh、DrawLine、DrawPoint 或 DrawSprite，为调用者列举出它的元素。DrawDynamicElements 可能被每个视图每帧调用多次；结果会进行缓冲，图元的元素可能需要在多个通道中进行渲染。在渲染线程中调用 DrawDynamicElements，这样可能由游戏线程写入的 PrimitiveComponent 的任何成员都必须在 FPrimitiveSceneProxy 中进行镜像并且通过重新附加该图元进行更新。
+
+对于在将该图元附加到场景后仍然保持静止的网格物体元素，有一种优化的路径。场景管理器会在附加图元时调用 FPrimitiveSceneProxy::DrawStaticElement，它会使用类似于 FPrimitiveDrawInterface 的界面来列举图元的静态网格物体元素。对静态网格物体元素进行缓冲，并使用优化的渲染路径。与 DrawDynamicElements 不同，在游戏线程中会调用 DrawStaticElements。
+
+渲染视图的一帧时，场景渲染代码会调用 FPrimitiveSceneProxy::GetViewRelevance 来确定该图元与视图有怎样的联系。它会返回一个 FPrimitiveViewRelevance 结构体，它是描述图元与视图的相关性的标志集合。最重要的标志是 bStaticRelevance 和 bDynamicRelevance；这些标志会确定是否要绘制由 DrawStaticElements 或 DrawDynamicElements 列举的网格物体元素。您应该基于图元有元素在其中的 DPG 以及该图元是否会使用半透明、变形或 SceneColor 材质，设置其余标志。在渲染线程中调用 GetViewRelevance。
+
+您可以使用 hit proxies 减弱图元的点击检测精确度。将 hit proxy 与每个绘制的元素相关联，可以提供有关用户在编辑器中所进行的点击的更多信息。默认操作是使用指向该图元的所有者 HActor。如果您希望提供更多有关图元的不同元素的信息，您必须执行 FPrimitiveSceneProxy::CreateHitProxies 分配供您的图元使用的 hit proxies。然后可以将 hit proxies 穿死到 FPrimitiveDrawInterface::SetHitProxy 和 FStaticPrimitiveDrawInterface::SetHitProxy。在游戏线程中调用 CreateHitProxies。
+
+
+### 从渲染线程中访问 PrimitiveComponent
+
+只要图元场景代理有一个可以被分配并在渲染线程中执行代码，PrimitiveComponent 就会使用一个渲染命令篱笆以确保它不会被当成垃圾回收。
+
+如果您的 PrimitiveComponent 的成员在游戏过程中是静止的，那么您可以在渲染线程中直接从该图元场景代理访问该成员。
+
+如果您的 PrimitiveComponent 的成员在游戏过程中是动态的，那么您必须在您的图元场景代理中镜像它，或者对它的访问进行序列化。您可以使用全局 FlushRenderingCommands 函数对它的访问进行序列化。FlushRenderingCommands 会等待渲染线程变成空闲。然后您可以通过确认该渲染线程不会访问它直到渲染命令入队，写入共享的成员。
+
+
+### 光照
+
+场景管理器会它的边界体积、光照通道、包含/不包含体积以及其他设置找到影响您的图元的光源。
+
+您可以通过执行 FLightCacheInterface 并将您的执行传递到网格物体元素的 LCI 成员中为一个网格物体元素提供静态光照。FLightCacheInterface 会提供一个可选光照贴图以及从光源 GUID 到详细的光源交互信息的贴图。光源交互信息包含在 FLightInteraction 中，而且可能是无缓存的、无关的、光照贴图的、顶点阴影贴图的或材质阴影贴图的。
+
+要计算静态光照，您必须执行 UPrimitiveComponent::GetStaticLightingInfo。静态光照系统会在预计算过程中调用它，这样可以列举该图元的静态网格物体和贴图。
+
+静态光照网格物体是一组会遮挡或反射静态光照的三角形。
+
+静态网格物体光照贴图是将一个静态光照贴图或顶点缓冲映射到一个静态光照网格物体上。静态光照系统会为贴图计算光照贴图和阴影贴图，然后将它们传递到您执行的贴图的 Apply（应用）函数。
+
+ 
+
+
+
+

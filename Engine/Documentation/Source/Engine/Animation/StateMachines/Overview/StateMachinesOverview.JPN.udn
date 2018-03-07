@@ -1,0 +1,158 @@
+﻿INTSourceChangelist:3198499
+Availability:Public
+Title:ステートマシンの概要
+Crumbs: %ROOT%, Engine, Engine/Animation, Engine/Animation/StateMachines
+Description:ステートマシンの仕組みとその中で使われるコア システムについて説明します。
+version:4.14
+related:Engine/Animation/StateMachines/CreatingStateMachines
+related:Engine/Animation/StateMachines/EditingStateMachines
+related:Engine/Animation/StateMachines/TransitionRules
+related:Engine/Animation/AnimBlueprints
+
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine\Animation\StateMachines\Overview:title%](Engine\Animation\StateMachines\Overview\StateMachineImage.png)
+	[/PARAM]
+	[PARAM:title]
+		%Engine\Animation\StateMachines\Overview:title%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine\Animation\StateMachines\Overview]
+	[/PARAM]
+	[PARAM:description]
+		%Engine\Animation\StateMachines\Overview:description%
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine\Animation\StateMachines\Overview:title%](Engine\Animation\StateMachines\Overview\StateMachineImage.png)
+	[/PARAM]
+	[PARAM:title]
+		%Engine\Animation\StateMachines\Overview:title%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine\Animation\StateMachines\Overview]
+	[/PARAM]
+	[PARAM:description]
+		%Engine\Animation\StateMachines\Overview:description%
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[TOC (start:2)]
+
+アニメーション **ステートマシン** を使うと、 [ **Animation ブループリント** ](Engine/Animation/AnimBlueprints/) をモジュールとして捉えることができます。 
+ユーザーは、キャラクターやスケルタルメッシュが存在しうる一連のさまざまなステートを定義するだけです。 
+次に、キャラクターもしくはメッシュが、ステートに出入りする状況をフローチャートのように定義します。 
+
+例えば、フローチャートでキャラクター アニメーションのプロセスを定義することもできます。このような感じになります。
+
+[REGION:raw]
+![](AnimationFlowChart.png)(w:700)
+[/REGION]
+
+上のフローに対してステートマシンを設定した場合、最終的にはこのような感じになります。
+
+![](StateMachine.png)(W:700)
+
+
+## ステートマシンのアナトミー
+
+ステートマシンは、ステートのネットワークとその出入りの遷移を定義するルールで主に構成されています。各ステートは、各ルールセットと合わせて、凝縮された [**ブループリント**](Engine/Blueprints) ネットワークになります。 
+これにより、複雑なアニメーションのブレンドを、過度に複雑な **AnimGraph** を使用せずに簡単に処理できるようになります。 
+
+### ステート
+
+概念上、ステートはキャラクターまたはスケルタルメッシュが定期的にブレンドインしたり、ブレンドアウトするとわかっている AnimGraph のまとまった部分と考えると良いでしょう。 
+その後、グラフのこの部分へ遷移することができます。例えばキャラクターのアニメーションに Idle ステートが含まれていて、このステートに単一アニメーションのみが格納されていることがあります。 
+
+Idle ステートをステートマシンから見るとこのようになります。
+
+![](State.png)
+
+このステートを **ダブルクリック** するとグラフが開きます。このグラフで **Final Animation Pose (最終アニメーション ポーズ)** がどのようなものになるかを定義します。
+
+![](IdleStateInside.png)
+
+キャラクターが動作を開始すると、Movement ステートへ遷移します。歩いたり走る動作のように、表面上の横方向の移動を定義します。
+
+![](MoveState.png)
+
+このステート内にはキャラクターの速度と動作方向で定義されている [**ブレンドスペース**](Engine/Animation/Blendspaces) が含まれている場合があります。
+
+![](MovementInside.png)
+
+自由にレイアウトできるように、ステートへの入力ピンやステート自体にピンがありません。 
+
+外側の枠からワイヤーをドラッグすることで、ステート同士を接続したり、新規ステートを作成することができます (ブループリントと同様)。 
+
+![](DragWire.png)
+
+
+
+### 遷移ルール
+
+ステートを定義したら、スケルタルメッシュのあるステートから別のステートへの遷移方法を制御できる必要があります。この場合に、**Transition Rules** が役立ちます。 
+遷移ルールはステートを接続するワイヤーと一緒に自動的に作成されます。
+
+![](TransitionRule.png)
+
+変数の値に対していくつでもチェックやテストを遷移ルールで実行することができます。全て True または False を出力することを目的とします。この Boolean 出力は遷移でアニメーションが動くことが可能か否かを決定します。 
+
+![](TransitionRuleInside.png)
+
+これは、キャラクターの速度の値をテストしている例です。値が 10 を超えると遷移を有効にします。この場合、キャラクターは Idle ステートから Movement ステートへ移行します。 
+その後完全に異なるルールを使用して Idle ステートへ再度戻ることができます。 
+
+例えば、ここでは Movement から Idle へ移動する遷移ルールを使用しています。
+
+![](TransitionRuleReturn.png)
+
+内部では、 Movement ステートへの遷移に使用した同値がもはや True ではないことをチェックします。 
+
+[REGION:fullwidth]
+![](TransitionRuleReturnInside.png)
+[/REGION]
+
+
+### コンジット
+
+**Conduits (コンジット)** は、より高度で共有可能な遷移リソースとしての機能を果たします。遷移ルールはあるステートから別のステートへの単純な 1 対 1 の関係であるのに対して、コンジットは 1 対多数、多数対 1 、または多数対多数の関係になることが可能です。 
+コンジットはグラフ上に表示され、ステートに類似した外観になりますが、コンジット名の前に別のアイコンが付きます (以下参照)。 
+
+![](ConduitNode.png)
+
+コンジットのユースケースとして、例えば、キャラクターが消滅する (キルされる) と再生する複数のアニメーションがあるとします。 
+
+キャラクターのヘルス値が 0 以下となったら、 Death ステートへ遷移するようなシンプルな遷移ルールから始めます。しかしステートの代わりに遷移がコンジットに入ると、プレイヤーがどのようにデス(機能停止) に至るか (射殺、刺殺、爆発、車による事故、武器による打撃など) を確認する一連のチェックを行うことができます。そこから分岐して、様々な独立したデス ステートに進みます。 
+
+グラフの簡易版は以下のようになります。 
+
+![](ConduitGraph.png)(w:800)
+
+コンジット グラフの内部は遷移ルールのように見えます。
+
+![](ConduitInside.png)
+
+コンジットを出る実際の遷移ルールは、その後、デスのタイプを決定して適切なステートへブレンドできるようにします。
+
+## マウスオーバーのプレビュー
+
+ステートマシーンの特徴の 1 つは、コンポーネント ノードだけでなく、ステートマシーンにもマウスを当てればプレビューが可能な点です。例えば、ステートマシーン上にカーソルを当てると、プレビュー ウィンドウが開いてステートマシーンの大まかなビューを表示します。折りたたまれたブループリント ネットワークに似ています。
+
+![](StateMachineHoverPreview.png)
+
+これらのプレビューは、ステートマシーン内の各種ステートおよび遷移ルールにも拡張され、マウスを当てると内容のプレビューが表示されます。
+
+![](IdleStatePreview.png)
+
+遷移ルールの場合、ノードのプレビューだけでなく、ルールの詳細も表示されます。
+
+![](TransitionRulePreview.png)
+
+

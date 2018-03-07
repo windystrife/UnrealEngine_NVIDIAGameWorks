@@ -1,0 +1,160 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	SkyLighting.usf - implementation of dynamic sky lighting
+=============================================================================*/
+
+#include "Common.ush"
+#include "DeferredShadingCommon.ush"
+#include "ReflectionEnvironmentShared.ush"
+#include "BRDF.ush"
+#include "ShadingModels.ush"
+
+Texture2D BentNormalAOTexture;
+SamplerState BentNormalAOSampler;
+
+float3 DecodeBentNormal(float3 EncodedBentNormal)
+{
+	return EncodedBentNormal;
+}
+
+Texture2D IrradianceTexture;
+SamplerState IrradianceSampler;
+
+float3 ContrastAndNormalizeMulAdd;
+float OcclusionExponent;
+float4 OcclusionTintAndMinOcclusion;
+float OcclusionCombineMode;
+
+/** Note: used by movable skylights only.  Stationary sky light diffuse is evaluated in the base pass, and Static sky lighting is baked into lightmaps. */
+void SkyLightDiffusePS(
+	in noperspective float4 UVAndScreenPos : TEXCOORD0, 
+	out float4 OutColor : SV_Target0)
+{
+	float2 UV = UVAndScreenPos.xy;
+	uint ShadingModelId = GetShadingModelId(UV);
+	float3 Lighting = 0; 
+
+	BRANCH
+	// Only light pixels marked as lit
+	if (ShadingModelId > 0)
+	{
+		FScreenSpaceData ScreenSpaceData = GetScreenSpaceData(UV);
+		FGBufferData GBuffer = ScreenSpaceData.GBuffer;
+
+		float SkyVisibility = 1;
+		float DotProductFactor = 1;
+		float3 SkyLightingNormal = GBuffer.WorldNormal;
+		float3 DiffuseIrradiance = 0;
+
+#if APPLY_SHADOWING
+		float3 BentNormal = DecodeBentNormal(Texture2DSampleLevel(BentNormalAOTexture, BentNormalAOSampler, UV, 0).xyz);
+
+		#define USE_DIRECTIONAL_OCCLUSION_ON_SKY_DIFFUSE 1
+
+		#if USE_DIRECTIONAL_OCCLUSION_ON_SKY_DIFFUSE
+		{
+			SkyVisibility = length(BentNormal);
+			float3 NormalizedBentNormal = BentNormal / (max(SkyVisibility, .00001f));
+
+			// Use more bent normal in corners
+			float BentNormalWeightFactor = SkyVisibility;
+
+			SkyLightingNormal = lerp(NormalizedBentNormal, GBuffer.WorldNormal, BentNormalWeightFactor);
+			DotProductFactor = lerp(dot(NormalizedBentNormal, GBuffer.WorldNormal), 1, BentNormalWeightFactor);
+		}
+		#else
+		{
+			SkyVisibility = length(BentNormal);
+		}
+		#endif
+
+		float ContrastCurve = 1 / (1 + exp(-ContrastAndNormalizeMulAdd.x * (SkyVisibility * 10 - 5)));
+		SkyVisibility = saturate(ContrastCurve * ContrastAndNormalizeMulAdd.y + ContrastAndNormalizeMulAdd.z);
+		
+		#if SUPPORT_IRRADIANCE
+			DiffuseIrradiance = Texture2DSampleLevel(IrradianceTexture, IrradianceSampler, UV, 0).xyz;
+		#endif
+#endif
+
+		// Apply DFAO controls
+		SkyVisibility = pow(SkyVisibility, OcclusionExponent);
+		SkyVisibility = lerp(SkyVisibility, 1, OcclusionTintAndMinOcclusion.w);
+
+		// Combine with other AO sources
+		if (OcclusionCombineMode == 0)
+		{
+			// Combine with min which nicely avoids over-occlusion in cases where strong DFAO is present along with strong SSAO (distant trees)
+			SkyVisibility = min(SkyVisibility, min(GBuffer.GBufferAO, ScreenSpaceData.AmbientOcclusion));
+		}
+		else
+		{
+			// Combine with mul, which continues to add SSAO depth even indoors.  SSAO will need to be tweaked to be less strong.
+			SkyVisibility = SkyVisibility * min(GBuffer.GBufferAO, ScreenSpaceData.AmbientOcclusion);
+		}
+
+		float ScalarFactors = SkyVisibility;
+
+		float3 DiffuseColor = GBuffer.DiffuseColor;
+
+		BRANCH 
+		if (ShadingModelId == SHADINGMODELID_TWOSIDED_FOLIAGE)
+		{
+			float3 SubsurfaceLookup = GetSkySHDiffuse(-GBuffer.WorldNormal) * View.SkyLightColor.rgb;
+			float3 SubsurfaceColor = ExtractSubsurfaceColor(GBuffer);
+			Lighting += ScalarFactors * SubsurfaceLookup * SubsurfaceColor;
+		}
+
+		if (ShadingModelId == SHADINGMODELID_SUBSURFACE || ShadingModelId == SHADINGMODELID_PREINTEGRATED_SKIN)
+		{
+			float3 SubsurfaceColor = ExtractSubsurfaceColor(GBuffer);
+			// Add subsurface energy to diffuse
+			DiffuseColor += SubsurfaceColor;
+		}
+
+		BRANCH 
+		if (ShadingModelId == SHADINGMODELID_HAIR)
+		{
+			float3 N = GBuffer.WorldNormal;
+			float3 V = -normalize(mul(float4(UVAndScreenPos.zw, 1, 0), View.ScreenToWorld).xyz);
+			float3 L = normalize(V - N * dot(V,N));
+			SkyLightingNormal = L;
+			DiffuseColor = PI * HairShading( GBuffer, L, V, N, 1, 0, 0.2, uint2(0,0) );
+		}
+
+		if (ShadingModelId == SHADINGMODELID_CLOTH)
+		{
+			DiffuseColor += GBuffer.CustomData.rgb * GBuffer.CustomData.a;
+		}
+
+		// Compute the preconvolved incoming lighting with the bent normal direction
+		float3 DiffuseLookup = GetSkySHDiffuse(SkyLightingNormal) * View.SkyLightColor.rgb;
+
+		// darken by DirectionalOcclusion feature from LightPropagationVolume (could be optimized if the feature is not used)
+		float DirectionalOcclusion = ScreenSpaceData.DirectionalOcclusion.r;
+		DiffuseLookup *= DirectionalOcclusion;
+
+		// Apply AO to the sky diffuse and account for darkening due to the geometry term
+		// apply the Diffuse color to the lighting (including OcclusionTintAndMinOcclusion as it's considered another light, that fixes SubsurfaceProfile being too dark)
+		Lighting += ((ScalarFactors * DotProductFactor) * DiffuseLookup + (1 - SkyVisibility) * OcclusionTintAndMinOcclusion.xyz) * DiffuseColor;
+
+		Lighting += DiffuseIrradiance * GBuffer.DiffuseColor * (GBuffer.GBufferAO * ScreenSpaceData.AmbientOcclusion);
+
+		// For debugging
+		#if SUPPORT_IRRADIANCE
+			//Lighting = max(Texture2DSampleLevel(IrradianceTexture, IrradianceSampler, UV, 0).xyz, 0) + .01f * GetSkySHDiffuse(InGBufferData.WorldNormal);
+		#endif
+
+		//Lighting = (Texture2DSampleLevel(BentNormalAOTexture, BentNormalAOSampler, UV, 0).xyz);
+	}
+
+	// Scene color alpha is used for ScreenSpaceSubsurfaceScattering (if that is not needed it can be disabled with SUBSURFACE_CHANNEL_MODE)
+	{
+		FLightAccumulator LightAccumulator = (FLightAccumulator)0;
+
+		const bool bNeedsSeparateSubsurfaceLightAccumulation = ShadingModelId == SHADINGMODELID_SUBSURFACE_PROFILE;
+
+		LightAccumulator_Add(LightAccumulator, Lighting, Lighting, 1.0f, bNeedsSeparateSubsurfaceLightAccumulation);
+		OutColor = LightAccumulator_GetResult(LightAccumulator);
+	}
+}

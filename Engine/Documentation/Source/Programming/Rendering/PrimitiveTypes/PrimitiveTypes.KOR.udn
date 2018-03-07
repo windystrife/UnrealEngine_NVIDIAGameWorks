@@ -1,0 +1,70 @@
+﻿INTSourceChangelist:3151855
+Availability:Docs
+Title:프리미티브 유형 테크니컬 가이드
+Crumbs:%ROOT%, Programming, Programming/Rendering
+Description:렌더 프리미티브 유형을 새로 만드는 데 대한 프로그래머 안내서입니다.
+tags:Rendering
+
+[REGION:todo]
+	언리얼 엔진 3 에서 이식해 온 문서로 현재 검토중에 있습니다. 정보가 맞지 않을 수 있습니다.
+[/REGION]
+
+[TOC (start:2 end:3)]
+
+UPrimitiveComponent (프리미티브 컴포넌트)는 렌더링 및 충돌 대상이 되는 액터 컴포넌트입니다. 이 글에서는 UPrimitiveComponent 유형을 새로 만드는 법에 대해 알아봅니다.
+
+
+
+## 렌더링
+
+프리미티브는 는 표시여부(visibility) 단위입니다. 뷰 프러스텀 컬링 및 오클루전 컬링은 프리미티브의 바운딩 박스를 통해 이뤄집니다. 프리미티브의 바운딩 볼륨을 Bounds 멤버에 쓰기 위해서는, UPrimitiveComponent::UpdateBounds 를 반드시 구현해야 합니다.
+
+프리미티브는 메시 엘리먼트, 선, 스프라이트, 점으로 렌더링됩니다. 프리미티브는 그 외형을 이루는 엘리먼트에 대한 Enum 을 씬 매니저에 표시합니다.
+
+별도의 PrimitiveComponent 파생 클래스를 만들 때는, 그에 해당하는 FPrimitiveSceneProxy 도 구현해 줘야 합니다. 이는 프리미티브 컴포넌트의 렌더 스레드 사본으로, 해당 컴포넌트 렌더링에 필요한 데이터를 전부 포함할 것입니다. 프록시는 컴포넌트를 붙이고 떼는 (attachment/detachment) 도중 렌더 스레드의 씬에 추가/제거됩니다. 이 작업은 프록시에 필요한 렌더링 리소스를 초기화하고자 할 때이기도 합니다.
+
+
+### 프리미티브 씬 프록시
+
+렌더링 스레드는 게임 스레드에서 한 프레임 뒤쳐진 씬 상태에서 작동합니다. 게임 스레드에서 동적으로 변경할 수도 있는 프리미티브 프로퍼티는 렌더링 스레드에 대해 복제해야 하는데, 그래야 게임 스레드가 다음 프레임에 병렬적으로 업데이트할 수 있습니다. PrimitiveComponent 는 동적인 멤버를 미러링하는 프리미티브 씬 프록시를 생성해야 합니다. 새로 만드는 프리미티브 유형에 씬 프록시를 생성할 수 있는 기회를 주기 위해 프리미티브를 등록할 때, 씬 매니저는 UPrimitiveComponent::CreateSceneProxy 를 호출합니다.
+
+미러링된 멤버 중 하나가 변경되면, MarkRenderStateDirty 를 호출하여 씬 프록시를 새로 만들어야 합니다. 씬 프록시가 프레임 마지막에 재생성됩니다.
+
+
+### 엘리먼트 그리기
+
+씬 매니저는 FPrimitiveSceneProxy::DrawDynamicElements 를 호출하여 프리미티브의 엘리먼트를 열거합니다. 프리미티브는 호출자에 대해 그 엘리먼트를 열거하기 위해, 제공된 FPrimitiveDrawInterface 에서 DrawMesh, DrawLine, DrawPoint, DrawSprite 를 호출합니다. DrawDynamicElements 프레임별 뷰마다 여러번 호출될 수 있습니다. 그 결과는 캐시되지 않으며, 프리미티브의 엘리먼트를 다수의 패스에서 렌더링해야 할 수 있습니다. DrawDynamicElements 는 렌더 스레드에서 호출되므로, 게임 스레드에서 쓰기가 될 수 있는 PrimitiveComponent 멤버는 반드시 FPrimitiveSceneProxy 에 미러링한 다음 프리미티브를 다시 붙여(reattach) 업데이트시켜야 합니다.
+
+프리미티브를 씬에 붙인 후 스태틱으로 남는 메시 엘리먼트에 최적화된 패스가 있습니다.  FPrimitiveSceneProxy::DrawStaticElements 라 불리는 씬 매니저는 FPrimitiveDrawInterface 와 유사한 인터페이스를 사용하여 프리미티브의 스태틱 엘리먼트들을 열거합니다. 스태틱 메시 엘리먼트들이 캐시되고 최적화된 렌더링 패스를 사용합니다.  DrawDynamicElements 와 달리 DrawStaticElements 는 게임 스레드에서 호출됩니다.
+
+뷰 프레임을 렌더링할 때 씬 렌더링 코드는 프리미티브가 뷰와 무슨 관계가 있는가를 결정하기 위해 FPrimitiveSceneProxy::GetViewRelevance 를 호출합니다.  이것은 프리미티브와 뷰와의 관계를 설명하는 플래그 모음인 FPrimitiveViewRelevance 구조체를 반환합니다. 가장 중요한 플래그는 bStaticRelevance 와 bDynamicRelevance 입니다. 이 플래그는 DrawStaticElements 또는 DrawDynamicElements 에 의해 열거된 메시 엘리먼트들이 그려질지를 결정합니다.  프리미티브가 엘리먼트들을 어떤 DPG 에 갖고 있는지 여부 및 프리미티브가 반투명, 디스토션, 씬 컬러 머티리얼 사용 여부에 따라 나머지 플래그들을 설정해야 합니다.  GetViewRelevance 는 렌더링 스레드에서 호출됩니다.
+
+히트 프락시를 사용하여 프리미티브에서 클릭 탐지의 정밀도를 분리(decouple)할 수 있습니다. 히트 프락시는 사용자가 에디터에서 무엇을 클릭했는지에 관한 추가 정보를 제공하기 위해 각각의 그려진 엘리먼트와 관련됩니다. 히트 프락시는 기본적으로 HActor 를 사용하여 프리미티브 소유자를 가리킵니다. 만약 프리미티브의 여러가지 엘리먼트들에 관한 추가 정보를 제공하길 원한다면, 프리미티브에 사용되는 히트 프락시를 할당할 FPrimitiveSceneProxy::CreateHitProxies 를 반드시 구현해야 합니다.  그럼 히트 프락시는 FPrimitiveDrawInterface::SetHitProxy 와 FStaticPrimitiveDrawInterface::SetHitProxy 로 전달될 수 있습니다. CreateHitProxies 는 게임 스레드에서 호출됩니다.
+
+
+### 렌더링 스레드에서 PrimitiveComponent 접근하기
+
+PrimitiveComponent 는 프리미티브 씬 프록시가 할당되고 렌더링 스레드에서 코드가 실행되는 한 가비지 컬렉션 대상이 되지 않도록 보장하기 위해 렌더 명령 펜스를 사용합니다.
+
+여러분 PrimitiveComponent 의 멤버가 게임 플레이 동안 스태틱이면 그 멤버를 렌더링 스레드에 있는 프리미티브 씬 프록시에서 직접 접근할 수 있습니다.
+
+만약 PrimitiveComponent 의 멤버가 게임 플레이 동안 스태틱이면 프리미티브 씬 프록시에서 반드시 미러링하거나, 그에 대한 접근을 Serialize 해야 합니다.  글로벌 FlushRenderingCommands 함수를 사용하여 그에 대한 접근의 Serialize 가능합니다. FlushRenderingCommands 는 렌더링 스레드가 idle 상태가 될 때까지 기다립니다. 그 이후 렌더링 명령이 큐에 등록될 때까지 렌더링 스레드가 접근하지 않는다는 가정 하에 공유 멤버에게 쓰기가 가능합니다.
+
+
+### 라이팅
+
+렌더러는 디퍼드 셰이딩 패스에 다이내믹 라이트를 적용합니다.
+
+FLightCacheInterface 를 구현하고, 그 구현을 메시 엘리먼트의 LCI 멤버에 전달함으로써 메시 엘리먼트에 스태틱 라이팅을 제공할 수 있습니다. FLightCacheInterface 는 선택적으로 라이트맵을 제공하고, 라이트 GUID 에서 디테일한 라이트 상호작용 정보로 매핑합니다. 라이트 상호작용 정보는 FLightInteraction 에 포함되어 있으며, uncached (캐시안됨), irrelevant (연관성 없음), light-mapped (라이트 매핑됨), vertex shadow-mapped (버텍스 섀도 매핑됨), texture shadow-mapped (텍스처 섀도 매핑됨) 등이 가능합니다.
+
+스태틱 라이팅을 계산하기 위해서는 반드시 UPrimitiveComponent::GetStaticLightingInfo 를 구현해야 합니다. 스태틱 라이팅 시스템에서는 미리계산 도중 프리미티브의 메시와 매핑을 열거하기 위해 이 함수를 호출합니다.
+
+스태틱 라이팅 메시는 스태틱 라이팅을 막거나 튕겨내는 트라이앵글 집합입니다.
+
+스태틱 라이팅 매핑은 스태틱 라이팅 메시에 대한 스태틱 라이팅 텍스처 또는 버텍스 버퍼의 매핑입니다. 스태틱 라이팅 시스템은 매핑에 대한 라이트맵과 섀도맵을 계산한 다음 매핑의 Apply 함수 구현에 전달합니다.
+
+ 
+
+
+
+

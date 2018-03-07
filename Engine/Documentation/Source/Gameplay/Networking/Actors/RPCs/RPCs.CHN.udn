@@ -1,0 +1,124 @@
+﻿INTSourceChangelist:2713513
+Availability:Public
+Title: RPC
+Crumbs:Gameplay, Gameplay/Networking, Gameplay/Networking/Actors
+Description:设定网络中的函数复制
+Related: Gameplay/Networking/Actors/OwningConnections
+Related: Gameplay/Networking/Actors/Components
+
+[TOC (start:2 end:3)]
+
+RPC （远程过程调用）是在本地调用但在其他机器（不同于执行调用的机器）上远程执行的函数。 
+
+RPC 函数非常有用，可允许客户端或服务器通过网络连接相互发送消息。
+
+这些功能的主要作用是执行那些不可靠的暂时性/修饰性游戏事件。这其中包括播放声音、生成粒子或产生其他临时效果 
+之类的事件，它们对于 Actor 的正常运作并不重要。在此之前，这些类型的事件往往要通过 Actor 属性进行复制。 
+
+在使用 RPC 时，还必须要了解 [所有权的工作方式](Gameplay/Networking/Actors/OwningConnections)，因为它决定了大多数 RPC 将在哪里运行。
+
+## 使用 RPC 
+要将一个函数声明为 RPC，您只需将 `Server`、`Client` 或 `NetMulticast` 关键字添加到 `UFUNCTION` 声明。 
+
+例如，若要将某个函数声明为一个要在服务器上调用、但需要在客户端上执行的 RPC，您可以这样做：
+
+	UFUNCTION( Client );
+	void ClientRPCFunction();
+
+要将某个函数声明为一个要在客户端上调用、但需要在服务器上执行的 RPC，您可以采取类似的方法，但需要使用 `Server` 关键字：
+
+	UFUNCTION( Server );
+	void ServerRPCFunction();
+
+此外，还有一种叫做多播（Multicast）的特殊类型的 RPC 函数。多播 RPC 可以从服务器调用，然后在服务器和当前连接的所有客户端上执行。 
+要声明一个多播函数，您只需使用 `NetMulticast` 关键字：
+
+	UFUNCTION( NetMulticast );
+	void MulticastRPCFunction();
+
+多播 RPC 还可以从客户端调用，但这时就只能在本地执行。
+
+## 快速提示
+
+注意我们是如何在函数的开头预置 `Client`、`Server` 或 `Multicast` 关键字的。
+这是我们在内部所做的一个约定，用来告诉程序员所用的函数将分别在客户端、服务器或所有客户端上调用。
+
+它有一个非常重要的作用，就是事先确定该函数将在多人游戏会话期间被哪些机器调用。
+
+## 要求和注意事项
+您必须满足一些要求才能充分发挥 RPC 的作用：
+1.	它们必须从 Actor 上调用。
+1.	Actor 必须被复制。
+1.	如果 RPC 是从服务器调用并在客户端上执行，则只有实际拥有这个 Actor 的客户端才会执行函数。
+1.	如果 RPC 是从客户端调用并在服务器上执行，客户端就必须拥有调用 RPC 的 Actor。
+1.	多播 RPC 则是个例外：
+	* 如果它们是从服务器调用，服务器将在本地和所有已连接的客户端上执行它们。
+	* 如果它们是从客户端调用，则只在本地而非服务器上执行。
+	* 现在，我们有了一个简单的多播事件限制机制：在特定 Actor 的网络更新期内，多播函数将不会复制两次以上。按长期计划，我们会对此进行改善，同时更好的支持跨通道流量管理与限制。
+
+下面的表格根据执行调用的 actor 的所有权（最左边的一列），总结了特定类型的 RPC 将在哪里执行。
+
+### 从服务器调用的 RPC
+
+| Actor 所有权			| 未复制	| `NetMulticast`				| `Server`	| `Client`				|
+| ---------------------		| --------------	| ---------					| ---------	| ---------------------	|
+| **Client-owned actor**	| 在服务器上运行			| 在服务器和所有客户端上运行	| 在服务器上运行	| 在 actor 的所属客户端上运行	|
+| **Server-owned actor**	| 在服务器上运行			| 在服务器和所有客户端上运行	| 在服务器上运行	| 在服务器上运行				|
+| **Unowned actor**			| 在服务器上运行			| 在服务器和所有客户端上运行	| 在服务器上运行	| 在服务器上运行				|
+
+### 从客户端调用的 RPC
+
+| Actor 所有权						| 未复制	| `NetMulticast`		| `Server`	| `Client`			|
+| -------------------------------------	| --------------	| ---------			| ---------	| -----------------	|
+| **Owned by invoking client**	| 在执行调用的客户端上运行	| 在执行调用的客户端上运行	| 在服务器上运行	| 在执行调用的客户端上运行	|
+| **Owned by a different client**	| 在执行调用的客户端上运行	| 在执行调用的客户端上运行	| 丢弃	| 在执行调用的客户端上运行	|
+| **Server-owned actor**				| 在执行调用的客户端上运行	| 在执行调用的客户端上运行	| 丢弃	| 在执行调用的客户端上运行	|
+| **Unowned actor**						| 在执行调用的客户端上运行	| 在执行调用的客户端上运行	| 丢弃	| 在执行调用的客户端上运行	|
+
+
+## 可靠性
+
+默认情况下，RPC 并不可靠。要确保在远程机器上执行 RPC 调用，您可以指定 `Reliable` 关键字：
+
+	UFUNCTION( Client, Reliable );
+	void ClientRPCFunction();
+
+## 蓝图
+
+如果被标记为 RPC 的函数是从蓝图中调用，它们也会被复制。这时，它们将遵循相同的规则，就像是从 C++ 调用一样。在此情况下，您无法 
+将函数动态标记为蓝图的 RPC。
+
+然而，自定义事件却可以从蓝图编辑器内部被标记为复制。
+
+要使用此功能，您需要在您的事件图表中新建一个自定义事件。单击自定义事件并在详细信息视图中编辑复制设置：
+
+![](RPC_BP.png)
+
+## 验证
+
+我们在不久前加入了为 RPC 增加验证函数的功能，以此作为检测错误数据/输入的一个手段。其主要思路是：如果 RPC 的验证函数检测到任何 
+参数存在问题，就会通知系统将发起 RPC 调用的客户端/服务器断开。
+
+要为 RPC 声明一个验证函数，只需将 `WithValidation` 关键字添加到 `UFUNCTION` 声明语句：
+
+	UFUNCTION( Server, WithValidation );
+	void SomeRPCFunction( int32 AddHealth );
+
+然后在实施函数旁边加入验证函数：
+
+	bool SomeRPCFunction _Validate( int32 AddHealth )
+	{
+		If ( AddHealth > MAX_ADD_HEALTH )
+		{
+			return false;                       // This will disconnect the caller
+		}
+	return true;                              // This will allow the RPC to be called
+	}
+
+	void SomeRPCFunction _Implementation( int32 AddHealth )
+	{
+		Health += AddHealth;
+	}
+
+最近的一次更改被添加到 UHT，以便要求客户端 -> 服务器 RPC 具有一个 _Validate 函数。这样是为了鼓励使用安全的服务器 RPC 函数，同时尽可能方便其他人 
+添加代码以检查所有参数，确保其符合所有已知的输入限制。

@@ -1,0 +1,51 @@
+﻿INTSourceChangelist:3126630
+Availability:Public
+Title:BuildGraph
+Crumbs: %ROOT%, Programming, Programming/Development
+Description:使用 BuildGraph 脚本编写系统自定义安装的版本。
+Version:4.13
+type:landing
+parent:Programming/Development
+tags:BuildGraph
+
+**BuildGraph** 是一个基于脚本的构建自动化系统，其特点是拥有虚幻引擎 4（UE4）项目中常见的构建块图表。BuildGraph 整合了 UnrealBuildTool、AutomationTool，以及编辑器。可根据项目进行延展和自定义。
+
+BuildGraph 脚本以 XML 编写，指定用户定义节点的图表（通过节点之间的依赖性）。每个节点由按序列执行的多个任务组成，产生某些输出（如编译此项目、然后打包、运行此测试，等等）。当被询问构建目标（即为一个节点或命名输出）时，BuildGraph 将执行图表中构建所需的全部节点。
+
+和其他构建工具不同，BuildGraph 是类似 makefile 的脚本语言和 build farm 配置脚本的混合。它允许对承担步骤执行的机器类型进行注解，在 
+出现步骤失败时提供失败通知接收者列表，并将仅在显式用户触发后执行的节点分组。它还将追踪来自任务执行的输出文件的创建，方式是让图表执行在一个农场的机器上进行分布（节点在需要之处同步运行），且中间工件将自动传送至网络共享（或从网络共享传输）。
+
+Epic 使用 BuildGraph 准备 UE4 二进制版本、市场中的样本包，并应用自己游戏的流程（除其他外）。`[UE4Root]/Engine/Build/Graph/Examples` 目录下有数个示例 BuildGraph 脚本，创建二进制 UE4 分布的脚本位于 `[UE4Root]/Engine/Build/InstalledEngineBuild.xml` 中。
+
+通过 Visual Studio 打开脚本后，将使用存在于 `[UE4Root]Engine/Build/Graph/Schema.xsd` 的模式在编辑时提供丰富的工具提示、验证和智能感知功能。
+
+## 编写 BuildGraph 脚本
+
+如希望学习如何自行编写 **BuildGraph** 脚本，它有助于了解构成图表的多个部分。图表通过以下单元创建：
+
+* 任务：作为构建过程的部分执行的行为（编译、打包等）。
+* 节点：排序任务（执行生成输出）的命名序列。在它们可被执行之前，节点可能依赖于其他节点先行执行其任务。
+* 代理：在相同机器上执行的一组节点（如作为构建系统的一部分运行）。进行本地构建时代理无效果。 
+* 触发：手动介入后才会执行的群组的容器。 
+* 聚合：可通过单一命名进行引用的节点和命名输出群组。
+
+脚本常频繁使用可重复使用的属性或条件定义值。属性由 `<Property>` 单元声明，作用域为其首个声明的点。通过 `$(Property Name)` 符号引用的属性在所有属性字符串均有效，并将在脚本被读取时被展开。用户可在命令行上进行供应的属性可通过 `<Option>` 单元进行声明，可使用 `<EnvVar>` 单元将环境变量导入属性。
+
+单元可通过“if”属性进行条件定义。查看以下条件语句表达式语法。
+
+BuildGraph 一般用于打包的游戏，因此原生支持过滤和文件处理。支持文件列表的属性可能包含一个 Perforce 风格的通配符（匹配任意位置任意数量的“...”、“*”和“？”式样）、一个完整的路径名、或对文件标记合集的一个引用。属性以 `#` 前缀表示。使用 `<Tag>` 任务可将文件添加到一个标记集，还可执行并/差风格的运算。每个节点可以命名标签串列的形式声明多个输出，其他节点可依赖于这个串列。
+
+图表可作为构建系统的一部分同步执行。如需照此执行，通过 `-Export=<Filename>` 参数运行生成最初的图表配置（生成一个 JSON 文件，列出要执行的节点和依赖性）。每个参与的代理应被同步到相同的变更列表，AutomationTool（UAT）应通过合适的 `-SingleNode=<Name>` 参数重新运行。来自不同节点的输出通过共享存储（通常为网络共享）在代理之间传输，可使用 `-SharedStorageDir=<Path>` 参数在命令行上指定共享路径。注意：机器的分配（它们之间的协调）将假定由外部系统管理。
+
+用于定义 BuildGraph 架构的单元列于以下部分中。
+
+## BuildGraph 脚本编写参考
+
+[DIR(output:"listbutton" parent:"Programming/Development/BuildGraph" org:"flat" type:"reference")]
+
+## 使用 BuildGraph
+
+[REGION:topics third]
+%Programming/Development/BuildGraph/Usage:topiccompact%
+%Programming/Development/InstalledBuildReference:topiccompact%
+[/REGION]

@@ -1,0 +1,184 @@
+﻿Availability: Public
+Title:2. 配置输入并创建Pawn的移动组件
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/Components
+Description:设置输入并构建自定义Pawn移动组件来定义Pawn如何移动。
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[上一步](Programming\Tutorials\Components\1 "%Programming\Tutorials\Components\1:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[编程指南主页](Programming\Tutorials\)
+	[/PARAM]
+	[PARAM:next]
+		[下一步](Programming\Tutorials\Components\3 "%Programming\Tutorials\Components\3:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+1. 返回 **Unreal Editor（虚幻编辑器）** ，现在我们可以配置项目的输入设置了。 您可以在 **Edit（编辑）** 下拉菜单的 **Project Settings（项目设置）** 中找到这些设置。
+
+	[![](EditProjectSettings.png)](EditProjectSettings.png)
+
+	在该处，我们选择左侧的 **Engine（引擎）** 部分的 **Input（输入）** 选项。 我们需要 **Action Mapping（动作映射）** 来设置粒子系统的切换，两个 **Axis Mappings（轴映射）** 来移动 **Pawn** ，以及一个 **Axis Mapping（轴映射）** 来旋转 **Pawn** 。
+
+	| ----- | ----- | ----- |
+	| 动作映射 | | |
+	| 粒子切换 | 空格键 | |
+
+	| ----- | ----- | ----- |
+	| 坐标轴映射 | | |
+	| 向前移动 | W | 1.0 |
+	|  | S | -1.0 |
+	| 向右移动 | A | -1.0 |
+	|  | D | 1.0 |
+	| 旋转 | Mouse X | 1.0 |
+
+	[![](InputSettings.png)](InputSettings.png)
+
+1. 我们不直接在 **Pawn** 类中处理所有的移动，而是创建一个 **Movement Component（移动组件）** 来让它为我们管理移动。 在这个教程中，我们会扩展 **Pawn Movement Component（Pawn移动组件）** 类。 我们首先选择 **File（文件）** 下拉菜单中的 **Add Code to Project（添加代码到项目）** 命令。
+
+	[![](AddCPPCode.png)](AddCPPCode.png)
+
+	和 **Pawn** 类不一样，默认情况下，我们看不到 **Pawn Movement Component（Pawn移动组件）** 。 如需搜寻它，我们需要查看 **Show All Classes（显示所有类）** 选项。
+
+	[![](ShowAllClasses.png)](ShowAllClasses.png)
+
+	您可以在搜索栏中输入"movement"（移动）来快速缩小搜寻列表的范围。 
+
+	[![](ChooseParentClass.png)](ChooseParentClass.png)
+
+	[REGION:tip]**Pawn Movement Components（Pawn移动组件）** 有一些强劲的、内置的功能可用于辅助常见的物理功能，同时还是一个在许多 **Pawn** 类型间共享移动代码的好方法。 随着您的项目变得越来越大， **Pawns** 变得越来越复杂，使用 **Components（组件）** 来隔离功能是一个很好的方法。[/REGION]
+
+	由于我们把 **Pawn** 类称为"CollidingPawn"，我们就把这个命名为"CollidingPawnMovementComponent"吧。
+
+	[![](NameComponent.png)](NameComponent.png)
+
+----
+
+我们完成了对输入配置的定义并创建了自定义的 **Pawn Movement Component（Pawn移动组件）** 。 我们可以返回 **Visual Studio** 并写代码以定义当我们使用 **Pawn Movement Component（Pawn移动组件）** 时， **Pawns** 的移动方法。
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    代码
+    [/PARAMLITERAL]
+    [PARAM:heading]
+	    正在开发中的代码
+    [/PARAM]
+    [PARAM:content]
+		**CollidingPawn.h**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "GameFramework/Pawn.h"
+			#include "CollidingPawn.generated.h"
+
+			UCLASS()
+			class HOWTO_COMPONENTS_API ACollidingPawn : public APawn
+			{
+				GENERATED_BODY()
+
+			public:
+				// 设置此pawn属性的默认值
+				ACollidingPawn();
+
+				// 当游戏开始或生成时调用
+				virtual void BeginPlay() override;
+	
+				// 在每一帧调用
+				virtual void Tick( float DeltaSeconds ) override;
+
+				// 调用以绑定功能到输入
+				virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override;
+
+				UParticleSystemComponent* OurParticleSystem;
+			};
+
+		**CollidingPawn.cpp**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_Components.h"
+			#include "CollidingPawn.h"
+
+			// 设置默认值
+			ACollidingPawn::ACollidingPawn()
+			{
+ 				// 将此pawn设置为在每一帧都调用Tick()。  如果您不需要这项功能，您可以关闭它以改善性能。
+				PrimaryActorTick.bCanEverTick = true;
+
+				// 我们的根组件是一个会对物理行为进行响应的球体
+				USphereComponent* SphereComponent = CreateDefaultSubobject<USphereComponent>(TEXT("RootComponent"));
+				RootComponent = SphereComponent;
+				SphereComponent->InitSphereRadius(40.0f);
+				SphereComponent->SetCollisionProfileName(TEXT("Pawn"));
+
+				// 创建并放置网格物体组件，这样我们能看到球体的位置
+				UStaticMeshComponent* SphereVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualRepresentation"));
+				SphereVisual->AttachTo(RootComponent);
+				static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereVisualAsset(TEXT("/Game/StarterContent/Shapes/Shape_Sphere.Shape_Sphere"));
+				if (SphereVisualAsset.Succeeded())
+				{
+					SphereVisual->SetStaticMesh(SphereVisualAsset.Object);
+					SphereVisual->SetRelativeLocation(FVector(0.0f, 0.0f, -40.0f));
+					SphereVisual->SetWorldScale3D(FVector(0.8f));
+				}
+
+				// 创建粒子系统以供我们激活或反激活
+				OurParticleSystem = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("MovementParticles"));
+				OurParticleSystem->AttachTo(SphereVisual);
+				OurParticleSystem->bAutoActivate = false;
+				OurParticleSystem->SetRelativeLocation(FVector(-20.0f, 0.0f, 20.0f));
+				static ConstructorHelpers::FObjectFinder<UParticleSystem> ParticleAsset(TEXT("/Game/StarterContent/Particles/P_Fire.P_Fire"));
+				if (ParticleAsset.Succeeded())
+				{
+					OurParticleSystem->SetTemplate(ParticleAsset.Object);
+				}
+
+				//  使用弹簧臂来让相机获得一种平滑、自然的运动。
+				USpringArmComponent* SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraAttachmentArm"));
+				SpringArm->AttachTo(RootComponent);
+				SpringArm->RelativeRotation = FRotator(-45.f, 0.f, 0.f);
+				SpringArm->TargetArmLength = 400.0f;
+				SpringArm->bEnableCameraLag = true;
+				SpringArm->CameraLagSpeed = 3.0f;
+
+				// 创建相机并附加到弹簧臂
+				UCameraComponent* Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("ActualCamera"));
+				Camera->AttachTo(SpringArm, USpringArmComponent::SocketName);
+
+				// 控制默认玩家
+				AutoPossessPlayer = EAutoReceiveInput::Player0;
+			}
+
+			// 当游戏开始或生成时调用
+			void ACollidingPawn::BeginPlay()
+			{
+				Super::BeginPlay();
+	
+			}
+
+			// 在每一帧调用
+			void ACollidingPawn::Tick( float DeltaTime )
+			{
+				Super::Tick( DeltaTime );
+
+			}
+
+			// 调用以绑定功能到输入
+			void ACollidingPawn::SetupPlayerInputComponent(class UInputComponent* InputComponent)
+			{
+				Super::SetupPlayerInputComponent(InputComponent);
+
+			}
+
+
+    [/PARAM]
+[/OBJECT]
+
+%Steps%

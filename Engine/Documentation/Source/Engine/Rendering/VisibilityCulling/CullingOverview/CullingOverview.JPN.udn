@@ -1,0 +1,421 @@
+﻿INTSourceChangelist:3108692
+Availability:Docs
+Title:ビジビリティ カリングの概要
+Crumbs: %ROOT%, Engine, 
+Description:ビジビリティ カリングの概要
+Version:4.13
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Rendering/VisibilityCulling:title%]()
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/VisibilityCulling:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/VisibilityCulling:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/VisibilityCulling]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/VisibilityCulling:title%]()
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/VisibilityCulling:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/VisibilityCulling:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/VisibilityCulling]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+[TOC(start:2 end:2)]
+
+
+
+
+ビジビリティ カリングはシーンのすべてのアクタを集めてから、使用できるカリング メソッドを使って見えるかどうかをテストします。アクタの可視ステートの確認プロセスは、 
+テストのために GPU に送るクエリ数を減らすことでカリングの効率性を上げるために使われます。 
+
+このカリング処理の仕組みを理解するには、まずアクタの境界を可視ステート テストに使う方法、 
+視錐台とは何か、そしてオクルーダー アクタとオクルーディー アクタの違いを理解しなければなりません。 
+
+## アクタの可視ステート テスト
+
+ビジビリティ カリングを使うには、カメラ ビュー内でアクタが見えるかどうかを確認する方法がまず必要です。これは、アクタの境界を使えば可能であり、
+ビジビリティ カリングを機能させる重要な部分となります。このカリング処理の仕組みを理解するには、
+アクタの境界、カメラ視錐台、およびオクルージョンがお互いどのように機能してアクタの可視ステートを設定するのかを理解する必要があります。
+
+## アクタの範囲
+
+アクタには、メッシュのジオメトリを囲むバウンディング ボックスと球体で構成される境界があります。境界はメッシュに基づいて自動的に計算されますが、必要に応じて、 
+スタティックメッシュ エディタ、ペルソナ、またはシーンの [Details (詳細)] パネルでインスタンスごとに編集することができます。ビジビリティとオクルージョン カリングを行うために、 
+アクタの境界を使ってアクタがカメラの視野角内に入るかどうかをテストします。
+
+![](BoundsEditorView1.png)(w:350)
+[REGION:caption]
+アクタのバウンディング ボックスと球体
+[/REGION]
+
+Bounds Scale の設定方法
+
+以下のオプションを使って、スタティクメッシュおよびスケルタルメッシュの境界を設定することができます。 
+
+[REGION:imagetable]
+| ![](BoundScaleSetting.png)(w:400) | ![](BoundsScaleSettingSMEditor.png)(w:400) |
+| --- | --- |
+| Scene Per-Instance Detail's panel | スタティックメッシュ エディタとスケルタルメッシュ エディタの詳細パネルです。 | 
+[/REGION]
+
+[REGION:note]
+スタティックメッシュ エディタとペルソナでは特定の XYZ 座標値を設定できますが、**Bounds Scale** ではアクタの境界を均等にスケールする乗数を使ってインスタンスごとに設定します。
+[/REGION]
+
+シーン内のアクタの境界を表示するには、まずビューポートを開いて、**[Show (表示)]** > **[Advanced (詳細)]** > **[Bounds (境界)]** を選択、あるいはコマンド `Show Bounds` を使います。次に、シーンのアクタを選択して、
+境界が見えるか確認します。
+
+[OBJECT:ComparisonSlider]
+ [PARAM:before]
+ ![Bounds Scale: 1.0](Bounds2.png)(w:500)
+ [/PARAM]
+ [PARAM:after]
+ ![Bounds Scale: 1.25](Bounds3.png)(w:500)
+ [/PARAM]
+[/OBJECT]
+[REGION:caption]
+_選択したアクタの [Detail (詳細)] パネルで Bounds Scale を設定する_
+[/REGION]
+
+[REGION:tip]
+アクタの境界は、整数でなくても広げることができます。目指す大きさになるまで、小数点単位で徐々に増やしていくことができます。例えば、 
+Bounds Scale を 2.0 ではなく 1.15 にします。 
+[/REGION]
+
+
+## カメラの視錐台について
+
+カメラの視錐台とは、3D で表示される領域のことです。 
+
+[REGION:imagetable]
+| [INCLUDE:#cameraview1] |
+| ---------------------- |
+| カメラの視錐台 (FOV) を 90 度 (デフォルト) に設定 |
+[REGION:caption]
+_画像をクリックしてフルサイズで表示_
+[/REGION]
+[/REGION]
+
+このピラミッド型がカメラ ビューから見た **視野角** (FOV) を表します。このビューがシーンの視錐台内にある各種アクタを表示します。
+下の画像は、上のシーンを構成するエレメントをすべて含んでいます。視錐台内で見えないスポットライトなどのアクタ、 
+あるいは視錐台内で見えないその他のアクタも含むことができます。  
+
+[REGION:imagetable]
+| [INCLUDE:#sceneview1]| 
+| --- |
+| カメラのアトリビュートを付けたシーン ビュー  |
+[/REGION]
+[REGION:caption]
+_画像をクリックしてフルサイズで表示_
+[/REGION]
+
+この画像は FOV 内に存在するアクタ、およびスポットライトのように存在しないアクタがすべて含まれる完全なシーンを表しています。以下は、属性ごとに分類した
+カメラのエレメントの表です。
+
+| 番号 | 説明 |
+| ------ | ----------- |
+| **1**  | **Field of View (FOV):** 度で計測した視野角の幅です。 |
+| **2**  | **Near Clip Plane:** カメラに最も近いレンダリング ポイントです。 |
+| **3**  | **Camera View Frustum:** ニア クリップ面とファー クリップ面の間の領域です。このビューにあるものはすべてレンダリング対象と見なされます。 |
+| **4**  | **Far Clip Plane:** カメラから最も遠いレンダリング ポイントです。ビューをクリップする設定距離ではなく、シーン深度によって調節されます。 |
+
+<!---
+[EXCERPT:CameraView1]
+[REGION:lightbox]
+[![](CameraView.png)(w:600)](CameraView.png)
+[/REGION]
+[/EXCERPT:CameraView1]
+
+[EXCERPT:SceneView1]
+[REGION:lightbox]
+[![](FrustumView.png)(w:600)](FrustumView.png)
+[/REGION]
+[/EXCERPT:SceneView1]
+--->
+
+### カメラの視野角
+視錐台は **視野角** (FOV) で調整します。値が高いと表示角度が広くなり、値が低いと表示角度が制限されます。
+
+詳細は、本ページの [カメラの使用および設定方法](Gameplay/HowTo/UsingCameras) をご覧ください。
+
+[REGION:note]
+カメラの視錐台のビジュアル化はデフォルトでは無効になっています。ビューポートで **[Show (表示)]** > **[Advanced (詳細)]** > **[Camera Frustum (カメラ錐台)]** を選択して、まず有効にしなければなりません。
+[/REGION]
+
+[OBJECT:EmbeddedVideo]
+ [PARAMLITERAL:width]
+ 640
+ [/PARAMLITERAL]
+ [PARAMLITERAL:height]
+ 360
+ [/PARAMLITERAL]
+ [PARAMLITERAL:videoid]
+ RqTqc0dLKPM
+ [/PARAMLITERAL]
+[/OBJECT]
+
+
+
+
+## オクルージョンについて
+
+オクルージョンは、別のアクタを隠すことができるアクタ、または別のアクタから隠されるアクタがあると発生します。これらのアクタは、オクルーダー、オクルーディー、あるいはその両方になります。 
+ 
+* オクルーダーは、別のアクタを視錐台に表示されないようにするアクタです。
+* オクルーディーは、別のアクタによって視錐台に表示されなくなるアクタのことです。アクタがある程度大きければ、それより小さいアクタを視錐台で隠すオクルーダーとなります。
+
+下の例では、カメラがシーンのビューを表しています。ウォールの後ろには、カメラ ビューで隠されているため表示されていないアクタがあります。彫刻と銃身は、それらをオクルードしている壁によって隠されているので、 
+両方ともオクルーディーとなります。さらに、銃身と彫刻は後ろにあるものを隠していればオクルーダーとなることを覚えておいてください。すべてのオクルーダーは、 
+他のアクタを隠すことができる大きさがあればオクルーディーになることができます。
+
+[REGION:imagetable]
+| [INCLUDE:#OccluderVsOccludee1] | [INCLUDE:#OccluderVsOccludeeCV] |
+| --- | --- | 
+| Occluder = Wall, Occludee = Barrels and Statue  | カメラ FOV が銃身と彫刻をオクルードする壁を表示します。 |
+[/REGION]
+[REGION:caption]
+_画像をクリックしてフルサイズで表示_
+[/REGION]
+
+<!---
+[EXCERPT:OccluderVsOccludee1]
+[REGION:lightbox]
+[![](OccluderVsOccludee.png)(w:450)](OccluderVsOccludee.png)
+[/REGION]
+[/EXCERPT:OccluderVsOccludee1]
+
+[EXCERPT:OccluderVsOccludeeCV]
+[REGION:lightbox]
+[![](OccluderVsOccludeeCameraView.png)(w:450)](OccluderVsOccludeeCameraView.png)
+[/REGION]
+[/EXCERPT:OccluderVsOccludeeCV]
+--->
+
+<!---
+### ビジビリティ カリング
+
+以下のタイプのカリングは、シーンのアクタの現在の可視ステートの判断に使用します。
+
+|カリングのタイプ|説明|
+| ---------------- | ----------- |
+| **Distance** | アクタの設定距離を可視ステートの判断に使用します。 |
+| **View Frustum** | カメラの視錐台内に境界が一切表示されないアクタを削除するために使用します。この表示領域の外にあるものは、レンダリングの対象にはなりません。 |
+| **Occlusion Queries** | カメラ視錐台にありながら、他のアクタに隠されて表示されない余分なアクタを削除するために使用します。アクタがシーンの深度バッファ内にあるかどうかテストして行います。あればレンダリングされ、なければオクルードされているとみなされレンダリングされません。 |
+
+
+本ページの [バッファの可視化](Engine/UI/LevelEditor/Viewports/ViewModes#buffervisualization) で詳細をご確認ください。
+--->
+
+## ビジビリティ カリング メソッド
+
+データがシーンからカリングされたら、アクタの可視ステートをテストするために実装されているカリング メソッドでテストします。ビジビリティ カリング メソッドは一緒に機能します。
+モバイルの場合、動的オクルージョンができない場合の解決方法となります。
+
+以下のカリング メソッドは適用順になっています。同時に、、レンダリング スレッド負荷の小さいもの順にもなっています。
+
+* 距離カリング (インスタンスごとのボリュームおよび Cull Distance Volumes)
+* 視錐台カリング
+* 事前計算オクルージョン カリング
+* 動的オクルージョン カリング (ハードウェア オクルージョン クエリ)
+
+
+### 距離カリング (インスタンス別)
+
+シーン内の各アクタは、レンダリング結果が見えるように描画距離を最短距離と最長距離に設定することができます。
+
+![](DistanceCullSettings.png)
+
+| **プロパティ** | **説明** |
+| ------------ | --------------- |
+| **Min Draw Distance** | プリミティブのレンダリング最小距離です。プリミティブのバウンディング球体の中央からカメラ位置までワールド スペース単位で計測されます。 |
+| **Desired Max Draw Distance** | レベル デザイナーに公開されている最長描画距離です。実際の最長描画距離は、この最小 (0 は無視) とこのオブジェクトに影響しているボリュームです。 |
+| **Current Max Draw Distance** | このプロパティは編集できません。このフィールドには、プリミティブが中に存在する CullDistanceVolume によって設定されたカリング距離が表示されます。0 に設定すると Cull Distance Volume は設定されないので、値は 0 になります。 |
+
+下の例では、キューブに **Min Draw Distance** と **Desired Max Draw Distance** を設定しています。これらの値は、アクタをレンダリングする最短距離、あるいは 
+アクタをレンダリングできるカメラのビューからの最長距離を決定します。
+
+* **Min Draw Distance:** 500
+* **Desired Max Draw Distance:** 1000
+
+[REGION:note]
+ここで、**Desired Max Draw Distance** が Cull Distance Volume に設定された高い値をオーバーライドしていることに注目してください。詳細は、[Cull Distance Volume][カリング距離ボリューム](1_TimH\2_IN_PROGRESS\VisibilityCulling\CullDistanceVolume) ページを参照してください。
+[/REGION]
+
+[OBJECT:EmbeddedVideo]
+ [PARAMLITERAL:width]
+ 640
+ [/PARAMLITERAL]
+ [PARAMLITERAL:height]
+ 360
+ [/PARAMLITERAL]
+ [PARAMLITERAL:videoid]
+ LiiJ13LulIU
+ [/PARAMLITERAL]
+[/OBJECT]
+
+
+<!---
+[REGION:imagetable]
+| [INCLUDE:#Units1500] | [INCLUDE:#Units1000] | [INCLUDE:#Units500] |
+| --- | --- | --- |
+| Desired Max Draw Distance 以上 | Min and Max Draw Distance 内 | Min Draw Distance 以下 | 
+[/REGION]
+
+上の動画での現象を図説しやすいように、この画像はトップダウン ビューを表示し、**Camera** アクタか **Cube** アクタの中央までの距離を示します。 
+トップダウン ビューのすぐ下の画像は、カメラのビューです。
+
+--->
+
+**Desired Max Draw Distance** が 1000、**Min Draw Distance** が 500 に設定されているので、
+キューブ アクタはカメラがアクラのバウンディング ボックスの中央からこの範囲内を移動した時だけみえるようになります。カメラがこのスペース外に移動すると、アクタはレンダリング対象外となります。 
+
+<!--
+[EXCERPT:Units1500]
+[REGION:lightbox]
+[![](1500units.png)(w:300)](1500Units.png)
+[/REGION]
+[/EXCERPT:Units1500]
+
+[EXCERPT:Units1000]
+[REGION:lightbox]
+[![](1000units.png)(w:300)](1000Units.png)
+[/REGION]
+[/EXCERPT:Units1000]
+
+[EXCERPT:Units500]
+[REGION:lightbox]
+[![](500units.png)(w:300)](500Units.png)
+[/REGION]
+[/EXCERPT:Units500]
+-->
+
+
+### Cull Distance Volume
+
+Cull Distance Volumes は、対応する距離の境界のサイズに基づいてアクタを自動的に除去する大きさと距離を配列に指定することができるようにします。これらのボリュームは、
+内装が詳細な広い屋外のシーンに便利です。 
+
+使用方法とセットアップに関する情報は、本ページの [Cull Distance Volumes](1_TimH\2_IN_PROGRESS\VisibilityCulling\CullDistanceVolume) をご覧ください。
+
+
+### 視錐台カリング
+
+カメラの視錐台は、シーンからカリングされたデータが表示中の領域内にあるかどうかをテストするために使います。この処理は、アクタのバウンディング ボックスと球体を使ってビューの中で見えるか確認します。もしなければ、 
+アクタはレンダリングされません。
+
+以下の例は、視錐台が表示中の領域内のアクタの存在の判定方法です。
+
+* 黄色は、視錐台の FOV と他のアクタにオクルードされない領域を表します。
+* 赤は、他のアクタ (壁や大きいオブジェクトなど) のためオクルードされて部分的に見えている視錐台です。
+
+[REGION:imagetable]
+| [INCLUDE:#Camera1] | [INCLUDE:#Camera2] | [INCLUDE:#Camera3] | [INCLUDE:#Camera4] |
+| ------------------ | ------------------ | ------------------ | ------------------ |
+|          1         |          2         |          3         |          4         | 
+[/REGION]
+
+| **番号** | **説明** |
+| ---------- | --------------- |
+| **1** | このパースペクティブからは、玄関までのビュー以外すべてを隠すオクルーダとなる大きい壁があります。このため、キューブだけしか見えません。つまり、球体とコーンは壁のオクルーディーなので、レンダリングはされません。 |
+| **2** | カメラが前方に動くと、視錐台には映るシーンが広がります。壁が球体とコーンをオクルードしなくなり、壁の隅周辺で球体とコーンが部分的に見えます。見えているのは一部ですが、全体がレンダリングされているということになります。 |
+| **3** | 次に、カメラが左を向くと、視錐台内には球体とキューブが見えます。ビューの外にあるコーンと壁はレンダリングされません。 |
+| **4** | 今度はカメラが右に向くと、ビューにはコーンとキューブが見えるようになり、ビューから外れた壁と球体はレンダリングされなくなります。 |
+
+[REGION:note]
+ビジビリティ カリングの仕組みの一般的な例です。レンダリングに関する注意事項と理由はたくさんあるので、ここでは一部のみ説明します。ヒントや方策については、
+本ページの [ベスト プラクティスのためのカリング方法](Engine\Rendering\VisibilityCulling\CullingBestPractices) をご覧ください。
+[/REGION]
+
+<!--
+[EXCERPT:Camera1]
+[REGION:lightbox]
+[![](Camera1.png)(w:215)](Camera1.png)
+[/REGION]
+[/EXCERPT:Camera1]
+
+[EXCERPT:Camera2]
+[REGION:lightbox]
+[![](Camera2.png)(w:215)](Camera2.png)
+[/REGION]
+[/EXCERPT:Camera2]
+
+[EXCERPT:Camera3]
+[REGION:lightbox]
+[![](Camera3.png)(w:215)](Camera3.png)
+[/REGION]
+[/EXCERPT:Camera3]
+
+[EXCERPT:Camera4]
+[REGION:lightbox]
+[![](Camera4.png)(w:215)](Camera4.png)
+[/REGION]
+[/EXCERPT:Camera4]
+-->
+
+[TOC(start:2 end:2)]
+
+### Precomputed Visibility Volume
+
+<!---![](PrecomputedVisibilityVolume.png)(w:500)--->
+
+Precomputed Visibility Volumes は、静的ライティング ビルドの後にサーフェイスに置かれるビジビリティ セルを使います。これらのビジビリティ セルは、カメラ ビューを使ってアクタの可視ステートを変更します。
+カリング メソッドは、可視ステートを確認するためのハードウェア オクルージョン クエリを発行できないモバイル デバイス上にビジビリティ カリングを行う際に便利です。 
+
+使用方法とセットアップに関する情報は、本ページの [Precomputed Visibility Volumes](1_TimH\2_IN_PROGRESS\VisibilityCulling\PrecomputedVisibilityVolume) をご覧ください。
+
+### 動的オクルージョン
+
+動的オクルージョン クエリは、カメラの視錐台内にあると判定されたアクタを見るだけでカリング メソッドのチェーンの最後に実施されます。視錐台内にあるアクタ境界は、 
+GPU に送られて 1 フレーム遅れで読みとることで、シーン深度バッファに対するビジビリティがテストされます。アクタの境界がシーン深度内に表示されなければ、 
+レンダリングはされません。これにより、別のアクタにオクルードされたアクタに対する可視ステートがレンダリングされないようにします。また、ファー クリップ面の距離に特定の値を設定するのではなくて、
+おおよその距離に依存しているので、表示距離を遠くにすることができます。
+
+#### Hierarchical Z Buffer
+
+[REGION:warning]
+Hierarchical Z-Buffer オクルージョンの実装はまだ実験的と見なされています。不適切にメッシュがカリングされてしまうなど、未対処の既知の問題があります。 
+[/REGION]
+
+Hierarchical Z-Buffer オクルージョンの背後にある考え方は、アクタのビジビリティを決定するために複数の解像度でシーンの深度を表現することです。これは、テスト対象のアクタに対してシーンで深度を特定するテクセルがあるシーン深度に対して、 
+レンダー ターゲットのミップマップ版を作成することで実現します。アクタの境界の深度値をキャプチャされたレンダー ターゲットの深度値と比較すれば、
+アクタのオクルージョンをテストすることができます。解像度が低めのミップ レベルを使うと、アクタ境界のチェックが慎重になり、
+ミップ レベルからサンプリングする際のテクスチャ フェッチが少なくなります。 
+
+[REGION:note]
+シーンを実際のシーン解像度より低い解像度でレンダリングすると、表示すべきアクタを不正にカリングする危険があります。  
+[/REGION]
+
+Hierarchical Z-Buffer Occlusion Culling は以下のコンソール コマンドで有効にすることができます。 
+
+	r.HZBOcclusion
+
+* 0 で Hierarchical Z-Buffer occlusion を無効にします。
+* 1 で Hierarchical Z-Buffer occlusion を有効にします。
+* 2 は Hierarchical Z-Buffer システムを強制使用します。これにより、レンダリング プラットフォームの環境設定をオーバーライドします。
+
+

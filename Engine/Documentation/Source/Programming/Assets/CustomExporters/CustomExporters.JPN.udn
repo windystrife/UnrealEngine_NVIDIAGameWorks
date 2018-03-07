@@ -1,0 +1,97 @@
+﻿INTSourceChangelist:2638780
+Availability:Docs
+Title:カスタム仕様のエクスポータ テクニカル ガイド
+Crumbs: %ROOT%, Engine, Engine/UI, Programming
+Description:カスタム仕様のアセットタイプ用エクスポータのプログラマー向けライティング ガイド
+
+[REGION:todo]
+	このページはアンリアル エンジン 3 のドキュメントから転載され現在見直しがされています。古い情報が含まれる場合もありますので予めご了承ください。
+[/REGION]
+
+[TOC(start:2)]
+
+UExporter クラスは資産をエクスポートするためにエディタで使用します。エディタのコピー/ペースト/複製機能を使用したり、資産をファイルへ出力したりします。エクスポータ クラスは、エクスポータがサポートするオブジェクトのタイプや、サポートしているエクスポート フォーマットの一覧を宣言します。エクスポータは、テキストまたはバイナリのいずれかをサポートします。
+
+UExporter のシスター クラスは UFactory です。UFactory は資産のインポートやペースト、および資産の新規作成に使用します。エクスポータ記述方法の詳細については、[カスタム エクスポータの作成](Programming/Assets/CustomExporters) をご覧ください。
+
+
+
+## 新規 UExporter クラスの追加
+
+UExporter から派生したタイプは、ご使用のゲーム エディタ プロジェクトで定義することができます。アンリアル エンジン 4 で出荷する UFactory から派生したタイプのサンプルについては、 Editor/UnrealEd/Classes/Exporters に記載されているクラスでご確認ください。
+
+
+## 注意すべき UExporter メンバ
+
+以下は、コンストラクタの UExporter 派生タイプで通常設定される UFactory メンバのリストです。
+
+
+### SupportedClass (サポートクラス)
+このエクスポータで作成されたオブジェクトのタイプです。
+
+
+### FormatExtension
+このエクスポータがサポートしているファイル タイプのファイル拡張子のリストです。例えば、アセットがエディタからファイルへエクスポートされる時にユーザーに対して表示されるファイル ダイアログで使用されます。
+
+
+### FormatDescription
+このエクスポータがサポートしている説明のリストです。アセットをファイルにエクスポートする時に、エディタ UI でユーザーに表示されます。
+
+
+### PreferredFormatIndex
+お好みのエクスポート タイプの FormatExtension 配列へのインデックスです。一括エクスポート処理の際、出力フォーマットの自動選択に使用します。
+
+
+### bText
+_true_ の場合、エクスポータは ExportText によりアセットをテキストへエクスポートすることが可能なことを表します。_false_ の場合、エクスポータは ExportBinary によりバイナリへのみエクスポート可能なことを表します。
+
+
+
+## バイナリ エクスポータのサンプル
+
+下記は、サウンド オブジェクト (USoundNodeWave) を .wav にエクスポートするために使用される簡単なエクスポータの実装例です。
+
+	/** Constructor */
+	USoundExporterWAV::USoundExporterWAV(const FObjectInitializer& ObjectInitializer)
+		:Super(ObjectInitializer)
+	{
+		// Structure to hold one-time initialization
+		struct FConstructorStatics
+		{
+			ConstructorHelpers::FClassFinder<UObject> Class0;
+			FConstructorStatics()
+				:Class0(TEXT("class'SoundNodeWave'"))
+			{
+			}
+		};
+		static FConstructorStatics ConstructorStatics;
+
+		// プロパティの初期化
+		SupportedClass = USoundNodeWave::StaticClass();
+		bText = false;
+		FormatDescription.Add(TEXT("Sound"));
+		FormatExtension.Add(TEXT("WAV"));
+	}
+
+	/** wav 形式の指定アーカイブへサウンドデータをエクスポートします。 */
+	bool USoundExporterWAV::ExportBinary( UObject* Object,
+											const TCHAR* Type,
+											FArchive& Ar,
+											FFeedbackContext* Warn,
+											int32 FileIndex,
+											uint32 PortFlags )
+	{
+		USoundNodeWave* Sound = CastChecked<USoundNodeWave>( Object );
+
+		// .wav 形式で内部に既に格納されているサウンドデータを/
+		// エクスポートします。
+		void* RawWaveData = Sound->RawData.Lock( LOCK_READ_ONLY );
+		Ar.Serialize( RawWaveData, Sound->RawData.GetBulkDataSize() );
+		Sound->RawData.Unlock();
+		return true;
+	}
+ 
+
+
+
+

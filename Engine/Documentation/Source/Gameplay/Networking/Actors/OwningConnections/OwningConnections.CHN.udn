@@ -1,0 +1,30 @@
+﻿INTSourceChangelist:2713387
+Availability:Public
+Title: Actor 及其所属连接
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking, Gameplay/Networking/Actors
+Description:关于服务器在多人游戏中担当角色的概述。
+Related: Gameplay/Networking/Actors
+Related: Gameplay/Networking/Actors/RPCs
+Related: Gameplay/Networking/Server
+version: 4.9
+
+在这篇文章中，您会看到很多关于 actor 所属连接的介绍。最终，每个连接都有一个专门为其创建的 PlayerController（关于此过程的更多信息，请参阅客户端连接流程详情）。每个出于此原因创建的 PlayerController 都归这个连接所有。要确定一个 actor 是否归某一连接所有，您可以查询这个 actor 最外围的所有者，如果所有者是一个 PlayerController，则这个 actor 同样归属于拥有 PlayerController 的那个连接。
+
+类似的例子包括 Pawn actor 归 PlayerController 所有的情形。它们的所有者将是其所属的 PlayerController。在此期间，它们归属于 PlayerController 的连接。在连接归属于 PlayerController 期间，Pawn 只能由该连接所有。所以，一旦 PlayerController 不再拥有这个 Pawn，后者就不再归连接所有。
+
+另一个例子就是道具栏物品归 Pawn 所有的情况。这些道具栏物品归属于可能拥有该 Pawn 的同一连接（如存在）。
+
+在确定所属连接方面，组件有一些特殊之处。这时，我们要首先确定组件所有者，方法是遍历组件的“外链”，直到找出所属的 actor，然后确定这个 actor 的所属连接，像上面那样继续下去。
+
+连接所有权是以下情形中的重要因素：
+* RPC 需要确定哪个客户端将执行运行于客户端的 RPC
+* Actor 复制与连接相关性
+* 在涉及所有者时的 Actor 属性复制条件
+
+连接所有权对于 RPC 这样的机制至关重要，因为当您在 actor 上调用 RPC 函数时，除非 RPC 被标记为多播，否则就需要知道要在哪个客户端上执行该 RPC。它可以查找所属连接来确定将 RPC 发送到哪条连接。
+
+连接所有权会在 actor 复制期间使用，用于确定各个 actor 上有哪些连接获得了更新。对于那些将 bOnlyRelevantToOwner 设置为 true 的 actor，只有拥有此 actor 的连接才会接收这个 actor 的属性更新。默认情况下，所有 PlayerController 都设置了此标志，正因如此，客户端才只会收到其拥有的 PlayerController 的更新。这样做是出于多种原因，其中最主要的是防止玩家作弊和提高效率。
+
+对于那些要用到所有者的 [需要复制属性的情形](Gameplay/Networking/Actors/Properties/Conditions) 来说，连接所有权具有重要意义。例如，当使用 `COND_OnlyOwner` 时，只有此 actor 的所有者才会收到这些属性更新。
+
+最后，所属连接对那些作为自治代理的 actor（角色为 `ROLE_AutonomousProxy`）来说也很重要。这些 actor 的角色会降级为 `ROLE_SimulatedProxy`，其属性则被复制到不拥有这些 actor 的连接中。

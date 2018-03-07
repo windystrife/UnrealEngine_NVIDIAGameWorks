@@ -1,0 +1,151 @@
+﻿Availability:Public
+Title:自动测试技术指南
+Crumbs: %ROOT%, Programming, Programming/Automation
+Description:创建新的自动测试的程序员指南。
+
+自动测试有两种： **简单** 和 **复杂** 。简单测试用来描述单个原子测试，而复杂测试是用来运行基于多个输入的相同代码。
+
+简单测试可用来确认特定功能如预期般可操作。一般都是单元测试或功能测试。例如，简单测试可被用来测试在 _Play In Editor_ 中载入的当前地图或文本换行功能是否能在Slate中正常运行。
+
+复杂测试可被用来对一系列物品迭代并对每个物品运行相同的功能。一般就是内容压力测试。例如，载入所有地图或编译所有蓝本将会非常适合于复杂的自动测试。
+
+## 结构和执行
+
+所有`FAutomationTestBase`类中的自动测试定义通用功能并执行一系列命令。在建立新的自动测试时，`FAutomationTestBase`类使用的重要功能为：
+
+| 成员函数 | 描述 |
+| ---------------- | ----------- |
+| `GetTests()` | 逐个把待传入`RunTest()`的参数来填充命令列表。|
+| `RunTest()` | 使用传入的命令字符串来执行测试逻辑。|
+
+执行自动测试的基本流程为：
+
+	/-----------------\       /--------------\       /---------------\
+	|  Automation UI  |       |  GetTests()  |       |   RunTest()   |
+	+-----------------+       +--------------+       +---------------+
+	|                 |       |              |       |               |
+	|         o Start +-------+ o Commands   +---+-->+ o Parameters  +--\
+	|                 |       |              |   |   |               |  |
+	\-----------------/       \--------------/   |   \---------------/  |
+	                                             |                      |
+	                                             \----------------------/
+
+## 目录
+
+当前的规则是将所有的自动测试放置到相关模块内的`Private\Tests`目录。当您的测试与某特定类一一对应时，请将测试文件命名为`[ClassFilename]Test.cpp`。
+
+## 创建测试
+
+每个自动测试都使用一个特殊宏来进行声明。该宏根据简单测试或复杂测试而不同，但每个宏所需的参数都是一样的。
+
+| 参数 | 描述 |
+| --------- | ----------- |
+| `TClass` | 测试的类名。|
+| `PrettyName` | 定义在UI中出现的层次化测试名称的字符串 。|
+| `TFlags` | 定义自动测试需求/行为的`EAutomationTestFlags`（请参阅`AutomationTest.h`以获得细节）。|
+
+### 简单测试
+
+简单测试使用`IMPLEMENT_SIMPLE_AUTOMATION_TEST`宏来进行声明:
+
+	IMPLEMENT_SIMPLE_AUTOMATION_TEST( TClass, PrettyName, TFlags )
+
+这些测试通过应用`RunTest()`函数来单独定义其功能，而且`Parameters`字符串将保持为空字符串。
+
+**示例:**
+
+例如，`SetRes`命令功能的新简单测试的声明可能为：
+
+	IMPLEMENT_SIMPLE_AUTOMATION_TEST( FSetResTest, "Windows.SetResolution", ATF_Game )
+
+使用上述的  _SetRes_ 示例， 实现方式可以为：
+
+	bool FSetResTest::RunTest(const FString& Parameters)
+	{
+		FString MapName = TEXT("AutomationTest");
+		FEngineAutomationTestUtilities::LoadMap(MapName);
+
+		int32 ResX = GSystemSettings.ResX;
+		int32 ResY = GSystemSettings.ResY;
+		FString RestoreResolutionString = FString::Printf(TEXT("setres \%dx\%d"), ResX, ResY);
+
+		ADD_LATENT_AUTOMATION_COMMAND(FEngineWaitLatentCommand(2.0f));
+		ADD_LATENT_AUTOMATION_COMMAND(FExecStringLatentCommand(TEXT("setres 640x480")));
+		ADD_LATENT_AUTOMATION_COMMAND(FEngineWaitLatentCommand(2.0f));
+		ADD_LATENT_AUTOMATION_COMMAND(FExecStringLatentCommand(RestoreResolutionString));
+
+		return true;
+	}
+
+### 复杂测试
+
+复杂测试使用与简单测试声明宏类似的宏：
+
+	IMPLEMENT_COMPLEX_AUTOMATION_TEST( TClass, PrettyName, TFlags )
+
+如需定义复杂测试的功能，您必须应用`GetTests()`函数来枚举除`RunTest()`函数外的UI测试来定义执行每次迭代的逻辑。
+
+**示例:**
+
+在游戏中载入所有地图的复杂测试的示例声明如下：
+
+	IMPLEMENT_COMPLEX_AUTOMATION_TEST( FLoadAllMapsInGameTest, "Maps.LoadAllInGame", ATF_Game )
+
+使用地图载入示例， 实现方式可以为：
+
+	void FLoadAllMapsInGameTest::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+	{
+		FEngineAutomationTestUtilities Utils;
+		TArray<FString> FileList;
+		FileList = GPackageFileCache->GetPackageFileList();
+
+		// Iterate over all files, adding the ones with the map extension..
+		for( int32 FileIndex=0; FileIndex< FileList.Num(); FileIndex++ )
+		{
+			const FString& Filename = FileList[FileIndex];
+
+			// Disregard filenames that don't have the map extension if we're in MAPSONLY mode.
+			if ( FPaths::GetExtension(Filename, true) == FPackageName::GetMapPackageExtension() ) 
+			{
+				if (!Utils.ShouldExcludeDueToPath(Filename))
+				{
+					OutBeautifiedNames.Add(FPaths::GetBaseFilename(Filename));
+					OutTestCommands.Add(Filename);
+				}
+			}
+		}
+	}
+
+	bool FLoadAllMapsInGameTest::RunTest(const FString& Parameters)
+	{
+		FString MapName = Parameters;
+
+		FEngineAutomationTestUtilities::LoadMap(MapName);
+		ADD_LATENT_AUTOMATION_COMMAND(FEnqueuePerformanceCaptureCommands());
+
+		return true;
+	}
+
+## Latent命令
+
+Latent命令可以让自动测试的一部分在多帧间运行。它们应在 _RunTest_ 调用时排队。
+
+第一步是使用以下语法来声明Latent命令：
+
+	DEFINE_LATENT_AUTOMATION_COMMAND_ONE_PARAMETER(FExecStringLatentCommand, FString, ExecCommand);
+
+	bool FExecStringLatentCommand::Update()
+
+Update（更新）调用应该能在其完成执行后返回 _true_ 值，而在其停止自动测试时返回 _false_ 值，然后在下帧再次尝试。命令按顺序执行，如latent命令从 _Update_ (更新）中返回 _false_ 值，则该命令的执行不会继续进行。
+
+第二步是添加latent命令到队列中来执行。它们都被封装到宏中，以防止如下的样板式代码:
+
+	ADD_LATENT_AUTOMATION_COMMAND(FExecStringLatentCommand(TEXT("setres 640x480")));
+
+您可以在`EngineAutomationTests.cpp中找到`FSetResTest`作为示例。
+
+## 注意事项
+
+[REGION:warning]
+在编辑器内，载入地图是立即发生的。在游戏中，载入地图在下一帧发生，因此必须使用[Latent命令](#Latent命令)。
+[/REGION]

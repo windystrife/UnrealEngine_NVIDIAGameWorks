@@ -1,0 +1,150 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title: Assert (어서트)
+Crumbs:
+Description:
+Version:4.9
+
+Assert, 어서트란 주어진 코드 조각이 가정하는 상황을 검증하는 도구입니다. 포인터의 NULL 여부를 검증하는 간단한 것에서부터, 특정 함수에 재진입했는지와 같은 복잡한 검증도 가능합니다. UE4 에는 이러한 유형의 검증을 하기 위한 매크로 시리즈가 제공됩니다. 특정 빌드 환경설정 하에서는 컴파일시 제외시킬 수 있도록 매크로로 되어 있는데, 퍼포먼스 상의 이유거나 최종 빌드에서는 필요치 않기 때문이거나 입니다. 매크로를 직접 확인하려면, 이곳에서 찾을 수 있습니다:
+
+`/UE4/Engine/Source/Runtime/Core/Public/Misc/AssertionMacros.h.`
+
+런타임 어서트 매크로는 실행 중지, 디버그 빌드에서 실행 중지, 실행 중지하지 않고 오류 보고, 총 3 가지 카테고리에 들어갑니다. 첫째 셋째 유형은 DO_CHECK 디파인에 따라 컴파일됩니다. 둘째 유형은 DO_GUARD_SLOW 디파인을 사용하여 컴파일됩니다. 그 디파인 중 어느 하나가 0 으로 설정되면, 매크로는 비활성화되어 실행에 영향을 끼치지 않습니다.
+
+어서트 매크로의 첫 클래스를 살펴봅시다. 아래 매크로는 어서트가 true 이지 않으면 모든 실행을 중지합니다. 디버거 안에서 실행중이라면, 어떻게 해서 그 지점에 이르렀는지 조사할 수 있도록 어서트가 중단점을 발동시킵니다.
+
+**check(표현식);**
+
+이 매크로는 표현식을 실행한 뒤, 어서트 결과가 false 이면 실행을 중지시킵니다. 표면식은 매크로가 빌드에 컴파일되는 경우에만 실행됩니다 (DO_CHECK=1). 가장 간단한 형태의 check() 매크로입니다.
+
+예:
+
+	check(Mesh != nullptr);
+	check(bWasInitialized && "Did you forget to call Init()?");
+
+**verify(표현식);**
+
+DO_CHECK 가 켜져있으면, 이 매크로는 check() 와 똑같은 역할을 합니다. 하지만 이 표면식은 DO_CHECK 가 꺼져있어도 실행됩니다. 변수 할당이 가정한 대로 되었는지 검증하는 데 사용할 수 있습니다.
+
+예:
+
+	verify((Mesh = GetRenderMesh()) != nullptr);
+
+**checkf(표현식, ...);**
+
+checkf() 매크로는 표현식이 true 가 아니면 디버깅에 도움이 되는 추가 정보를 출력하는 것이 가능합니다. 컴파일 면에 있어서는 check() 와 똑같습니다.
+
+예:
+
+	checkf(WasDestroyed, TEXT( "Failed to destroy Actor %s (%s)"), *Actor->GetClass()->GetName(), *Actor->GetActorLabel());
+	checkf( TCString<ANSICHAR>::Strlen( Key ) >= KEYLENGTH( AES_KEYBITS ), TEXT( "AES_KEY needs to be at least %d characters" ), KEYLENGTH( AES_KEYBITS ) );
+
+**verifyf(표현식, ...);**
+
+verify() 매크로도 항상 표현식을 실행하듯이, verifyf() 도 마찬가지입니다. checkf() 처럼 실행을 중지시키면서, 추가적인 디버그 메시지를 남깁니다.
+
+예:
+
+	verifyf(Module_libeay32, TEXT("Failed to load DLL %s"), *DLLToLoad);
+
+**checkCode(표현식);**
+
+이 매크로는 일반적인 check() 보다 약간 더 복잡합니다. 한 번 실행되는 do/while 루프 안에서 표현식을 실행합니다. 표현식은 do/while 대괄호 범위 안에 놓입니다. 엔진에서 자주 사용되지는 않지만, 필요하면 쓸 수는 있습니다. 표준 check() 매크로처럼 이 매크로도 DO_CHECK 가 꺼져있으면 컴파일에서 제외됩니다. 그때문에 필수적인 부가 효과가 있는 표현식은 사용하지 마십시오. DO_CHECK 가 꺼지면 코드가 제거되기 때문입니다.
+
+예:
+
+	checkCode( if( Object->HasAnyFlags( RF_PendingKill ) ) { UE_LOG(LogUObjectGlobals, Fatal, TEXT("Object %s is part of root set though has been marked RF_PendingKill!"), *Object->GetFullName() ); } );
+
+**checkNoEntry();**
+
+이 매크로는 표현식을 받지 않으며, 절대 실행될 일이 없는 코드 경로를 표시하는 데 사용됩니다.
+
+예:
+
+	switch (MyEnum)
+	{
+		case MyEnumValue:
+			break;
+		default:
+			checkNoEntry();
+			break;
+	}
+
+**checkNoReentry();**
+
+이 매크로는 호출이 주어진 함수에 재진입하는 것을 방지하기 위해 사용됩니다. 한 번 호출이 완료되기 전까지 다시 호출해서는 안될 함수에 사용하세요.
+
+예:
+
+	void NoReentry()
+	{
+		checkNoReentry();
+	}
+
+**checkNoRecursion();**
+
+checkNoReentry() 와 같은 검사를 하나, 이름으로 그 의도를 더욱 명확히 알 수 있습니다.
+
+예:
+
+	int32 Recurse(int32 A, int32 B)
+	{
+		checkNoRecursion();
+		return Recurse(A - 1, B - 1);
+	}
+
+**unimplemented();**
+
+DO_CHECK 매크로의 첫 클래스 내 마지막 매크로는 함수에 구현이 없어서 특정 클래스에서 호출하면 안되거나 덮어써야 하는 함수를 표시하는 데 사용됩니다.
+
+예:
+
+	class FNoImpl
+	{
+		virtual void DoStuff()
+		{
+			// You must override this
+			unimplemented();
+		}
+	};
+
+어서트 매크로의 둘째 클래스는 DO_GUARD_SLOW 가 켜졌을 때만 실행됩니다. DO_GUARD_SLOW 는 보통 디버그 빌드에만 켜기는 하나, 프로젝트에 직접 바꿀 수 있기는 합니다. 느리면서 규칙을 지나치게 따지는 검사일 것으로 기대되어, 디벨롭먼트 또는 쉬핑 빌드에서는 필요치 않습니다. 이 매크로들의 기능은 느리지 않은 버전과 똑같습니다. 매크로는 checkSlow(), checkfSlow(), verifySlow() 입니다. 
+
+예:
+
+	checkSlow(List->HasCycle());
+	checkfSlow(Class->IsA(AActor::StaticClass()), TEXT("Class (%s) is wrong type"), Class->GetName());
+	verifySlow(LastValue == Current);
+
+런타임 어서트의 마지막 클래스는 실행은 중지시키지는 않지만, 문제 추적에 도움이 되는 콜스택을 만드는 데 사용됩니다. 이 매크로의 표현식은 항상 실행되며, 조건식 안에 넣을 수 있습니다. 이 매크로는 DO_CHECK 디파인으로 켭니다.
+
+**ensure(표현식);**
+
+표현식을 검증하여 실패하면 그 지점까지 이르는 콜스택을 생성합니다.
+
+예:
+
+	if (ensure( InObject != NULL ))
+	{
+	InObject->Modify();
+	}
+
+**ensureMsg(표현식, 메시지);**
+
+표현식을 검증, 리포트에 메시지를 추가시킨 콜스택을 생성합니다.
+
+예:
+
+	ensureMsg(Node != nullptr, TEXT("Node is invalid"));
+
+**ensureMsgf(표현식, 메시지, ...);**
+
+표현식을 검증, 생성된 리포트에 대한 콜스택과 짝지은 상세 정보를 포함시킵니다. checkf() 나 verifyf() 처럼, 문제 추적에 도움이 되는 맥락 정보를 포함시킬 수 있습니다.
+
+예:
+
+	if (ensureMsgf(!bModal, TEXT("Could not create dialog because modal is set to (%d)"), int32(bModal)))
+	{
+		...
+	}
+

@@ -1,0 +1,222 @@
+Availability:Public
+Title:Light Propagation Volumes
+Crumbs:%ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description:System for dynamically generating global illumination.
+Version: 4.9
+SkillLevel: Advanced
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![](lpv_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/LightPropagationVolumes:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/LightPropagationVolumes:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/LightPropagationVolumes]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![](lpv_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/LightPropagationVolumes:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/LightPropagationVolumes:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/LightPropagationVolumes]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:todo]
+Light Propagation Volumes are a feature in development and not ready for production.
+[/REGION]
+
+[TOC]
+
+
+
+[REGION:fullwidth]
+![](lpv_scene.png)
+[/REGION]
+
+## Enabling Light Propagation Volumes
+
+To get the feature enabled, put this into `ConsoleVariables.ini` and (re)start the engine:
+
+	r.LightPropagationVolume = 1
+
+At the moment, this console variable cannot be changed at runtime.
+
+## Basic Scene Setup
+
+* Add a Directional Light with its **Mobility** set to **Movable**.
+* Add/Adjust geometry and the light direction to give you some shadowed parts and some parts that receive the light (ideally bright colored materials).
+* Make sure you do not have any Lightmass GI enabled to be confused as dynamic GI (both techniques together would result in too bright indirect lighting).
+* Enable **Affect Dynamic Indirect Lighting** on the Directional Light.
+* Enabled Light Propagation Mode viewmode in the showflags to visualize the area that is covered by the Light Propagation Volume [(See below)](#viewingglobalillumination).
+* Add/Change a post process volume (should be unbound) to tweak the "Size" in the LightPropagationVolume settings to cover the area with the required detail and distance (Tradeoff).
+* Use the Global Illumination showflags to enable/disable GI.
+                
+
+## Light Propagation Volume Settings
+
+Some global settings can be found in the post process settings (add a post process volume, make it unbound 
+and make sure it has a proper priority):
+
+![](LPV_settings.png)
+
+The tooltips (hover over with the mouse) give you more details on the settings.
+
+<!-- add setting descriptions -->
+
+Having those settings in a volume allows them to be soft blendable depending on the camera position (e.g. 
+less GI bounce in an indoor environment or under some trees).
+
+Secondary occlusion should be enabled, and since secondary bounces are very cheap, they should also be enabled. 
+
+### Adjusting the Look and Performance
+
+The technique stores data in a low resolution volume grid. In order to avoid leaking through geometry smaller 
+than the volume, we bias the injection. This is adjustable in the post process settings:
+
+[REGION:imagetable]
+| [REGION:lightbox][![](LPV_injection_bias_1.png)(w:290)](LPV_injection_bias_1.png)[/REGION] | [REGION:lightbox][![](LPV_injection_bias_2.png)(w:290)](LPV_injection_bias_2.png)[/REGION] | [REGION:lightbox][![](LPV_injection_bias_3.png)(w:290)](LPV_injection_bias_3.png)[/REGION] |
+| --- | --- | --- |
+| 1.0 | 1.3 | 2.0 |
+[/REGION]
+
+The bias can be adjusted per mesh with the "LPV Bias Multiplier".
+
+![](LPV_bias_multiplier.png)
+
+For better performance, (less draw call for no CPU cost, some GPU cost) you can disable the feature in the material:
+
+![](LPV_disable_material.png)
+
+## Directional Light Settings
+
+For performance reasons, Light Propagation Volumes only use Directional Lights as incoming light. The method 
+computes a so called _Reflective Shadow Map_ nearby the camera. This is like a normal shadow map (2d texture 
+of opaque depth from light perspective) but with additional material properties (material color, normal). Doing 
+it for each point light would be very costly. Make sure you have the right settings on the directional light:
+
+![](LPV_light_settings.png)
+
+You want to have "Affect Dynamic Indirect Lighting" and "Cast Shadows" enabled and an indirect lighting 
+intensity of around 1.0.
+
+## Viewing Global Illumination
+
+You can disable LPV in the show flags (note that this also disables baked global illumination which was computed 
+by Lightmass):
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Global Illumination Disabled](LPV_show_flag.png)(w:460)
+	[/PARAM]
+	[PARAM:after]
+	![Global Illumination Enabled](LPV_show_flag_enabled.png)(w:460)
+	[/PARAM]
+[/OBJECT]
+
+## Visualizing Light Propagation Volumes
+
+The actual Light Propagation volume can be visualized through show flags and is displayed in the Viewport:
+ 
+[INCLUDE:#visualizeslider]
+
+## GI Replace Material Switch
+[EXCERPT:GIReplaceExample]
+
+Notice the two red boxes - one is bouncing off green instead of red.
+ 
+![](LPV_bounce_color_override.png)(convert:false)
+
+This was achieved by using a new material expression.
+
+![](LPV_gi_replace.png)
+ 
+Normally you do not want to have a completely different color but some darkening, brightening, or a minor color 
+adjustment can be useful.
+
+[/EXCERPT:GIReplaceExample]
+
+## Other Notes
+
+Properties of the current LPV implementation:
+
+* Computed each frame which allows dynamic material/light/geometry.
+* Diffuse and approximated specular material interaction.
+* Limited distance (larger volume e.g. 2x would be easy but memory requirements and some computations would grow by 8x).
+* Constant detail in world space (it would be better to have more detail nearby and less detail in distance).
+* Not affecting translucency.
+* Light bounce is not affected by decals.
+* Decal shading just works (unlike with baked lighting where the lighting is applied in the base pass before decals get applied).
+* Requires compute shader (DirectX 11) support.
+* Supports one or more Directional light for light bounce.
+* Changing the size at runtime has minor artifacts that fade away over time.
+* Emissive lighting for cheap area lights (not currently implemented).
+* Occlusion (not currently implemented).
+* Point light shadows approximated by occlusion (not currently implemented).
+* Secondary occlusion through geometry voxelization which has some performance cost but quite better quality (not currently implemented).
+
+
+<!--
+[EXCERPT:VisualizeSlider]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:id]
+	LPV_visualize
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:max]
+	17
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	**Drag the slider to see the visualized Light Propagation Volume.** 
+	[/PARAM]
+	[PARAM:image_list]
+	![](LPV_visualize_1.png)
+	![](LPV_visualize_2.png)
+	![](LPV_visualize_3.png)
+	![](LPV_visualize_4.png)
+	![](LPV_visualize_5.png)
+	![](LPV_visualize_6.png)
+	![](LPV_visualize_7.png)
+	![](LPV_visualize_8.png)
+	![](LPV_visualize_9.png)
+	![](LPV_visualize_10.png)
+	![](LPV_visualize_11.png)
+	![](LPV_visualize_12.png)
+	![](LPV_visualize_13.png)
+	![](LPV_visualize_14.png)
+	![](LPV_visualize_15.png)
+	![](LPV_visualize_16.png)
+	![](LPV_visualize_17.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:VisualizeSlider]
+-->
+
+
+
+

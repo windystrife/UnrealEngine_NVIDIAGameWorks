@@ -1,0 +1,173 @@
+﻿INTSourceChangelist:3467293
+Availability:Public
+Title: 파티클 시스템 레벨 오브 디테일 (LOD)
+Crumbs: %ROOT%, Engine, Engine/Rendering/ParticleSystems
+Description:언제든지 십만 단위의 파티클이 가능한 GPU 파티클 시뮬레이션 입니다.
+Version: 4.9
+tags:Particles
+topic-image:ParticleSystemLOD_topic.png
+
+[TOC(start:2 end:3)]
+
+레벨 오브 디테일(LOD)을 통해 이펙트 아티스트는 플레이어 범위에 따라 화면 공간을 가장 효율적으로 활용해 내는 파티클 이펙트를 만들 수 있습니다. 모닥불 파티클 시스템을 예로 들어 봅시다. 관련된 이미터가 여럿 있을 수 있습니다:
+
+* 불꽃심
+* 표면상의 불꽃
+* 중심 불빛
+* 불똥과 불씨
+* 연기 한 겹 이상
+
+
+가까이서 보면 이런 모양일 것입니다:
+
+![FireEffect_Close.png](FireEffect_Close.png)
+
+
+그런데 플레이어가 멀어지면 화면 공간을 훨씬 덜 차지하게 됩니다. 이렇게요:
+
+![FireEffect_Distant.png](FireEffect_Distant.png)
+
+이런 경우 파티클 시스템 중 불씨 부분처럼 (한 픽셀 이하로) 너무 작아 렌더링할 수 없는 부분이 생깁니다. 어쨌든 그런 부분도 계산하여 처리되게 마련입니다. 바로 LOD 가 등장할 때입니다. LOD 는 파티클 시스템을 거리에 따라 단순화시켜 주는 것으로, 플레이어가 이펙트를 알아보기 힘드리만치 멀리 떨어지면 파티클 시스템 내 이미터나 모듈 전체 또는 일부를 꺼버릴 수 있습니다.
+
+
+이 글에서는 파티클 시스템에 LOD 를 만드는 법은 물론 게임 내에서 어찌 사용하는지에 대해 다뤄 보도록 하겠습니다.
+
+
+## 캐스케이드 LOD 콘트롤
+
+캐스케이드에서 LOD 콘트롤에 대한 부분은 다음과 같습니다.
+
+**캐스케이드 LOD 콘트롤**
+
+![Cascade_Toolbar.png](Cascade_Toolbar.png)
+
+각 콘트롤에 대해 자세히 알아보겠습니다.
+
+
+| **버튼** | **이름** | **설명** |
+| --- | --- | --- |
+| ![Cascade_Toolbar_RegenLOD_Duplicating.png](Cascade_Toolbar_RegenLOD_Duplicating.png) | **최상 LOD 를 복제해서 최하 LOD 재생성 버튼** | _최상 LOD 를 복제해서 최하 LOD 재생성_ 버튼이 눌리면, 파티클 시스템은 기존의 하위 LOD 레벨을 모두 제거한 다음 최상 LOD 레벨을 그대로 복사하여 최하 LOD 를 새로 만듭니다. |
+| ![Cascade_Toolbar_RegenLOD.png](Cascade_Toolbar_RegenLOD.png) | **최하 LOD 재생성 버튼** | _최하 LOD 재생성_ 버튼이 눌리면, 파티클 시스템은 기존의 하위 LOD 레벨을 모두 제거한 다음 최하 LOD 를 새로 재생성합니다. |
+| ![Cascade_Toolbar_LowestLOD.png](Cascade_Toolbar_LowestLOD.png) | **최하 LOD 로 점프 버튼** | _최하 LOD 로 점프_ 버튼이 눌리면, 시스템은 가능한 LOD 중 최하 스태틱 LOD 로 설정됩니다. |
+| ![Cascade_Toolbar_LowerLOD.png](Cascade_Toolbar_LowerLOD.png) | **하위 LOD 로 점프 버튼** | _하위 LOD 로 점프_ 버튼이 눌리면, 시스템은 가능한 LOD 중 현재 LOD 세팅보다 한 단계 낮은 스태틱 LOD 로 설정됩니다. |
+| ![Cascade_Toolbar_AddLOD_Before.png](Cascade_Toolbar_AddLOD_Before.png) | **현재 이전에 LOD 추가 버튼** | _현재 이전에 LOD 추가_ 버튼이 눌리면, 시스템은 현재 로드된 LOD 앞에 스태틱 LOD 레벨을 새로 삽입합니다. |
+| ![Cascade_Toolbar_CurrentLOD.png](Cascade_Toolbar_CurrentLOD.png) | **현재 LOD** | 현재 LOD 정보 상자에 현재 로드된 LOD 가 무엇인지, 파티클 시스템에 존재하는 LOD 갯수는 몇 개인지 표시됩니다. |
+| ![Cascade_Toolbar_AddLOD_After.png](Cascade_Toolbar_AddLOD_After.png) | **현재 이후에 LOD 추가 버튼** | _현재 이후에 LOD 추가_ 버튼이 눌리면, 시스템은 현재 로드된 LOD 뒤에 스태틱 LOD 레벨을 새로 삽입합니다. |
+| ![Cascade_Toolbar_HigherLOD.png](Cascade_Toolbar_HigherLOD.png) | **상위 LOD 로 점프 버튼** | _상위 LOD 로 점프_ 버튼이 눌리면, 시스템은 가능한 LOD 중 현재 LOD 세팅보다 높은 스태틱 LOD 로 설정됩니다. |
+| ![Cascade_Toolbar_HighestLOD.png](Cascade_Toolbar_HighestLOD.png) | **최상 LOD 로 점프 버튼**  | _최상 LOD 로 점프_ 버튼이 눌리면, 시스템은 가능한 LOD 중 최상 스태틱 LOD 로 설정됩니다. |
+| ![Cascade_Toolbar_DeleteLOD.png](Cascade_Toolbar_DeleteLOD.png) | **LOD 삭제 버튼** | _LOD 삭제_ 버튼이 눌리면, 파티클 시스템에서 현재 선택된 스태틱 LOD 레벨이 삭제됩니다. |
+
+
+
+
+
+## 파티클 시스템에 LOD 레벨 만들기
+
+다음으로 LOD 가 완벽 지원되는 파티클 시스템을 만들기 위한 디자인 절차에 대해 다뤄 보도록 하겠습니다. 이 프로세스는 다음과 같이 요약해 볼 수 있습니다:
+
+* 원하는 전체 이펙트를 만듭니다. 최상 LOD 레벨이 됩니다.
+* 다음으로 최하 LOD 레벨을 만듭니다.
+* 퀄리티 최상에서 최하로 부드럽게 전환될 수 있도록 그 둘 사이에 LOD 레벨을 추가로 만듭니다.
+
+
+[REGION:note]
+	모듈의 추가 삭제는 최상 LOD 레벨 편집시에만 가능합니다.
+[/REGION:note]
+
+
+
+이 예제에는 SubUV 이미터가 하나 있습니다. SubUV 좌표 0 에서는 숫자 1 을, 좌표 1 에서는 숫자 2 를 표시하는 식으로 구성되어 있습니다. 텍스처를 적용한 모습은 이렇습니다:
+
+![ImageTest_Tile.png](ImageTest_Tile.png)(w:256)
+
+최상 LOD 레벨을 구성합니다.
+
+**최상 LOD 레벨**
+
+![HighestLOD.png](HighestLOD.png)
+
+디자이너가 보기에, 이제 이 파티클 시스템에는 LOD 를 만들어도 되겠다고 느껴지면, 툴바에서 **최하 LOD 재생성** 버튼을 선택해야 합니다. 그러면 시스템이 최하 LOD 레벨을 재생성하도록 만듭니다 (중간에 만들어진 스태틱 LOD 레벨이 있으면 지우기도 합니다). 지금으로서는 그저 최상 LOD 레벨을 복제하여 스폰 속도만 낮추도록 하겠습니다.
+
+최하 LOD 레벨을 선택한 이후, 값에 대한 트윅 작업을 거쳐 적합한 모양새를 만듭니다. 한 가지 주의할 점, 스태틱 LOD 레벨에 있는 모든 모듈은 기본적으로 _un-editable_ 수정불가능 마킹이 되어 있습니다. 대리석 배경으로 표시되는 모듈이 바로 그렇습니다.
+
+| 최상 LOD 로 보여지는 모듈 | 최하 LOD 로 보여지는 모듈 |
+| --- | --- |
+|![HighestLevelModules.png](HighestLevelModules.png)| ![LowestLevelModules.png](LowestLevelModules.png)|
+
+스태틱 LOD 레벨의 모듈을 수정하기 위해서는 활성화시켜 줘야 합니다. 모듈에 우클릭하여 뜨는 맥락 메뉴에서 _상위에서 복제_ 를 선택하면 됩니다.
+
+가능한 옵션은 다음과 같습니다:
+
+| **옵션** | **설명 ** |
+| ---- | ---- |
+| **Duplicate from Higher** | 상위에서 복제 - 한 단계 상위 LOD 세팅을 복제하여 모듈을 편집 상태로 만듭니다. |
+| **Share from Higher** | 상위에서 공유 - 한 단계 상위 LOD 세팅을 공유하여 모듈을 편집 상태로 만듭니다. 즉 하나를 수정하면 다른 하나도 같은 방식으로 자동 수정됩니다. |
+| **Duplicate from Highest** | 최상에서 복제 - 최상 LOD 세팅을 복제하여 모듈을 편집 상태로 만듭니다. |
+
+
+우리 예제에서는 SubImage Index 모듈을 편집 상태로 만들어 인덱스를 3 으로 설정했습니다. 그 결과는 다음과 같이 노랑 *4* 를 표시하는 이미터가 됩니다:
+
+**최하 LOD 레벨**
+
+![LowestLOD.png](LowestLOD.png)
+
+참고로 스폰 속도(Spawn Rate)는 최상 LOD 레벨의 10% 로 자동 설정되었습니다.
+
+다음 단계는 (아직 최하 LOD 를 보고 있다는 가정 하에) **현재 이전에 LOD 추가** 버튼을 눌러 최상 / 최하 LOD 사이에 스태틱 LOD 를 추가하는 것입니다. SubImage Index 모듈이 활성화되어 그 인덱스가 1 로 설정됩니다. 그 결과는 다음과 같이 파랑 *2* 를 표시하는 이미터가 됩니다:
+
+**LOD 레벨 1**
+
+![LOD_33.png](LOD_33.png)
+
+마찬가지로 **현재 이전에 LOD 추가** 버튼을 눌러 최상 / 최하 LOD 사이에 스태틱 LOD 를 또하나 추가하고, SubImage Index 모듈을 활성화시킵니다. 그 인덱스가 2 로 설정되어, 다음과 같이 녹색 *3* 을 표시하는 이미터가 되었습니다:
+
+**LOD 레벨 2**
+
+![LOD_66.png](LOD_66.png)
+
+
+## LOD Method 와 Distance 세팅
+
+게임내에서의 파티클 시스템 LOD 제어는 두 가지 모드 중 하나를 사용하여 이루어집니다. LODMethod 라는 각 파티클 시스템의 Enum 을 통해 이러한 모드를 결정할 수 있고, 이것이 차례로 LOD 거리를 어떻게 처리할 것인가를 제어합니다.
+
+우리 파티클 시스템 예제에서의 프로퍼티 창 모습은 다음 이미지와 같습니다:
+
+**LODDistances 프로퍼티 창**
+
+![LODsettings.png](LODsettings.png)
+
+이 예제에서는, 카메라와 이미터의 거리가 [0..1249] 유닛일 때 LOD 0 (최상)이 사용됩니다. [1250..1874] 이면 LOD1, [1875..2499] 이면 LOD2, 2500 이상이면 LOD3 가 사용됩니다.
+
+LODDistanceCheckTime 은 Automatic 모드로 설정된 ParticleSystemComponent 의 LOD 결정을 위한 거리 검사를 실행시간 몇 초마다 할 것인지 설정하는 데 사용됩니다. 이 경우, 레벨에 있는 이 파티클 시스템의 각 인스턴스는 0.25 초마다 거리 검사를 합니다.
+
+ 
+
+| 프로퍼티 | 설명 |
+| -------- | ---- |
+| [REGION:tablesection]LOD[/REGION] ||
+| **LOD Distance Check Time** | LOD 거리 검사 시간 - 시스템이 활용할 LOD 레벨 결정용 거리 검사를 몇 초마다 할 것인지 입니다 (LODMethod 가 Automatic 일 때만 사용됩니다). |
+| **LOD Method** | LOD 방법 - 시스템이 적합한 LOD 레벨 선택에 활용할 방법을 나타내는 Enum 입니다. 가능한 방법은 두 가지입니다: [INCLUDE:#LODMethod] |
+| **LODDistances** | LOD 거리 - 활용할 LOD 레벨 결정을 위한 거리값이 들어있는 배열입니다 (LODMethod 가 Automatic 일때만 사용됩니다). 이 수치는 LOD 레벨 선택을 위한 최소 거리를 나타냅니다. 예를 들어 LOD 레벨이 셋인 시스템은: [INCLUDE:#LODDistance] |
+| **LODSettings** | LOD 세팅 - 각각의 LOD 에 사용할 전용 세팅 결정을 위한 구조체 배열입니다. 현재 _Lit_ 로 설정할 때만 주어진 LOD 가 사용중일 때 파티클 시스템이 빛을 받을지 여부를 결정합니다. |
+
+<!----
+[EXCERPT:LODDistance]
+[REGION:simpletable]
+| LODDistanceIndex | 값 | 범위 | 선택되는 LOD 레벨 |
+| --- | --- | --- | --- |
+| 0 | 0.0 | 0.0 - 2499.9 | 0 (최상) |
+| 1 | 2500.0 | 2500.0 - 4999.9 | 1 |
+| 2 | 5000.0 | 5000.0 - 무한 | 2 |
+[/REGION]
+[/EXCERPT:LODDistance]
+[EXCERPT:LODMethod]
+[REGION:simpletable]
+| Method | 설명 |
+| --- | --- |
+| Automatic | 자동 - LOD 거리와 검사 시간에 따라 LOD 레벨을 자동 설정합니다. |
+| DirectSet | 수동 - 시스템이 사용할 LOD 레벨을 게임에서 직접 설정합니다. |
+| ActivateAutomatic | 자동활성화 - 이펙트가 스폰되면 LOD 에 정의된 거리 파라미터에 따라 LOD 가 정의됩니다. |
+[/REGION]
+[/EXCERPT:LODMethod]
+
+---->

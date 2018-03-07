@@ -1,0 +1,147 @@
+﻿Availability: Public
+Title:3. 在世界中放置相机Director（导演）
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/AutoCamera
+Description:在世界中放置相机Director并分配相机到其中
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[上一步](Programming\Tutorials\AutoCamera\2 "%Programming\Tutorials\AutoCamera\2:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[编程指南主页](Programming\Tutorials\)
+	[/PARAM]
+	[PARAM:next]
+		[下一步](Programming\Tutorials\AutoCamera\4 "%Programming\Tutorials\AutoCamera\4:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+1. 在代码编译完成后，我们可以把 **内容浏览器** 中的新类的实例拖曳到 **关卡编辑器** 中。
+
+	[![](CameraDirectorInContentBrowser.png)](CameraDirectorInContentBrowser.png)
+
+1. 接下来，我们需要设置CameraOne（相机1）和CameraTwo（相机2）变量。 在 **World Outliner** （世界大纲视图）中搜寻CameraDirector，并在 **详细信息面板** 中进行编辑。
+
+	[![](CameraDirectorDetails.png)](CameraDirectorDetails.png)
+
+	点击标记为"无"的下拉框，然后设置变量为 **Cube** （立方体）和我们之前创建的 **CameraActor** （相机Actor）。
+
+	[![](CameraDirectorDetails2.png)](CameraDirectorDetails2.png)
+
+1. 如果我们按下 **Play** （播放），我们将会看到与此视图对齐的相机：
+
+	[![](CameraOneView.png)](CameraOneView.png)
+
+	然后平滑混合到此视图：
+
+	[![](CameraTwoView.png)](CameraTwoView.png)
+
+	在对齐之前，它会等待几秒。
+
+----
+
+我们现在的这个系统会完全基于游戏逻辑来移动玩家的相机。 代码可进行修改以在任何游戏中进行使用，玩家在这些游戏中无法直接控制相机，或者在这些游戏中，在相机视图间的混合是有效的。
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    代码
+    [/PARAMLITERAL]
+    [PARAM:heading]
+		完成的代码
+    [/PARAM]
+    [PARAM:content]
+		**MyPawn.h**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "GameFramework/Actor.h"
+			#include "CameraDirector.generated.h"
+
+			UCLASS()
+			class HOWTO_AUTOCAMERA_API ACameraDirector : public AActor
+			{
+				GENERATED_BODY()
+	
+			public:	
+				// Sets default values for this actor's properties
+				ACameraDirector();
+
+				// Called when the game starts or when spawned
+				virtual void BeginPlay() override;
+	
+				// Called every frame
+				virtual void Tick( float DeltaSeconds ) override;
+
+				UPROPERTY(EditAnywhere)
+				AActor* CameraOne;
+
+				UPROPERTY(EditAnywhere)
+				AActor* CameraTwo;
+
+				float TimeToNextCameraChange;
+			};
+
+		**MyPawn.cpp**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_AutoCamera.h"
+			#include "CameraDirector.h"
+			#include "Kismet/GameplayStatics.h"
+
+			// Sets default values
+			ACameraDirector::ACameraDirector()
+			{
+ 				// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
+				PrimaryActorTick.bCanEverTick = true;
+
+			}
+
+			// Called when the game starts or when spawned
+			void ACameraDirector::BeginPlay()
+			{
+				Super::BeginPlay();
+	
+			}
+
+			// Called every frame
+			void ACameraDirector::Tick( float DeltaTime )
+			{
+				Super::Tick( DeltaTime );
+
+				const float TimeBetweenCameraChanges = 2.0f;
+				const float SmoothBlendTime = 0.75f;
+				TimeToNextCameraChange -= DeltaTime;
+				if (TimeToNextCameraChange <= 0.0f)
+				{
+					TimeToNextCameraChange += TimeBetweenCameraChanges;
+		
+					//Find the actor that handles control for the local player.
+					APlayerController* OurPlayerController = UGameplayStatics::GetPlayerController(this, 0);
+					if (OurPlayerController)
+					{
+						if (CameraTwo && (OurPlayerController->GetViewTarget() == CameraOne))
+						{
+							//Blend smoothly to camera two.
+							OurPlayerController->SetViewTargetWithBlend(CameraTwo, SmoothBlendTime);
+						}
+						else if (CameraOne)
+						{
+							//Cut instantly to camera one.
+							OurPlayerController->SetViewTarget(CameraOne);
+						}
+					}
+				}
+			}
+
+
+    [/PARAM]
+[/OBJECT]
+
+
+%Steps%

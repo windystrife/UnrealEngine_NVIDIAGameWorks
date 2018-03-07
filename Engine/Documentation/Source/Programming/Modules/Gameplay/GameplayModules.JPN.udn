@@ -1,0 +1,80 @@
+﻿INTSourceChangelist:2725063
+Availability:Public
+Title:Gameplay モジュール
+Crumbs:%ROOT%, Programming
+Description:DLL にコンパイルされたゲームプロジェクトに属するゲームプレイ クラスの集まり
+Version:4.9
+
+[TOC(start:2)]
+
+[EXCERPT:Intro]
+エンジンそのものがモジュールの集まりで構成されているように、各ゲームも 1 つ以上のゲームプレイ モジュール構成されます。これらは、関連クラスの集まりのためのコンテナであるという意味において、エンジンの過去のバージョンのパッケージに似ています。アンリアル エンジン 4 では、ゲームプレイはすべて C++ で行われるため、モジュールは独自のパッケージ ファイルではなく実際には DLL です。
+[/EXCERPT:Intro]
+
+[REGION:note]
+まだゲームプロジェクトを作成していない場合、ゲーム用のプロジェクトを作成し、セットアップする手順については、[ゲームプロジェクトの作成](Engine/Basics/Projects/Browser#新規プロジェクトの作成) をご覧ください。
+[/REGION]
+
+## モジュール作成
+
+ゲームプレイ モジュールには、少なくとも必ず、以下を含まなければなりません。すなわち、ヘッダーファイル(.h)、C++ ファイル (.cpp)、およびビルド ファイル (*.Build.cs) です。ヘッダーファイルは、必ず、そのモジュールのディレクトリの「Public」フォルダ、すなわち [GameName]\Source\[ModuleName]\Public になければなりません。このファイルには、モジュール内に含まれるクラスをコンパイルするために必要なヘッダ ファイル (モジュールの自動生成ヘッダを含む) が含まれます。
+
+	#include "Engine.h"
+	#include "EnginePrivate.h"
+	#include "<ModuleName>Classes.h"
+
+C++ ファイルは、モジュールのディレクトリの「Private」フォルダ (すなわち、[GameName]\Source\[ModuleName]\Private) に入れられ、モジュールを登録し、実装します。
+
+[REGION:note]ゲーム内の少なくとも 1 つのモジュールは、必ず `IMPLEMENT_PRIMARY_GAME_MODULE` を使用して登録します。追加のモジュールでは、代替の `IMPLEMENT_GAME_MODULE` メソッドを使用することができます。ゲーム プロジェクトで 1 つ以上のゲームプレイ モジュールを使用する詳細については、[複数ゲームプレイモジュール](#複数ゲームプレイモジュール) セクションをご覧ください。[/REGION]
+
+	// Include our game's header file
+	#include "<ModuleName>.h"
+
+	// Designate the module as primary
+	IMPLEMENT_PRIMARY_GAME_MODULE( <ModuleName>, "<GameName>" );
+
+ビルド ファイルは、ゲームプレイ モジュールのルート ディレクトリ、すなわち [GameName]\Source\[ModuleName] に入れられ、UnrealBuildTool がモジュールをコンパイルするために使用する一部の情報を定義します。
+
+	using UnrealBuildTool;
+
+	public class <ModuleName> :ModuleRules
+	{
+		public <ModuleName>( TargetInfo Target )
+		{
+			PublicDependencyModuleNames.AddRange( new string[] { "Core", "Engine" } );
+			PrivateDependencyModuleNames.AddRange( new string[] { "RenderCore" } );
+		}
+	}
+
+### INI ファイルのセットアップ
+
+新しいゲームプレイ モジュールは、UObject コードを持つため、設定が必要になります。
+
+1. モジュールを「DefaultEngine.ini」ファイルのいくつかのエリアに追加する必要があります。
+
+	`[UnrealEd.EditorEngine]` セクションの`EditPackages` 配列:
+
+		[UnrealEd.EditorEngine]
+		+EditPackages=<ModuleName>
+
+	`[Launch]` セクション
+
+		[Launch]
+		Module=<ModuleName>
+
+	`[/Script/Engine.UObjectPackages]` セクションの `NativePackages` 配列:
+
+		[/Script/Engine.UObjectPackages]
+		+NativePackages=<ModuleName>
+
+
+## 複数ゲームプレイモジュール
+
+ゲームの DLL モジュール方式については、現実的な選択があります。数多くの DLL ファイルにゲームを分割すると、必要以上の手間がかかりますが、ニーズと方針を踏まえた上で各チームがこのように決定しました。複数ゲームプレイ モジュールを使用すると、リンク時間は向上し、コードのイタレーションは速くなります。しかし、モジュールが多くなると、DLL のエクスポートおよび / またはインターフェース クラスに対処する必要が増えます。このトレードオフは、エンジンとエディタのコードの場合は妥当ですが、ゲームプレイに関しては疑問があります。
+
+プライマリ ゲーム モジュールを作成して、ゲーム固有のモジュールをいくつでも追加することができます。こうした新規モジュールに対して *.Build.cs ファイルを作成して、モジュールへの参照を、ゲームの [Target.cs file](Programming/UnrealBuildSystem/TargetFiles) (OutExtraModuleNames array) に追加できます。C++ コードでゲーム モジュールに対して適切なマクロを使用するようにしてください。少なくとも 1 つのモジュールでは必ず `IMPLEMENT_PRIMARY_GAME_MODULE` マクロを使用し、その他すべてのモジュールでは `IMPLEMENT_GAME_MODULE` を使用するようにします。これで、UBT は自動的にモジュールを発見し、追加のゲーム DLL ファイルをコンパイルします。
+
+## 制限事項
+
+ 相互依存 (Engine と UnrealEd のモジュールなど、エクスポートとインポートの両方の関数と相互からのデータ) のモジュール作成はサポートします。しかし、これはコンパイル時間に関しては理想的ではなく、変数の静的初期化で問題を生じる場合があります。相互依存しないゲームプレイ モジュールは設計や維持が難しいですが、それに対するコードはよりクリーンになることがあります。
+

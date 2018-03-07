@@ -1,0 +1,168 @@
+﻿INTSourceChangelist:2721440
+Availability:Public
+Title:自動化に関するテクニカルガイド
+Crumbs: %ROOT%, Programming, Programming/Automation
+Description:新規の自動化テストを作成するためのプログラマー用ガイド
+Version:4.9
+
+自動化テストには、主に簡易テストと複合テストの二通りの方法があります。簡易テストは、 
+単一の最小限のテストを表し、複合テストは同じコードを複数の入力に対し実行します。 
+
+簡易テストは、特定の機能が予定通りに動作していることを確認する際に役立ちます。これらは、 
+一般的にユニット テストまたは機能テストです。例えば、簡易テストは、現在のマップが _Play In Editor_ にロードされるかをテスト、 
+もしくは、テキストラッピングがスレートで正しく機能しているかをテストする際に使用します。
+
+複合テストは複数アイテムの集まりをイタレーションして、各アイテムで 
+同じ機能を実行する際に便利です。これは通常はコンテンツ負荷テストです。例えば全てのマップの読み込み、または全ブループリントのコンパイルなどが、 
+複合自動化テストに適しています。
+
+## アーキテクチャと実行
+
+全ての自動化テストは、コマンドセットの実行に汎用機能を定義する **FAutomationTestBase**  
+クラスから派生しています。以下は、自動化テストの新規設定時に使用する FAutomationTestBase クラスの 
+重要な関数です。
+
+| メンバ関数 | 説明 |
+| ---------------- | ----------- |
+| `GetTests()` | `RunTest()`に渡されるパラメータを、一つずつコマンドリストへ入れます。 |
+| `RunTest()` | 渡されるコマンド文字列を使用してテスト ロジックを実行します。|
+
+以下は、自動化テストの一般的な実行フローです。
+
+	/-----------------\       /--------------\       /---------------\
+	|  Automation UI  |       |  GetTests()  |       |   RunTest()   |
+	+-----------------+       +--------------+       +---------------+
+	|                 |       |              |       |               |
+	|         o Start +-------+ o Commands   +---+-->+ o Parameters  +--\
+	|                 |       |              |   |   |               |  |
+	\-----------------/       \--------------/   |   \---------------/  |
+	                                             |                      |
+	                                             \----------------------/
+
+## ディレクトリ
+
+現在の決まりでは、全ての自動化テストは、関連モジュール内の 
+`Private\Tests` ディレクトリへ入ります。テストが特定クラスと一対一でマッチした時、テストファイル名を `[ClassFilename]Test.cpp` としてください。
+
+## テストの作成
+
+各自動化テストは、特別なマクロを使って宣言されます。簡易テストまたは複合テストによってマクロは異なりますが、 
+各マクロが必要とするパラメータは同一です。
+
+| パラメータ | 説明 |
+| --------- | ----------- |
+| `TClass` | テストのクラス名です |
+| `PrettyName` | UI に表示される階層的なテストの名前を指定した文字列です |
+| `TFlags` | 自動化テストの必要条件や動作を指定した`EAutomationTestFlags`です (詳細は `AutomationTest.h` を参照)。 |
+
+### 簡易テスト
+
+簡易テストは `IMPLEMENT_SIMPLE_AUTOMATION_TEST`マクロを使用して以下のように宣言します。
+
+	IMPLEMENT_SIMPLE_AUTOMATION_TEST( TClass, PrettyName, TFlags )
+
+このテストは、単に `RunTest()` 関数を実装することによってその機能を定義し、 
+`Parameters` 文字列は常に空の文字列となります。
+
+**例**
+
+以下は `SetRes` コマンド機能の新しい簡易テストの宣言例です。
+
+	IMPLEMENT_SIMPLE_AUTOMATION_TEST( FSetResTest, "Windows.SetResolution", ATF_Game )
+
+上記の _SetRes_ の例を活用した実装が以下となります。
+
+	bool FSetResTest::RunTest(const FString& Parameters)
+	{
+		FString MapName = TEXT("AutomationTest");
+		FEngineAutomationTestUtilities::LoadMap(MapName);
+
+		int32 ResX = GSystemSettings.ResX;
+		int32 ResY = GSystemSettings.ResY;
+		FString RestoreResolutionString = FString::Printf(TEXT("setres \%dx\%d"), ResX, ResY);
+
+		ADD_LATENT_AUTOMATION_COMMAND(FEngineWaitLatentCommand(2.0f));
+		ADD_LATENT_AUTOMATION_COMMAND(FExecStringLatentCommand(TEXT("setres 640x480")));
+		ADD_LATENT_AUTOMATION_COMMAND(FEngineWaitLatentCommand(2.0f));
+		ADD_LATENT_AUTOMATION_COMMAND(FExecStringLatentCommand(RestoreResolutionString));
+
+		return true;
+	}
+
+### 複合テスト
+
+複合テストは、以下のように簡易テストの宣言マクロと類似したマクロを使用します。
+
+	IMPLEMENT_COMPLEX_AUTOMATION_TEST( TClass, PrettyName, TFlags )
+
+複合テストの機能を定義するには、UI にテストを列挙する `GetTests()` 関数と、 
+各イタレーションで実行するロジックを定義する `RunTest()` 関数を実装しなくてはいけません。
+
+**例**
+
+以下は、ゲームの全マップを読み込むための複合テストの宣言例です。
+
+	IMPLEMENT_COMPLEX_AUTOMATION_TEST( FLoadAllMapsInGameTest, "Maps.LoadAllInGame", ATF_Game )
+
+マップの読み込み例を使用した実装は以下のようになります。
+
+	void FLoadAllMapsInGameTest::GetTests(TArray<FString>& OutBeautifiedNames, TArray <FString>& OutTestCommands) const
+	{
+		FEngineAutomationTestUtilities Utils;
+		TArray<FString> FileList;
+		FileList = GPackageFileCache->GetPackageFileList();
+
+		// マップ拡張子のついたファイルを追加して、全てのファイルをイタレーションします。
+		for( int32 FileIndex=0; FileIndex< FileList.Num(); FileIndex++ )
+		{
+			const FString& Filename = FileList[FileIndex];
+
+			// [MAPSONLY] モードの場合、マップ拡張子がないファイル名は無視します。
+			if ( FPaths::GetExtension(Filename, true) == FPackageName::GetMapPackageExtension() ) 
+			{
+				if (!Utils.ShouldExcludeDueToPath(Filename))
+				{
+					OutBeautifiedNames.Add(FPaths::GetBaseFilename(Filename));
+					OutTestCommands.Add(Filename);
+				}
+			}
+		}
+	}
+
+	bool FLoadAllMapsInGameTest::RunTest(const FString& Parameters)
+	{
+		FString MapName = Parameters;
+
+		FEngineAutomationTestUtilities::LoadMap(MapName);
+		ADD_LATENT_AUTOMATION_COMMAND(FEnqueuePerformanceCaptureCommands());
+
+		return true;
+	}
+
+## Latent コマンド
+
+Latent コマンドは、複数フレーム上で自動化テストのセクションを実行します。これらは、 
+_RunTest_ コール時に待ち行列に入ることを意図しています。
+
+最初に、以下のシンタックスを使用して Latent コマンドを宣言します。
+
+	DEFINE_LATENT_AUTOMATION_COMMAND_ONE_PARAMETER(FExecStringLatentCommand, FString, ExecCommand);
+
+	bool FExecStringLatentCommand::Update()
+
+Updateコールは、実行終了時に _true_ を、自動化テストの実行を中止して 
+次のフレームで再度試みる時に _false_ を返します。コマンドは順番に実行され、Latent コマンドが Update から false を返すと 
+実行は継続しません。
+
+次に、実行のため Latent コマンドを待ち行列へ追加します。コマンドはボイラープレートコードを回避するため、 
+以下の様にマクロでラップします。
+
+	ADD_LATENT_AUTOMATION_COMMAND(FExecStringLatentCommand(TEXT("setres 640x480")));
+
+`EngineAutomationTests.cpp` にある `FSetResTest` が例として挙げられます。  
+
+
+[REGION:warning]
+エディタは、マップの読み込みをすぐに開始します。ゲームは、マップの読み込みを次のフレームで開始するため、 
+[Latentコマンド](#Latentコマンド) を使用しなくてはいけません。
+[/REGION]

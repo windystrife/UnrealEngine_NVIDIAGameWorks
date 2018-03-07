@@ -1,0 +1,206 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title: 슬레이트 개요
+Crumbs:%ROOT%, Programming, Programming/Slate
+Description:크로스 플랫폼 Slate UI 프레임워크에 대한 개요입니다.
+Version:4.9
+
+[REGION:fullwidth]
+![Slate UI](editor.png)
+[/REGION]
+
+[TOC (start:2)]
+
+
+[EXCERPT:Intro]
+**Slate** (슬레이트)는 언리얼 엔진 4 와 함께 제공되는 플랫폼 무관, 완벽한 커스텀 유저 인터페이스 프레임워크로, 언리얼 에디터와 같은 툴과 어플리케이션에 쓸 유저 인터페이스나 게임내 유저 인터페이스의 재미와 효율을 높일 수 있도록 디자인된 것입니다. 서술형(declarative) 문법에 쉬운 디자인, 레이아웃, 스타일 요소가 결합된 Slate 를 통해 쉬운 UI 제작 및 반복작업이 가능할 것입니다.
+[/EXCERPT:Intro]
+
+Slate UI 솔루션으로 툴과 어플리케이션에 쓸 그래픽 유저 인터페이스를 매우 쉽게 조합시킬 수 있으며, 그에 대한 반복처리도 매우 빠르게 가능합니다.
+
+## 서술형 문법
+
+Slate 의 **서술형 문법** 은 프로그래머가 인디렉션(indirection, 포인터를 통한 변수 접근) 레이어를 추가하지 않고도 UI 제작을 가능하게 해 줍니다.
+
+	SLATE_BEGIN_ARGS( SSubMenuButton )
+		: _ShouldAppearHovered( false )
+		{}
+		/** The label to display on the button */
+		SLATE_ATTRIBUTE( FString, Label )
+		/** Called when the button is clicked */
+		SLATE_EVENT( FOnClicked, OnClicked )
+		/** Content to put in the button */
+		SLATE_NAMED_SLOT( FArguments, FSimpleSlot, Content )
+		/** Whether or not the button should appear in the hovered state */
+		SLATE_ATTRIBUTE( bool, ShouldAppearHovered )
+	SLATE_END_ARGS()
+
+
+## 컴포지션
+
+Slate의 컴포지션(구성) 프레임워크는 프로토타이핑이나 반복처리를 위해 UI 요소를 빠르게 재배치하는 작업을 간단하게 만들어 줍니다.
+
+컴포지션 중인 UI 일부의 예는 이렇습니다:
+
+	// 스태틱 메시용 섹션을 새로 추가합니다.
+	ContextualEditingWidget->AddSlot()
+	.Padding( 2.0f )
+	[
+		SNew( SDetailSection )
+		.SectionName("StaticMeshSection")
+		.SectionTitle( LOCTEXT("StaticMeshSection", "Static Mesh").ToString() )
+		.Content()
+		[
+			SNew( SVerticalBox )
+			+ SVerticalBox::Slot()
+			.Padding( 3.0f, 1.0f )
+			[
+				SNew( SHorizontalBox )
+				+ SHorizontalBox::Slot()
+				.Padding( 2.0f )
+				[
+					SNew( SComboButton )
+					.ButtonContent()
+					[
+						SNew( STextBlock )
+						.Text( LOCTEXT("BlockingVolumeMenu", "Create Blocking Volume").ToString() ) 
+						.Font( FontInfo )
+					]
+					.MenuContent()
+					[
+						BlockingVolumeBuilder.MakeWidget()
+					]
+				]
+			]
+					
+		]
+	];
+
+위의 컴포지션으로 아래와 같은 UI 요소를 만듭니다:
+
+![Rendered UI](Slate_composition.png)
+
+## 스타일
+
+스타일은 위젯의 여러 부분에 만들어 적용할 수 있습니다. 그러면 UI 컴포넌트의 외양에 대한 반복작업 뿐만 아니라 스타일 공유 및 재사용도 편해집니다.
+
+	// 툴바
+	{
+		Set( "ToolBar.Background", FSlateBoxBrush( TEXT("Common/GroupBorder"), FMargin(4.0f/16.0f) ) );
+
+		Set( "ToolBarButton.Normal", FSlateNoResource() );		// 주: 고의적인 투명 배경
+		Set( "ToolBarButton.Pressed", FSlateBoxBrush( TEXT("Old/MenuItemButton_Pressed"), 4.0f/32.0f ) );
+		Set( "ToolBarButton.Hovered", FSlateBoxBrush( TEXT("Old/MenuItemButton_Hovered"), 4.0f/32.0f ) );
+
+		// Tool bar buttons are sometimes toggle buttons, so they need styles for "checked" state
+		Set( "ToolBarButton.Checked", FSlateBoxBrush( TEXT("Old/MenuItemButton_Pressed"),  4.0f/32.0f, FLinearColor( 0.3f, 0.3f, 0.3f ) ) );
+		Set( "ToolBarButton.Checked_Hovered", FSlateBoxBrush( TEXT("Old/MenuItemButton_Hovered"),  4.0f/32.0f ) );
+		Set( "ToolBarButton.Checked_Pressed", FSlateBoxBrush( TEXT("Old/MenuItemButton_Pressed"),  4.0f/32.0f, FLinearColor( 0.5f, 0.5f, 0.5f ) ) );
+
+		// 툴바 버튼 레이블 폰트
+		Set( "ToolBarButton.LabelFont", FSlateFontInfo( TEXT("Roboto-Regular"), 8 ) );
+	}
+
+컴포지션에 사용된 스타일입니다:
+
+	SNew( SBorder )
+	.BorderImage( FEditorStyle::GetBrush( "ToolBar.Background" ) )
+	.Content()
+	[
+		SNew(SHorizontalBox)
+
+		// 컴파일 버튼 (멀티박스 버튼같아 보이도록 훼이꾸)
+		+SHorizontalBox::Slot()
+		[
+			SNew(SButton)
+			.Style(TEXT("ToolBarButton"))
+			.OnClicked( InKismet2.ToSharedRef(), &FKismet::Compile_OnClicked )
+			.IsEnabled( InKismet2.ToSharedRef(), &FKismet::InEditingMode )
+			.Content()
+			[
+				SNew(SVerticalBox)
+				+SVerticalBox::Slot()
+				.Padding( 1.0f )
+				.HAlign(HAlign_Center)
+				[
+					SNew(SImage)
+					.Image(this, &SBlueprintEditorToolbar::GetStatusImage)
+					.ToolTipText(this, &SBlueprintEditorToolbar::GetStatusTooltip)
+				]
+				+SVerticalBox::Slot()
+				.Padding( 1.0f )
+				.HAlign(HAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("CompileButton", "Compile").ToString())
+					.Font( FEditorStyle::GetFontStyle( FName( "ToolBarButton.LabelFont" ) ) )
+					.ToolTipText(LOCTEXT("CompileButton_Tooltip", "Recompile the blueprint").ToString())
+				]
+			]
+		]
+	]
+
+## 입력
+
+Slate에는 마우스와 키보드 입력을 받는 기능이 지원됩니다. 유연한 키 바인딩 시스템이 제공되어 어느 명령에 어떤 키조합이든 바인딩 가능하며, 그 바인딩을 동적으로 변경할 수도 있습니다.
+
+## 출력
+
+Slate는 타겟 무관 렌더링 프리미티브를 사용하기에, 사실상 어느 플랫폼에서도 실행 가능합니다. 현재는 언리얼 엔진 4 가 실행되는 플랫폼이면 어디서든 실행 가능하도록 언리얼 엔진 4 Rendering Hardware Interface (RHI)를 대상으로 삼습니다.
+
+## 레이아웃 프리미티브
+
+레이아웃 프리미티브로 정적이고 동적인 레이아웃 빌드를 쉽게 할 수 있습니다.
+
+	FString DefaultLayout =
+					TEXT( "	{" )
+					TEXT( "		\"type\": \"tabstack\"," )
+					TEXT( "		\"sizecoeff\": 1," )
+					TEXT( "		\"children\":" )
+					TEXT( "		[" )
+					TEXT( "			{" )
+					TEXT( "				\"type\": \"tab\"," )
+					TEXT( "				\"content\": \"Widget Inspector Tab\"" )
+					TEXT( "			}," )
+					TEXT( "			{" )
+					TEXT( "				\"type\": \"tab\"," )
+					TEXT( "				\"content\": \"Plugin Manager Tab\"" )
+					TEXT( "			}," )
+					TEXT( "			{" )
+					TEXT( "				\"type\": \"tab\"," )
+					TEXT( "				\"content\": \"Debug Tools\"" )
+					TEXT( "			}" )
+					TEXT( "		]" )
+					TEXT( "	}" );
+
+위의 레이아웃으로 만들어지는 UI 는 아래와 같습니다:
+
+![UI Layout](Slate_layout.png)
+
+## 사용자 주도형 레아아웃
+
+Slate의 **도킹 프레임워크** 는 상상할 수 있는 어떤 레이아웃으로도 탭 패널을 재배치하고 도킹하는 능력을 사용자에게 부여해 줍니다. 사용자가 환경을 커스터마이징할 수 있다면, 원하는 툴을 가지고 원하는 방식으로 작업할 수 있게 됩니다.
+
+**떠다니는 탭**
+
+![도킹](docking_before.png)
+
+**탭을 도킹 타겟에 드래그**
+
+![도킹 영역에 드래그](docking_place.png)
+
+**도킹된 탭**
+
+![도킹됨](docking_after.png)
+
+## 개발자 툴
+
+**Slate 위젯 리플렉터** 로는 UI 와 관련 코드를 디버깅하고 분석할 수 있습니다. 버그와 예상치 못한 행위를 추적하는 데 뿐만 아니라, 유저 인터페이스의 프로파일링과 최적화하는 데도 도움이 됩니다.
+
+[REGION:fullwidth]
+![Widget Inspector](widget_inspector.png)
+[/REGION]
+
+## 엔진 접근
+
+Slate UI 시스템은 프로그래머에게 엔진과 에디터 직접 접근 권한을 제공, 어느 개발 팀의 작업방식이든 어느 프로젝트의 요구사항이든 수용할 수 있는 신기능과 툴 구현 작업을 훨씬 쉽게 만들어 줍니다.

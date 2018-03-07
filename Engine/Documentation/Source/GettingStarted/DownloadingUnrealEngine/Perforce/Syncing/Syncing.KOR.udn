@@ -1,0 +1,109 @@
+﻿INTSourceChangelist:3108692
+Availability: Licensee
+Title:퍼포스와 빌드 동기화하기
+Crumbs:%ROOT%, Engine, Programming, Programming/Basics, GettingStarted/DownloadingUnrealEngine/Perforce
+Description:퍼포스를 사용하여 언리얼 엔진 4 빌드를 구하는 방법 안내서입니다.
+version: 4.9
+
+[TOC(start:2)]
+
+파일 리비전 세트 식별을 위한 두 가지 주요 방법은, 라벨과 변경목록을 통하는 것입니다. 하이 레벨에서 라벨은 QA-approved build 식으로 엔진의 특정 빌드를 이루는 변경사항 전부를 가리키는 반면, 변경목록은 특정 변경사항 세트를 가리킵니다. 이 두 개념의 실제적인 차이점은 퍼포스 웹사이트의 [http://www.perforce.com/perforce/doc.current/manuals/p4guide/06_codemgmt.html](http://www.perforce.com/perforce/doc.current/manuals/p4guide/06_codemgmt.html) 페이지를 참고하시기 바랍니다. 에픽의 퍼포스 디포로 동기화하기 위해 알아둬야 할 점은 이와 같습니다:
+
+
+* **Labels** - 새 QA-승인 빌드로 업데이트하는 데는 라벨로 동기화시켜야 할 것입니다.
+* **Changelists** - 엔진의 특정 부분에만 가해진 변경사항 세트를 업데이트하는 데는 변경목록으로 동기화시켜야 할 것입니다.
+
+
+
+
+## P4V 와 Depot
+
+P4v 의 트리 패널에는 Workspace 및 Depot 트리가 있습니다. Depot Tree 뷰에서 Depot 노드를 클릭하면 그 안에 있는 디렉토리가 확장됩니다.
+
+![p4v_depot_tree.jpg](p4v_depot_tree.jpg)(w:374 h:307)
+
+
+* _CodeDrop_ - 에픽이 만든 게임의 다양한 스냅샷이 포함된 것으로, 예제로 사용할 수 있습니다.
+* _PhysX_ - 피직스 미들웨어에 대한 공용 파일이, 계약에 따라 담겨 있습니다. 추가적인 디렉토리와 파일도 확인하실 수 있을 것입니다.
+* _UnrealEngine3_ - 언리얼 엔진 3 를 빌드하고 실행하기 위한 모든 것이 담겨 있습니다. ExampleGame 및 UDKGame 예제 또한 포함되어 있습니다.
+* _UnrealMCP_ - UnrealMCP 에 대한 소스가 담겨 있으며, 이는 플레이어의 온라인 사용감을 향상시키기 위해 고도로 탄력적인 가용 서비스 세트에 집중된 SOA (서비스-지향 아키텍처)입니다.
+
+
+보다 자세한 정보는, [디렉토리 레이아웃](Engine/Basics/DirectoryStructure) 페이지를 참고하시기 바랍니다.
+
+_UnrealEngine3_ 디렉토리 안에는 여러가지 서브디렉토리: _Binaries_, _Development_, _Engine_ 과 두 개의 게임 디렉토리: _ExampleGame_ 및 _UDKGame_ 이 있습니다.
+
+![p4v_depot_tree_ue3.jpg](p4v_depot_tree_ue3.jpg)(w:374 h:307)
+
+_ExampleGame_ 은 에픽이 제공하는 가장 최소한의 게임 구현으로, 게임이 _언리얼 토너먼트_와 너무 유사하지만 않다면 여기서부터 자체 게임 프로젝트를 만들기 시작해 볼 수 있습니다.
+
+_UDKGame_ 은 _언리얼 토너먼트 3_ 를 기반으로 한 현재 언리얼 엔진 3 데모입니다. 에픽이 엔진을 어떻게 사용하려 했는지 정확히 보여주는 정교한 예제가 됩니다. _UDKGame_ 에서 직접 확장하시기 보다 _UDKGame_ 은 예제로 참고만 하시는 것이 좋습니다. 귀하의 게임 프로젝트에 _UDKGame_ 에 있는 C++ 또는 언리얼스크립트 코드는 얼마든지 사용하셔도 됩니다만, 에픽의 콘텐츠(텍스처, 메시, 레벨, 사운드 등)를 게임에 포함한 채로 발매해서는 안됩니다.
+
+_UnrealEngine3_ 의 경우, 에픽 콘텐츠 대부분은 게임-전용 디렉토리에 위치해 있기에, 필요한 것이 엔진 소스인 경우 단지 //depot/UnrealEngine3/Development 디렉토리로 싱크하면 됩니다. 예를 들어 디렉토리를 필요한 만큼만 선택하면 _UDKGame_ 콘텐츠를 업데이트하지 않고도 _ExampleGame_ 최신 콘텐츠를 받아올 수 있습니다.
+
+![p4v_depot_tree_ue3_examplegame.jpg](p4v_depot_tree_ue3_examplegame.jpg)(w:374 h:307)
+
+리비전을 받을 때, 많은 내려받기 진행상황이 로그 창에 표시됩니다. _Sync completed with no warnings or errors_ 라는 메시지가 바람직한 것입니다.
+
+
+
+## QA 빌드로 동기화하기
+
+QA-승인 빌드로 동기화하려면 다음 단계를 따르십시오:
+
+
+1. P4V 클라이언트 어플리케이션을 실행합니다.
+
+	![p4v_small.jpg](p4v_small.jpg)(w:800 h:525)
+
+1. Depot 트리에서 UnrealEngine3 디렉토리에 우클릭하여 뜨는 맥락 메뉴에서 _Get Revision..._ 을 선택합니다. 또는 그냥 _Actions_ 메뉴에서 _UnrealEngine3_ 디렉토리를 선택하고 _Get Revision..._ 을 선택해도 됩니다. 
+
+	![p4v_depot_menu.jpg](p4v_depot_menu.jpg)(w:304 h:650)
+
+1. _Get Revision_ 창이 열립니다.
+
+	![p4v_get_revision.jpg](p4v_get_revision.jpg)(w:634 h:488)
+
+	_Specify revision using_ 라디오 버튼을 선택하여 콤보박스와 텍스트 필드를 활성화시킵니다.
+
+	![p4v_specify_revision.jpg](p4v_specify_revision.jpg)(w:513 h:63)
+
+1. 콤보박스에서 _label_ 을 선택합니다.
+
+	![p4v_revision_label.jpg](p4v_revision_label.jpg)(w:100 h:103)
+
+	Press the ![p4v_browse_button.jpg](p4v_browse_button.jpg)button to open the _Select Label_ window.
+
+	![p4v_select_label.jpg](p4v_select_label.jpg)(w:800 h:526)
+
+1. 싱크를 하려는 라벨을 선택합니다. 보통 이는 최신 QA-승인 빌드이며, _QA_APPROVED_BUILD_[Month]_[Year]_ 의 형태로 라벨을 지정합니다. 모든 라벨을 로드시키려면 목록을 약간 아래로 스크롤해야 할 수도 있습니다.
+
+	![p4v_label_build.jpg](p4v_label_build.jpg)(w:800 h:526)
+
+	Press the ![p4v_ok_button.jpg](p4v_ok_button.jpg)to select the label and close the window.
+
+1. ![p4v_get_revision_button.jpg](p4v_get_revision_button.jpg) 버튼을 눌러 _Get Revision_ 창을 닫고 동기화를 시작합니다. 로그에 진행상황이 표시될 것입니다.
+
+	![p4v_sync_progress.jpg](p4v_sync_progress.jpg)(w:800 h:117)
+
+
+
+## 우수 사례 및 전략
+
+Client Spec 을 여럿 사용하기 보다는, 테스트 팀의 승인을 받은 특정 빌드에 모든 바이너리/파일을 동기화시키는 배치 파일을 사용할 것을 추천합니다. 같은 배치 파일을 #head 콘텐츠에 동기화시키는데도 사용할 수 있습니다.
+
+언제든지 서포트 포탈에서 최근 빌드 체인지리스트를 구할 수 있습니다.
+
+게임 콘텐츠 디렉토리에 관해서, 퍼포스는 바이너리 비교를 제공하지 않기에, 패키지에 업데이트를 하면, 퍼포스는 업데이트된 파일이 있으면 그냥 다시 받아버립니다. 몇 기가씩 되는 콘텐츠의 경우, 한 번 이상 해 주고 싶지 않은 작업이겠지요. 그래서 가끔씩, 일례로 밤새 한 번 돌려놓고 참고로 사용할 콘텐츠를 구하고서, 필요할 때만 가끔씩 업데이트할 것을 추천합니다.
+
+최신 QA 승인 빌드에 풀 싱크하는 데 문제가 있는 경우, 부분별로 싱크해 보세요. 라이선시와 컨트랙터는 아주 가끔씩, 싱크 도중 끊기는 경우가 있습니다. 그리 큰 문제는 아니지만, 좌절스러울 수는 있습니다. 그러한 문제 경함을 위해, 루트 아래 각 폴더를 동기화시키면 됩니다. 각 게임도 콘텐츠만 빼고 별도로 싱크할 수도 있습니다. 콘텐츠의 경우도 그 안의 하위 폴더를 개별적으로 싱크할 수 있습니다. 고생스럽긴 해도, 한 번만 해 두면 골칫거리 많이 줄어들 수 있습니다.
+
+싱크 도중 "can't clobber writable file" 이라는 메시지가 나오는 경우가 있는데, 클라이언트 워크스페이스에 있는 파일에 쓰기가능 마킹이 된 경우가 있기 때문입니다. 유지해야 할 필요가 있는 변경사항이 있다 생각되는 경우, 어느 파일이 변경되었는지 그리고 체크인 시킬지 결정해야 하며, 변경내용은 필요없고 싱크만 다시 하려는 경우 그냥 QA 라벨에 "force sync" 하여 덮어써 버리면 됩니다.
+
+빌드에 문제가 있는 경우, 최신 빌드 노트를 확인하세요. 퍼포스의 ([P4V](GettingStarted/DownloadingUnrealEngine/Perforce/P4V) 에서 _Action_ 아래 _Reconcile Offline Work_ 서브메뉴를 통해) _Check Consistency_ (일관성 검사)가 가능합니다. 마지막 수단으로 전체 루트 폴더와 그 내용을 _Remove from Client_ 를 한 다음 물리적으로 이동 (또는 삭제)합니다. 그런 다음 정상적으로 싱크합니다. 디포에서 _Remove from Client_ 를 해 줘야 서버에게 아무것도 없으니, 모든 파일을 강제 업데이트하라 이르는 것입니다.
+
+ 
+
+
+
+

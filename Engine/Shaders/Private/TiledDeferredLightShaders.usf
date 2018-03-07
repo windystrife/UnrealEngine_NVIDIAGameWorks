@@ -1,0 +1,402 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	TiledDeferredLightShaders.usf: Implementation of tiled deferred shading
+=============================================================================*/
+
+#define SUPPORT_CONTACT_SHADOWS 0
+
+#include "Common.ush"
+#include "DeferredLightingCommon.ush"
+// @third party code - BEGIN HairWorks
+#if SM5_PROFILE
+#include "HairWorks/HairWorksLighting.ush"
+#endif
+// @third party code - END HairWorks
+
+#define THREADGROUP_TOTALSIZE (THREADGROUP_SIZEX * THREADGROUP_SIZEY)
+
+/** View rect min in xy, max in zw. */
+uint4 ViewDimensions;
+uint NumLights;
+
+// Workaround performance issue with shared memory bank collisions in GLSL
+#if GL4_PROFILE || SWITCH_PROFILE || SWITCH_PROFILE_FORWARD
+#define ATOMIC_REDUCTION 0
+#else
+#define ATOMIC_REDUCTION 1
+#endif
+
+#if !ATOMIC_REDUCTION
+groupshared float TileZ[THREADGROUP_TOTALSIZE];
+#endif
+
+/** Min and Max depth for this tile. */
+groupshared uint IntegerTileMinZ;
+groupshared uint IntegerTileMaxZ;
+
+/** Number of lights affecting the tile, after culling. */
+groupshared uint TileNumLights;
+/** 
+ * Indices of lights that survived culling for the tile. 
+ * The order of lights will be non-deterministic, so the final result must not be dependent on this order.
+ */
+groupshared uint TileLightIndices[MAX_LIGHTS];
+/** Number of simple lights affecting the tile after culling. */
+groupshared uint TileNumSimpleLights;
+/** Same as TileLightIndices, except for simple lights */
+groupshared uint TileSimpleLightIndices[MAX_LIGHTS];
+
+/** Output HDR target. */
+Texture2D<float4> InTexture;
+RWTexture2D<float4> RWOutTexture;
+
+// @third party code - BEGIN HairWorks
+#if SM5_PROFILE
+Texture2D<float4> HairInTexture;
+RWTexture2D<float3> RWHairOutTexture;
+#endif
+// @third party code - END HairWorks
+
+[numthreads(THREADGROUP_SIZEX, THREADGROUP_SIZEY, 1)]
+void TiledDeferredLightingMain(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+    uint ThreadIndex = GroupThreadId.y * THREADGROUP_SIZEX + GroupThreadId.x;
+    
+	uint2 PixelPos = DispatchThreadId.xy + ViewDimensions.xy;
+	float2 ScreenUV = (float2(DispatchThreadId.xy) + .5f) / (ViewDimensions.zw - ViewDimensions.xy);
+	float2 ScreenPosition = float2(2.0f, -2.0f) * ScreenUV + float2(-1.0f, 1.0f);
+	float SceneDepth = CalcSceneDepth(PixelPos);
+
+#if ATOMIC_REDUCTION
+	// Initialize per-tile variables
+    if (ThreadIndex == 0) 
+	{
+        IntegerTileMinZ = 0x7F7FFFFF;     
+        IntegerTileMaxZ = 0;
+		TileNumLights = 0;
+		TileNumSimpleLights = 0;
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+    
+	// Use shared memory atomics to build the depth bounds for this tile
+	// Each thread is assigned to a pixel at this point
+	//@todo - move depth range computation to a central point where it can be reused by all the frame's tiled deferred passes!
+    InterlockedMin(IntegerTileMinZ, asuint(SceneDepth));
+    InterlockedMax(IntegerTileMaxZ, asuint(SceneDepth));
+
+	// @third party code - BEGIN HairWorks
+#if SM5_PROFILE
+	if(bHairDeferredRendering)
+	{
+		float HairDepthNear = ConvertFromDeviceZ(HairNearestDepthTexture[PixelPos]);
+		InterlockedMin(IntegerTileMinZ, asuint(min(SceneDepth, HairDepthNear)));
+		InterlockedMax(IntegerTileMaxZ, asuint(SceneDepth));
+	}
+	else
+#endif
+	// @third party code - END HairWorks
+
+    GroupMemoryBarrierWithGroupSync();
+#else
+
+	TileZ[ThreadIndex] = SceneDepth;
+
+	GroupMemoryBarrierWithGroupSync();
+
+	THREADGROUP_TOTALSIZE;
+
+	if (ThreadIndex < 32)
+	{
+		float Min = SceneDepth;
+		float Max = SceneDepth;
+		for (int i = ThreadIndex + 32; i< THREADGROUP_TOTALSIZE; i += 32)
+		{
+			Min = min(Min, TileZ[i]);
+			Max = max(Max, TileZ[i]);
+		}
+		TileZ[ThreadIndex] = Min;
+		TileZ[ThreadIndex + 32] = Max;
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
+	if (ThreadIndex < 8)
+	{
+		float Min = TileZ[ThreadIndex];
+		float Max = TileZ[ThreadIndex + 32];
+
+		Min = min(Min, TileZ[ThreadIndex + 8]);
+		Max = max(Max, TileZ[ThreadIndex + 40]);
+
+		Min = min(Min, TileZ[ThreadIndex + 16]);
+		Max = max(Max, TileZ[ThreadIndex + 48]);
+
+		Min = min(Min, TileZ[ThreadIndex + 24]);
+		Max = max(Max, TileZ[ThreadIndex + 56]);
+
+		TileZ[ThreadIndex + 64] = Min;
+		TileZ[ThreadIndex + 96] = Max;
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
+	if (ThreadIndex == 0)
+	{
+		float Min = TileZ[64];
+		float Max = TileZ[96];
+
+		for (int i = 1; i< 8; i++)
+		{
+			Min = min(Min, TileZ[i + 64]);
+			Max = max(Max, TileZ[i + 96]);
+		}
+
+		IntegerTileMinZ = asuint(Min);
+		IntegerTileMaxZ = asuint(Max);
+		TileNumLights = 0;
+		TileNumSimpleLights = 0;
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+#endif
+
+    float MinTileZ = asfloat(IntegerTileMinZ);
+    float MaxTileZ = asfloat(IntegerTileMaxZ);
+
+	// Setup tile frustum planes
+	float2 TileScale = float2(ViewDimensions.zw - ViewDimensions.xy) * rcp(2 * float2(THREADGROUP_SIZEX, THREADGROUP_SIZEY));
+    float2 TileBias = TileScale - GroupId.xy;
+
+    float4 C1 = float4(View.ViewToClip._11 * TileScale.x,	0.0f,								View.ViewToClip._31 * TileScale.x + TileBias.x,	0.0f);
+    float4 C2 = float4(0.0f,								-View.ViewToClip._22 * TileScale.y, View.ViewToClip._32 * TileScale.y + TileBias.y,	0.0f);
+    float4 C4 = float4(0.0f,								0.0f,								1.0f,											0.0f);
+
+    float4 frustumPlanes[6];
+    frustumPlanes[0] = C4 - C1;
+    frustumPlanes[1] = C4 + C1;
+    frustumPlanes[2] = C4 - C2;
+    frustumPlanes[3] = C4 + C2;
+    frustumPlanes[4] = float4(0.0f, 0.0f,  1.0f, -MinTileZ);
+    frustumPlanes[5] = float4(0.0f, 0.0f, -1.0f,  MaxTileZ);
+
+	// Normalize tile frustum planes
+    UNROLL 
+	for (uint i = 0; i < 4; ++i) 
+	{
+        frustumPlanes[i] *= rcp(length(frustumPlanes[i].xyz));
+    }
+
+	// With a perspective projection, the clip space position is NDC * Clip.w
+	// With an orthographic projection, clip space is the same as NDC
+	float2 ClipPosition = ScreenPosition * (View.ViewToClip[3][3] < 1.0f ? SceneDepth : 1.0f);
+	float4 HomogeneousWorldPosition = mul(float4(ClipPosition, SceneDepth, 1), View.ScreenToWorld);
+	float3 WorldPosition = HomogeneousWorldPosition.xyz / HomogeneousWorldPosition.w;
+
+	// RGB accumulated RGB HDR color, A: luminance for screenspace subsurface scattering
+	float4 CompositedLighting = 0;
+
+#define DO_CULLING_AND_SHADING 1
+#if DO_CULLING_AND_SHADING
+
+	// Compute per-tile lists of affecting lights through bounds culling
+	// Each thread now operates on a sample instead of a pixel
+	LOOP
+	for (uint LightIndex = ThreadIndex; LightIndex < NumLights && LightIndex < MAX_LIGHTS; LightIndex += THREADGROUP_TOTALSIZE)
+	{
+		float4 LightPositionAndInvRadius = TiledDeferred.LightPositionAndInvRadius[LightIndex];
+		float LightRadius = 1.0f / LightPositionAndInvRadius.w;
+		float3 BoundsViewPosition = mul(float4(LightPositionAndInvRadius.xyz + View.PreViewTranslation.xyz, 1), View.TranslatedWorldToView).xyz;
+
+		// Cull the light against the tile's frustum planes
+		// Note: this has some false positives, a light that is intersecting three different axis frustum planes yet not intersecting the volume of the tile will be treated as intersecting
+		bool bInTile = true;  
+				
+		// Test against the screen x and y oriented planes first
+		UNROLL
+		for (uint i = 0; i < 4; ++i) 
+		{
+			float PlaneDistance = dot(frustumPlanes[i], float4(BoundsViewPosition, 1.0f));
+			bInTile = bInTile && (PlaneDistance >= -LightRadius);
+		}
+
+		BRANCH
+		if (bInTile)
+		{
+			bool bInDepthRange = true;  
+				
+			// Test against the depth range
+			UNROLL 
+			for (uint i = 4; i < 6; ++i) 
+			{
+				float PlaneDistance = dot(frustumPlanes[i], float4(BoundsViewPosition, 1.0f));
+				bInDepthRange = bInDepthRange && (PlaneDistance >= -LightRadius);
+			}
+				 
+			// Add this light to the list of indices if it intersects
+			BRANCH
+			if (bInDepthRange) 
+			{
+				// Separate lights into different index lists depending on whether they will use simple shading or not
+				// This prevents the need for an inner loop branch when shading
+				if (TiledDeferred2.SpotAnglesAndSourceRadiusAndSimpleLighting[LightIndex].w > .5f)
+				{
+					uint ListIndex;
+					InterlockedAdd(TileNumSimpleLights, 1U, ListIndex);
+					TileSimpleLightIndices[ListIndex] = LightIndex; 
+				}
+				else
+				{
+					uint ListIndex;
+					InterlockedAdd(TileNumLights, 1U, ListIndex);
+					TileLightIndices[ListIndex] = LightIndex; 
+				}
+			}
+		}
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+		  
+	uint NumLightsAffectingTile = TileNumLights;
+	uint NumSimpleLightsAffectingTile = TileNumSimpleLights;
+	
+	// Lookup GBuffer properties once per pixel 
+	FScreenSpaceData ScreenSpaceData = GetScreenSpaceDataUint(PixelPos);
+	FGBufferData InGBufferData = ScreenSpaceData.GBuffer; 
+	float3 CameraVector = normalize(WorldPosition - View.WorldCameraOrigin);
+
+	// @third party code - BEGIN HairWorks
+#if SM5_PROFILE
+	if(bHairDeferredRendering)
+	{
+		const float HairNearestDepth = HairNearestDepthTexture[PixelPos];
+		if(HairNearestDepth > 0)
+		{
+			float3 OutHairColor = 0;
+
+			uint2 Size;
+			uint SampleNum;
+			HairDepthTextureMS.GetDimensions(Size.x, Size.y, SampleNum);
+
+			float3 ScreenVector = mul(float4(ScreenPosition.xy, 1, 0), View.ScreenToTranslatedWorld).xyz;
+
+			LOOP
+			for(uint TileLightIndex = 0; TileLightIndex < NumLightsAffectingTile; TileLightIndex++)
+			{
+				uint LightIndex = TileLightIndices[TileLightIndex];
+
+				FDeferredLightData LightData = (FDeferredLightData)0;
+				LightData.LightPositionAndInvRadius = TiledDeferred.LightPositionAndInvRadius[LightIndex];
+				LightData.LightColorAndFalloffExponent = TiledDeferred.LightColorAndFalloffExponent[LightIndex];
+				{
+					float4 Value = TiledDeferred2.LightDirectionAndSpotlightMaskAndMinRoughness[LightIndex];
+					LightData.LightDirection = Value.xyz;
+					LightData.bSpotLight = Value.w > 0;
+					LightData.MinRoughness = abs(Value.w);
+				}
+				LightData.SpotAnglesAndSourceRadius = float4(TiledDeferred2.SpotAnglesAndSourceRadiusAndSimpleLighting[LightIndex].xyz, 0);
+				LightData.ShadowMapChannelMask = TiledDeferred2.ShadowMapChannelMask[LightIndex];
+				LightData.bInverseSquared = LightData.LightColorAndFalloffExponent.w == 0;
+				// Only radial lights supported with tiled deferred
+				LightData.bRadialLight = true;
+				// The only type of shadowing supported for lights using tiled is static shadowing, so the light should only compute shadowing if it has static shadowing
+				//LightData.bShadowed = dot(LightData.ShadowMapChannelMask, float4(1, 1, 1, 1));
+				LightData.ShadowedBits = false;
+
+				// Lights requiring light attenuation are not supported tiled for now
+				UNROLL
+				for(uint i = 0; i < min(SampleNum, 8); ++i)
+				{
+					FHairScreenSpaceData HairScreenSpaceData = GetHairWorksScreenSpaceData(PixelPos, i);
+					OutHairColor += GetHairWorksDynamicLighting(ScreenVector, PixelPos, HairScreenSpaceData, LightData);
+				}
+			}
+
+			// The simple shading model does not depend on ShadingModelID, so use it anytime the material is lit
+			LOOP
+			for(uint TileLightIndex = 0; TileLightIndex < NumSimpleLightsAffectingTile; TileLightIndex++)
+			{
+				uint LightIndex = TileSimpleLightIndices[TileLightIndex];
+
+				FSimpleDeferredLightData LightData = (FSimpleDeferredLightData)0;
+				LightData.LightPositionAndInvRadius = TiledDeferred.LightPositionAndInvRadius[LightIndex];
+				LightData.LightColorAndFalloffExponent = TiledDeferred.LightColorAndFalloffExponent[LightIndex];
+				LightData.bInverseSquared = LightData.LightColorAndFalloffExponent.w == 0;
+
+				UNROLL
+				for(uint i = 0; i < min(SampleNum, 8); ++i)
+				{
+					FHairScreenSpaceData HairScreenSpaceData = GetHairWorksScreenSpaceData(PixelPos, i);
+					OutHairColor += GetHairWorksSimpleLighting(ScreenVector, PixelPos, HairScreenSpaceData, LightData);
+				}
+			}
+
+			BRANCH
+			if(all(DispatchThreadId.xy < ViewDimensions.zw))
+			{
+				RWHairOutTexture[PixelPos.xy] = HairInTexture[PixelPos.xy] + OutHairColor / SampleNum;
+			}
+		}
+	}
+#endif
+	// @third party code - END HairWorks
+		
+	BRANCH
+	if (InGBufferData.ShadingModelID != SHADINGMODELID_UNLIT)
+	{
+		LOOP
+		for (uint TileLightIndex = 0; TileLightIndex < NumLightsAffectingTile; TileLightIndex++) 
+		{
+			uint LightIndex = TileLightIndices[TileLightIndex];
+
+			FDeferredLightData LightData = (FDeferredLightData)0;
+			LightData.LightPositionAndInvRadius = TiledDeferred.LightPositionAndInvRadius[LightIndex];
+			LightData.LightColorAndFalloffExponent = TiledDeferred.LightColorAndFalloffExponent[LightIndex];
+			{
+				float4 Value = TiledDeferred2.LightDirectionAndSpotlightMaskAndMinRoughness[LightIndex];
+				LightData.LightDirection = Value.xyz;
+				LightData.bSpotLight = Value.w > 0;
+				LightData.MinRoughness = abs(Value.w);
+			}
+			LightData.SpotAnglesAndSourceRadius = TiledDeferred2.SpotAnglesAndSourceRadiusAndSimpleLighting[LightIndex];
+			LightData.ShadowMapChannelMask = TiledDeferred2.ShadowMapChannelMask[LightIndex];
+			LightData.bInverseSquared = LightData.LightColorAndFalloffExponent.w == 0;
+			// Only radial lights supported with tiled deferred
+			LightData.bRadialLight = true;
+			// The only type of shadowing supported for lights using tiled is static shadowing, so the light should only compute shadowing if it has static shadowing
+			LightData.ShadowedBits = dot(LightData.ShadowMapChannelMask, float4(1, 1, 1, 1));
+	
+			// Lights requiring light attenuation are not supported tiled for now
+			CompositedLighting += GetDynamicLighting(WorldPosition, CameraVector, ScreenSpaceData.GBuffer, ScreenSpaceData.AmbientOcclusion, InGBufferData.ShadingModelID, LightData, float4(1, 1, 1, 1), 0.5, uint2(0,0));
+		}
+
+		// The simple shading model does not depend on ShadingModelID, so use it anytime the material is lit
+		LOOP
+		for (uint TileLightIndex = 0; TileLightIndex < NumSimpleLightsAffectingTile; TileLightIndex++) 
+		{
+			uint LightIndex = TileSimpleLightIndices[TileLightIndex];
+
+			FSimpleDeferredLightData LightData = (FSimpleDeferredLightData)0;
+			LightData.LightPositionAndInvRadius = TiledDeferred.LightPositionAndInvRadius[LightIndex];
+			LightData.LightColorAndFalloffExponent = TiledDeferred.LightColorAndFalloffExponent[LightIndex];
+			LightData.bInverseSquared = LightData.LightColorAndFalloffExponent.w == 0;
+						
+			// todo: doesn't support ScreenSpaceSubsurfaceScattering yet (not using alpha)
+			CompositedLighting.rgb += GetSimpleDynamicLighting(WorldPosition, CameraVector, ScreenSpaceData.GBuffer.WorldNormal, ScreenSpaceData.AmbientOcclusion, ScreenSpaceData.GBuffer.DiffuseColor, ScreenSpaceData.GBuffer.SpecularColor, ScreenSpaceData.GBuffer.Roughness, LightData);
+		}
+	}
+		
+#endif
+
+	// Only write to the buffer for threads inside the view
+	BRANCH
+    if (all(DispatchThreadId.xy < ViewDimensions.zw)) 
+	{
+		// One some hardware we can read and write from the same UAV with a 32 bit format. We don't do that yet.
+		RWOutTexture[PixelPos.xy] = InTexture[PixelPos.xy] + CompositedLighting;
+    }
+}

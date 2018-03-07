@@ -1,0 +1,173 @@
+﻿INTSourceChangelist:3467293
+Availability:Public
+Title:パーティクル システムの詳細度 (LOD)
+Crumbs: %ROOT%, Engine, Engine/Rendering/ParticleSystems
+Description:膨大な数のパーティクルに対しいつでも実施可能な GPU シミュレーション
+Version:4.9
+tags:Particles
+topic-image:ParticleSystemLOD_topic.png
+
+[TOC(start:2 end:3)]
+
+LOD を使うと、エフェクト アーティストはプレイヤーの範囲に合わせてスクリーン スペースを最も効率よく使用するパーティクル エフェクトを作成することができます。キャンプ ファイアーのパーティクル システムを考えてください。次のようなエミッタが含まれています。
+
+* 炎心
+* 外炎
+* コアの発光
+* 火花と燃えさし
+* 一層以上の煙
+
+
+詳細表示するとこのようなものが表示されます。
+
+![FireEffect_Close.png](FireEffect_Close.png)
+
+
+ただし、プレイヤーが遠ざかっていくと、スクリーン スペースは以下のように小さくなります。
+
+![FireEffect_Distant.png](FireEffect_Distant.png)
+
+これは、燃えさしなどパーティクル システムのアスペクトがレンダリングには小さすぎる (ピクセルより小さい) ためです。しかしながら、このようなパーティクルでも計算や処理は可能です。そこで LOD の出番です。LOD はパーティクル システムを距離に合わせて簡素化することが可能なので、プレイヤーがエフェクトを効果的に認識するには遠すぎる状態になると、システム内のエミッタとモジュールは設定を終了、または完全にオフにすることができます。
+
+
+本ドキュメントでは、詳細度 (LOD) に関して、インゲームでの使用方法に加えてお使いのパーティクル システムでの作成方法について記述します。
+
+
+## カスケードによる LOD の制御
+
+カスケード ツールバーの以下の部分が LOD 制御に関わります。
+
+**カスケードの LOD コントロール**
+
+![Cascade_Toolbar.png](Cascade_Toolbar.png)
+
+各コントロールの詳細です。
+
+
+| **ボタン** | **名前** | **説明** |
+| --- | --- | --- |
+| ![Cascade_Toolbar_RegenLOD_Duplicating.png](Cascade_Toolbar_RegenLOD_Duplicating.png) | **Regenerate Lowest LOD Duplicating Highest Button** | _[Regenerate Lowest LOD Duplicating Highest]_ ボタンを押すと、パーティクル システムは既存の LOD のうち低い方のレベルをすべて消去し、最高レベルの完全コピーを最低レベルとして新たに生成します。 |
+| ![Cascade_Toolbar_RegenLOD.png](Cascade_Toolbar_RegenLOD.png) | **Regen Lowest LOD Button** | _[Regen Lowest LOD]_ ボタンを押すと、パーティクルシステムは既存する LOD のうち低い方のレベルをすべて消去し、最低レベルを生成し直します。 |
+| ![Cascade_Toolbar_LowestLOD.png](Cascade_Toolbar_LowestLOD.png) | **Jump to Lowest LOD Button** | _[Jump to Lowest LOD]_ ボタンを押すと、システムは使用可能な最低静的 LOD に設定されます。 |
+| ![Cascade_Toolbar_LowerLOD.png](Cascade_Toolbar_LowerLOD.png) | **Jump to Lower LOD Button** | _[Jump Lower to LOD]_ ボタンを押すと、現在の LOD 設定の次に低い使用可能な静的 LOD に設定されます。 |
+| ![Cascade_Toolbar_AddLOD_Before.png](Cascade_Toolbar_AddLOD_Before.png) | **Add LOD before current Button** | _[Add LOD before current]_ ボタンを押すと、システムは現在ロードされた LOD の前に新しい静的 LOD レベルを挿入します。 |
+| ![Cascade_Toolbar_CurrentLOD.png](Cascade_Toolbar_CurrentLOD.png) | **Current LOD** |Current LOD Info Box には、パーティクル システム内に存在する LOD 数および現在ロードされている LOD に関する情報があります。|
+| ![Cascade_Toolbar_AddLOD_After.png](Cascade_Toolbar_AddLOD_After.png) | **Add LOD after current Button** | _[Add LOD before current]_ ボタンを押すと、システムは現在ロードされた LOD の後ろに新しい静的 LOD レベルを挿入します。|
+| ![Cascade_Toolbar_HigherLOD.png](Cascade_Toolbar_HigherLOD.png) | **Jump to Higher LOD Button** | _[Jump to Higher LOD]_ ボタンを押すと、現在の LOD 設定の次に高い使用可能な静的 LOD に設定されます。 |
+| ![Cascade_Toolbar_HighestLOD.png](Cascade_Toolbar_HighestLOD.png) | **Jump to Highest LOD Button**  |_[Jump to Highest LOD]_ ボタンを押すと、パーティクルシステムは使用可能な最高レベルの静的 LOD に設定されます。 |
+| ![Cascade_Toolbar_DeleteLOD.png](Cascade_Toolbar_DeleteLOD.png) | **Delete LOD Button** | _[Delete LOD]_ ボタンを押すと、現在選択されている静的 LOD レベルがパーティクル システムから削除されます。  |
+
+
+
+
+
+## パーティクル システムにおける LOD レベルの作成
+
+このセクションでは、LOD の完全サポートを備えたパーティクル システム作成を目指して設計されたデザインフローについて説明します。プロセスの概要は以下のように分類できます。
+
+* 全体的に見て望ましいエフェクトを作成します。これが最高レベルの LOD です。
+* 次に、最低レベルの LOD を作成します。
+* 高品質から低品質への遷移を滑らかにするため、2 つの間に別の LOD レベルを追加します。
+
+
+[REGION:note]
+	最高 LOD レベルでの編集作業中は、モジュールは追加 / 削除しかできません。 
+[/REGION:note]
+
+
+
+この例では、SubUV を 1 つ使います。SubUV の座標 0 が 1 、座標 1 が 2 を示すように設定します。テクスチャを適用すると以下のように見えます。
+
+![ImageTest_Tile.png](ImageTest_Tile.png)(w:256)
+
+最高 LOD レベルを設定します。 
+
+**最高 LOD レベル**
+
+![HighestLOD.png](HighestLOD.png)
+
+デザイナーがパーティクル システムの LOD 作成準備ができたと判断した時点で **[Regenerate Lowest LOD (最低 LOD を作成)]** を選択してください。これにより、最低 LOD レベルが再生成されます。(同時に、その間に作成されていた静的 LOD レベルが削除されます。)現在のところ、このメニュー項目は最高 LOD レベルの複製を作成し、そのスポーンレートを下げるだけですが、
+
+最低 LOD レベルを選択してから、適切な外観を得るために値の調整を開始します。ここで注意しなければならないのは、デフォルトでは静的 LOD レベル内のすべてのモジュールが _編集不可能である_ とマークされている点です。これは、モジュール背景のマーブル模様により示されています。
+
+|最高 LOD から見たモジュール | 最低 LOD から見たモジュール |
+| --- | --- |
+|![HighestLevelModules.png](HighestLevelModules.png)| ![LowestLevelModules.png](LowestLevelModules.png)|
+
+静的 LOD レベル内のモジュールを編集するには、これを有効にする必要があります。モジュールを **右クリック** してコンテキスト メニューから **[Duplicate from Higher (より高い LOD から複製)]** を選択します。  
+
+以下は利用可能なオプションの動作説明です。
+
+| **オプション** | **説明** |
+| ---- | ---- |
+| **Duplicate from Higher** | 次に高い LOD から設定をコピーしてモジュールを編集可能にします。 |
+| **Share from Higher** | 次に高い LOD と設定を共有してモジュールを編集可能にします。つまり、一方への編集が自動的にもう一方への編集になります。 |
+| **Duplicate from Highest** | 最高 LOD から設定をコピーしてモジュールを編集可能にします。 |
+
+
+この例では、SubImage Index モジュールを編集するために有効にし、そのインデックスを 3 に設定します。この結果、下の図のようにエミッタには *4* がイエローで表示されます。
+
+**最低 LOD レベル**
+
+![LowestLOD.png](LowestLOD.png)
+
+スポーンレートが最高 LOD レベルの 10% に自動的に設定されている点に注意してください。
+
+次のステップでは、**[Add LOD before current (現在位置の直前に LOD を追加)]** ボタンを押して最高レベルと最低レベルの間に静的 LOD を追加します (まだ最低 LOD のビューを見ているものとします)。SubImage Index モジュールが有効になり、そのインデックスが 1 に設定されます。この結果、下の図のようにエミッタには 2 がブルーで表示されます。
+
+**LOD レベル 1**
+
+![LOD_33.png](LOD_33.png)
+
+最初の静的 LOD と最低 LOD の間にある別の静的 LOD にも同じ手順を行います。**[Add LOD after current (現在位置の直後に LOD を追加)]** ボタンを押し SubImage index モジュールを有効にしします。SubImage Index が 2 に設定され、下の図のようにエミッタには 3 がグリーンで表示されます。
+
+**LOD レベル 2**
+
+![LOD_66.png](LOD_66.png)
+
+
+## LOD Method と LOD Distance の設定
+
+インゲームでのパーティクル システムの LOD の制御には 2 通りの方法があります。それぞれのパーティクル システムにある LODMethod と呼ばれる列挙型変数がこのモードを決定する方法を提供し、LOD 距離の処理方法を順番に制御します。
+
+次の図はパーティクル システム サンプルのプロパティ ウィンドウを示しています。
+
+**LODDistances プロパティ ウィンドウ**
+
+![LODsettings.png](LODsettings.png)
+
+この例では、エミッターがカメラから[0..1249] ユニットの距離にある間は LOD 0 (最高レベル) が使用されます。LOD 1 は [1250..1874]、LOD2 は [1875..2499]、LOD3 は距離が 2500 ユニットを超えたときです。
+
+LODDistanceCheckTime では、Automatic モードに設定された各 ParticleSystemComponent が、実行時に LOD 判定のための距離チェックを実行する頻度を秒単位で設定します。この例では、レベル内のこのパーティクル システムの各インスタンスは、1/4 秒ごとに距離チェックを実行します。
+
+ 
+
+| プロパティ | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]LOD[/REGION] ||
+| **LOD Distance Check Time** | 使用する LOD レベルを決定するためにシステムが距離チェックを実行する間隔 (秒) です(LODMethod が Automatic に設定時のみ使用します)。 |
+| **LOD Method** | システムが適切な LOD レベルの選択に利用するメソッドを示す列挙型変数です。利用可能なメソッドがいくつかあります。 [INCLUDE:#LODMethod] |
+| **LODDistances** | 使用する LOD レベルを決定するための距離の配列です。(LODMethod が Automatic に設定時のみ使用します。)これらの数値は、選択する LOD レベルに推奨する最少距離を示します。例えば 3 つの LOD レベルをもつシステムを想定してみましょう。[INCLUDE:#LODDistance] |
+| **LODSettings** | 各 LOD に使用する具体的な設定を決定する ParticleSystem がライトを受け取ると、常に _Lit_ が制御する唯一の設定です。 |
+
+<!----
+[EXCERPT:LODDistance]
+[REGION:simpletable]
+| LODDistanceIndex | 値 | 範囲 | 選択される LOD レベル |
+| --- | --- | --- | --- |
+| 0 | 0.0 | 0.0 - 2499.9 | 0 (最高) |
+| 1 | 2500.0 | 2500.0 - 4999.9 | 1 |
+| 2 | 5000.0 | 5000.0 - Infinity | 2 |
+[/REGION]
+[/EXCERPT:LODDistance]
+[EXCERPT:LODMethod]
+[REGION:simpletable]
+| メソッド | 説明 |
+| --- | --- |
+| Automatic | LOD 距離に基づいて LOD レベルを設定し、自動的に時間を確認します。 |
+| DirectSet | システムが使用する LOD レベルをゲームが直接設定します。 |
+|Activate Automatic (自動のアクティベート) | LOD で定義された距離パラメータに基づき、エフェクトがスポーンされたときに LOD が定義されます。
+[/REGION]
+[/EXCERPT:LODMethod]
+
+---->

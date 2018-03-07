@@ -1,0 +1,113 @@
+﻿INTSourceChangelist:2728676
+Availability:Public
+Title:组件
+Crumbs:%ROOT%, Programming
+Description:组件的解释，以及诸多可用类型的描述。
+Version:4.9
+
+[TOC (start:2 end:3)]
+
+
+[EXCERPT:Overview]
+**组件** 是一种特殊类型的 **对象**，作为 **Actor** 中的子对象使用。它们常用于有必要使用易于切换部分的情况下，以变更拥有 Actor 特定方面的行为或功能。例如，汽车的控制和移动方式与飞机相差甚远，而飞机又与船相差很大，以此类推；然而所有载具却拥有其他共性。使用组件处理控制和移动，可轻松将载具的行为设定为与一种特定类型相同。
+[/EXCERPT:Overview]
+
+与整体子类型的默认行为相反，作为 Actor 中子对象创建的组件将被实例化，意味着一个特定类的每个 Actor 实例将获取其自身独有的组件实例。将此可视化的简单方法为想象上文描述的载具。一个 **汽车** 类可使用组件代表汽车的轮子。四个 **轮子** 组件将作为类默认属性中的子对象创建，然后被指定到一个 `Wheels[]` 阵列。当一个新的汽车实例被创建时，将新建此车特有的轮子组件实例。如情况与上述不同，一辆汽车在世界场景中移动时，所有汽车的轮子均会转动 - 这样的情况显然不对。组件实例化默认简化了快速添加独有子对象到 Actor 的过程。 
+
+[REGION:note]
+如没有组件实例化，所有组件变量都需要使用 [实例化](Programming\UnrealArchitecture\Reference\Properties\Specifiers\Instanced) 属性说明符进行声明。
+[/REGION]
+
+## Actor 组件
+
+**ActorComponent** 是组件的基础类，定义可被添加到不同类型 Actor 的重复使用行为。它们主要用于将几何体与 Actor 关联起来，形式为碰撞几何体或渲染网格体，控制 Actor 在世界场景中的移动方式、播放与 Actor 相关的声效、使 Actor 能投射光影到世界场景，等等。事实上，玩家进行游戏时在世界场景中看到或交互的内容是某种 ActorComponent 的产物。拥有变形的 ActorComponent 被称为 **SceneComponents**，而可被渲染的则称为 **PrimitiveComponents**。
+
+### 注册组件
+
+为使 ActorComponent 每帧更新并对场景产生影响，它们必须和场景进行 **注册**。调用 `UActorComponent::RegisterComponent()` 即可执行注册。 
+
+	void UActorComponent::RegisterComponent()
+
+此函数调用 `UActorComponent::RegisterComponentWithScene()`，以确保 ActorComponent 被包含在拥有 Actor 的 `Components[]` 阵列中，使其与场景相关联，然后为 ActorComponent 创建 [渲染代理](#SceneProxy) 和 [物理状态](#PhysicsState)。 
+
+如 ActorComponents 作为子对象创建并被添加到 Actor 默认属性的 `Components[]` 阵列，则拥有 Actor 生成时 ActorComponents 将被自动注册。调用 `UActorComponent::RegisterComponent()` 即可在游戏中即时对其进行注册，但需要注意 - 组件注册操作较为繁重，只应在必要时执行。
+
+#### 注册事件
+
+当组件被注册时，以下事件将被触发。
+
+| 函数 | 描述 |
+| -------- | ----------- |
+| UActorComponent::OnRegister() | 如有必要，注册组件时事件会为额外的初始化留出余地。|
+| UActorComponent::CreateRenderState() | 初始化组件的渲染状态。|
+| UActorComponent::CreatePhysicsState() | 初始化组件的物理状态。|
+
+
+### 注销组件
+
+也可取消 ActorComponent 的注册，避免它们被更新、模拟，或渲染。调用 `UActorComponent::UnregisterComponent()` 即可取消组件注册。 
+
+	void UActorComponent::UnregisterComponent()
+
+#### 注销事件
+
+组件被取消注册时将触发下列事件。
+
+| 函数 | 描述 |
+| -------- | ----------- |
+| UActorComponent::OnRegister() | 如有必要，取消组件注册时事件会为额外的操作留出余地。|
+| UActorComponent::DestroyRenderState() | 取消组件渲染状态初始化。|
+| UActorComponent::DestroyPhysicsState() | 取消组件物理状态初始化。|
+
+(#Updating)
+### 更新
+
+ActorComponent 可通过其 `TickComponent()` 函数进行每帧更新。这允许组件执行类型特定的每帧计算。例如，**SkeletalMeshComponents** 使用 `TickComponent()` 更新动画和骨骼控制器，而 **ParticleSystemComponents** 使用它更新系统的发射器并检查需要处理的粒子事件。
+
+为使组件得到更新，必须将其注册，设为 tick（`bComponentNeverTicks=false`），并设置好其 tick 函数。 
+
+### 渲染状态
+
+必须创建 ActorComponent 的渲染状态，以便进行渲染。ActorComponent 的渲染状态还将告知引擎是否需要根据组件发生的变化更新其渲染数据。当这类变化发生时，渲染状态将被标记为 dirty。然后在当前帧的最后，所有 dirty 组件的渲染数据均会更新。
+
+(#PhysicsState)
+### 物理状态
+
+必须为 ActorComponent 创建物理状态，以便使用物理引擎进行模拟。与渲染状态不同的是，物理状态将不会被标记为 dirty，因为变化出现时便会立即进行物理更新。这非常重要，因为它能防止“帧后穿帮”之类的问题出现。
+
+## 场景组件
+
+SceneComponent 是 ActorComponent 的延伸，拥有一个变形，即位置、旋转和尺寸。附加的一个变形意味着 SceneComponent 可以相互附着。
+
+### 附着
+
+在虚幻引擎 4 中，所有附着均在组件层上处理，只有 SceneComponent 可相互附着。SceneComponent 拥有一个 `AttachParent` 属性，指向其附着的组件。它主要在一个 Actor 包含多个组件，使其全部附着时（此行为为所需）使用。然而，其也可用于指定属于另一个 Actor 的组件，以便将一个 Actor 中的组件附着到另一个 Actor 中的组件。
+
+这意味着如需将一个 Actor 附着到另一个 Actor，相关的每个 Actor 必须包含至少一个 SceneComponent - 因为它们是实际被附着的对象 - 且 Actor 被附着的 SceneComponent 必须为根组件。原因十分明显 - 每个组件只可拥有一个父项，因此如果附着的组件不为被附着 Actor 的根组件，则只有该组件以及其子组件被附着。如将 Actor 视为一个整体，根组件将保持未附着和不受影响状态，因其依赖于根组件和其变形。
+
+### 组件变形
+
+`FTransform` 结构体包含一个 `Translation` 矢量，一个 `Rotation` 四元数，和一个 `Scale3D` 矢量。每个 SceneComponent 拥有其自身的 `FTransform`，通常为内部使用，描述其世界场景相对位置、相对旋转和相对大小。它们还使用一个额外的 `RelativeLocation` 矢量、`RelativeRotation` 旋转体，和 `RelativeScale3D` 矢量，它们可与自身的父组件相对，或与世界场景相对。在获取或设置组件的变形时，通常会用到它们。
+
+`RelativeLocation`、`RelativeRotation`，和 `RelativeScale3D` 默认与其 `AttachParent` 相对。使用 `bAbsoluteLocation`、`bAbsoluteRotation`，和 `bAbsoluteScale` 属性可强制这些数值与世界场景相对。将任意属性设为 `true` 后将使对应的属性变为世界场景相对。
+
+即使是在使用父项相对的变形数据时，仍可通过下列方法使用绝对世界数值对平移和旋转进行设置。
+
+
+| 函数 | 描述 |
+| -------- | ----------- |
+| SceneComponent::SetWorldLocation() | 设置此组件的相对平移，将其放置在世界空间中提供的位置。|
+| SceneComponent::SetWorldRotation() | 设置此组件的相对旋转，为其设置在世界空间中提供的朝向。|
+
+## 元组件
+
+**PrimitiveComponents** 是包含或生成某种几何体的 SceneComponents，通常作为碰撞数据进行渲染或使用。多种类型的几何体有数种子类，但迄今为止最常见的是 **CapsuleComponent**、**StaticMeshComponent**，和 **SkeletalMeshComponent**。CapsuleComponents 生成用于碰撞检测的几何体，但不用于渲染；StaticMeshComponents 和 SkeletalMeshComponents 包含用于渲染（也可用于碰撞检测）的预建几何体。
+
+(#SceneProxy)
+### 场景代理
+
+PrimitiveComponent 的 `SceneProxy` 是一个 `FPrimitiveSceneProxy` 实例，可封装被镜像的场景数据，以便与游戏线程平行渲染元。 
+将为每个元类型创建一个 `FPrimitiveSceneProxy` 的子类，以保存渲染这类元所必需的特定渲染数据。
+
+在 [渲染系统总览](Programming/Rendering) 中可查看元和渲染集合体的更多细节内容。
+

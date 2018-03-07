@@ -1,0 +1,54 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	MonoscopicFarFieldRendering.usf: Shaders that deal with Monoscopic far field rendering for VR
+=============================================================================*/
+
+#include "Common.ush"
+
+Texture2D MonoColorTexture;
+SamplerState MonoColorTextureSampler;
+
+#if MOBILE_MULTI_VIEW
+Texture2DArray	MobileSceneColorTexture;
+#else
+Texture2D		MobileSceneColorTexture;
+#endif
+SamplerState MobileSceneColorTextureSampler;
+
+float LeftViewWidthNDC;
+float LateralOffsetNDC;
+
+void MonoscopicFarFieldMask(
+	noperspective float2 InUV : TEXCOORD0,
+	out float4 OutColor : SV_Target0
+	)
+{
+#if MOBILE_MULTI_VIEW
+	const float3 LeftViewAlphaUV = float3(InUV.x - LateralOffsetNDC, InUV.y, 0.0);
+	const float3 RightViewAlphaUV = float3(InUV.x + LateralOffsetNDC, InUV.y, 1.0);
+#else
+	const float2 LeftViewAlphaUV = float2(InUV.x - LateralOffsetNDC, InUV.y);
+	const float2 RightViewAlphaUV = float2(InUV.x + LeftViewWidthNDC + LateralOffsetNDC, InUV.y);
+#endif
+
+	const float LeftViewAlpha  = MobileSceneColorTexture.Sample(MobileSceneColorTextureSampler, LeftViewAlphaUV).a;
+	const float RightViewAlpha = MobileSceneColorTexture.Sample(MobileSceneColorTextureSampler, RightViewAlphaUV).a;
+
+	// If the pixel wasn't written to with a fully opaque result when rendering the stereo views, 
+	// don't mask it out to ensure we render it in the mono view.
+	if (LeftViewAlpha < 1.0 || RightViewAlpha < 1.0 )
+	{
+		discard;
+	}
+
+	OutColor = float4(0, 0, 0, 1);
+}
+
+void CompositeMonoscopicFarFieldView(
+	noperspective float2 InUV : TEXCOORD0,
+	out float4 OutColor : SV_Target0
+	)
+{
+	OutColor = float4(Texture2DSample(MonoColorTexture, MonoColorTextureSampler, InUV).rgb, 1.0);
+}

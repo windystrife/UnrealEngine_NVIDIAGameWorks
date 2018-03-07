@@ -1,0 +1,78 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	EvaluateSurfelMaterial.usf
+=============================================================================*/
+
+#include "Common.ush"
+#include "/Engine/Generated/Material.ush"
+#include "SurfelMaterialShared.ush"
+
+uint SurfelStartIndex;
+uint NumSurfelsToGenerate;
+Buffer<float4> InterpolatedVertexData;
+RWBuffer<float4> RWSurfelData;
+
+void AssembleMaterialParameters(out FMaterialPixelParameters MaterialParameters, uint SurfelIndex)
+{
+	MaterialParameters = (FMaterialPixelParameters)0;
+
+	float3 Tangent0 = InterpolatedVertexData[(SurfelStartIndex + SurfelIndex) * INTERPOLATED_VERTEX_DATA_STRIDE + 1].xyz;
+	float3 Tangent1 = InterpolatedVertexData[(SurfelStartIndex + SurfelIndex) * INTERPOLATED_VERTEX_DATA_STRIDE + 2].xyz;
+	float3 Tangent2 = InterpolatedVertexData[(SurfelStartIndex + SurfelIndex) * INTERPOLATED_VERTEX_DATA_STRIDE + 3].xyz;
+
+	MaterialParameters.TangentToWorld = float3x3(Tangent0, Tangent1, Tangent2);
+
+	float4 PackedUVs = InterpolatedVertexData[(SurfelStartIndex + SurfelIndex) * INTERPOLATED_VERTEX_DATA_STRIDE + 4];
+
+	#if NUM_MATERIAL_TEXCOORDS > 0
+		MaterialParameters.TexCoords[0] = PackedUVs.xy;
+	#endif
+
+	#if NUM_MATERIAL_TEXCOORDS > 1
+		MaterialParameters.TexCoords[1] = PackedUVs.zw;
+	#endif
+
+	float4 VertexColor = InterpolatedVertexData[(SurfelStartIndex + SurfelIndex) * INTERPOLATED_VERTEX_DATA_STRIDE + 5];
+
+	MaterialParameters.VertexColor = VertexColor;
+}
+
+float4x4 Instance0InverseTransform;
+
+[numthreads(EVALUATE_SURFEL_MATERIAL_GROUP_SIZE, 1, 1)]
+void EvaluateSurfelMaterialCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	ResolvedView = ResolveView();
+
+	uint SurfelIndex = DispatchThreadId.x;
+
+	if (SurfelIndex < NumSurfelsToGenerate)
+	{
+		float4 PositionAndRadius = InterpolatedVertexData[(SurfelStartIndex + SurfelIndex) * INTERPOLATED_VERTEX_DATA_STRIDE + 0];
+		FMaterialPixelParameters MaterialParameters;
+		FPixelMaterialInputs PixelMaterialInputs;
+		AssembleMaterialParameters(MaterialParameters, SurfelIndex);
+
+		float4 PixelPosition = float4(PositionAndRadius.xyz + ResolvedView.PreViewTranslation.xyz, 0);
+		CalcMaterialParameters(MaterialParameters, PixelMaterialInputs, float4(0, 0, 0, 0), true);
+
+		float3 BaseColor = GetMaterialBaseColor(PixelMaterialInputs);	
+		float Metallic = GetMaterialMetallic(PixelMaterialInputs);
+		float3 DiffuseColor = BaseColor - BaseColor * Metallic;
+		float3 EmissiveColor = GetMaterialEmissive(PixelMaterialInputs);	
+
+		float3 InstanceLocalPosition = mul(float4(PositionAndRadius.xyz, 1), Instance0InverseTransform).xyz;
+		//@todo - use a proper normal transform
+		float3 InstanceLocalNormal = mul(MaterialParameters.TangentToWorld[2], (float3x3)Instance0InverseTransform);
+
+		//@todo - take instance scale into account for the radius
+		RWSurfelData[(SurfelStartIndex + SurfelIndex) * SURFEL_DATA_STRIDE + 0] = float4(InstanceLocalPosition, PositionAndRadius.w);
+		RWSurfelData[(SurfelStartIndex + SurfelIndex) * SURFEL_DATA_STRIDE + 1] = float4(InstanceLocalNormal, 0);
+		RWSurfelData[(SurfelStartIndex + SurfelIndex) * SURFEL_DATA_STRIDE + 2] = float4(DiffuseColor, 0);
+		RWSurfelData[(SurfelStartIndex + SurfelIndex) * SURFEL_DATA_STRIDE + 3] = float4(EmissiveColor, 0);
+	}
+}

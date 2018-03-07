@@ -1,0 +1,229 @@
+﻿INTSourceChangelist:3580774
+Availability:Public
+Title:VR 立体图层
+Crumbs:%ROOT%,
+Description:设置并使用 VR 立体图层。
+Version:4.17
+parent:Platforms/VR
+type:overview
+Skilllevel:Intermediate
+tags:VR
+tags:Oculus Rift
+tags:GearVR
+tags:SteamVR
+tags:PSVR
+order:1
+Topic-Image:VRSL_Topic_Image.png
+social-image:![](Platforms\VR\VirtualRealityDevelopment_topic.png)
+
+[TOC(start:2)]
+
+[EXCERPT:VRStereoLayersIntro]
+
+通过虚拟现实（VR）**立体图层（Stereo Layers）** 可将单独的纹理发送至 VR 头戴显示器（HMD），并将其重新投射到和不同于项目其他内容的单独渲染通道中。这非常适用于需要添加到 HMD 的用户界面（UI），但不受到后期处理或抗锯齿的影响。在以下文档中，我们将了解如何在所有支持的平台上设置并使用立体图层。  
+
+[/EXCERPT:VRStereoLayersIntro]
+
+## 支持平台 
+
+支持虚幻引擎 4（UE4）的所有 VR 平台均支持 VR 立体图层，包括：
+
+* [**Oculus VR**](https://www.oculus.com/)
+* [**Gear VR**](http://www.samsung.com/global/galaxy/gear-vr/)
+* [**Google VR**](https://vr.google.com/)
+* [**Steam VR**](http://store.steampowered.com/steamvr)
+* [**PSVR**](https://www.playstation.com/en-us/explore/playstation-vr/)
+* [**OSVR**](http://www.osvr.org/)
+
+## 平台差异
+
+原生 VR 平台公开的功能不同，因此立体图层的行为在不同平台之间也有所不同。该部分通过实现列出了大多数行为。
+
+* **世界锁定：**图层位置位于游戏世界坐标中。
+* **追踪锁定：**图层位置相对于玩家周围的实时世界追踪空间。
+* **面部锁定：**无论位置和旋转如何，图层都将处于 HMD 视图中相同的位置。
+
+查看位置类型的另一种方式是计算相对于视点的图层位置时将玩家位置和旋转的哪些方面纳入考量：
+
+|位置类型 | 世界位置|头部位置|头部旋转|
+|--------------|--------------|-|-|
+|世界锁定  | 是 | 是|是|
+|追踪锁定| 否  | 是|是|
+|面部锁定   | 否  | 否 |否|
+
+### Steam VR
+
+* 只支持四边形立体图层形状。
+
+* 不支持 No Alpha 标记忽略透明通道。解决方法是确保纹理不带透明通道，或完全不透明。
+
+* 在所有图层上执行隐面剔除，图层在反面不可见。
+
+* 但多个图层拥有相同的优先级时，图层按到 HMD 视图的平均距离渲染。
+
+* 在 UE4 中，立体图层中使用的纹理必须被设为 UserInterFace2D (RGBA)，否则将无法显示。
+
+### Oculus VR
+
+* 只支持四边形立体图层形状。
+
+* 支持世界锁定和追踪锁定图层上的 Support Depth 标记。
+
+* 但多个图层拥有相同优先级时，图层按未定义的排序进行渲染。如需要进行排序，则使用不同的优先级。
+
+### Gear VR 
+
+* 实现全部三个形状类型。
+
+* 支持世界锁定和追踪锁定图层上的 Support Depth 标记。
+
+* 但多个图层拥有相同优先级时，图层按未定义的排序进行渲染。如需要进行排序，则使用不同的优先级。
+
+### 其他 VR 平台
+
+当前，所有其他 VR 平台共享一个默认图层实现，将提供以下支持。
+
+* 只支持四边形立体图层形状。
+
+* 不支持通过设置 vr.StereoLayers.bMixLayerPriorities 控制台变量来混合面部锁定图层与世界锁定和追踪锁定图层的优先级。
+
+* 但多个图层拥有相同优先级时，图层按未定义的排序进行渲染。如需要进行排序，则使用不同的优先级。
+
+[EXCERPT:VRStereoLayers]
+
+## 图层形状
+
+只有所有平台上支持的图层形状为四线性图层。此外 Gear VR 支持圆柱体和立方体图层。
+
+## 图层绘制排序
+
+立体图层存在于游戏世界之外，基于每层的优先级设置进行布层。高优先级的图层在低优先级的图层之前渲染。此外，面部锁定的图层固定在世界锁定或追踪锁定图层之前进行渲染（无视优先级）。这与 UE4 4.16 和更早版本有所不同，之前所有图层类型均混合在一起。将 **vr.StereoLayers.bMixLayerPriorities** 控制台变量设为 1 即可获得老版本中的行为。
+
+[region:note]
+图层将固定在 3D 场景之前进行渲染，Oculus Rift 和 Gear VR 支持将世界锁定与追踪锁定图层和场景进行混合，开启/关闭 Supports Depth 标记即可。此标记在所有其他平台上均被无视。
+[/region]
+
+## 立体图层设置
+
+如要结合 **VR Pawn** 使用立体图层，需要执行以下操作。
+
+1. 打开需要结合立体图层使用的 **Pawn**，然后前往 **Viewport** 面板。
+
+    [REGION:lightbox]
+    [![](VRSL_Pawn_Setup_01.png)(w:667)](VRSL_Pawn_Setup_01.png)
+    [/REGION]
+
+    [REGION:caption]
+    点击查看全图。
+    [/REGION]
+
+1. 从显示的下拉列表中点击 Add Components 按钮，搜索 Stereo Layer 组件。
+
+    [REGION:lightbox]
+    [![](VRSL_Pawn_Setup_02.png)(w:667)](VRSL_Pawn_Setup_02.png)
+    [/REGION]
+
+    [REGION:caption]
+    点击查看全图。
+    [/REGION]
+
+1. 将 **Stereo Layer 组件** 拖到 **Pawn 的** 摄像机上，使其成为摄像机的子 actor。
+    
+    ![](VRSL_Pawn_Setup_03.png)(convert:false)
+
+1. 从组件列表选择 **Stereo Layer 组件**，然后在 **Transform** 部分的 **Details 面板** 中将 **Location** **X** 的值设为 **100**，便于在 VR 中进行查看。
+
+    [REGION:lightbox]
+    [![](VRSL_Pawn_Setup_04.png)(w:667)](VRSL_Pawn_Setup_04.png)
+    [/REGION]
+
+    [REGION:caption]
+    点击查看全图。
+    [/REGION]
+
+1. 在 **Details 面板** 中展开 **Stereo Layer** 部分。
+
+    [REGION:lightbox]
+    [![](VRSL_Pawn_Setup_05.png)(w:667)](VRSL_Pawn_Setup_05.png)
+    [/REGION]
+
+    [REGION:caption]
+    点击查看全图。
+    [/REGION]
+
+1. 在 **Content Browser** 中找到需要显示的纹理，点击选中。然后返回 Stereo Layers 部分下的 **Pawn** 蓝图中，按下 **Texture** 输入旁边的小 **白色三角形**，使用立体图层应该显示的纹理。
+
+    [REGION:lightbox]
+    [![](VRSL_Pawn_Setup_06.png)(w:667)](VRSL_Pawn_Setup_06.png)
+    [/REGION]
+
+    [REGION:caption]
+    点击查看全图。
+    [/REGION]
+
+1. 接下来按 **Play in VR** 按钮在 VR 中运行项目。戴上头戴显示器后，您将看到在 Texture 输入中指定的纹理显示在面前。纹理将精准地跟随头戴显示器，可如下方视频所示快速转动头部。
+
+	[OBJECT:EmbeddedVideo]
+		[PARAMLITERAL:videoid]
+		Eb_kndx6tac
+		[/PARAMLITERAL]
+		[PARAMLITERAL:width]
+		100
+		[/PARAMLITERAL]
+		[PARAMLITERAL:height]
+		56.25
+		[/PARAMLITERAL]
+		[PARAMLITERAL:units]
+		%
+		[/PARAMLITERAL]
+		[PARAMLITERAL:type]
+		simple
+		[/PARAMLITERAL]
+	[/OBJECT]
+
+    [region:note]
+    如在 VR 中查看项目时您选择的纹理未显示，则需要检查使用的纹理压缩设置是否正确。如您不确定自己使用的头戴显示器应使用何种设置，请查阅“立体图层纹理压缩设置”部分。
+    [/region]
+[/EXCERPT:VRStereoLayers]
+
+## 立体图层纹理压缩设置
+
+您需要根据不同的头戴显示器对用于所显示纹理的压缩设置进行调整。以下是各头戴显示器正确显示立体图层所需的纹理压缩设置。
+
+[REGION:lightbox]
+[![](VRSL_Texture_Settings.png)(w:667)](VRSL_Texture_Settings.png)
+[/REGION]
+
+[REGION:caption]
+点击查看全图。
+[/REGION]
+
+|头戴显示器| 所需纹理压缩设置|
+|---------------|----------------------------------------------------|
+|**Oculus Rift**| 无|
+|**Gear VR**| 无|
+|**HTC Vive**| UserInterFace2D (RGBA)|
+|**PSVR**| 无|
+
+## 立体图层属性详解
+
+立体图层有部分属性会对其渲染的方式产生影响。下表详述了每个设置及其对立体图层的效果。
+
+![](VRSL_Prop_Breakdown_00.png)
+
+|设置名称 | 描述|
+|---------------|----------------------------------------------------|
+|**Live Texture**|如立体图层纹理需要每帧自行更新，则为 true（场景采集、视频等）。|
+|**Supports Depth**|如立体图层需要支持与场景几何体的深度交集（如在平台上可用），则为 true。|
+|**No Alpha Channel**|如纹理不应使用其自身的透明通道，则为 true（1.0 将被替换）。|
+|**Texture**|立体图层上显示的纹理（如平台上支持立体纹理，且提供了超过一个纹理，这将为右眼图像）。|
+|**Quad Preserve Texture Ratio**|如果四边形应基于设置纹理的有效维度内部设置其 Y 轴的值，则为 true。|
+|**Stereo Layer Type**|指定四边形渲染到屏幕的方式，以及显示的位置。|
+|**Stereo Layer Shape**|指定图层的类型。注意：只有在特定平台上才支持部分形状！|
+|**Priority**|所有立体图层的渲染优先级，高优先级先于低优先级渲染。|
+|**Left Texture**|如平台支持立体纹理，立体图层上显示的纹理为左眼图像。|
+|**Quad Size**|渲染立体图层四边形的大小。|
+|**UVRect**|映射到四边形面的 UV 坐标。|
+|**Cylinder Radius**|渲染立体图层圆柱体的半径大小。|
+|**Cylinder Overly Arc**|立体图层圆柱体的圆弧角度。|
+|**Cylinder Height**|立体图层圆柱体的高度。|

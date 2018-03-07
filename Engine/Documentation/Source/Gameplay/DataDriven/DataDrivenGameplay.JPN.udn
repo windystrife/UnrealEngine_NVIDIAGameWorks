@@ -1,0 +1,154 @@
+﻿INTSourceChangelist:3606403
+Availability:Public
+Title:データ駆動型のゲームプレイエレメント
+Crumbs:%ROOT%
+Description:外部に保存されたデータを使用するゲームプレイ エレメントの操作
+version:4.9
+type:reference
+tags:Gameplay
+
+[toc(start:2 end:2)]
+
+データ駆動型ゲームプレイは、一般的なボックス型ゲームの寿命をはるかに上回るゲームで、 
+プレイヤーのフィードバックに基づきデータの微調整やバランスを取る必要がある場合、 
+作業量と複雑度を軽減すると同時に、データの作成や進行状態の視覚化やパラメータ化も 
+可能にします。実績のあるツールによる管理が可能で、 
+インポートするとゲームに自動反映できる **Excel** やその他のスプレッドシート ドキュメントへデータを移動できます。
+
+Excel ドキュメントでデータを UE4 にインポートする新しい方法が 2 通りあります:
+
+* **DataTables (データ テーブル)**
+* **CurveTables (カーブ テーブル)**
+
+
+これらの Excel ドキュメントは、マクロベースのエクスポートボタンがある .xlsm (マクロ有効 Excel ドキュメント) です。 
+中間データフォーマット、.csv (comma separated variables) へのエクスポートが簡単にできます。 
+これらの Excel ドキュメントは、検索や修正をしやすいように、全て 1 つの場所に常駐しています。
+
+* [](Example.xlsm) (ダウンロードは、 **右クリック** して **[Save as...]**)
+
+
+## データ テーブル
+
+データ テーブルは、名前から想像できるように、数多くの関連データのテーブルを意味を持たせて使いやすいようにグループ化し、 
+データ フィールドがアセットの参照を含む有効な UObject プロパティとなります。デザイナーが CSV ファイルをデータテーブルへインポートする前に、 
+そのデータの解釈方法をエンジンに指示する行コンテナをプログラマーが作成します。 
+これらのテーブルは、コードをベースにした UStruct とその変数が 1:1 にマッピングされたカラム名で構成されます。 
+名前は、インポートする側が認識できるように、 **FTableRowBase** から継承しなければなりません。 
+
+最初の列は指定した名前になり、ゲームの中で使用するために各行にアクセスできる名前が含まれます。その後の列にはヘッダ用の変数名が入り、 
+同じコラムの下の方にはその行と列の交差位置のデータが入ります。このフォーマットで 
+1 つの行が FTableRowBase から継承した構造体に 1:1 で直接マップします。
+
+### 例
+
+例をあげると、レベルアップ体験データとデータをゲームに提供する CSV ドキュメントに対する定義は以下のようになります。
+
+	/** レベルアップ テーブルのエントリを定義する構造体 */
+	USTRUCT(BlueprintType)
+	struct FLevelUpData : public FTableRowBase
+	{
+		GENERATED_USTRUCT_BODY()
+
+	public:
+
+		FLevelUpData()
+		:XPtoLvl(0)
+		, AdditionalHP(0)
+		{}
+
+		/** 'Name' 列は XP Level と同じ*/
+
+		/** XP は前のレベルから任意のレベルになります。*/
+		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=LevelUp)
+		int32 XPtoLvl;
+
+		/** このレベルで Extra HitPoints を得ます。*/
+		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=LevelUp)
+		int32 AdditionalHP;
+
+		/** Achivement (アチーブメント、成績) に使うアイコン*/
+		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=LevelUp)
+		TSoftObjectPtr<UTexture> AchievementIcon;
+	};
+
+
+**CSV ドキュメント:**
+
+	Name,XPtoLvl,AdditionalHP,AchievementIcon
+	1,0,0,"Texture2d'/Game/Textures/AchievementIcon1'"
+	2,1000,9,"Texture2d'/Game/Textures/AchievementIcon2'"
+	3,1000,10,"Texture2D'/Game/Textures/AchievementIcon3'"
+	4,1500,12,"Texture2D'/Game/Textures/AchievementIcon4'"
+	5,2000,14,"Texture2D'/Game/Textures/AchievementIcon5'"
+
+[REGION:tip]
+アセット タイプの前後のダブルクォーテーションは、プロパティ インポート パイプラインにとって重要です。これらがないと、テキストは Texture2d としてインポートされます。 
+[/REGION]
+
+## データ カーブ
+
+データ カーブはデータ テーブルと同じように機能しますが、 
+浮動小数点のみに対応します。データ テーブルと同様に、最初の列は指定した `Name` で、 
+ゲームの中で使用するために各行にアクセスできる名前が含まれます。2 列目からは、 
+描画されるカーブに対する X 軸変数が格納されています。この見出しの下のデータは、その行の Y 軸の値です。このフォーマットで 
+コードがアクセスできるカーブに 1 つの行が対応し、それに応じてデータを補間します。
+
+### 例
+
+以下は、ダメージの進行に対するテーブルの例です:
+
+[REGION:simpletable]
+|                      | 0   | 1   | 2   | 3   |
+| -------------------- | --- | --- | --- | --- |
+| Melee_Damage         | 15  | 20  | 25  | 30  |
+| Melee_KnockBack      | 1   | 2   | 4   | 8   |
+| Melee_KnockBackAngle | 10  | 45  | 60  | 65  |
+| Melee_StunTime       | 0   | 1   | 5   | 7   |
+[/REGION]
+
+## インポートプロセス
+
+CSV ファイルのインポート プロセスは以下のようにシンプルです。
+
+1.	ファイルを Excel または他のスプレッドシートから拡張子 .csv で保存します。
+1.	アンリアル エディタを開き、 **コンテンツ ブラウザ** の **[Import]** をクリックします。
+1. DataTable としてインポートしたい CSV ファイルの場所へ行き選択します。
+1. 最後に、ドロップダウン リストからこの列を表すもの、ここでは LevelUpData を選択します。
+
+	![](levelupdata_options.png)
+
+	この操作により、 **コンテンツ ブラウザ** の現在のディレクトリに DataTable オブジェクトが作成されます。
+
+	![](datatableobject.png)
+
+	そのオブジェクトを **ダブルクリック** すると、エディタ内で DataTable のコンテンツが表示されます。オブジェクトを **右クリック** してメニューから **[Reimport]** を選ぶと、オブジェクトを更新することができます。 
+	オブジェクトの再インポートには、元のファイル パスが使われます。ご注意ください。インポート後のデータはこのような表示になります。
+	![](datatableview.jpg)
+
+
+## データの連携
+
+上記のテーブルから、非常に簡単にデータ連携が行えます。プログラマーの観点で言えば、要は 
+DataTable と CurveTable のいずれか使用したい方に合わせて、**FDataTableRowHandle** または 
+ **FCurveTableRowHandle** いずれかのブループリントにエクスポーズされた変数を配置すればよいのです。コンテンツ プロバイダの観点で言えば、以下のように 
+2 つのサブフィールドを持つデータフィールドが公開されます:
+
+1.	DataTable/CurveTable - データを持つテーブルへのコンテンツの参照です。
+2.	RowName - データを取得したい行の最初の列の名前です。
+
+
+## データの使用方法 (プログラマー向け)
+
+データを連携させれば、データの使用方法は非常に簡単です。ハンドルの構造体によりヘルパー関数 (**FindRow()** と **GetCurve()**) が与えられ、 
+データの入った構造体またはカーブを取得することができます。 
+FCurveTableRowHandle の場合は、FRichCurve ポインタが返されます。ただし、FDataTableRowHandle は、 
+テンプレート関数呼び出しの際に構造体を指定することができます。この構造体が、継承階層における最終の構造体 
+または、あらゆるものの親となることができます。
+
+最後の注意事項ですが、返された構造体とカーブは全て関数のローカルスコープ以外の場所にキャッシュしないように 
+注意してください。テーブルが再インポートで更新された場合、 
+データ変更がすぐに反映されて無効なポインタへのアクセスがないようにするためです。
+
+上記の DataTable の例で参照したアセットは、遅延読み込みされたアセットです (TSoftObjectPtr により処理されます)。 
+アセット フィールド タイプが UTexture に設定されていると、DataTable のロード時にすべてのアセットがロードされます。

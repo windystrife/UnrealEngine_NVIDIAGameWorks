@@ -1,0 +1,227 @@
+﻿INTSourceChangelist:2713167
+Availability: Public
+Title:碰撞参考指南
+Crumbs: %ROOT%, Engine, Engine/Physics
+Description: 关于碰撞、碰撞响应及碰撞预制的所有内容。
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Physics/Collision:title%](physics_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%\rendering_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Physics/Collision:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Physics/Collision:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Physics/Collision]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[TOC(start:2 end:3)]
+
+
+**Collision Responses（碰撞响应）** 和 **Trace Responses（踪迹响应）** 构成了虚幻引擎4如何处理碰撞及运行时射线投射追踪的基础。每个可以碰撞的对象 
+会获得一种 **对象类型** 及其定义了它如何同所有其他对象类型交互的一系列响应。当发生碰撞或者重叠事件时， 
+这两个涉及到的对象（或所有对象）都可以设置为影响其他对象或受到碰撞的影响或忽略彼此。
+
+踪迹响应的工作原理类似，除了踪迹（射线投射）本身可以定义为其中一种踪迹响应类型，从而允许Actor 
+根据 _它们的_ 踪迹响应阻挡它或者忽略它。
+
+## 属性
+
+![](COL_collisionBasics.png)
+
+在属性列表中，有很多物理相关的关键词。有两个不是非常清楚的关键词 **Simple（简单碰撞）** 和 **Complex Collision（复杂碰撞）** 。简而言之， 
+简单碰撞的形状是您的[盒体、KDOP、球体、胶囊体和凸面体形状](Engine/Physics\Collision\Reference)，
+所有这些形状都可以在静态网格物体编辑器中生成。复杂碰撞是基于每个多边形的，从来不用于正在模拟物理的Actor（它将从世界中直降下来）。
+
+
+| **属性** | **描述** |
+| -------- | ----------- |
+| **Simulation Generates Hit Events（模拟生成碰撞事件）** |该标志表示是否应该为涉及到该PrimitiveComponent(图元组件)的物理碰撞调用 **Event Hit（碰撞事件）** 和 **On Component Hit（组件碰撞）** 事件。更简单地讲，它使得这个对象“知道”它实际上具有物理碰撞。然而，它仅是一个通知，无论该设置怎样，设置为同静态场景发生碰撞的动态对象都将会执行该处理；它将不会触发这些事件。|
+| **Generate Overlap Events（生成重叠事件）** | 如果您想让一个对象生成重叠事件，比如 **Event Actor Begin Overlap（Actor开始处重叠事件）** 或 **Event Actor End Overlap（Actor结束处重叠事件）** ，则该标志需要设置为 **真** 。进一步讲，要想让该选项有用，那么所涉及的对象需要可以彼此重叠。|
+| [REGION:tablesection] &nbsp; [/REGION]||
+| **Collision Presets（碰撞预制）** | 这些是下面的 **Collision Responses（碰撞响应）** 项的一组预制。有一个INI文件，您可以编辑它进行修改或添加概述信息。**要想编辑该项下的任何内容，您需要设置该项为 "自定义..."**|
+| **Collision Enabled（启用的碰撞）** | 这里有三个设置，如下所示: |
+| ^ | _No Collision（无碰撞）_ - 不同该对象发生碰撞，无论是踪迹碰撞还是物理碰撞。|
+| ^ | _No Physics Collision（无物理碰撞）_ - 该刚体仅用于射线投射、扫射及重叠。|
+| ^ | _Collision Enabled（启用碰撞）_ - 该刚体用于物理模拟和碰撞查询。|
+| **Object Type（对象类型）** | 该项定义了当对象移动时将其作为何种对象对待。这比定义对象为静态对象或动态对象有更多的交互，正如您在下面所看到的。|
+| [REGION:tablesection] &nbsp; [/REGION]||
+| **Collision Responses（碰撞响应）** | 该项将下面的碰撞响应设置为选中的值。所以，如果您这里选择“Block（阻挡）”，那么下面的所有行都会选择“阻挡”。|
+| **Trace Responses（踪迹响应）** |这些项定义了当对象同踪迹交互(通常仅通过射线投射完成)时如何表现。对象可以选择 **阻挡** 、 **重叠** 或简单地 **忽略** 来自特定源头的踪迹。除了名称外，默认踪迹响应是没有区别的。在代码或蓝图中，您可以使用任何一项来进行跟踪从一个对象到另一个对象的射线投射。但是，出于踪迹组织管理的目的，则应该按照它们名称的寓意那样进行使用。**踪迹响应** 的默认响应是： |
+| ^ | _Visibility（可见性）_ - 从一个位置到另一个位置的踪迹，如果‘阻挡’此种类型的对象挡住了踪迹的去路，那么该踪迹将被‘阻挡’。|
+| ^ | _Camera（相机）_ - 和 _Visibility（可见性）_ 一样, 但应该用于从相机处进行踪迹跟踪的设置。|
+| **Object Responses（对象响应）** | 一个对象可以选择阻挡、重叠或简单地忽略同它交互的对象。**对象响应** 的默认响应是： |
+| ^ | _WorldStatic（世界静态）_ - 体积和世界几何体应该是 _WorldStatic（世界静态）_ 。| 
+| ^ | _WorldDynamic（世界动态）_ -  _Pawns_ 、 _PhysicsBodies（物理刚体）_ 、 _Vehicles载具_ 及 _Destructible（可破坏的）_ Actors之外的可移动Actors。比如电梯。| 
+| ^ | _Pawn_ - 角色。| 
+| ^ | _PhysicsBody（物理刚体）_ - 任何在世界中模拟的或者可以在世界中模拟的物理对象。| 
+| ^ | _Vehicle（载具）_ - 一个应该具有的很好的响应，以便您可以让 _Pawns_ 跳入到载具中。| 
+| ^ | _Destructible（可破坏的）_ - 可破坏的Actors。|
+| [REGION:tablesection] &nbsp; [/REGION]||
+| **Use CCD（使用连续碰撞检测）** | 是否针对该对象应用 **Continuous Collision Detection（连续碰撞检测）** 。增加碰撞检测的准确度。|
+| **Always Create Physics State（总是创建物理状态）** | 表示您是否想总是创建 **物理状态** （它的碰撞属性、质量、它是否休眠等...所有这些都可以归入一个物理状态中）。如果设置为 _假_ ，那么如果在该Actor上激活碰撞或模拟，那么将仍然生成该状态， 比如通过蓝图或代码，但是将会有一些性能消耗，因为它必须使得新的对象完全进行物理模拟。设置该项为 **真** 可以通过在一个对象需要物理状态时（在碰撞或模拟时）减少计算对象物理状态的性能消耗来提高性能。| 
+| **Multi Body Overlap（多个刚体重叠）** | 如果此值为true，如重叠的物理刚体为多刚体组件，则此组件将对每个重叠的物理刚体将生成单独的重叠。设想一下骨架物理资源，具有其独立的碰撞形状。启用该项后，角色的手将生成 _自己_ 的重叠事件。从而对所报告的内容及特定情况下应该怎么做有更多的控制。|
+| **Check Async Scene on Move（移动时检查异步场景）** | 如果该项设置为 **真** ，那么组件将在两个物理场景（同步和异步）中都查找碰撞。异步场景主要由可破坏网格物体的破碎块使用。|
+| **Trace Complex on Move（移动时跟踪复杂碰撞）** | 如果该项设置为 **真**, 扫过该组件的对象将在运动时跟踪复杂碰撞。复杂碰撞简而言之就是基于每个面的碰撞，而简单碰撞则是您的球体、胶囊体、盒体及生成的凸面体形状。|
+| **Return Material on Move（移动时返回材质） ** | 设置该项为 **真** 将返回物理材质到 **Hit Info（碰撞信息）** 中。|
+
+一些组件在碰撞类目中将有额外的或较少的选项，很多时候，这些非常特定的选项将 
+仅显示在那个组件的适当编辑器中。
+
+| 属性 | 描述 |
+| -------- | ----------- |
+| [REGION:tablesection] **物理资源中的物理刚体** [/REGION] ||
+| **Collision Response（碰撞响应）** | 是否同物理资源中的特定物理刚体发生碰撞。|
+
+## 交互
+
+对于如何处理碰撞，需要记住几点：
+
+* 对于设置为Block（阻挡）的两个（或多个）Actor之间自然会发生阻挡行为。然而，要想执行蓝图、可破坏的Actor触发器等中的Event Hit(碰撞事件)，则必须启用Simulation Generates Hit Events（模拟生成碰撞事件）项。
+* 设置Actor为 **Overlap（重叠）** 通常看上去就像它们 **Ignore（忽略）** 彼此一样， 如果没有 **Generate Overlap Events（生成重叠事件）** , 那么它们本质上是一样的。
+* 要想让两种或多种模拟对象彼此阻挡，那么必须将它们都设置为阻挡其各自的对象类型。
+* 对于两个或多个模拟对象: 如果一个对象设置为同另一个对象重叠，另一个对象设置为阻挡其他对象，那么将会发生重叠而不会进行阻挡。
+* 即使一个对象阻挡其他对象，也会生成重叠事件，尤其是当对象在高速运行时。
+	* 不推荐让一个对象既有碰撞事件又有重叠事件。尽管这是可行的，但是需要很多手动处理。
+* 如果一个对象设置为忽略其他对象，而另一个对象设置为和其他对象重叠，那么将不会激活重叠事件。
+* 这里列出的对象响应都仅是默认设置，实际上对一个对象 _是_ 什么没有实质影响。请参照下面来获得关于设置自定义的[对象类型和踪迹通道](#自定义对象通道和踪迹通道)的更多信息。
+
+要想测试关卡并四处查看您的世界：
+
+* 默认 **Play In Editor（在编辑器中运行）** 相机是pawn。因此，任何设置为阻挡pawn的对象都可以阻挡它。
+*  **Simulate in Editor（在编辑器中模拟）** 相机在控制任何事物之前不是pawn。它可以自由地插入到任何事物，并不会产生任何碰撞或重叠事件。
+
+
+## 一般碰撞交互
+
+[REGION:note]
+这些交互假设所有对象都设置  **Collision Enabled（启用碰撞）** 为 **Collision Enabled（启用碰撞）** ，以便他们可以完全同其他物体进行碰撞 。如果禁用了碰撞， 
+那么就像将所有碰撞响应设置为 _忽略_ 一样。
+[/REGION]
+
+接下来的部分，这些设置用于解释将要发生的行为：
+
+![](COL_setup.png)(w:940 convert:false)
+
+球体是一个 **PhysicsBody（物理刚体）** ，盒体是 **WorldDynamic（世界动态）** ，通过修改它们的碰撞设置，我们可以获得各种不同行为。
+
+### 碰撞
+
+<!--
+[EXCERPT:spacerEX]
+[REGION:raw]
+![](spacer.png)
+[/REGION]
+[/EXCERPT:spacerEX]
+ -->
+
+[VAR:spacer]
+[INCLUDE:#spacerEX]
+[/VAR]
+
+通过将二者的碰撞设置都设为彼此阻挡，便会产生碰撞，这能很好地让对象彼此交互：
+
+![](COL_collideNoEvent.png)(w:940 convert:false)
+
+| 球体碰撞设置| 墙体碰撞设置 |
+| --- | ---- |
+| ![](COL_collideNoEvent_Sphere.png)(w:300) %spacer% |![](COL_collideNoEvent_Box.png)(w:301) %spacer% |
+| 在这种情形中， 该球体是一个 **PhysicsBody(物理刚体)** ，它设置为‘阻挡’ **WorldDynamic（世界动态）** （这正是墙体的设置）。|该墙体是 **WorldDynamic** 并设置为 `阻挡` **PhysicsBody（物理刚体）** Actor (这正是球体的设置)。|
+
+在该情形中，球体和墙体将发生简单的碰撞；将不会出现进一步的碰撞通知。
+
+### 碰撞和模拟生成碰撞事件
+
+仅仅有碰撞是有用的，一般这是物理交互的最低要求，但如果您想让某物“报告”它已经发生了碰撞，以便可以 
+触发一个蓝图或一段代码：
+
+![](COL_collideEvent.png)(w:940 convert:false)
+
+| 球体碰撞设置| 墙体碰撞设置 |
+| --- | ---- |
+| ![](COL_collideEvent_Sphere.png)(w:300) %spacer%|![](COL_collideNoEvent_Box.png)(w:301) %spacer%|
+| 在上面的示例中， 球体是一个 **PhysicsBody(物理刚体)** ，它设置为‘阻挡’ **WorldDynamic（世界动态）** （这正是墙体的设置）。然而，球体已经启用了“模拟生成碰撞事件”，所以当它和任何事物发生碰撞时都会为其自身触发一个事件。|该墙体是 **WorldDynamic** 并设置为 `阻挡` **PhysicsBody（物理刚体）** Actor (这正是球体的设置)。因为墙体没有设置“模拟生成碰撞事件”，所以它将不会为其自身生成事件。|
+
+当球体设置为“模拟生成碰撞事件”时，球体将告诉其自身它有一个碰撞。它将在球体的蓝图中触发类似 
+ **ReceiveHit** 和 **OnComponentHit** 的事件。现在，如果盒体有一个碰撞事件，它将不会激活，因为它将永远不会告诉自己发生了碰撞。
+
+进一步讲，一个正在报告刚体碰撞的对象当它正坐在某物上时，它将会向所有对象进行报告并产生垃圾报告， 
+所以最好仔细地在蓝图或代码中过滤什么正在进行碰撞。
+
+### 重叠和忽略
+
+总而言之， **Overlap（重叠）** 和 **Ignore（忽略）** 的工作原理是完全一样的，它们假设禁用Generate Overlap Events（生成重叠事件）。在下述情形中，球体设置为 
+重叠或忽略该盒体：
+
+![](COL_ignore.png)(w:940 convert:false)
+
+
+
+
+| 球体碰撞设置| 墙体碰撞设置 |
+| --- | ---- |
+| ![](COL_OverlapNoEvent_Sphere.png)(w:300) %spacer% |![](COL_collideNoEvent_Box.png)(w:303) %spacer% |
+| 这里球体设置为同 **WorldDynamic** Actor (比如我们的墙体)重叠, 但它没有启用 Generate Overlap Events （生成重叠事件）。就该球体而言，它不会同任何对象发生碰撞或进行重叠，它会有效地忽略该墙体。 |该墙体是 **WorldDynamic** 并设置为 `阻挡` **PhysicsBody（物理刚体）** Actor (这正是球体的设置)。正如上面所述的，这两个Actor需要设置为阻挡彼此的各自对象类型。如果没有这样设置，它们将不会碰撞。|
+
+或者：
+
+| 球体碰撞设置| 墙体碰撞设置 |
+| --- | ---- |
+| ![](COL_ignore_sphere.png)(w:300) %spacer% |![](COL_collideNoEvent_Box.png)(w:303) %spacer% |
+| 这里球体设置为忽略 **WorldDynamic** Actor (比如我们的墙体), 它将穿过该墙体。|该墙体是 **WorldDynamic** 并设置为 `阻挡` **PhysicsBody（物理刚体）** Actor (这正是球体的设置)。正如上面所述的，这两个Actor需要设置为阻挡彼此的各自对象类型。如果没有这样设置，它们将不会碰撞。|
+
+
+
+### 重叠并生成重叠事件
+
+同每帧都能触发的碰撞不同，重叠事件是 **ReceiveBeginOverlap** 和 **ReceiveEndOverlap** ，仅在特定情形中才会触发这些事件。
+
+![](COL_overlapEvent.png)(w:940 convert:false)
+
+| 球体碰撞设置| 墙体碰撞设置 |
+| --- | ---- |
+| ![](COL_OverlapEvent_Sphere.png)(w:300) %spacer% | ![](COL_collideNoEvent_Box.png)(w:303) %spacer% |
+| 这里球体设置为同 **WorldDynamic** Actor (比如我们的墙体)重叠, 并且当它和某物重叠时它将为其自身生成一个事件。|该墙体是 **WorldDynamic** 并设置为 `阻挡` **PhysicsBody（物理刚体）** Actor (这正是球体的设置)。正如上面所述的，这两个Actor需要设置为阻挡彼此的各自对象类型。如果没有这样设置，它们将不会碰撞。但， 这里确实发生 **Overlap(重叠)** 并且触发了球体的事件。|
+
+ 
+## 自定义对象通道和踪迹通道
+
+有些时候6个对象响应通道和2个踪迹响应通道根本无法满足您想创建效果的细化要求。这时就该用到 
+您项目设置中的碰撞编辑器了。您可以从 **Edit Menu（编辑菜单）** -> **Project Settings（项目设置）** -> **Collision（碰撞）** 来访问它们。
+
+![](COL_projectSettings_1.png)
+
+[REGION:lightbox]
+[![](COL_projectSettings_2.png)(w:940)](COL_projectSettings_2.png)
+[/REGION]
+
+从这里，您可以添加新的Object Response Channels（对象响应通道）和Trace Response Channels（踪迹响应通道）。点击 **New Object Channel（新建对象通道）...** 或 **New Trace Channel（新建踪迹通道）...** 按钮，提供一个名字，  
+选择一个 **Default Response（默认响应）** 并点击 **Accept（接受）** 。
+
+![](COL_customChannel.png)
+
+您最多可以有18个自定义对象响应通道或自定义踪迹响应通道。
+
+### 预制
+
+自定义预制也可以通过展开  **Preset（预制）** 类目并点击 **New（新建）...** 按钮来设置。
+
+![](COL_customPresets.png)
+
+在这里，您可以命名预制，启用或禁用碰撞，选择您的预制的对象类型，及为选中的对象类型 
+最终定义每个响应通道的行为。
+
+
+
+
+
+

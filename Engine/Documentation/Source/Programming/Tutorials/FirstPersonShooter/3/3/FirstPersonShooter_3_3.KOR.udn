@@ -1,0 +1,133 @@
+﻿INTSourceChangelist:3388665
+Availability: Public
+Title: 3.3 - 발사체 콜리전 및 수명 구성
+Crumbs: %ROOT%, Programming, Programming/Tutorials/FirstPersonShooter, Programming/Tutorials/FirstPersonShooter/3
+Description: 일인칭 슈팅 발사체에 대한 콜리전 및 수명 구성법을 배워봅니다.
+SkillLevel: Beginner
+Version: 4.15
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[예전 단계](Programming/Tutorials/FirstPersonShooter/3/2)
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[섹션 홈](Programming/Tutorials/FirstPersonShooter/3)
+	[/PARAM]	
+	[PARAM:next]
+		[다음 단계](Programming/Tutorials/FirstPersonShooter/3/4)
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+현재 발사체는:
+
+*	수명이 무한입니다 (씬 아웃라이너에서 전혀 사라지지 않습니다).
+*	월드의 다른 오브젝트와 충돌하지 않습니다.
+
+이번 단계에서는 발사체의 충돌과 수명을 구성해 주겠습니다.
+
+## 발사체의 수명 기간 제한
+
+1.	**Solution Explorer** 에서 `FPSProjectile` 클래스 CPP 파일을 찾아 `FPSProjectile.cpp` 를 엽니다.
+
+1.	`FPSProjectile` 생성자에 다음 코드를 추가하여 발사체의 수명을 설정합니다:
+
+		// 3 초 후 죽습니다.
+		InitialLifeSpan = 3.0f;
+
+## 발사체의 충돌 세팅 편집
+
+언리얼 엔진에는 여러가지 프리셋 콜리전 채널이 포함되어 있으나, 엔진에서는 게임 프로젝트에 사용할 수 있는 커스터마이징 가능 채널을 여럿 제공하기도 합니다.
+
+1. **프로젝트 세팅** 을 열고 **콜리전** 을 선택하면 콜리전 채널 커스터마이징이 가능합니다.
+
+	![](SettingCollisionChannels.png)
+
+1.	**새 오브젝트 채널...** 을 선택하여 콜리전 채널을 새로 만듭니다. 새로운 콜리전 채널 이름을 "Projectile" 이라 하고 **Default Response** (기본 반응) 이 **Block** (막음)이라 되어있는지 확인하고 **수락** 을 누릅니다.
+
+	![](NewChannel.png)
+
+1.	**프리셋** 아래 **추가...** 를 선택하고 새 프로파일 이름도 "Projectile" 이라 해줍니다. 다음 그림을 참고하여 콜리전 프리셋을 설정하세요.
+
+	![](NewProfile.png)
+
+	이 콜리전 프로파일은 발사체가 `스태틱 액터`, `폰`, `다이내믹 액터`, `피직스` 시뮬레이션 `액터`, `비히클`, `디스트럭터블 액터` 에 막힘을 나타냅니다.
+	또한 이 콜리전 프로파일은 프로젝타일 오버랩의 `Pawn` 을 지정하기도 합니다.
+
+## 새 콜리전 채널 세팅 사용
+
+1.	**Solution Explorer** 에서 `FPSProjectile` 클래스 CPP 파일을 찾은 다음 `FPSProjectile.cpp` 를 엽니다.
+
+1.	`FPSProjectile` 생성자에서, `CollisionComponent` 뒤에 다음 줄을 추가합니다:
+
+		CollisionComponent->BodyInstance.SetCollisionProfileName(TEXT("Projectile"));
+
+1.	`FPSProjectile.cpp` 는 이제 다음과 같을 것입니다:
+
+		// 프로젝트 세팅의 설명 페이지에 저작권 문구를 채우세요.
+		
+		#include "FPSProject.h"
+		#include "FPSProjectile.h"
+		
+		// Sets default values
+		AFPSProjectile::AFPSProjectile()
+		{
+		 	// 이 액터가 매 프레임 Tick() 을 호출하도록 설정합니다. 필요치 않은 경우 끄면 퍼포먼스가 향상됩니다.
+			PrimaryActorTick.bCanEverTick = true;
+		
+			// 구체를 단순 콜리전 표현으로 사용합니다.
+			CollisionComponent = CreateDefaultSubobject<USphereComponent>(TEXT("SphereComponent"));
+			CollisionComponent->BodyInstance.SetCollisionProfileName(TEXT("Projectile"));
+		
+			// 구체의 콜리전 반경을 설정합니다.
+			CollisionComponent->InitSphereRadius(15.0f);
+			// 루트 컴포넌트를 콜리전 컴포넌트가 되도록 설정합니다.
+			RootComponent = CollisionComponent;
+		
+			// 이 컴포넌트를 사용하여 이 프로젝타일의 무브먼트를 구동시킵니다.
+			ProjectileMovementComponent = CreateDefaultSubobject<UProjectileMovementComponent>(TEXT("ProjectileMovementComponent"));
+			ProjectileMovementComponent->SetUpdatedComponent(CollisionComponent);
+			ProjectileMovementComponent->InitialSpeed = 3000.0f;
+			ProjectileMovementComponent->MaxSpeed = 3000.0f;
+			ProjectileMovementComponent->bRotationFollowsVelocity = true;
+			ProjectileMovementComponent->bShouldBounce = true;
+			ProjectileMovementComponent->Bounciness = 0.3f;
+		
+			// 3 초 후 죽습니다.
+			InitialLifeSpan = 3.0f;
+		}
+		
+		// 게임 시작시 또는 스폰시 호출됩니다.
+		void AFPSProjectile::BeginPlay()
+		{
+			Super::BeginPlay();
+			
+		}
+		
+		// 매 프레임 호출됩니다.
+		void AFPSProjectile::Tick( float DeltaTime )
+		{
+			Super::Tick( DeltaTime );
+		
+		}
+		
+		// 프로젝타일의 속도를 발사 방향으로 초기화시키는 함수입니다.
+		void AFPSProjectile::InitVelocity(const FVector& ShootDirection)
+		{
+			ProjectileMovementComponent->Velocity = ShootDirection * ProjectileMovementComponent->InitialSpeed;
+		}
+
+1.	Visual Studio 에서 `FPSProjectile.cpp` 를 저장합니다.
+
+1.	**Solution Explorer** 에서 **FPSProject** 를 찾습니다.
+
+1.	**FPSProject** 에 우클릭하고 **Build** 를 선택하여 프로젝트를 컴파일합니다.
+
+	![](BuildFPSProject.png)
+
+%Steps%

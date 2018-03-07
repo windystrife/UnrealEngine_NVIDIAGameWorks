@@ -1,0 +1,140 @@
+﻿INTSourceChangelist:3615724
+Availability:Public
+Title:Sync Group
+Crumbs: %ROOT%, Engine, Engine/Animation
+Description:Sync Group は、異なる長さのアニメーションを同期します。
+Type:Overview
+SkillLevel:Intermediate
+Version:4.17
+Parent:Engine/Animation
+Order:1
+Tags:Animation Sequence
+Tags:Animation Notify
+topic-image:SyncGroups_topic.png
+Related:Engine/Animation/Sequences
+Related:Engine/Animation/AnimBlueprints
+
+[TOC (start:2 end:2)]
+
+[EXCERPT:Intro]
+**Sync Group** は、異なる長さを持つ関連アニメーションの同期を維持します。例えば、歩きサイクルと走りサイクルをブレンドさせて、キャラクターを滑らかに加速または減速させる場合があります。ただし、これらのアニメーションが異なる長さだったらどうなるでしょうか？ 例えば、歩行が走行よりもかなり長い時間かかる場合はどうでしょう？ そのような場合、あるものをもう 1 つのものに直接ブレンドすると、足のアニメーションの切り替え時に見栄えの悪いビートが生じて、不自然な結果が生じることになります。
+
+Sync Group は、主要なアニメーション ノード 1 つをリーダーにし、関連するその他全てのアニメーションは単に時間の長さが一致するようにスケールすることで、この問題を解消します。通常、リーダーはブレンド ウェイトが一番大きいノードになります。ウェイトがブレンドされ、フォロワーのウェイトがリーダーのウェイトより重くなったら、このフォロワーがリーダーとなります。このように、2 つのアニメーションが共に円滑に機能して、1 つのモーションから次のモーションへシームレスに遷移します。 
+
+ただし、アニメーションの時間はシフトしているので、アニメーションに対してある程度の考慮が必要です。例えば、異なる歩きサイクルと走りサイクルをブレンドさせた例では、アニメーションは動き始めと終わりが必ず同じ足になるようにすると思います。こういった標準を早めに作成しておくと、全てのブレンドをもっとスムーズにできるようになります！
+[/EXCERPT:Intro]
+
+
+
+##グループのロール：リーダーとフォロワー
+
+Sync Group は、 1 つのアニメーションがリーダーとなり、その他は全てフォロワーとなるグループ ロールの概念で機能します。 
+
+| | |
+|---|---|
+|Leader|[INCLUDE:#leaderlist]|
+|Follower|[INCLUDE:#followerlist]|
+
+リーダーとフォロワーは、どちらのアニメーションの方がブレンド ウェイトがあるかによって指定されます。以下がその例です。
+
+| 画像 | 説明 |
+|---|---|
+|[INCLUDE:#runanimation]| Sync Group 名 WalkRun に設定された元のサイズの走行アニメーションです。 |
+|[INCLUDE:#walkanimation]| Sync Group 名 _WalkRun_ に設定された元のサイズの歩行アニメーションです。 |
+|[INCLUDE:#walkanimationscaled] | このインスタンスでは、走行アニメーションのブレンド ウェイトが歩行アニメーションより重くなります。これらは同じ Sync グループなので、歩行アニメーションが走行アニメーションの長さに一致するように短縮されます。|
+|[INCLUDE:#runanimationscaled]| ここで、歩行アニメーションのブレンド ウェイトの方が重たくなります。この結果、走行アニメーションは歩行の長さに一致するように拡大されます。 | 
+
+<!---
+
+
+[EXCERPT:RunAnimation]
+[REGION:raw]
+![](diagram_RunAnimation.png)
+[/REGION]
+[/EXCERPT:RunAnimation]
+
+[EXCERPT:RunAnimationScaled]
+[REGION:raw]
+![](diagram_RunAnimationScaledUp.png)
+[/REGION]
+[/EXCERPT:RunAnimationScaled]
+
+[EXCERPT:WalkAnimation]
+[REGION:raw]
+![](diagram_WalkAnimation.png)
+[/REGION]
+[/EXCERPT:WalkAnimation]
+
+[EXCERPT:WalkAnimationScaled]
+[REGION:raw]
+![](diagram_walkAnimationScaledDown.png)
+[/REGION]
+[/EXCERPT:WalkAnimationScaled]
+
+[EXCERPT:LeaderList]
+* 全てのフォロワーに使用するマスターとなるアニメーションの長さを提供します。
+* Notifies の全てを実行します。
+[/EXCERPT:LeaderList]
+
+[EXCERPT:FollowerList]
+* リーダーに合わせてアニメーションの長さをスケールします。
+* 自分の Notifies を抑止して、リーダーの Notifies に従います。
+[/EXCERPT:FollowerList]
+
+---->
+
+
+##Sync Group の設定
+
+Sync Group の設定を行うには、AnimGraph で Animation ノードを選んで、 **[Details (詳細)]** パネルを見ます。Sync Group プロパティがあります。
+
+![](AnimationSyncGroup.png)
+
+| プロパティ | 説明 |
+|---|---|
+|**Group Name**| Sync Group の名前を入力します。通常、一緒にブレンドする予定の関連する全てのアニメーション (コソコソ歩く、歩行、走行、スプリントなどのボディ モーション) は同じ Sync Group に入れると良いでしょう。|
+|**Group Role**| グループのメンバーのタイプ (潜在リーダー、常にフォロワーなど)  |
+
+<!---
+Group Role には 3 つのオプションがあります。
+* Can Be Leader - デフォルト設定です。このアニメーションのブレンド ウェイトが一番大きい場合にリーダーとなり、他のアニメーションはその長さに一致するようにスケールします。
+* Always Leader - この設定がされたアニメーションが常にリーダーとなり、全てのアニメーションはリーダーの長さと一致するように常にスケールされます。
+* Never Leader - この設定がされたアニメーションは決してリーダーにはならず、次にウェイトのあるアニメーションにマッチするように常にスケールされます。
+
+--->
+
+
+[REGION:note]
+Sync Group は、ステートマシーン内、 AnimGraph 内の AnimSequence ノードおよび BlendSpace ノードで設定可能です。
+[/REGION]
+
+## マーカーベースのアニメーション同期
+
+Sync Group を使用する以外に、アニメーション内でマーカーを使ってアニメーションを同期させることもできます。 
+
+![](AddSyncMarker.png)
+
+Sync Marker (同期マーカー) を追加するには、アニメーション シーケンスの [](Engine/Animation/Sequences/Notifies) トラック内で右クリックして **[Add Sync Marker]** を選択します。 
+
+**Sync Marker で作業する場合に考慮すべきこと**
+
+* 同じ同期グループ内のアニメーションだけが同期され、リーダーが同じ同期グループ内のフォロワーの位置を操作します。 
+* 再生レートは常にマスター アニメーションのレートを使用します (現在、再生レートの調整は利用できません)。 
+* グループ内のすべてのアニメーションに共通するマーカーのみ同期します。 
+	* 例えば、アニメーションに 'Right Foot Down' マーカーがなければ、そのフレーム位置の決定時にこれらのマーカーはすべてのアニメーションで無視されます。 
+* 位置は、共通マーカーのリーダーの相対位置に基づいて同期します。 
+	* 例えば、リーダーが左右のフットマーカーの間の 25 ％ の場所にいたら、フォロワーはそれぞれの左右のマーカーの間の 25 ％ に同期されます。 
+* マーカーベースの同期は、同期グループのアニメーションに一致するマーカーが十分ある場合に自動的に使用されます。そうでなければ、オリジナルのスケーリングされた長さの同期が使用されます。 
+* [AnimMontages](Engine/Animation/AnimMontage) もブレンドアウトしながらのマーカーベース同期をサポートしているので、別のアニメーションからシームレスに遷移することができます。
+	* AnimMontage の [Asset Details (アセットの詳細)](Engine/Animation/Persona/AnimAssetDetails) パネルで Sync Group 設定が行えます。 
+
+[REGION:note]
+アニメーション内で [](Engine/Animation/AnimModifiers) をセットアップして適用することで Sync Marker を自動的に追加することもできます。 
+[/REGION]
+
+
+
+
+
+
+

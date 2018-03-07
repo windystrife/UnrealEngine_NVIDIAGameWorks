@@ -1,0 +1,178 @@
+#include "Common.ush"
+#include "/Engine/Generated/Material.ush"
+#include "/Engine/Generated/VertexFactory.ush"
+
+float ParticleSizeScale;
+
+Buffer<float4> AnisotropyBuffer1;
+Buffer<float4> AnisotropyBuffer2;
+Buffer<float4> AnisotropyBuffer3;
+
+
+
+void SphereMainVS(
+	FVertexFactoryInput Input,
+	out float4 OutPosition : SV_POSITION,
+	out float4 OutViewPos : TEXCOORD7,
+	out float4 OutParticleViewPosAndSize : PARTICLE_VIEW_POS_AND_SIZE
+	)
+{
+	ResolvedView = ResolveView();
+
+	// The actual vertex factory used here is ParticleSpriteVertexFactory.
+	FVertexFactoryIntermediates VFIntermediates = GetVertexFactoryIntermediates(Input);
+	float4	TranslatedWorldPosition = VertexFactoryGetWorldPosition(Input, VFIntermediates);
+
+	float3x3 TangentToLocal = VertexFactoryGetTangentToLocal(Input, VFIntermediates);
+	FMaterialVertexParameters VertexParameters = GetMaterialVertexParameters(Input, VFIntermediates, TranslatedWorldPosition.xyz, TangentToLocal);
+
+	// Vertex locations
+	OutPosition = mul(TranslatedWorldPosition, ResolvedView.TranslatedWorldToClip);
+	OutViewPos = mul(TranslatedWorldPosition, ResolvedView.TranslatedWorldToView);
+
+	// Particle location and size
+	float4 TranslatedParticlePosSize = VertexParameters.Particle.TranslatedWorldPositionAndSize;
+	OutParticleViewPosAndSize = float4(mul(TranslatedParticlePosSize, ResolvedView.TranslatedWorldToView).xyz, TranslatedParticlePosSize.w*ParticleSizeScale);
+}
+
+float Sign(float x) { return x < 0.0 ? -1.0: 1.0; }
+
+bool SolveQuadratic(float a, float b, float c, out float minT, out float maxT)
+{
+	if (a == 0.0 && b == 0.0)
+	{
+		minT = maxT = 0.0;
+		return false;
+	}
+
+	float discriminant = b*b - 4.0*a*c;
+
+	if (discriminant < 0.0)
+	{
+		return false;
+	}
+
+	float t = -0.5*(b + Sign(b)*sqrt(discriminant));
+	minT = t / a;
+	maxT = c / t;
+
+	//float t = 0.5f/a;
+	//float q = sqrt(discriminant);
+	//minT = (-b + q)*t;
+	//maxT = (-b - q)*t;
+	
+	if (minT > maxT)
+	{
+		float tmp = minT;
+		minT = maxT;
+		maxT = tmp;
+	}
+
+	return true;
+}
+
+float DotInvW(float4 a, float4 b) {	return a.x*b.x + a.y*b.y + a.z*b.z - a.w*b.w; }
+
+void EllipsoidMainVS(
+	FVertexFactoryInput Input,
+	uint InstanceId : SV_InstanceID,
+	uint VertexId : SV_VertexID,
+	out float4 OutPosition : SV_POSITION,
+	out float4x4 OutInvQuadric : INV_QUADRIC
+	)
+{
+	ResolvedView = ResolveView();
+
+	// The actual vertex factory used here is ParticleSpriteVertexFactory.
+	FVertexFactoryIntermediates VFIntermediates = GetVertexFactoryIntermediates(Input);
+	float4	TranslatedWorldPosition = VertexFactoryGetWorldPosition(Input, VFIntermediates);
+
+	float3x3 TangentToLocal = VertexFactoryGetTangentToLocal(Input, VFIntermediates);
+	FMaterialVertexParameters VertexParameters = GetMaterialVertexParameters(Input, VFIntermediates, TranslatedWorldPosition.xyz, TangentToLocal);
+
+	// Particle location and size
+	float4 ParticlePosSize = VertexParameters.Particle.TranslatedWorldPositionAndSize;
+	float4 ParticleTranslated = float4(ParticlePosSize.xyz, 1.0f);
+
+	float4 ClipVertexPos = mul(TranslatedWorldPosition, ResolvedView.TranslatedWorldToClip);
+	
+	//custom culling to avoid redundant work and artefacts
+	if (View.NearPlane > ClipVertexPos.w)
+	{
+		OutPosition = float4(2,2,-1,1);
+		return;
+	}
+
+	float NdcVertexZ = ClipVertexPos.z/ClipVertexPos.w;
+
+	// Read anisotropy
+	float4 Q1 = AnisotropyBuffer1[InstanceId];
+	float4 Q2 = AnisotropyBuffer2[InstanceId];
+	float4 Q3 = AnisotropyBuffer3[InstanceId];
+
+	Q1.w = clamp(Q1.w, 0.0f, ParticlePosSize.w)*ParticleSizeScale;
+	Q2.w = clamp(Q2.w, 0.0f, ParticlePosSize.w)*ParticleSizeScale;
+	Q3.w = clamp(Q3.w, 0.0f, ParticlePosSize.w)*ParticleSizeScale;
+
+	//Q1.xyz = float3(1.0f, 0.0f, 0.0f);
+	//Q2.xyz = float3(0.0f, 1.0f, 0.0f);
+	//Q3.xyz = float3(0.0f, 0.0f, 1.0f);
+	//Q1.w = 10.0f;
+	//Q2.w = 40.0f;
+	//Q3.w = 10.0f;
+
+	// Construct quadric matrix
+	float4x4 Quadric;
+	Quadric[0] = float4(Q1.xyz*Q1.w, 0.0);
+	Quadric[1] = float4(Q2.xyz*Q2.w, 0.0);
+	Quadric[2] = float4(Q3.xyz*Q3.w, 0.0);
+	Quadric[3] = ParticleTranslated;
+
+	// Transforms a normal from clip to parameter space
+	float4x4 NClipToParam = transpose(mul(Quadric, ResolvedView.TranslatedWorldToClip));
+
+	// Solve for the right hand bounds in homogenous clip space
+	float A1 = DotInvW(NClipToParam[3], NClipToParam[3]);
+	float B1 = -2.0f*DotInvW(NClipToParam[0], NClipToParam[3]);
+	float C1 = DotInvW(NClipToParam[0], NClipToParam[0]);
+	float XMin;
+	float XMax;
+ 	SolveQuadratic(A1, B1, C1, XMin, XMax);	
+
+	float A2 = DotInvW(NClipToParam[3], NClipToParam[3]);
+	float B2 = -2.0f*DotInvW(NClipToParam[1], NClipToParam[3]);
+	float C2 = DotInvW(NClipToParam[1], NClipToParam[1]); 
+	float YMin;
+	float YMax;
+ 	SolveQuadratic(A2, B2, C2, YMin, YMax);
+
+	if (VertexId == 0)
+	{
+		OutPosition = float4(XMin, YMax, NdcVertexZ, 1.0);
+	}
+	else if (VertexId == 1)
+	{
+		OutPosition = float4(XMin, YMin, NdcVertexZ, 1.0);
+	}
+	else if (VertexId == 2)
+	{
+		OutPosition = float4(XMax, YMin, NdcVertexZ, 1.0);
+	}
+	else // (VertexId == 3)
+	{
+		OutPosition = float4(XMax, YMax, NdcVertexZ, 1.0);
+	}
+
+	// Construct inverse quadric matrix (used for ray-casting in parameter space)
+	float4x4 InvQuadric;
+	InvQuadric[0] = float4(Q1.xyz/Q1.w, 0.0);
+	InvQuadric[1] = float4(Q2.xyz/Q2.w, 0.0);
+	InvQuadric[2] = float4(Q3.xyz/Q3.w, 0.0);
+	InvQuadric[3] = float4(0.0, 0.0, 0.0, 1.0);
+
+	InvQuadric = transpose(InvQuadric);
+	InvQuadric[3] = -mul(ParticleTranslated, InvQuadric);
+
+	// transform a point from view space to parameter space
+	OutInvQuadric = mul(ResolvedView.ViewToTranslatedWorld, InvQuadric);
+}

@@ -1,0 +1,336 @@
+﻿Availability: Public
+Title:3. 写C++ 代码以对输入进行响应
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/PlayerCamera
+Description:应用代码以控制具有输入的pawn和相机。
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[上一步](Programming\Tutorials\PlayerCamera\2 "%Programming\Tutorials\PlayerCamera\2:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[编程指南主页](Programming\Tutorials\)
+	[/PARAM]
+	[PARAM:next]
+		[下一步](Programming\Tutorials\PlayerCamera\4 "%Programming\Tutorials\PlayerCamera\4:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+1. 现在游戏已经有了我们可以使用的输入映射，让我们设置一些成员变量来存储我们接收到的数据吧。 在更新中，我们需要了解移动和鼠标查看坐标轴的值，每个都是二维的向量。 我们还想要了解是否应向放大或缩小的视图方向移动，以及我们目前距离这两种状态有多少距离。 为了完成这项目标，我们应该添加以下代码到`PawnWithCamera.h`中的类定义：
+
+		//输入变量
+		FVector2D MovementInput;
+		FVector2D CameraInput;
+		float ZoomFactor;
+		bool bZoomingIn;
+
+1. 我们需要创建函数来追溯输入，因此，让我们在`PawnWithCamera.h`中也添加如下代码到类定义中：
+
+		// 输入函数
+		void MoveForward(float AxisValue);
+		void MoveRight(float AxisValue);
+		void PitchCamera(float AxisValue);
+		void YawCamera(float AxisValue);
+		void ZoomIn();
+		void ZoomOut();
+
+	我们现在可以使用如下代码在`PawnWithCamera.cpp`中填入函数：
+
+		// 输入函数
+		void APawnWithCamera::MoveForward(float AxisValue)
+		{
+			MovementInput.X = FMath::Clamp<float>(AxisValue, -1.0f, 1.0f);
+		}
+
+		void APawnWithCamera::MoveRight(float AxisValue)
+		{
+			MovementInput.Y = FMath::Clamp<float>(AxisValue, -1.0f, 1.0f);
+		}
+
+		void APawnWithCamera::PitchCamera(float AxisValue)
+		{
+			CameraInput.Y = AxisValue;
+		}
+
+		void APawnWithCamera::YawCamera(float AxisValue)
+		{
+			CameraInput.X = AxisValue;
+		}
+
+		void APawnWithCamera::ZoomIn()
+		{
+			bZoomingIn = true;
+		}
+
+		void APawnWithCamera::ZoomOut()
+		{
+			bZoomingIn = false;
+		}
+
+	[REGION:note]我们还没有使用ZoomFactor完成任何内容。 这个变量将会在 **Pawn** 的 **Tick（更新）** 函数的过程中进行更新，因为它的值会基于按键的状态不断地进行变更。[/REGION]
+
+1. 现在我们已经有了存储输入数据的代码，我们只需告知 **虚幻引擎** 何时来调用该代码。 为 **Pawn** 绑定函数到输入事件和添加绑定代码到 **APawnWithCamera::SetupPlayerInputComponent** 一样方便，如下所示：
+
+		// 绑定事件到"ZoomIn"
+		InputComponent->BindAction("ZoomIn", IE_Pressed, this, &APawnWithCamera::ZoomIn);
+		InputComponent->BindAction("ZoomIn", IE_Released, this, &APawnWithCamera::ZoomOut);
+
+		//为四条轴绑定对每帧的处理
+		InputComponent->BindAxis("MoveForward", this, &APawnWithCamera::MoveForward);
+		InputComponent->BindAxis("MoveRight", this, &APawnWithCamera::MoveRight);
+		InputComponent->BindAxis("CameraPitch", this, &APawnWithCamera::PitchCamera);
+		InputComponent->BindAxis("CameraYaw", this, &APawnWithCamera::YawCamera);
+
+1. 最后，我们可以使用 **Tick（更新）** 函数中的这些值来更新每帧的 **Pawn** 和 **Camera（相机）** 。 以下代码块均应被添加到`PawnWithCamera.cpp`中的 **APawnWithCamera::Tick** ：
+
+		//如果按下了放大按钮则放大，否则就缩小
+		{
+			if (bZoomingIn)
+			{
+				ZoomFactor += DeltaTime / 0.5f;			//Zoom in over half a second
+			}
+			else
+			{
+				ZoomFactor -= DeltaTime / 0.25f;		//Zoom out over a quarter of a second
+			}
+			ZoomFactor = FMath::Clamp<float>(ZoomFactor, 0.0f, 1.0f);
+			// 基于ZoomFactor来混合相机的视域和弹簧臂的长度
+			OurCamera->FieldOfView = FMath::Lerp<float>(90.0f, 60.0f, ZoomFactor);
+			OurCameraSpringArm->TargetArmLength = FMath::Lerp<float>(400.0f, 300.0f, ZoomFactor);
+		}
+	[REGION:note]这个代码使用了多个硬编码的值，比如半秒和四分之一秒的缩放时间，90度的缩小和60度的放大视域值，以及400缩小和300放大的相机距离。 此类值应在编辑器中进行显示，将其作为标记为 **UPROPERTY(EditAnywhere)** 的变量，这样非程序员也能变更它们，或者让程序员可以不用重新编译代码就来变更它们，甚至在编辑器中玩游戏时来变更它们。[/REGION]
+
+		//旋转actor的偏转，这样将会旋转相机，因为相机附着于actor
+		{
+			FRotator NewRotation = GetActorRotation();
+			NewRotation.Yaw += CameraInput.X;
+			SetActorRotation(NewRotation);
+		}
+
+		// 旋转相机的倾斜，但对其进行限制，这样我们将总是向下看
+		{
+			FRotator NewRotation = OurCameraSpringArm->GetComponentRotation();
+			NewRotation.Pitch = FMath::Clamp(NewRotation.Pitch + CameraInput.Y, -80.0f, -15.0f);
+			OurCameraSpringArm->SetWorldRotation(NewRotation);
+		}
+	这个代码段会直接使用鼠标的X轴来旋转 **Pawn** 的偏转，但只有相机系统会对来自鼠标Y轴的倾斜变更来进行响应。 旋转任意 **Actor** 或 **Actor** 子类实际上会旋转根级 **组件** ，而这又会间接地影响所有附着的内容。
+
+		// 基于"MoveX"和 "MoveY"坐标轴来处理移动
+		{
+			if (!MovementInput.IsZero())
+			{
+				// 把移动输入坐标轴的值每秒缩放100个单位
+				MovementInput = MovementInput.SafeNormal() * 100.0f;
+				FVector NewLocation = GetActorLocation();
+				NewLocation += GetActorForwardVector() * MovementInput.X * DeltaTime;
+				NewLocation += GetActorRightVector() * MovementInput.Y * DeltaTime;
+				SetActorLocation(NewLocation);
+			}
+		}
+	使用 **GetActorForwardVector** 和 **GetActorRightVector** 让我们可以向着actor面朝的方向进行相对移动。 由于相机面朝的方向和actor一样，这使得我们的向前按键总是处于相对于玩家所注视方向的前方。
+
+
+1. 我们完成了编码。 现在我们可以编译代码并从 **内容浏览器** 中拖曳新类的一个实例到 **虚幻引擎** 编辑器中的 **关卡编辑器** 窗口。
+
+	[![](ClassInContentBrowser.png)](ClassInContentBrowser.png)
+
+	您可以随意添加 **Static Mesh（静态网格物体）** 或其它可视化 **组件** ，或不添加。 因为相机是在关卡中跟随您的，所以您应该能感觉到相机移动的平滑加速和减速，但旋转应该感觉比较紧密和实时的。 您可以尝试变更 **SpringArmComponent** 的一些属性，以查看它们会如何影响您操作的感受，诸如添加"Camera Rotation Lag（相机旋转延迟）" 或增大或降低"Camera Lag（相机延迟）"。
+
+	[![](SpringArmValues.png)](SpringArmValues.png)
+
+----
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    代码
+    [/PARAMLITERAL]
+    [PARAM:heading]
+	    完成的代码
+    [/PARAM]
+    [PARAM:content]
+		**PawnWithCamera.h**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "GameFramework/Pawn.h"
+			#include "PawnWithCamera.generated.h"
+
+			UCLASS()
+			class HOWTO_PLAYERCAMERA_API APawnWithCamera : public APawn
+			{
+				GENERATED_BODY()
+
+			public:
+				// 设置此pawn属性的默认值
+				APawnWithCamera();
+
+				// 当游戏开始或生成时调用
+				virtual void BeginPlay() override;
+	
+				// 在每一帧调用
+				virtual void Tick( float DeltaSeconds ) override;
+
+				// 调用以绑定功能到输入
+				virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override;
+
+			protected:
+				UPROPERTY(EditAnywhere)
+				USpringArmComponent* OurCameraSpringArm;
+				UCameraComponent* OurCamera;
+
+				//输入变量
+				FVector2D MovementInput;
+				FVector2D CameraInput;
+				float ZoomFactor;
+				bool bZoomingIn;
+
+				// 输入函数
+				void MoveForward(float AxisValue);
+				void MoveRight(float AxisValue);
+				void PitchCamera(float AxisValue);
+				void YawCamera(float AxisValue);
+				void ZoomIn();
+				void ZoomOut();
+			};
+
+		**PawnWithCamera.cpp**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_PlayerCamera.h"
+			#include "PawnWithCamera.h"
+
+			// 设置默认值
+			APawnWithCamera::APawnWithCamera()
+			{
+ 				// 将此pawn设置为在每一帧都调用Tick()。  如果您不需要这项功能，您可以关闭它以改善性能。
+				PrimaryActorTick.bCanEverTick = true;
+
+				//创建组件
+				RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+				OurCameraSpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraSpringArm"));
+				OurCameraSpringArm->AttachTo(RootComponent);
+				OurCameraSpringArm->SetRelativeLocationAndRotation(FVector(0.0f, 0.0f, 50.0f), FRotator(-60.0f, 0.0f, 0.0f));
+				OurCameraSpringArm->TargetArmLength = 400.f;
+				OurCameraSpringArm->bEnableCameraLag = true;
+				OurCameraSpringArm->CameraLagSpeed = 3.0f;
+				OurCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("GameCamera"));
+				OurCamera->AttachTo(OurCameraSpringArm, USpringArmComponent::SocketName);
+
+				//控制默认玩家
+				AutoPossessPlayer = EAutoReceiveInput::Player0;
+			}
+
+			// 当游戏开始或生成时调用
+			void APawnWithCamera::BeginPlay()
+			{
+				Super::BeginPlay();
+	
+			}
+
+			// 在每一帧调用
+			void APawnWithCamera::Tick( float DeltaTime )
+			{
+				Super::Tick(DeltaTime);
+
+				//如果按下了放大按钮则放大，否则就缩小
+				{
+					if (bZoomingIn)
+					{
+						ZoomFactor += DeltaTime / 0.5f;			//Zoom in over half a second
+					}
+					else
+					{
+						ZoomFactor -= DeltaTime / 0.25f;		//Zoom out over a quarter of a second
+					}
+					ZoomFactor = FMath::Clamp<float>(ZoomFactor, 0.0f, 1.0f);
+					// 基于ZoomFactor来混合相机的视域和弹簧臂的长度
+					OurCamera->FieldOfView = FMath::Lerp<float>(90.0f, 60.0f, ZoomFactor);
+					OurCameraSpringArm->TargetArmLength = FMath::Lerp<float>(400.0f, 300.0f, ZoomFactor);
+				}
+
+				//选择actor的偏转，这样将会旋转相机，因为相机附着于actor
+				{
+					FRotator NewRotation = GetActorRotation();
+					NewRotation.Yaw += CameraInput.X;
+					SetActorRotation(NewRotation);
+				}
+
+				// 选择相机的倾斜，但对其进行限制，这样我们将总是向下看
+				{
+					FRotator NewRotation = OurCameraSpringArm->GetComponentRotation();
+					NewRotation.Pitch = FMath::Clamp(NewRotation.Pitch + CameraInput.Y, -80.0f, -15.0f);
+					OurCameraSpringArm->SetWorldRotation(NewRotation);
+				}
+
+				// 基于"MoveX"和 "MoveY"轴来处理移动
+				{
+					if (!MovementInput.IsZero())
+					{
+						// 把移动输入轴的值每秒缩放100个单位
+						MovementInput = MovementInput.SafeNormal() * 100.0f;
+						FVector NewLocation = GetActorLocation();
+						NewLocation += GetActorForwardVector() * MovementInput.X * DeltaTime;
+						NewLocation += GetActorRightVector() * MovementInput.Y * DeltaTime;
+						SetActorLocation(NewLocation);
+					}
+				}
+			}
+
+			// 调用以绑定功能到输入
+			void APawnWithCamera::SetupPlayerInputComponent(class UInputComponent* InputComponent)
+			{
+				Super::SetupPlayerInputComponent(InputComponent);
+
+				// 绑定事件到"ZoomIn"
+				InputComponent->BindAction("ZoomIn", IE_Pressed, this, &APawnWithCamera::ZoomIn);
+				InputComponent->BindAction("ZoomIn", IE_Released, this, &APawnWithCamera::ZoomOut);
+
+				//为四条轴绑定每帧的处理
+				InputComponent->BindAxis("MoveForward", this, &APawnWithCamera::MoveForward);
+				InputComponent->BindAxis("MoveRight", this, &APawnWithCamera::MoveRight);
+				InputComponent->BindAxis("CameraPitch", this, &APawnWithCamera::PitchCamera);
+				InputComponent->BindAxis("CameraYaw", this, &APawnWithCamera::YawCamera);
+			}
+
+			// 输入函数
+			void APawnWithCamera::MoveForward(float AxisValue)
+			{
+				MovementInput.X = FMath::Clamp<float>(AxisValue, -1.0f, 1.0f);
+			}
+
+			void APawnWithCamera::MoveRight(float AxisValue)
+			{
+				MovementInput.Y = FMath::Clamp<float>(AxisValue, -1.0f, 1.0f);
+			}
+
+			void APawnWithCamera::PitchCamera(float AxisValue)
+			{
+				CameraInput.Y = AxisValue;
+			}
+
+			void APawnWithCamera::YawCamera(float AxisValue)
+			{
+				CameraInput.X = AxisValue;
+			}
+
+			void APawnWithCamera::ZoomIn()
+			{
+				bZoomingIn = true;
+			}
+
+			void APawnWithCamera::ZoomOut()
+			{
+				bZoomingIn = false;
+			}
+
+
+    [/PARAM]
+[/OBJECT]
+
+%Steps%

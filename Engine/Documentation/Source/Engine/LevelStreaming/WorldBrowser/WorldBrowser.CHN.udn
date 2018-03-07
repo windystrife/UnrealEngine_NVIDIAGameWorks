@@ -1,0 +1,184 @@
+﻿INTSourceChangelist:2675595
+Availability:Public
+Title:世界构成器的用户指南
+Crumbs: %ROOT%, Engine, Engine/LevelStreaming
+Description: 用于管理包含原点转移变换技术的较大世界的系统。
+SkillLevel: Intermediate
+Version: 4.9
+
+[TOC (start:2 end:3)]
+
+**世界构成器** 的设计是为了简单的管理大型世界。其目标之一是避免使用永久关卡来保存那些可以用流数据来处理的信息，
+因为那样做会使得在一些具有较多关卡设计师的项目中，需要关卡设计师们同时并行工作的时候成为瓶颈。永久关卡不在保存任何流关卡信息，
+代替的做法是检索一个文件夹，并将文件夹中检索到的所有关卡都作为流关卡。每个流关卡在数据包的头上都存贮了一些信息，
+世界构成器可以直接读取这些信息而不必将该关卡加载到内存中。初始状态时，除了永久关卡以外的其他所有关卡都从内存中卸载掉。
+可以随时手动的加载或卸载世界的某个部分。
+
+世界构成器依赖一个世界原始坐标变化功能，当使用基于距离的流关卡时，该功能能让创建的世界不受在引擎中硬编码的 `WORLD_MAX` 常量的限制。
+
+## 开启世界构成器
+
+用世界构成器来管理世界的功能可以在 **World Setting** 中勾选 **Enable World Composition** 来开启。
+
+同时也可以在 World Setting 中通过取消勾选 Enable World Origin Rebasing 来禁用世界原点转换功能。
+
+![](WorldBrowserSettings.png)
+
+## 关卡层次结构
+
+在启用了世界构成器后，所有你项目中的关卡都会在 **Level** 窗口中可见。在 Windows 菜单中选择 Levels 就能打开该窗口。
+
+Levels 窗口中展示了世界的层次结构。
+
+![](LevelsWindow.png)
+
+名字显示为蓝色的关卡是当前关卡。当前已经加载的关卡的名字显示为白色，而那些并未加载的关卡显示为灰色名字。
+
+在世界构建器中要加载一个关卡的话，只需要 **双击** 关卡名字即可。通过使用拖拽放置操作，
+您可以建立各个关卡间的 父项->子项 关系。子关卡存储了相对于父项关卡的位置信息，
+所以当您修改父项关卡的位置时，所有子关卡将相应地自动重新计算它们的位置。
+
+## 关卡构建
+
+当开启了世界构建器后，在 Levels 的窗口顶端会有一个按钮来打开世界构建器。
+
+![](WorldComposition.png)
+
+在这里能够观察整个世界的布局。
+
+![](world_layout.png)
+
+### 图层 
+
+默认情况下，所有关卡都分配给 **未分类** 图层。图层存放了关于动态载入距离的信息，
+所以分配给特定图层的关卡将继承该图层的动态载入距离设置。被分配到没有载入距离设置图层的关卡
+则永远不会因为距离而被动态载入，这样可以通过蓝图来对何时加载进行控制。
+
+可以通过点击 '+' 按钮来创建新图层。关卡每次仅可以分配给一个图层。
+
+图层不能被删除也不能被编辑，如果想修改动态载入距离设置，
+必须使用期望的设置创建新图层并将关卡分配给它。在下次打开关卡时，空的图层将会被自动删除。
+
+您可以通过图层来过滤关卡，要想完成这个处理，您需要通过点击它来切换图层。
+再次点击图层将会关闭它。您还可以使用 Ctrl+鼠标点击 来 打开/关闭 多个图层。
+当没有切换打开任何图层时(默认情形)，将不执行任何过滤。
+ 
+### 小地图
+
+除了永久关卡外，每个关卡都有一个图片以及世界坐标系下的位置，用于显示小地图。
+每当关卡内容有变化时，对应的图片也会变化。这个地图相当于从顶部预览整个关卡，并可以通过拖拽来调整各个关卡。
+当在调整关卡时，边缘会自动吸附到其他关卡上。可以通过按住Ctrl按钮来禁用这种行为。
+请留意关卡的位置是一组整形的坐标，因此为了让关卡之间能够严格对齐，每个关卡的边界长度都应该为整形。
+
+[REGION:tip]
+基于地形的关卡会自动按照地表组件的尺寸来自动吸附。这么做是为了在不同的关卡之间能够无缝的编辑地形类 Actor。
+
+所有的地形在编辑器窗口内都无法做位移的修改，这样才能保证地形不会被贸然的移动以至于导致和其他关卡的地形无法衔接上。
+[/REGION]
+
+当一个关卡第一次在世界构建器中加载时，会自动创建一个新的关卡边界 Actor，这个关卡边界 Actor 用于计算这个关卡的大小。
+ 
+默认情况下，关卡大小(边界框)按该关卡中找到的所有Actor的边界框的总和计算。注意，
+有些 Actor 可以具有巨大的边界框(比如天空盒)，这会导致在小地图中产生巨大的关卡平铺图块。
+这类 Actor 通常不希望它们参与关卡边界的计算，这是可以禁用自动关卡边界并手动为关卡边界 Actor 设置尺寸。
+
+![](transform.png)
+
+[REGION:note]
+目前，必须在窗口中开启实时，以便关卡边界 Actor 能够正常起效。
+[/REGION]
+ 
+小地图中的黄色方块表示这是安全编辑区域，其大小同引擎中的 `WORLD_MAX` 设置一样。
+该区域外面的关卡将会自动隐藏(禁用的关卡图片)。世界构建器尝试保持您正在处理的关卡接近于编辑器世界原点。
+该功能称为“聚焦”，并且，如果您想尝试编辑该安全编辑区域之外的区域，
+您可以将当前世界原点变换到一个新位置。变换后的关卡在保存到磁盘上时仍然保持它们的原始 Actor 变换。
+所以保存当前发生变换的关卡不会改变 Actor 的绝对位置。
+
+### UI 要素
+
+![](world_layout_UI.jpg)
+
+| 编号 | 状态条 | 描述 |
+| -- | ---------- | ----------- |
+| 1 | 图层 | 点击图层名字切换该图层是否过滤, 或者点击 **+** 创建新图层 |
+| 2 |  `WORLD_MAX` | 显示相对 `WORLD_MAX` 常量的比例尺 |
+| 3 | 世界原点 | 当前世界原点的坐标位置 |
+| 4 | 当前关卡 | 当前关卡的名字 | 
+| 5 | 鼠标位置 | 当前鼠标的世界坐标 |
+| 6 | Marquee 选择 | 世界单位下 Marquee 选框的大小 |
+| 7 | 世界尺寸 | 整个世界的大小，根据所有关卡的边界计算。 |
+ 
+## 关卡详细信息
+
+在关卡窗口中要查看任意关卡的详细信息，先选中它，再在工具栏中点击放大镜按钮。这将打开 **Level Details** 窗口，
+这里也可以直接在下拉框中切换到其他可选的关卡。
+
+![](level_details.png)
+
+### 平铺块设置
+
+| 设置 | 描述 |
+| ------- | ----------- |
+| Package Name（包名称） |选中关卡的包名称。|
+| Parent Package Name （父项包的名称）| 如果关卡有指定的父项，那么该项则是父项关卡的名称 - 该关卡的位置则变为相对于父项关卡的位置。|
+| Position（位置） | 从世界原点零点处开始的关卡偏移量。存储为二维整型向量。当关卡被添加到世界中时（变为可见），该关卡中的所有actor都以这个值进行移动，且当关卡从世界中删除时，会变换为原值。|
+| Absolute Position（绝对位置） | 关卡的绝对位置，和关卡没有父项时的位置一样。只读的。|
+| Z Order（Z排序） | 定义迷你地图中关卡平铺快的 Z 排序顺序。当有多个重叠的平铺块并且您想按特定顺序排序它们时可能是有用的。|
+
+### LOD 设置
+
+构成世界的每个关卡最多可以由 4 个 LOD 动态载入关卡。LOD 动态载入关卡的概念和网格物体 LOD 类似。
+根据动态载入距离设置的不同，动态载入关卡将会被替换为相应的 LOD 关卡。世界构建器
+使用模式 “Package name”_LOD# 自动发现 LOD 关卡。这里的编号应该在 1 到 4 之间。
+
+[REGION:note]
+虚幻引擎 4 附带了 Simplygon 的整合功能。但使用的话需要 [Simplygon](http://www.simplygon.com/) 的授权。
+[/REGION]
+
+| 设置 | 描述 |
+| ------- | ----------- |
+| Num LOD（LOD编号） | 选中关卡的LOD关卡的编号。|
+| [REGION:tablesection]LOD[1..4][/REGION] ||
+| Generate（生成） | 生成的原始关卡的简化版本。我们使用 Simplygon ProxyLOD 功能来将该关卡中发现的静态网格物体actor融合为一个简单的代理网格物体。地貌actor将会被转换为一个静态网格物体，并且从静态网格物体 Actor 进行单独地简化。一般，具有地貌 Actor 的关卡和一堆静态网格物体 Actor 将会导致产生包含 2 个简化静态网格物体 Actor 的 LOD 关卡。这个选项将会覆盖磁盘上之前存在的 LOD 关卡。|
+| Distance（距离） | 相对于原始关卡动态载入距离的距离。比如，如果原始关卡的动态载入距离=1000，LOD1 关卡动态载入距离为 1500，那么 LOD1 关卡将会在 [1000..2500] 区间范围内可见，原始关卡在 [0..1000] 范围内可见。|
+| Details percentage（细节百分比） | 当简化原始网格物体时要保持的细节百分比。简化设置的用户界面大概如右面所示，以后将会进行改进，使得它变得更加灵活。|
+ 
+## 世界原点变换
+
+世界浏览器支持以某任意数据变换世界原点。移动世界原点会导致给 
+世界中所有注册的actor添加偏移向量。每个actor具有一个ApplyWorldOffset函数， 
+您可以在子类中覆盖该函数来添加额外内容。如果您已经创建了一个继承AActor的新类并在其中存储了绝对位置值 
+，那么要使它同世界原点改变正确地协同工作，您必须重写ApplyWorldOffset函数 
+并在其中移动您的绝对值。在游戏线程中，渲染和物理资源将会同actor并行变换。
+ 
+## 巨大的世界和多玩家
+
+在多玩家游戏中，目前还不支持世界原点变换。事实上，没有好的解决方案来处理这个 
+问题。目前我们仅发现两种方法来实现提供该支持：
+
+1.	实现您自己的服务器解决方案。我们大部分大型多人在线游戏的授权用户都这么做。
+2.	在客户端和虚幻专用服务器之间实现某种层，它将转换客户端的变动的绝对位置，并将它们传递到正确的专用服务器，该服务器仅存放了客户端所处的世界的部分。
+ 
+## 创建地貌关卡
+
+在一个具有地貌actor的关卡平铺块上调用关联菜单将激活创建新邻接地貌关卡的菜单。
+
+该功能使您一键点击就可以使用地貌代理添加一个新的邻接关卡，该关卡大小和源地貌大小一样。
+
+### 平铺地形导入
+
+In the **Levels** panel toolbar you can find an option for importing tiled landscape. Tiled landscapes are created from a tiled heightmap, where each heightmap tile will represent a level with a landscape Actor in it. Tiled heightmaps/weightmaps can be exported from an application like World Machine. Adjacent heightmaps tiles should share border vertices ("Share edge vertices" in World Machine). And, each tile resolution should follow the recommendations from this page [](Engine/Landscape/Creation).
+ 
+![](tiled_heightmap_import.png)
+
+
+| Setting | Description |
+| ------- | ----------- |
+| Select Heightmap Tiles... | Allows you to select multiple heightmap tiles you want to import. |
+| Flip Tile Y Coordinate | Whether tiles should be imported with Y coordinate flipped. This option should be turned on when importing tiles created in World Machine.  |
+| Tile Coordinates Offset | Offset in tiles from origin. If set to zero, tile with coordinates x0_y0 will be created at world origin. |
+| Import Configuration | Generates all possible landscape configurations depending on resolution of selected tiles. |
+| Landscape Scale | How much to scale the tiled landscape by.|
+| Material | Material to use. When a material has be chosen, you will be able to assign weightmap tiles for each landscape layer found in the material and how each layer is blended. |
+
+When you have imported a tiled landscape, you can reimport heightmaps and weightmaps for selected levels using the **right-click** context menu on the minimap.

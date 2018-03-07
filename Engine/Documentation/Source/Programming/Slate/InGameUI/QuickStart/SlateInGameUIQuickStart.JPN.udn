@@ -1,0 +1,558 @@
+﻿INTSourceChangelist:2621786
+Title:Slate インゲーム UI のクイックスタート
+Crumbs:
+Description:
+Availability:Docs
+Version:4.9
+
+## プロジェクト設定
+
+まず初めに、基本的なコード (Basic Code) プロジェクトを作成します。
+
+[REGION:fullwidth]
+![](image001.png)
+[/REGION]
+
+これにより、デフォルトのクラスが以下に設定されます。
+
+![](image003.png)
+
+## 画面上に表示する
+
+1. デフォルト クラスの他に、「MainMenu」というクラスを追加し、作成するメニューをカプセル化します。まず最初に、メニューを構築し、それを開けたり終了する (表示 / 非表示にする) ための簡単な関数をいくつか作成するだけで、画面上に何かを表示させることができます。メンバ変数の SWidget Shared Pointer も追加して、リファレンスをメニュー階層で一番上のスレート ウィジェットに置くようにしました。
+
+		#pragma once
+
+		#include "Slate.h"
+
+		class MainMenu : public TSharedFromThis<MainMenu>
+		{
+		public:
+			/** Construct our widgets etc that we need for the menus */
+			void ConstructMenu();
+
+			/** Display the menu by adding our root widget to the GameViewport's widget content */
+			void OpenMenu();
+
+			/** Close the menu by removing our root widget from the GameViewport's widget content */
+			void CloseMenu();
+
+		private:
+
+			/** This is the root-most Slate Widget of our menu.Everything else is a child of this. */
+			TSharedPtr<SWidget> MenuRoot;
+		};
+
+	安全なリファレンスを Slate Menu イベントのデリゲート関数の「これ」にパスするのに便利なので、MainMenu クラスは TSharedFromThis テンプレートを継承します。詳細については後で説明します。
+
+1. メニュー クラスの関数の基本的な実装を追加します。
+
+		#include "SlateGameMenuExample.h"
+		#include "MainMenu.h"
+
+
+		#define LOCTEXT_NAMESPACE "MainMenu"
+
+
+		void MainMenu::ConstructMenu()
+		{
+			MenuRoot = SNew(SSearchBox)
+				.HintText(LOCTEXT("FilterSearch", "Search..."))
+				.ToolTipText(LOCTEXT("FilterSearchHint", "Type here to search").ToString());
+		}
+
+		void MainMenu::OpenMenu()
+		{
+			if (GEngine && GEngine->GameViewport)
+			{
+				GEngine->GameViewport->AddViewportWidgetContent(MenuRoot.ToSharedRef());
+				FSlateApplication::Get().SetKeyboardFocus(MenuRoot.ToSharedRef());
+			}
+		}
+
+		void MainMenu::CloseMenu()
+		{
+			if (GEngine && GEngine->GameViewport)
+			{
+				GEngine->GameViewport->RemoveViewportWidgetContent(MenuRoot.ToSharedRef());
+				FSlateApplication::Get().ClearKeyboardFocus(EFocusCause::Cleared);
+			}
+		}
+
+		#undef LOCTEXT_NAMESPACE
+
+画面に表示させるために、一時的な MenuRoot となるコードからどれかスレート ウィジェットをランダムに選びます。これがゲーム ビューポートの ViewportWidgetContent に追加され、表示されます。さらに、入力に反応できるように、 SlateManu キーボード フォーカスになるようにします。他の言語へのローカライズ対象テキストに対しては、LOCTEXT マクロを常に使用することが重要です。これについては、以下のブログを参照してください。
+
+[UE4 でLocalization Ready Game を作成する：Part 1 テキスト)(https://www.unrealengine.com/blog/creating-a-localization-ready-game-in-ue4-part-1-text)
+
+次に、「MainMenuGameMode」と呼ばれるメインメニューで再生されるプレイヤーのステートを表すための GameMode を追加します。ゲーム モードで使用する PlayerController の種類を定義して、BeginPlay イベントを使ってメインメニューを開き、リファレンスをシェアードポインタのメインメニューに保持します。
+
+	#pragma once
+
+	#include "GameFramework/GameMode.h"
+	#include "MainMenuGameMode.generated.h"
+
+	class MainMenu;
+
+	/**
+	 * 
+	 */
+	UCLASS()
+	class AMainMenuGameMode : public AGameMode
+	{
+		GENERATED_UCLASS_BODY()
+
+		virtual void BeginPlay() override;
+
+		TSharedPtr<MainMenu> MainMenuPtr;
+
+	};
+
+GameMode は Uclass であり、ヘッダーの UCLASS() macro はクラス定義の前に、 そしてGENERATED_UCLASS_BODY() はクラス定義の最初に、標準の #include が必要なことにご注意ください。
+
+	#include "SlateGameMenuExample.h"
+	#include "MainMenuGameMode.h"
+	#include "SlateGameMenuExamplePlayerController.h"
+
+	#include "MainMenu.h"
+
+	AMainMenuGameMode::AMainMenuGameMode(const FObjectInitializer& ObjectInitializer)
+		:Super(ObjectInitializer)
+	{
+		PlayerControllerClass = ASlateGameMenuExamplePlayerController::StaticClass(); 
+	}
+
+	void AMainMenuGameMode::BeginPlay()
+	{
+		MainMenuPtr = MakeShareable(new MainMenu());
+		MainMenuPtr->ConstructMenu();
+		MainMenuPtr->OpenMenu();
+	}
+
+ここで、新規のこの GameMode を使用するものに指定する必要があります。レベルごとにワールド設定で指定します。
+
+![](image005.png)
+
+あるいは、[Project Settings (プロジェクト設定)] > [Maps & Modes] の [Default GameMode] でも指定できます。
+
+[REGION:fullwidth]
+![](image007.png)
+[/REGION]
+
+指定すると、画面上にコンテンツを表示できます。
+
+[REGION:fullwidth]
+![](image009.png)
+[/REGION]
+
+追加した 1 つの検索ボックス ウィジェットでビューポートが覆われますが、最初はこうなります。
+
+ボタンを追加する
+
+このメニューを、メインメニューになるように作っていきます。以下のようなレイアウトが分かりやすいです。
+
+![](image011.png)
+
+これらの 3 つのボタンを広い領域に入れます。ゲームを開始する [Play (再生)] ボタン、アプリケーションを終了する [Exit (終了)] ボタン、別メニューへ移動する [Option] です。そのためには、 ConstructMenu 関数をこのように変更します。
+
+	#include "StyleDefaults.h"
+
+	void MainMenu::ConstructMenu()
+	{
+		const FSlateBrush* NoBorderBrush = FStyleDefaults::GetNoBrush();
+
+		MenuRoot =
+			SNew(SBorder)
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot()
+				.FillHeight(1.f)
+				.HAlign(HAlign_Center)
+				[
+					SNew(SBorder)
+					.HAlign(HAlign_Center)
+					.VAlign(VAlign_Center)
+					.BorderImage(NoBorderBrush)
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("SlateGameMenuTitle", "Slate Game Menu!"))
+					]
+				]
+				+ SVerticalBox::Slot()
+				.FillHeight(1.f)
+				.HAlign(HAlign_Center)
+				[
+					SNew(SBorder)
+					.HAlign(HAlign_Center)
+					.VAlign(VAlign_Center)
+					.BorderImage(NoBorderBrush)
+					[
+						SNew(SButton)
+						.OnClicked(FOnClicked::CreateSP(this, &MainMenu::StartGame))
+						.HAlign(HAlign_Center)
+						.VAlign(VAlign_Center)
+						.Text(LOCTEXT("StartGameButtonText", "Start Game"))
+					]
+				]
+				+ SVerticalBox::Slot()
+				.FillHeight(1.f)
+				.HAlign(HAlign_Center)
+				[
+					SNew(SBorder)
+					.HAlign(HAlign_Center)
+					.VAlign(VAlign_Center)
+					.BorderImage(NoBorderBrush)
+					[
+						SNew(SButton)
+						.HAlign(HAlign_Center)
+						.VAlign(VAlign_Center)
+						//.OnClicked(FOnClicked::CreateSP(this, &MainMenu::OpenOptionsMenu))
+						.Text(LOCTEXT("OptionsButtonText", "Options..."))
+					]
+				]
+				+ SVerticalBox::Slot()
+				.FillHeight(1.f)
+				.HAlign(HAlign_Center)
+				[
+					SNew(SBorder)
+					.HAlign(HAlign_Center)
+					.VAlign(VAlign_Center)
+					.BorderImage(NoBorderBrush)
+					[
+						SNew(SButton)
+						.HAlign(HAlign_Center)
+						.VAlign(VAlign_Center)
+						.OnClicked(FOnClicked::CreateSP(this, &MainMenu::QuitGame))
+						.Text(LOCTEXT("QuitButtonText", "Quit Game"))
+					]
+				]
+			]
+		;
+	}
+
+スレートには、プロパティを変更する様々な演算子を使うための特別な記法があることが分かります (これらのリンクでは、スレートの宣言記法と構成の情報はほとんどありません)。SNew(SWidget) を使った後に "." 演算子でスレート ウィジェットのプロパティを設定し、ブラケット演算子で他のウィジェット内に子ウィジェットをネスティングすることができます。
+
+上の例では、すべての回りに SBorder があり、その中の SVerticalBox にはメニュー タイトルとその他 3 つのボタンを含めたスロットが 4 つ付いています。アラインメントとサイズを活用して、外見を調整できます。スレートのレイアウトの機能方法については、そのリンクでご覧いただけます。これらを追加すると、メニューは最終的にこのようになります。
+
+![](image013.png)
+
+注目している部分です。上のコードの SButton には、 OnClicked プロパティが設定されていることが分かります。これは、ボタンがクリックされた時に、選択した関数を呼び出すデリゲートです。[Start Game (ゲーム開始)] ボタンの OnClicked 宣言は、このようになります。
+
+	.OnClicked(FOnClicked::CreateSP(this, &MainMenu::StartGame))
+
+FOnClicked は、ウィジェットがユーザーにクリックされたことを通知したい時に呼び出されるデリゲートで、ボタンおよびボタンのようなウィジェットでの使用向けです。デリゲートを接続するためには、関数が呼び出されるオブジェクト、呼び出す関数、オプションで関数にパスされるパラメータを指定します。デリゲートの指定には、様々な関数を使用することができます。ここでは、シェアードポインタベースのメンバ関数デリゲートである CreateSP を使いました (MainMenu が TSharedFromThis を継承するのはこのためで、安全なシェアードポインタのオプションを使うことができます)。CreateRaw で raw C ++ ポインタを使用したり、 CreateStatic で静的関数を使用することもできます (これらの場合、関数が呼び出されるオブジェクトを指定する必要はありません)。
+
+従って、[Start Game (ゲーム開始)] ボタンと [Quit Game (ゲーム終了)] ボタンのデリゲートはもう指定されているので、それらが呼び出す関数を定義する必要があります。これらはとても単純な関数です。 
+
+	FReply MainMenu::StartGame()
+	{
+		if (Controller.IsValid())
+		{
+			Controller->GetWorld()->ServerTravel("/Game/GameLevel");
+		}
+		CloseMenu();
+
+		return FReply::Handled();
+	}
+
+これらの関数は ServerTravel を使って、ゲームを開始するために別のマップへ変更するように指示します。メニューを終了します。この関数が FReply を返していることが分かります。Reply は、イベントの処理方法の所定の特徴を通知するために、 Slate イベントがシステムに返す関数です。例えば、マウスのキャプチャを特定のウィジェットに与えるようにシステムに指示して OnMouseDown イベントを処理することがあります (FReply::CaptureMouse( NewMouseCapture ) を返して実行します)。
+
+	FReply MainMenu::QuitGame()
+	{
+		CloseMenu();
+		if (MyPlayerController.IsValid())
+		{
+			MyPlayerController->ConsoleCommand("quit");
+		}
+
+		return FReply::Handled();
+	}
+
+Quit Game 関数はコンソールコマンド "quit" を使って、メニュー終了後にゲームを終了します。
+
+これらの関数は両方とも、プレイヤー コントローラーのリファレンスを使って関数を呼び出します。つまり、 WeakObjectPtr をプレイヤー コントローラーに保持するために MainMenu.cpp を変更し、コンストラクタ経由で設定をする必要があります。
+
+	MainMenu::MainMenu(TWeakObjectPtr<class APlayerController> InController)
+	:	MyPlayerController(InController)
+	{
+	}
+
+MainMenuGameMode は最初の PlayerController を MainMenu などにパスします。
+
+	#include "../../../../../../Engine/Source/Runtime/Engine/Classes/Kismet/GameplayStatics.h"
+	void AMainMenuGameMode::BeginPlay()
+	{
+		APlayerController* FirstPC = NULL;
+		if (GetWorld() != NULL)
+		{
+			// player 0 gets to own the UI
+			FirstPC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+		}
+		MainMenuPtr = MakeShareable(new MainMenu(TWeakObjectPtr<APlayerController>(FirstPC)));
+		MainMenuPtr->ConstructMenu();
+		MainMenuPtr->OpenMenu();
+	}
+
+ここで 2 つ問題があります。デフォルトではマウス カーソルが描画されていないので、作成したボタンをプレイヤーがクリックするのが難しいということです。また、 PlayerController は、ワールド内でのキャラクターとカメラの制御にマウスとキーボードを使っているので、ボタンをクリックするためにマウスを動かすと、メニューの背後にあるワールド カメラも動いてしまいます。これらの問題は、 CinematicMode を有効にして Player 入力を一時的に無効にし、 PlayerController にマウス カーソルを表示するように指示することで解決します。
+
+	void MainMenu::OpenMenu()
+	{
+		if (GEngine && GEngine->GameViewport)
+		{
+			// Add our menu widget content to the game viewport so it is displayed (メニュー ウィジェット コンテンツが表示されるように、ゲーム ビューポートに追加します)
+			UGameViewportClient* const GVC = GEngine->GameViewport;
+			GVC->AddViewportWidgetContent(MenuRoot.ToSharedRef());
+			if (MyPlayerController.IsValid())
+			{
+				// Enable the mouse cursor and disable other input (moving the mouse will not rotate the camera, etc) (マウス カーソルを有効に、他の入力を無効にします (マウスが移動してもカメラは回転しない、など)
+				MyPlayerController->SetCinematicMode(true, false, false, true, true);
+				MyPlayerController->bShowMouseCursor = true;
+			}
+		}
+	}
+
+メニューを終了するには、逆のことを行います。
+
+	void MainMenu::CloseMenu()
+	{
+		if (GEngine && GEngine->GameViewport)
+		{
+			// Remove our menu widget content from the game viewport so it is no longer displayed (ゲーム ウィジェット コンテンツが表示されないようにゲーム ビューポートから取り除きます)
+			UGameViewportClient* const GVC = GEngine->GameViewport;
+			GVC->RemoveViewportWidgetContent(MenuRoot.ToSharedRef());
+			FSlateApplication::Get().ClearKeyboardFocus(EFocusCause::Cleared);
+			if (MyPlayerController.IsValid())
+			{
+				// Re-enable other input and remove the mouse cursor (他の入力を再度有効にしてマウス カーソルを取り除きます)
+				MyPlayerController->SetCinematicMode(false, false, false, true, true);
+				MyPlayerController->bShowMouseCursor = false;
+			}
+		}
+	}
+
+スレート スタイルの定義と使用
+
+次に、メニューのスタイルを簡単かつ迅速に変更できるように、スレート スタイルを定義および使用します。スタイルは、ブラシ (スレート エレメントの描画方法に関する情報のコンテナ) 、ウィジェット スタイル、スレート フォント情報を表すいくつかのテキスト ストリングで構成されています
+
+例えば、ツールバー ボタンのスタイルは以下のように定義できます。
+
+	// Normal button (普通のボタン)
+	FButtonStyle Button = FButtonStyle()
+		.SetNormal(BOX_BRUSH("Button", FVector2D(32, 32), 8.0f / 32.0f))
+		.SetHovered(BOX_BRUSH("Button_Hovered", FVector2D(32, 32), 8.0f / 32.0f))
+		.SetPressed(BOX_BRUSH("Button_Pressed", FVector2D(32, 32), 8.0f / 32.0f))
+		.SetDisabled(BOX_BRUSH("Button_Disabled", 8.0f / 32.0f))
+		.SetNormalPadding(FMargin(2, 2, 2, 2))
+		.SetPressedPadding(FMargin(2, 3, 2, 1));
+	Style->Set("MyButtonStyle ", Button);
+
+または、以下のようなテキスト スタイルです。
+
+	const FTextBlockStyle NormalText = FTextBlockStyle()
+		.SetFont(TTF_FONT("Fonts/Roboto-Regular", 9))
+		.SetColorAndOpacity(FSlateColor::UseForeground())
+		.SetShadowOffset(FVector2D::ZeroVector)
+		.SetShadowColorAndOpacity(FLinearColor::Black)
+		.SetHighlightColor(FLinearColor(0.02f, 0.3f, 0.0f))
+		.SetHighlightShape(BOX_BRUSH("TextBlockHighlightShape", FMargin(3.f / 8.f)));
+	Style->Set("NormalText", NormalText); 
+
+仕上げに、上記の BRUSH と FONT マクロを定義して、定義を分かりやすくします。
+
+	#define IMAGE_BRUSH( RelativePath, ... )FSlateImageBrush( Style->RootToContentDir( RelativePath, TEXT(".png") ), __VA_ARGS__ )
+	#define BOX_BRUSH( RelativePath, ... )FSlateBoxBrush( Style->RootToContentDir( RelativePath, TEXT(".png") ), __VA_ARGS__ )
+	#define BORDER_BRUSH( RelativePath, ... )FSlateBorderBrush( Style->RootToContentDir( RelativePath, TEXT(".png") ), __VA_ARGS__ )
+	#define TTF_FONT( RelativePath, ... )FSlateFontInfo( Style->RootToContentDir( RelativePath, TEXT(".ttf") ), __VA_ARGS__ )
+	#define OTF_FONT( RelativePath, ... )FSlateFontInfo( Style->RootToContentDir( RelativePath, TEXT(".otf") ), __VA_ARGS__ )
+
+これらのスタイルは、このようなボタンに使用することができます。
+
+	SNew(SButton)	// Start Game button
+	.ButtonStyle(&FMySlateStyle::Get().GetWidgetStyle<FButtonStyle>("MyButtonStyle"))
+	.TextStyle(&FMySlateStyle::Get().GetWidgetStyle<FTextBlockStyle>("NormalText"))
+	.OnClicked(FOnClicked::CreateSP(this, &MainMenu::StartGame))
+	.HAlign(HAlign_Center)
+	.VAlign(VAlign_Center)
+	.Text(LOCTEXT("StartGameButtonText", "Start Game"))
+
+スレート メニューの例としては、スタイルは同じですが外見の定義が異なる 2 つの FSlateStyleSets (スタイルのグループ) をする MySlateStyle という別のクラスを作成します。こうしておくと、 2 つのスタイル設定の切り替えが容易です。上記の「Style」 変数は作成された FLateStyleSet で、上記のような様々なスタイルが設定されており、スレート スタイル レジストリには以下のように登録されています。
+
+	FSlateStyleRegistry::RegisterSlateStyle(NewStyle);
+
+最初に、ランダムなスタイルを幾つかまとめて投げると、このようになります。
+
+![](image015.png)
+
+美しくはないですが、見た目を修正するために簡単に繰り返すことができます。
+
+セカンド メニューの追加
+
+[Start Game (ゲーム開始)] ボタンと [Quit Game (ゲーム終了)] ボタンの動作方法を説明しましたが、[Options] ボタンはまだ動いていません。このボタンをクリックすると、プレイヤーは別メニューに移動することになります。ServerTravel を使って別のメニューを開く別のレベルへ移動し、[Back (戻る)] ボタンがクリックされたら MainMenu レベルへ戻ることももちろん可能ですが、別の方法を使いました。
+
+メインメニュー上にオプション メニューのをポップアップ表示させるために、 SOverlay のメインメニューをラップすることで、コンテンツの異なるスロットを定義することができます。スロットはオーバーラップできます。このオーバーレイが、メニューの中で新規のルート ウィジェットとなります。 
+
+Construct 関数において、両方のメニューを構成します。
+
+	void MainMenu::ConstructMenu()
+	{
+		// ...
+
+		HeaderFontInfo = FMySlateStyle::Get().GetFontStyle("RichText.Header");
+
+		// Set up the main menu widget contents (メイン メニュー ウィジェット コンテンツを設定します)
+		MenuRoot =
+			SNew(SOverlay)	// Overlay used to allow the Options menu to be "overlayed" or displayed on top of this menu
+			+SOverlay::Slot()	// New Slot for the overlay.This contains just the Main Menu content
+			[
+				// ...
+				// Main menu widgets (メイン メニュー ウィジェット)
+				/ ...
+			]
+		;
+
+		// ...
+
+		// Build options menu widgets (ビルド オプション メニュー ウィジェット)
+		OptionsMenuRoot = SNew(SBorder)
+			.Cursor(EMouseCursor::Default)
+			.HAlign(HAlign_Center)
+			.VAlign(VAlign_Center)
+			[
+				// ...
+				// Main menu widgets (メイン メニュー ウィジェット)
+				/ ...
+			]
+			;
+
+	}
+
+オプション メニューを表示したい場合は、オプション メニューのルート ウィジェットをルートの SOverlay の新規スロットに入れます。
+
+	FReply MainMenu::OpenOptionsMenu()
+	{
+		SOverlay* MenuRootOverlay = (SOverlay*)MenuRoot.Get();
+
+		if (MenuRootOverlay)
+		{
+			// Add another slot to the Main Menu's overlay and put our Options menu content in it
+			OptionsMenuSlot = &MenuRootOverlay->AddSlot()
+				[
+					OptionsMenuRoot.ToSharedRef()
+				]
+			;
+		}
+
+		return FReply::Handled();
+	}
+
+オプション メニューを非表示にしたい場合は、スロットを削除します。
+
+	FReply MainMenu::CloseOptionsMenu()
+	{
+		SOverlay* MenuRootOverlay = (SOverlay*)MenuRoot.Get();
+
+		if (MenuRootOverlay != NULL)
+		{
+			// Remove option menu overlay slot (オプション メニュー オーバーレイ スロットを取り除きます)
+			MenuRootOverlay->RemoveSlot(OptionsMenuSlot->Widget);
+		}
+
+		return FReply::Handled();
+	}
+
+オプション メニューのランダムなスタイルをさらに作成すると、このような感じになります。
+
+![](image017.png)
+
+オプションの変更
+
+上のスクリーンショットには、メニュー スタイルとフォント スタイルを変更するオプションがあります。
+
+これらもまた、関数を呼び出す単純なデリゲートです。
+
+	void MainMenu::StyleComboBoxSelectionChanged(TSharedPtr<FString> StringItem, ESelectInfo::Type SelectInfo)
+	{
+		if (StringItem->Equals("Style1"))
+		{
+			FMySlateStyle::SetStyle1();
+		}
+		else
+		{
+			FMySlateStyle::SetStyle2();
+		}
+
+		// After making these changes, close the menu, reconstruct it, and open it again
+		CloseOptionsMenu();
+		CloseMenu();
+		ConstructMenu();
+		OpenMenu();
+		OpenOptionsMenu();
+	}
+
+	void MainMenu::FontSize_ValueChanged(int32 InValue)
+	{
+		HeaderFontInfo.Size = InValue;
+		MenuHeaderText->SetFont(HeaderFontInfo);
+		OptionsMenuHeaderText->SetFont(HeaderFontInfo);
+	}
+
+STextBlock オブジェクトへのリファレンスは、 Construct 関数の SAssignNew を使って結果生じるウィジェット オブジェクトをメンバ変数に割り当てることで更新され、デリゲート関数での参照が可能になります。
+
+	SAssignNew(OptionsMenuHeaderText, STextBlock)	// Header text
+	.TextStyle(&FMySlateStyle::Get().GetWidgetStyle<FTextBlockStyle>("RichText.Header"))
+	.Text(LOCTEXT("OptionsMenuTitle", "Options!"))
+
+Style Combo Box 選択を変更するとメニューがリビルドされるので、メニューがリビルドされた時に正しいスタイルが確実に選択されるようにするために追加コードが若干必要です。これらのコードも Construct 関数にあります。
+
+	// Holds the list of Styles
+	StyleList.Empty();
+	StyleList.Add(MakeShareable(new FString("Style1")));
+	StyleList.Add(MakeShareable(new FString("Style2")));
+
+	// Since Construct Menus is called when the menu style changes, make sure the selection in the Menu Style combo box is up to date with the new selection (メニュー スタイルが変更されると Construct Menus が呼び出されるので、Menu Style コンボ ボックスの選択項目が新規の選択項目で更新されていることを確認してください)
+	FString CurrentStyleName = FMySlateStyle::Get().GetStyleSetName().ToString();
+	TSharedPtr<FString> CurrentlySelectedStyle;
+	for (TSharedPtr<FString> StyleString :StyleList)
+	{
+		if (StyleString->Equals(CurrentStyleName))
+		{
+			CurrentlySelectedStyle = StyleString;
+		}
+	}
+	if (!CurrentlySelectedStyle.IsValid() && StyleList.Num() > 0)
+	{
+		CurrentlySelectedStyle = StyleList[0];
+	}
+
+スタイルのドロップダウンを変更すると、別のスタイルになります (スタイルそのものは機能が必要です)。
+
+![](image019.png)
+
+フォント スライダーを変更すると、フォント サイズも変更します。
+
+![](image021.png)
+
+バックグラウンドとスタイルを整えると、最終的にはこのようになります。
+
+[REGION:imagetable]
+|![](image023.png)(w:460) | ![](image025.png)(w:460) |
+| ------ | ------ |
+| Style 1 のメニューオプション | Style 2 のメニューオプション |
+[/REGION]
+ 
+## ウィジェット リフレクタの使用
+
+スレート メニューの作成時に特に便利なツールが、ウィジェット リフレクタです。[Developer Tools] メニューから利用できます。
+
+[REGION:fullwidth]
+![](image027.png)
+![](image029.png)
+[/REGION]
+ 
+存在するスレート ウィジェット、存在している階層、そして可視性や作成したコードファイルやライン位置まで表示します。このような情報はメニューのデバッグ時、あるいはどのように作成されたか確認するために他のメニューを調べる際に、非常に便利です。また、[Pick Widget (ウィジェットを選択)] ボタンで、ウィジェット階層内でカーソルを当てたウィジェットをすべて見つけることができるようなります。
+
+[REGION:fullwidth]
+![](image031.png)
+[/REGION]
+
+もう 1 度ボタン (またはエスケープ) を押すと、選択中のウィジェット上でのフリーズが可能になります。

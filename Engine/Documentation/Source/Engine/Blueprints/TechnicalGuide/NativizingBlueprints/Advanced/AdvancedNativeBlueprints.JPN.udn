@@ -1,0 +1,104 @@
+﻿INTSourceChangelist:3426963
+Availability:Public
+Title:高度なブループリントのネイティブ化
+Crumbs:%ROOT%
+Description:ゲームプレイ要素をブループリントに公開するテクニカル ガイド (ゲームプレイ プログラマー向け)
+Related:Engine/Blueprints/TechnicalGuide/NativizingBlueprints
+Parent:Engine/Blueprints/TechnicalGuide
+Version:4.16
+type:reference
+tags:Blueprints
+SkillLevel:Advanced
+prereq:Engine/Blueprints/TechnicalGuide/NativizingBlueprints
+
+[TOC(start:2)]
+
+## Unreal Automation ツールでビルドする
+
+Unreal Automation ツールでのビルド中にコマンドラインからブループリントをネイティブ化するには `BuildCookRun` コマンドラインに `-nativizeAssets` スイッチを追加します。
+
+##ヘッダ宣言
+
+ネイティブ化されたブループリントは、別の新しいモジュールに格納されます。つまり、ゲームプレイ モジュールのヘッダは、オリジナルのモジュール以外でも使用が可能になります。 
+すべてのヘッダが、使用中のすべてのクラスと構造体を、インクルード ヘッダもしくは前方宣言として宣言していることを確認してください。
+
+###不足ヘッダの修正
+
+多くのプロジェクトには "修正型" ヘッダである `[GameName]/[GameName].h` あるいは `[GameName]/Public/[GameName].h` のいずれかが付いています。 
+* このヘッダのパスを `DefaultEditor.ini` の `[BlueprintNativizationSettings]` の `FilesToIncludeInModuleHeader` に追加すると、 
+  ヘッダ不足が原因の問題をほぼ解決することができます。
+
+##コード連携の促進
+
+手書きのコードとネイティブ化したコード間の連携の信頼性と効率を促進するために、いくつかの制約が発生します。これを念頭に置いて、 
+以下のインプリメンテーションはサポートされていません： 
+
+* `BlueprintPure` あるいは`BlueprintCallable` としてマークされた Private 関数および Protected 関数
+* `noexport` 構造体およびクラス
+* `BlueprintVisible` タグ、または `Editable` タグのあるビットフィールド変数
+* Private ビットフィールド変数
+* `UBlueprintGeneratedClass`、`UUserDefinedStruct`、`UUserDefinedEnum` 変数 (もしくはそれらをベースにした変数型)
+
+## 技術的な詳細
+
+コンパイル エラーまたはリンク エラー (LNK1000 や LNK1248) になった場合、ブループリント タイプまたは特定のブループリントを `DefaultEngine.ini` 設定ファイルから排除して、
+プロジェクトでネイティブ化したブループリント数を減らしてみてください。ブループリントを変換対象から除外する方法は、 
+[](Engine/Blueprints/TechnicalGuide/NativizingBlueprints) を参照してください。
+
+以下のモジュールでは、ブループリント ネイティブ化の処理の仕組みが分かります。
+
+* `BlueprintCompilerCppBackend` モジュール (格納場所: `Engine\Source\Developer\BlueprintCompilerCppBackend\`) はブループリント記法のツリーを C++ に変換します。 
+* `BlueprintNativeCodeGen` モジュール (格納場所: `Engine\Source\Developer\BlueprintNativeCodeGen\`) は、クックおよびパッキング中に「素晴らしいこと」がいろいろできます。 
+
+[PUBLISH:Licensee]
+
+## Windows での変換コードのデバッグ
+
+プロジェクトに既に C++ コードが含まれている場合、既存プロジェクトのソリューションを使ってコードをデバッグできます。ただし、プロジェクトにもともとブループリントしか含まれていない場合、`GenerateProjectFiles` バッチファイルを実行してプロジェクトに Visual Studio ソリューションを作ります。
+
+[REGION:warning]
+プロジェクトのコンパイル、あるいはプロジェクトのエディタ版のビルドには、このソリューション (主となる UE4 ソリューションの新規プロジェクト) は使用しないでください。 
+[/REGION]
+
+### ステップ
+
+以下のステップは、プロジェクトのクック、ビルド、ステージングが完了したプロジェクトを前提としています。 
+
+1.	ゲームの中間フォルダ (`[GameDirectory]\Intermediate\WindowsNoEditor\NativizedAssets` など) に置かれている NativizedAssets プラグイン フォルダを開きます。
+
+	![](NativizedAssetsFolder_Loc.png)(w:863)
+
+1.	NativizedAssets プラグイン フォルダをゲームのプラグイン フォルダ (`[GameDirectory]\Plugins`など) に移動します。
+
+	[REGION:lightbox]
+		[![](NativizedAssetsMove_Loc.png)(w:863)](NativizedAssetsMove_Loc.png)
+	[/REGION]
+
+	[REGION:caption]
+		クリックしてフルサイズで表示
+	[/REGION]
+
+1.	次に、UE4 をDevelopment (または Development-Client、Development-Server) 実行ファイル コンフィギュレーションにコンパイルし、コマンドライン パラメータとして `-basedir="[Path to Cooked Game]\Binaries\Win64"` をパスします。
+
+	[REGION:note]
+	コマンドライン パラメータとして `-basedir=""` をパスすると、ゲームをクックしたビルドに UE4 が立ち上がります。
+	[/REGION]
+
+この時点で、ネイティブ化したコードを自由にデバッグおよび編集できます。
+
+[/PUBLISH:Licensee]
+
+<!--Commented out per SME; however, it's being preserved for future review.
+
+1. 以下のラインを実行します。こららは、ネイティブ化されたビルドをパッケージ処理する出力ログにあるので、 
+コピーすればスイッチが環境に合っているか簡単に検証することができます。`Development` スイッチを `Debug` に変えるだけです。 
+
+		<UE4>\Engine\Binaries\DotNET\UnrealBuildTool.exe" <project name> Win64 Debug -Project=<project path>\<project name>.uproject  <project path>\<project name>.uproject  -PLUGIN "<project path>\Intermediate\<platform>\NativizedAssets\NativizedAssets.uplugin" -remoteini="<project path>" -noxge -generatemanifest -NoHotReloadFromIDE -ignorejunk
+
+		<UE4>\Engine\Binaries\DotNET\UnrealBuildTool.exe" <project name> Win64 Debug -Project=<project path>\<project name>.uproject  <project path>\<project name>.uproject  -PLUGIN "<project path>\Intermediate\<platform>\NativizedAssets\NativizedAssets.uplugin" -remoteini="<project path>" -noxge -NoHotReloadFromIDE -ignorejunk
+
+2. Visual Studio プロジェクトで作業中のディレクトリ (デバッグ設定) を `<Packaged Folder>\<platform>\<project name>\Binaries\Win64\` に設定します。
+
+3. Visual Studio でデバッグを実行しますが、Visual Studio からはプロジェクトを再コンパイルしないでください。
+
+-->

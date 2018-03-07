@@ -1,0 +1,267 @@
+﻿INTSourceChangelist:2727346
+Availability:Public
+Title:5.在编辑器中运行
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/Components
+Description:在编辑器中进行游戏，测试代码。
+version:4.9
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[Previous Step](Programming\Tutorials\Components\4 "%Programming\Tutorials\Components\4:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[](Programming\Tutorials\Components\)
+	[/PARAM]
+	[PARAM:next]
+		[Next Step](Programming\Tutorials\Components\6 "%Programming\Tutorials\Components\6:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+1. 在 **虚幻编辑器** 中，按下 **Compile** 按钮即可加载代码修改。
+
+	![](CompileFromEditor.png)
+
+1. 需要将 **CollidingPawn** 的一个实例放入世界场景。类保存在 **内容浏览器**“C++ Classes/HowTo_Components/CollidingPawn”路径下。
+
+	![](ClassInContentBrowser.png)
+
+	![](LevelEditorBeforePlay.png)
+
+1. 按下 **Play** 按钮后，使用 WASD 键移动球体，使用鼠标转向，与场景中的对象（如此例中的桌子或椅子，或放置在场景中的其他物理对象）发生碰撞和滑动。按下空格键还可以在球体上生成火焰（或消除已生成的火焰）！
+
+	![](CollidingAndOnFire.png)
+
+----
+
+**虚幻引擎 4** 中有各种类型的 **组件** - 我们此处对常见组件的仅仅是停留在表面而已。尝试探索内置的组件或自行编写吧！它们灵活且功能强大，有助于使项目代码整洁有序，便于重复使用。
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    code
+    [/PARAMLITERAL]
+    [PARAM:heading]
+	    完成代码
+    [/PARAM]
+    [PARAM:content]
+		**CollidingPawn.h**
+			// 版权所有 1998-2017 Epic Games, Inc. 保留所有权利。
+
+			#pragma once
+
+			#include "GameFramework/Pawn.h"
+			#include "CollidingPawn.generated.h"
+
+			UCLASS()
+			class HOWTO_COMPONENTS_API ACollidingPawn : public APawn
+			{
+				GENERATED_BODY()
+
+			public:
+				// 设置该 pawn 属性的默认值
+				ACollidingPawn();
+
+				// 游戏开始时或生成时调用
+				virtual void BeginPlay() override;
+	
+				// 每帧调用
+				virtual void Tick( float DeltaSeconds ) override;
+
+				// 调用后将功能绑定到输入
+				virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override;
+
+				UParticleSystemComponent* OurParticleSystem;
+				class UCollidingPawnMovementComponent* OurMovementComponent;
+
+				virtual UPawnMovementComponent* GetMovementComponent() const override;
+
+				void MoveForward(float AxisValue);
+				void MoveRight(float AxisValue);
+				void Turn(float AxisValue);
+				void ParticleToggle();
+			};
+
+		**CollidingPawn.cpp**
+			// 版权所有 1998-2017 Epic Games, Inc. 保留所有权利。
+
+			#include "HowTo_Components.h"
+			#include "CollidingPawn.h"
+			#include "CollidingPawnMovementComponent.h"
+
+			// 设置默认值
+			ACollidingPawn::ACollidingPawn()
+			{
+ 				// 将此 pawn 设为每帧调用 Tick()。不需要时可将此关闭，以提高性能。
+				PrimaryActorTick.bCanEverTick = true;
+
+				// 我们的根组件是对物理作出反应的球体
+				USphereComponent* SphereComponent = CreateDefaultSubobject<USphereComponent>(TEXT("RootComponent"));
+				RootComponent = SphereComponent;
+				SphereComponent->InitSphereRadius(40.0f);
+				SphereComponent->SetCollisionProfileName(TEXT("Pawn"));
+
+				// 创建并放置一个网格体组件，以便了解球体的所在位置
+				UStaticMeshComponent* SphereVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualRepresentation"));
+				SphereVisual->AttachTo(RootComponent);
+				static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereVisualAsset(TEXT("/Game/StarterContent/Shapes/Shape_Sphere.Shape_Sphere"));
+				if (SphereVisualAsset.Succeeded())
+				{
+					SphereVisual->SetStaticMesh(SphereVisualAsset.Object);
+					SphereVisual->SetRelativeLocation(FVector(0.0f, 0.0f, -40.0f));
+					SphereVisual->SetWorldScale3D(FVector(0.8f));
+				}
+
+				// 创建一个可启用或停用的粒子系统
+				OurParticleSystem = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("MovementParticles"));
+				OurParticleSystem->AttachTo(SphereVisual);
+				OurParticleSystem->bAutoActivate = false;
+				OurParticleSystem->SetRelativeLocation(FVector(-20.0f, 0.0f, 20.0f));
+				static ConstructorHelpers::FObjectFinder<UParticleSystem> ParticleAsset(TEXT("/Game/StarterContent/Particles/P_Fire.P_Fire"));
+				if (ParticleAsset.Succeeded())
+				{
+					OurParticleSystem->SetTemplate(ParticleAsset.Object);
+				}
+
+				// 使用弹簧臂让摄像机运动平稳而自然。
+				USpringArmComponent* SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraAttachmentArm"));
+				SpringArm->AttachTo(RootComponent);
+				SpringArm->RelativeRotation = FRotator(-45.f, 0.f, 0.f);
+				SpringArm->TargetArmLength = 400.0f;
+				SpringArm->bEnableCameraLag = true;
+				SpringArm->CameraLagSpeed = 3.0f;
+
+				// 创建一个摄像机，将其附着到弹簧臂
+				UCameraComponent* Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("ActualCamera"));
+				Camera->AttachTo(SpringArm, USpringArmComponent::SocketName);
+
+				// 掌控默认玩家
+				AutoPossessPlayer = EAutoReceiveInput::Player0;
+
+				// 创建移动组件的一个实例，并告知其更新根组件。
+				OurMovementComponent = CreateDefaultSubobject<UCollidingPawnMovementComponent>(TEXT("CustomMovementComponent"));
+				OurMovementComponent->UpdatedComponent = RootComponent;
+			}
+
+			// 游戏开始时或生成时调用
+			void ACollidingPawn::BeginPlay()
+			{
+				Super::BeginPlay();
+	
+			}
+
+			// 每帧调用
+			void ACollidingPawn::Tick( float DeltaTime )
+			{
+				Super::Tick( DeltaTime );
+
+			}
+
+			// 调用后将功能绑定到输入
+			void ACollidingPawn::SetupPlayerInputComponent(class UInputComponent* InputComponent)
+			{
+				Super::SetupPlayerInputComponent(InputComponent);
+
+				InputComponent->BindAction("ParticleToggle", IE_Pressed, this, &ACollidingPawn::ParticleToggle);
+
+				InputComponent->BindAxis("MoveForward", this, &ACollidingPawn::MoveForward);
+				InputComponent->BindAxis("MoveRight", this, &ACollidingPawn::MoveRight);
+				InputComponent->BindAxis("Turn", this, &ACollidingPawn::Turn);
+			}
+
+			UPawnMovementComponent* ACollidingPawn::GetMovementComponent() const
+			{
+				return OurMovementComponent;
+			}
+
+			void ACollidingPawn::MoveForward(float AxisValue)
+			{
+				if (OurMovementComponent && (OurMovementComponent->UpdatedComponent == RootComponent))
+				{
+					OurMovementComponent->AddInputVector(GetActorForwardVector() * AxisValue);
+				}
+			}
+
+			void ACollidingPawn::MoveRight(float AxisValue)
+			{
+				if (OurMovementComponent && (OurMovementComponent->UpdatedComponent == RootComponent))
+				{
+					OurMovementComponent->AddInputVector(GetActorRightVector() * AxisValue);
+				}
+			}
+
+			void ACollidingPawn::Turn(float AxisValue)
+			{
+				FRotator NewRotation = GetActorRotation();
+				NewRotation.Yaw += AxisValue;
+				SetActorRotation(NewRotation);
+			}
+
+			void ACollidingPawn::ParticleToggle()
+			{
+				if (OurParticleSystem && OurParticleSystem->Template)
+				{
+					OurParticleSystem->ToggleActive();
+				}
+			}
+
+		**CollidingPawnMovementComponent.h**
+			// 版权所有 1998-2017 Epic Games, Inc. 保留所有权利。
+
+			#pragma once
+
+			#include "GameFramework/PawnMovementComponent.h"
+			#include "CollidingPawnMovementComponent.generated.h"
+
+			/**
+			 * 
+			 */
+			UCLASS()
+			class HOWTO_COMPONENTS_API UCollidingPawnMovementComponent : public UPawnMovementComponent
+			{
+				GENERATED_BODY()
+	
+			public:
+				virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction *ThisTickFunction) override;	
+			};
+
+		**CollidingPawnMovementComponent.cpp**
+			// 版权所有 1998-2017 Epic Games, Inc. 保留所有权利。
+
+			#include "HowTo_Components.h"
+			#include "CollidingPawnMovementComponent.h"
+
+			void UCollidingPawnMovementComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction *ThisTickFunction)
+			{
+				Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+				// 确保所有内容仍然有效，并允许移动。
+				if (!PawnOwner || !UpdatedComponent || ShouldSkipUpdate(DeltaTime))
+				{
+					return;
+				}
+
+				// 获取（然后清除）在 ACollidingPawn::Tick 设置的移动矢量。
+				FVector DesiredMovementThisFrame = ConsumeInputVector().GetClampedToMaxSize(1.0f) * DeltaTime * 150.0f;
+				if (!DesiredMovementThisFrame.IsNearlyZero())
+				{
+					FHitResult Hit;
+					SafeMoveUpdatedComponent(DesiredMovementThisFrame, UpdatedComponent->GetComponentRotation(), true, Hit);
+
+					// 如碰到物体，尝试沿其滑动
+					if (Hit.IsValidBlockingHit())
+					{
+						SlideAlongSurface(DesiredMovementThisFrame, 1.f - Hit.Time, Hit.Normal, Hit);
+					}
+				}
+			};
+
+
+    [/PARAM]
+[/OBJECT]
+
+%Steps%

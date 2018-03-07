@@ -1,0 +1,293 @@
+﻿INTSourceChangelist:3429264
+Availability: Public
+Title:C++ 의 콘솔 변수
+Crumbs:%ROOT%, Engine, Programming, Programming/Basics
+Description:콘솔 변수 생성을 위한 구현 세부사항과 콘솔 매니저에 대한 개요입니다.
+Version: 4.16
+Parent:Programming/Development/Tools
+Order:
+topic-image:consoleVar_topicImage.png
+
+[TOC(start:2)]
+
+
+
+
+**콘솔 명령** 이란 사용자가 입력한 문자열을 엔진에 전송하여 엔진이 어떤 식으로 (예: 콘솔/로그 반응, 내부 상태 변경 등) 반응하는 것을 말합니다.
+**콘솔 변수** 는 콘솔을 통해 변경할 수 있는 몇몇 상태를 추가적으로 저장합니다. 콘솔 매니저에서 콘솔 명령과 변수를 등록하는 것으로 
+자동 완성과 Enum 을 통해 콘솔 오브젝트 전체 목록을 구할 수 있습니다 (콘솔 명령 **Help** 또는 **DumpConsoleVariables**). 이때문에 예전 Exec 인터페이스는 피해야 합니다. 
+중심부의 콘솔 매니저가 (사용자 입력 히스토리 등) 모든 것을 제어합니다.
+
+
+## 콘솔 변수란 무엇인가?
+
+콘솔 변수란 엔진 측면의 state를 저장하는 (float, int, string 등의) 단순 데이터형으로, 사용자가 그 state를 읽고 설정할 수도 있습니다. 
+콘솔 변수에는 이름이 있어 콘솔에 이름을 입력하기 시작하면 자동 완성 기능이 지원됩니다. 예를 들어 
+
+|**사용자 콘솔 입력**|**콘솔 출력**|**설명**|
+| --- | --- | --- |
+|`MyConsoleVar`|`MyConsoleVar = 0`|변수의 현재 state가 콘솔에 출력됩니다.|
+|`MyConsoleVar 123`|`MyConsoleVar = 123 LastSetBy: Constructor`|변수의 state가 바뀌고 새로운 state가 콘솔에 출력됩니다.|
+|`MyConsoleVar ?`|`아마도 도움말 여러 줄`|콘솔 변수 도움말이 콘솔에 출력됩니다.|
+
+
+
+## 콘솔 변수 생성/등록하기
+
+변수는 엔진이 생성되는 초기에 등록해 줘야 합니다. 예:
+
+	static TAutoConsoleVariable<int32> CVarRefractionQuality(
+		TEXT("r.RefractionQuality"),
+		2,
+		TEXT("Defines the distortion/refraction quality, adjust for quality or performance.\n")
+		TEXT("<=0: off (fastest)\n")
+		TEXT("  1: low quality (not yet implemented)\n")
+		TEXT("  2: normal quality (default)\n")
+		TEXT("  3: high quality (e.g. color fringe, not yet implemented)"),
+		ECVF_Scalability | ECVF_RenderThreadSafe);
+
+여기서 int32 유형의 콘솔 변수를 **r.RefractionQuality** 라는 이름으로 등록하며, 기본값은 2 이고 여러줄 도움말 텍스트와 플래그가 있습니다.
+플래그가 여럿 있는데, 가장 중요한 것은 **ECVF_Cheat** 입니다. `IConsoleManager.h` 에 자세히 설명되어 있습니다.
+도움말 텍스트는 사용자가 콘솔 변수 뒤에 "?" 를 사용하면 표시됩니다.
+
+필요하면 함수 안에 콘솔 변수를 생성할 수도 있습니다:
+
+	IConsoleManager::Get().RegisterConsoleVariable(TEXT("r.RefractionQuality"),
+       2,
+       TEXT("Defines the distortion/refraction quality, adjust for quality or performance.\n")
+		TEXT("<=0: off (fastest)\n")
+		TEXT("  1: low quality (not yet implemented)\n")
+		TEXT("  2: normal quality (default)\n")
+		TEXT("  3: high quality (e.g. color fringe, not yet implemented)"),
+       ECVF_Scalability | ECVF_RenderThreadSafe);
+    
+`GConsoleManager` 가 글로벌 액세스 포인트이며, 여기서 콘솔 변수를 새로 등록하거나 이미 있던 것을 찾을 수 있습니다. 첫 파라미터는 콘솔 변수의 이름입니다. 
+둘째 파라미터는 디폴트 값이며, 이 상수의 타입에 따라 다양한 콘솔 변수 타입으로 만들 수 있습니다: int, float, string (!FString).
+다음 파라미터는 콘솔 변수 도움말 텍스트를 정의합니다.
+
+기존 변수로의 레퍼런스를 등록하는 것도 가능합니다. 편리하고 빠르지만, (스레드 안전성이나 콜백, 싱크, 치트 등) 여러가지 기능이 생략되므로 이런 방법은 피할 것을 추천합니다. 예제입니다:
+
+	FAutoConsoleVariableRef CVarVisualizeGPUSimulation(
+		TEXT("FX.VisualizeGPUSimulation"),
+		VisualizeGPUSimulation,
+		TEXT("Visualize the current state of GPU simulation.\n")
+		TEXT("0 = off\n")
+		TEXT("1 = visualize particle state\n")
+		TEXT("2 = visualize curve texture"),
+		ECVF_Cheat
+		);
+
+여기서는 변수 유형에서 유형이 공제되어 있습니다.
+
+
+
+## 콘솔 변수의 상태 구하기
+
+`RegisterConsoleVariableRef` 로 생성된 콘솔 변수의 상태는 등록할 때 사용한 변수로 쉽게 구할 수 있습니다. 예:
+
+	// only needed if you are not in the same cpp file
+	extern TAutoConsoleVariable<int32> CVarRefractionQuality;
+	// get the value on the game thread
+	int32 MyVar = CVarRefractionQuality.GetValueOnGameThread();
+
+(!GetInt(), !GetFloat(), !GetString() 등의) Getter 함수를 사용해서 콘솔 변수의 상태 결과를 알아낼 수 있는데, 약간 구현이 느리기만 할 뿐입니다 (가상 함수 호출, 캐시 없을 확률 등).
+최적의 퍼포먼스를 위해서라면 등록된 변수와 같은 타입을 사용해 줘야 합니다. 변수로의 포인터를 구하려면 등록 
+함수의 반환 인수를 저장하거나, 변수가 필요한 시점 직전에 `FindConsoleVariable` 를 호출하면 됩니다. 예를 들어:
+
+    static const auto CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("TonemapperType")); 
+	int32 Value = CVar->GetInt();
+   
+저기 static 을 통해 이 코드가 처음 호출됐을 때만 (맵으로 구현된) 이름 검색을 하도록 합니다. 
+변수가 절대 이동하지 않고 엔진 셧다운시에만 소멸되니 옳다 하겠습니다.
+
+
+## 콘솔 변수 변경사항 추적 방법
+
+콘솔 변수가 변경되었는지 확인하는 커스텀 코드를 실행하고자 한다면, 세 가지 방법이 있습니다.
+
+종종 **간단한 방법** 이 최선입니다: 서브시스템에 옛날 상태를 저장한 다음 매 프레임마다 달라졌는지 검사합니다. 여기서 그 발생시점을 매우 자유롭게 제어합니다. 예: 렌더 스레드냐 게임 스레드냐, 스트리밍 스레드냐, 틱 또는 렌더링 이전이냐 이후냐 등등. 차이점을 감지하면, 콘솔 변수 상태를 복사한 다음 
+커스텀 코드를 실행합니다. 예:
+
+	void MyFunc()
+	{
+		int GBufferFormat = CVarGBufferFormat.GetValueOnRenderThread();
+
+		if(CurrentGBufferFormat != GBufferFormat)
+		{
+			CurrentGBufferFormat = GBufferFormat;
+
+			// custom code
+		}
+	}
+
+**console variable sink** 를 등록할 수도 있습니다. 예:
+
+	static void MySinkFunction()
+	{
+		bool bNewAtmosphere = CVarAtmosphereRender.GetValueOnGameThread() != 0;
+
+		// by default we assume the state is true
+		static bool GAtmosphere = true;
+
+		if (GAtmosphere != bNewAtmosphere)
+		{
+			GAtmosphere = bNewAtmosphere;
+
+			// custom code
+		}
+	}
+
+	FAutoConsoleVariableSink CMyVarSink(FConsoleCommandDelegate::CreateStatic(&MySinkFunction));
+
+이 싱크는 렌더링 전 메인 스레드의 특정 지점에서 호출됩니다. 함수는 콘솔 변수 이름/포인터를 구하지 않는데, 보통 잘못된 동작으로 끝나기 때문입니다.
+다수의 콘솔 변수가 (예: r.SceneColorFormat, r.GBufferFormat) 전부 변화를 유발한다면, 하나씩 하나씩이 아닌 전부 변경된 이후에 코드를 호출하는 것이 최선입니다.
+
+마지막 방법은 **콜백** 을 사용하는 것인데, 조심해서 사용하지 않으면 문제가 생길 수 있으니 피하는 것이 좋습니다.
+
+* 순환을 통해 교착상태에 빠질 수 있습니다 (교착은 막을 수 있지만 어느 콜백이 좋을지가 명확하지 않습니다).
+* Set() 가 호출될 때마다 어느 시점에서든 콜백이 돌아올 수 있습니다. 코드는 (init 도중이든 serialization 도중이든) 어떤 경우에서도 작동해야 합니다.
+  항상 메인 스레드 측에 있다 가정할 수 있습니다.
+
+위에 언급한 다른 방법이 통하지 않은 경우가 아니라면야 이 방법은 사용하지 말 것을 권합니다.
+
+예제:
+
+	void OnChangeResQuality(IConsoleVariable* Var)
+	{
+		SetResQualityLevel(Var->GetInt());
+	}
+
+	CVarResQuality.AsVariable()
+		->SetOnChangedCallback(FConsoleVariableDelegate::CreateStatic(&OnChangeResQuality));
+
+
+
+## 콘솔 변수 행위와 스타일에 의도된 사항
+
+* 콘솔 변수는 사용자 입력을 반영하나, (MotionBlur 0/1 같은 옵션은 지원하지 않는 플랫폼이 있을 수 있기에) 시스템의 state 까지 반영하지는 않습니다.
+  변수 state 는 코드로 변경하지 않는 것이 좋습니다. 왜냐하면 사용자가 지정한 state 가 변수에 반영되지 않으면 잘못 입력했나 혼란을 줄 수도 있고, 
+  다른 변수의 state 때문에 콘솔 변수를 변경하지 못하게 될 수도 있기 때문입니다.
+* 항상 변수의 용도와 적정값을 설명해 주는 도움말을 작성해 주시기 바랍니다.
+* 대부분의 콘솔 변수는 개발 전용으로만 쓰이기에, 일찍 `ECVF_Cheat` 옵션을 붙여 주는 것도 좋은 생각입니다.
+  디파인을 사용하여 피처를 컴파일에서 빼버리는 것도 더욱 좋을 수 있습니다 (예: #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)).
+* 변수 이름은 가급적 최소 길이로 하면서도 이름 자체로 설명이 되게끔 하는 것이 좋으며, 부정적인 의미는 피하는 것이 좋습니다 
+  (나쁜 이름의 예: EnableMotionBlur, MotionBlurDisable, MBlur, HideMotionBlur). 
+  대소문자를 적절히 사용하여 읽기 쉽고 일관되게 해 주시기 바랍니다 (예: MotionBlur).
+* 들여쓰기의 경우 (폭이 가변적이지 않은) 고정폭 폰트로 출력한다 가정하는 것이 좋습니다.
+* 자동 완성과 DumpConsoleCommands 및 Help 의 동작을 위해서는 엔진 초기화 도중 변수를 등록시키는 것이 중요합니다.
+
+더 자세한 내용은 `IConsoleManager.h` 를 참고해 보시기 바랍니다.
+
+
+## 콘솔 변수 로드하기
+
+엔진 시동시 콘솔 변수의 스테이트는 "Engine/Config/ConsoleVariables.ini" 파일에서 로드할 수 있습니다. 이 곳은 로컬 개발자를 위해 예약된 곳으로, 프로젝트 세팅에 사용해서는 안될 것입니다.
+더 자세한 내용은 파일 자체에서 찾아볼 수 있습니다:
+
+    ; 이 파일로 엔진 시동시 (정의되지 않은 순서대로) 콘솔 변수를 설정할 수 있습니다.
+    ; 현재 이 파일을 덮어쓰는 파일은 없습니다.
+    ; 이 파일은 (코멘트에 대해, 그리고 코멘트를 찾을 위치를 알기 위해) 소스 콘트롤 데이터베이스에 있어야 하나,
+    ; 변수로부터 공백 상태가 유지되었습니다.
+    ; 반복되는 콘솔 변수 세팅을 타이핑할 시간을 절약하려면 
+    ; 개발자가 로컬에서 변경하면 됩니다. 변수는 [Startup] 부분에 있어야 합니다.
+    ; 나중에 섹션 이름으로 레퍼런스되는 네임드 섹션이 여럿 있을 수도 있습니다.
+    ; 그러면 플랫폼 전용 또는 레벨 전용 오버라이드가 가능합니다.
+    ; 이름 비교는 대소문자를 구분하지 않으며, 변수가 존재하지 않으면 무시됩니다.
+    ;
+    ; 예제 파일 내용:
+    ;
+    ; [Startup]
+    ; FogDensity = 0.9
+    ; ImageGrain = 0.5
+    ; FreezeAtPosition = 2819.5520 416.2633 75.1500 65378 -25879 0
+    
+    [Startup]
+    
+세팅을 "Engine/Config/BasEngine.ini" 에 넣을 수도 있습니다. 예:
+
+	[SystemSettings]
+	r.MyCvar = 2
+
+	[SystemSettingsEditor]
+	r.MyCvar = 3
+
+세팅은 "Script/Engine.RendererSettings" 에서도 올 수 있습니다. 이 프로젝트 세팅은 이렇게 노출됩니다:
+
+	UPROPERTY(config, EditAnywhere, Category=Optimizations, meta=(
+		ConsoleVariable="r.EarlyZPassMovable",DisplayName="Movables in early Z-pass",
+		ToolTip="Whether to render movable objects in the early Z pass. Need to reload the level!"))
+		uint32 bEarlyZPassMovable:1;
+
+그 세팅은 에디터 UI 에서 변경 가능합니다. 프로젝트 세팅은 엔진 퀄리티(scalability) 세팅과 섞이지 않도록 해야 합니다 (우선권 문제 방지를 위해서입니다).
+
+기타 세팅은 엔진 퀄리티(Scalability) 기능에서 올 수 있습니다. 자세한 정보는 "Config/BaseScalability.ini" 또는 엔진 퀄리티 관련 문서를 참고하세요.
+
+## 명령줄
+
+명령줄에서는 콘솔 변수 설정, 콘솔 명령 호출, 명령 실행이 가능합니다. 예:
+
+	UE4Editor.exe GAMENAME -ExecCmds="r.BloomQuality 12;vis 21;Quit"
+
+여기서는 3 개의 명령을 실행합니다. 참고로 이런 식의 콘솔 변수 설정은 ini 파일과는 달리 '=' 를 생략해야 합니다.
+
+## 우선권
+
+콘솔 변수는 유저/에디터/프로젝트 세팅, 명령줄, consolevariables.ini 등 다양한 소스를 통해 덮어쓸 수 있습니다.
+특정 (예: 명령줄에서의) 덮어쓰기는 유지하면서 일부 세팅 재적용이 가능하도록 (예: 프로젝트 세팅을 에디터 UI 에서 변경할 수 있도록) 하기 위하여,
+우선권을 도입했습니다. 이제 모든 세팅을 어떤 순서로도 적용시킬 수 있습니다.
+
+IConsoleManager.h 를 보면:
+
+	// lowest priority (default after console variable creation)
+	ECVF_SetByConstructor =			0x00000000,
+	// from Scalability.ini
+	ECVF_SetByScalability =			0x01000000,
+	// (in game UI or from file)
+	ECVF_SetByGameSetting =			0x02000000,
+	// project settings
+	ECVF_SetByProjectSetting =		0x03000000,
+	// per device setting
+	ECVF_SetByDeviceProfile =		0x04000000,
+	// per project setting
+	ECVF_SetBySystemSettingsIni =	0x05000000,
+	// consolevariables.ini (for multiple projects)
+	ECVF_SetByConsoleVariablesIni = 0x06000000,
+	// a minus command e.g. -VSync 
+	ECVF_SetByCommandline =			0x07000000,
+	// least useful, likely a hack, maybe better to find the correct SetBy...
+	ECVF_SetByCode =				0x08000000,
+	// editor UI or console in game or editor
+	ECVF_SetByConsole =				0x09000000,
+
+어떤 경우에는 이런 로그 출력을 볼 수도 있습니다:
+
+	Console variable 'r.MyVar' wasn't set (Priority SetByDeviceProfile < SetByCommandline)
+
+(명령줄이 유저 세팅을 강제하는 등) 의도되었을 수도 있고, 코드 문제로 유발되었을 수도 있습니다.
+우선권은 지난 번 누가 변수를 설정했는지 확인하는 데도 도움이 됩니다. 콘솔 변수 상태를 구해보면 이 정보를 알 수 있습니다. 예:
+
+	> r.GBuffer
+	
+	r.GBuffer = "1"      LastSetBy: Constructor
+
+
+
+
+## 앞으로
+
+* 현재 콘솔 변수는 C++ 로만 만들 수 있으나, 바뀔 수도 있습니다.
+* enum 과 bool 타입도 추가할 계획이었으나 문제가 많았습니다. 현재로서는 int 나 필요하면 string 을 사용하시기 바랍니다.
+* 도움말이 편하기는 합니다만 실행파일 크기 절약이나 치터 방지 목적으로, define 을 추가하여 도움말이 실행파일에 추가되지 않도록 하는 것을 고려중입니다.
+
+
+## 콘솔 변수 등록 해제하기
+
+`UnregisterConsoleVariable` 메소드로 콘솔 변수를 제거할 수 있습니다. 최소한 유저 관점에서는 그렇습니다. 
+포인터가 데이터에 접근할 때 크래시가 일어나지 않도록 변수를 (unregistered 플래그 설정 상태로) 유지는 시킵니다. 새 변수가 같은 이름으로 등록되면, 
+예전 변수가 복원되며, 새 변수에서 도움말과 옵션을 복사해 옵니다. 이런 식으로 변수 state 조차 그대로 유지하며 DLL 로딩과 언로딩이 가능한 것입니다. 
+참고로 콘솔 변수 레퍼런스에 대해서는 작동하지 않습니다.
+<!--Sentence below deprecated for clarification.-->
+<!--This can be fixed by giving up on one: do not store pointers, do not unregistered or not use references.-->
+
+
+

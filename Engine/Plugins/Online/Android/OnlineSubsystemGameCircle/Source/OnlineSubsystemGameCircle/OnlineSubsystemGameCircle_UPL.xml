@@ -1,0 +1,414 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--OnlineSubsystemGameCircle plugin additions-->
+<root xmlns:android="http://schemas.android.com/apk/res/android">
+	<!-- init section is always evaluated once per architecture -->
+	<init>
+		<log text="GameCircle init"/>
+		
+		<!-- get packaging for GearVR from ini and reset it if architecture not supported -->
+		<setBoolFromProperty result="bEnableAmazonGameCircleSupport" ini="Engine" section="/Script/GameCircleRuntimeSettings.GameCircleRuntimeSettings" property="bEnableAmazonGameCircleSupport" default="false"/>
+		<setBoolFromProperty result="bSupportsInAppPurchasing" ini="Engine" section="/Script/GameCircleRuntimeSettings.GameCircleRuntimeSettings" property="bSupportsInAppPurchasing" default="false"/>
+		<setBoolFromProperty result="bEnableFireTVSupport" ini="Engine" section="/Script/GameCircleRuntimeSettings.GameCircleRuntimeSettings" property="bEnableFireTVSupport" default="false"/>
+		<setStringFromProperty result="DebugAPIKeyFile" ini="Engine" section="/Script/GameCircleRuntimeSettings.GameCircleRuntimeSettings" property="DebugAPIKeyFile" default="Build/GameCircle/Debug_api_key.txt"/>
+		<setStringFromProperty result="DistributionAPIKeyFile" ini="Engine" section="/Script/GameCircleRuntimeSettings.GameCircleRuntimeSettings" property="DistributionAPIKeyFile" default="Build/GameCircle/Distro_api_key.txt"/>
+		
+		<setBoolFromProperty result="bEnableGooglePlaySupport" ini="Engine" section="/Script/AndroidRuntimeSettings.AndroidRuntimeSettings" property="bEnableGooglePlaySupport" default="false"/>
+		<setBoolNot result="bNotGooglePlay" source="$B(bEnableGooglePlaySupport)"/>
+		<setBoolAnd result="bGameCircleIsEnabled" arg1="$B(bEnableAmazonGameCircleSupport)" arg2="$B(bNotGooglePlay)"/>
+
+	</init>
+
+	<!-- optional updates applied to AndroidManifest.xml -->
+	<androidManifestUpdates>
+		<if condition="bGameCircleIsEnabled">
+			<true>
+				<setStringFromAttribute result="PackageName" tag="manifest" name="package"/>
+				
+				<loopElements tag="uses-sdk">
+					<setStringFromAttribute result="TargetSDKVersionString" tag="$" name="android:targetSdkVersion"/>
+				</loopElements>
+
+				<setInt result="TargetSDKVersionInt" value="$S(TargetSDKVersionString)"/>
+				<setBoolIsGreater result="bTargetGreaterThan10" arg1="$I(TargetSDKVersionInt)" arg2="10"/>
+
+				<setBool result="bSetTouchScreenNotRequired" value="false"/>
+				<if condition="bEnableFireTVSupport">
+					<true>
+						<!--Loop through to find an existing touchscreen feature. If one exists, set required to false, else, add the feature with requirement set to false-->
+						<loopElements tag="uses-feature">
+							<if condition="bSetTouchScreenNotRequired">
+								<false>
+									<setStringFromAttribute result="FeatureName" tag="$" name="android:name"/>
+									<setBoolIsEqual result="bFoundTouchScreenFeature" arg1="$S(FeatureName)" arg2="android.hardware.touchscreen"/>
+									<if condition="bFoundTouchScreenFeature">
+										<removeAttribute tag="$" name="android:required"/>
+										<addAttribute tag="$" name="android:required" value="false"/>
+										<setBool result="bSetTouchScreenNotRequired" value="true"/>
+									</if>
+								</false>
+							</if>
+						</loopElements>
+						<if condition="bSetTouchScreenNotRequired">
+							<false>
+								<addFeature android:name="android.hardware.touchscreen" android:required="false"/>
+							</false>
+						</if>
+					</true>
+				</if>
+
+				<setElement result="AuthActivityElement" value="activity"/>
+				<addAttribute tag="$AuthActivityElement" name="android:name" value="com.amazon.identity.auth.device.authorization.AuthorizationActivity"/>
+				<addAttribute tag="$AuthActivityElement" name="android:theme" value="@android:style/Theme.NoDisplay"/>
+				<addAttribute tag="$AuthActivityElement" name="android:allowTaskReparenting" value="true"/>
+				<addAttribute tag="$AuthActivityElement" name="android:launchMode" value="singleTask"/>
+
+				<setElement result="IntentFilterElement" value="intent-filter"/>
+
+				<addElements tag="$IntentFilterElement">
+					<action android:name="android.intent.action.VIEW"/>
+					<category android:name="android.intent.category.DEFAULT"/>
+					<category android:name="android.intent.category.BROWSABLE"/>
+				</addElements>
+
+				<setElement result="HostElement" value="data"/>
+				<addAttribute tag="$HostElement" name="android:host" value="$S(PackageName)"/>
+				<addAttribute tag="$HostElement" name="android:scheme" value="amzn"/>
+
+				<addElement tag="$IntentFilterElement" name="HostElement"/>
+				<addElement tag="$AuthActivityElement" name="IntentFilterElement"/>
+				<addElement tag="application" name="AuthActivityElement"/>
+				
+				<if condition="bTargetGreaterThan10">
+					<true>
+						<addElements tag="application">
+							<activity android:name="com.amazon.ags.html5.overlay.GameCircleUserInterface" android:theme="@style/GCOverlay" android:hardwareAccelerated="false"/>
+							<activity android:name="com.amazon.ags.html5.overlay.GameCircleAlertUserInterface" android:theme="@style/GCAlert" android:hardwareAccelerated="false"/>
+						</addElements>
+					</true>
+					<false>
+						<addElements tag="application">
+							<activity android:name="com.amazon.ags.html5.overlay.GameCircleUserInterface" android:theme="@style/GCOverlay"/>
+							<activity android:name="com.amazon.ags.html5.overlay.GameCircleAlertUserInterface" android:theme="@style/GCAlert"/>
+						</addElements>
+					</false>
+				</if>
+
+				<addElements tag="application">
+					<meta-data android:name="com.epicgames.ue4.GameActivity.bGameCircleIsEnabled" android:value="true"/>
+					<receiver android:name="com.amazon.identity.auth.device.authorization.PackageIntentReceiver" android:enabled="true">
+						<intent-filter>
+							<action android:name="android.intent.action.PACKAGE_INSTALL"/>
+							<action android:name="android.intent.action.PACKAGE_ADDED"/>
+							<data android:scheme="package"/>
+						</intent-filter>
+					</receiver>
+				</addElements>
+
+				<if condition="bSupportsInAppPurchasing">
+					<true>
+						<addElements tag="application">
+							<receiver android:name="com.amazon.device.iap.ResponseReceiver">
+								<intent-filter>
+									<action android:name="com.amazon.inapp.purchasing.NOTIFY" android:permission="com.amazon.inapp.purchasing.Permission.NOTIFY"/>
+								</intent-filter>
+							</receiver>
+						</addElements>
+						
+						<setBool result="bFoundBillingPermission" value="false"/>
+						<loopElements tag="uses-permission">
+							<if condition="bFoundBillingPermission">
+								<false>
+									<setStringFromAttribute result="PermissionString" tag="$" name="android:name"/>
+									<setBoolIsEqual result="bEqualsBilling" arg1="$S(PermissionString)" arg2="com.android.vending.BILLING"/>
+									<if condition="bEqualsBilling">
+										<true>
+											<setBool result="bFoundBillingPermission" value="true"/>
+										</true>
+									</if>
+								</false>
+							</if>
+						</loopElements>
+						
+						<if condition="bFoundBillingPermission">
+							<false>
+								<log text="GameCircle - Adding Billing Permission for In-App Purchasing"/>
+								<addPermission android:name="com.android.vending.BILLING"/>
+							</false>
+						</if>
+						
+					</true>
+				</if>
+			</true>
+		</if>
+	</androidManifestUpdates>
+
+	<!-- optional additions to proguard -->
+	<proguardAdditions>
+		<if condition="bGameCircleIsEnabled">
+			<true>
+				<insert>
+					-dontwarn com.amazon.**
+					-keep class com.amazon.** {*;}
+					-keepattributes *Annotation*
+				</insert>
+			</true>
+		</if>
+	</proguardAdditions>
+
+	<!-- optional files or directories to copy or delete from Intermediate/Android/APK before ndk-build -->
+	<prebuildCopies>
+		<if condition="bGameCircleIsEnabled">
+			<true>
+				<trace enable="true"/>
+
+				<copyDir src="$S(PluginDir)/../../Build/Android/Java" dst="$S(BuildDir)"/>
+				<copyDir src="$S(PluginDir)/../ThirdParty" dst="$S(BuildDir)"/>
+				<if condition="bSupportsInAppPurchasing">
+					<false>
+						<log text="Amazon IAP Disabled. Removing IAP-related files."/>
+						<deleteFiles filespec="src/com/epicgames/ue4/AmazonStoreHelper.java"/>
+						<deleteFiles filespec="libs/in-app-purchasing-*.jar"/>
+					</false>
+				</if>
+				<if condition="Distribution">
+					<true>
+						<copyFile src="$S(BuildDir)/../../../$S(DistributionAPIKeyFile)" dst="$S(BuildDir)/assets/api_key.txt"/>
+					</true>
+					<false>
+						<copyFile src="$S(BuildDir)/../../../$S(DebugAPIKeyFile)" dst="$S(BuildDir)/assets/api_key.txt"/>
+					</false>
+				</if>
+			</true>
+			<false>
+				<log text="GameCircle Is Not Enabled. Removing GameCircle Files"/>
+				<deleteFiles filespec="src/com/epicgames/ue4/AmazonStoreHelper.java"/>
+				<deleteFiles filespec="libs/in-app-purchasing-*.jar"/>
+				<deleteFiles filespec="libs/AmazonInsights*.jar"/>
+				<deleteFiles filespec="libs/gamecirclesdk.jar"/>
+				<deleteFiles filespec="libs/login-with-amazon-sdk.jar"/>
+				<deleteFiles filespec="jni/AGS/*"/>
+				<deleteFiles filespec="jni/libs/libAmazonGamesJni.so"/>
+				<deleteFiles filespec="res/drawable/spinner_*.png"/>
+				<deleteFiles filespec="res/drawable/rounded_corners.xml"/>
+				<deleteFiles filespec="res/drawable/gc_overlay_spinner.xml"/>
+				<deleteFiles filespec="res/layout/modal_*_container.xml"/>
+				<deleteFiles filespec="res/raw/amazon_gc_prototype.zip"/>
+				<deleteFiles filespec="res/values/amazon_gc_styles.xml"/>
+				<deleteFiles filespec="assets/api_key.txt"/>
+			</false>
+		</if>
+	</prebuildCopies>
+
+	<!-- optional additions to the GameActivity imports in GameActivity.java -->
+	<gameActivityImportAdditions>
+		<if condition="bGameCircleIsEnabled">
+			<true>
+				<insert>
+					// Needed for Amazon
+					import com.amazon.ags.api.AmazonGamesCallback;
+					import com.amazon.ags.api.AmazonGamesClient;
+					import com.amazon.ags.api.AmazonGamesStatus;
+					import com.amazon.ags.api.AmazonGamesFeature;
+					import android.content.pm.PackageInfo;
+					import java.util.EnumSet;
+				</insert>
+			</true>
+		</if>
+	</gameActivityImportAdditions>
+
+	<!-- optional additions to the GameActivity class in GameActivity.java -->
+	<gameActivityClassAdditions>
+		<if condition="bGameCircleIsEnabled">
+			<true>
+				<insert>
+					//	Amazon GameCircle
+					private AmazonGamesClient agsClient;
+					private boolean bAGSIsEnabled = false;
+					
+					public native void nativeOnAmazonGamesInitCallback(boolean bServiceIsReady);
+					public native void nativeGameCircleOnResume();
+				</insert>
+
+				<if condition="bSupportsInAppPurchasing">
+					<true>
+						<insert>
+							private boolean bAmazonIAPSetupCalled = false;
+
+							private void SetUpAmazonIAPService()
+							{
+								if(bAmazonIAPSetupCalled)
+								{
+									if(IapStoreHelper != null)
+									{
+										((AmazonStoreHelper)IapStoreHelper).OnServiceInitialized();
+									}
+									return;
+								}
+								
+								bAmazonIAPSetupCalled = true;
+							
+								try
+								{
+									PackageInfo packageInfo = getPackageManager().getPackageInfo(getPackageName(), PackageManager.GET_RECEIVERS);
+									if(packageInfo.receivers != null)
+									{
+										int numReceivers = packageInfo.receivers.length;
+										for(int i = 0; i &lt; numReceivers; ++i)
+										{
+											if( packageInfo.receivers[i].name.equals("com.amazon.device.iap.ResponseReceiver") )
+											{
+												Log.debug("Found receiver indicating Amazon IAP is enabled: " + packageInfo.receivers[i].name);
+												IapStoreHelper = new AmazonStoreHelper("", this, Log);
+												break;
+											}
+										}
+										
+										if(IapStoreHelper != null)
+										{
+											((AmazonStoreHelper)IapStoreHelper).OnServiceInitialized();
+										}
+									}
+								}
+								catch(Exception e)
+								{
+									Log.debug("Exception caught during IAP setup " + e.getMessage());
+								}
+							}
+						</insert>
+					</true>
+					<false>
+						<insert>
+							private void SetUpAmazonIAPService()
+							{
+								// Amazon IAP Marked as Unsupported
+							}
+						</insert>
+					</false>
+				</if>
+			</true>
+		</if>
+	</gameActivityClassAdditions>
+	
+	<!-- optional additions to GameActivity onCreate metadata reading in GameActivity.java -->
+	<gameActivityReadMetadataAdditions>
+		<if condition="bGameCircleIsEnabled">
+			<true>
+				<insert>
+					if(bundle.containsKey("com.epicgames.ue4.GameActivity.bGameCircleIsEnabled"))
+					{
+						bAGSIsEnabled = bundle.getBoolean("com.epicgames.ue4.GameActivity.bGameCircleIsEnabled");
+						Log.debug( "Amazon Games Services Support is set to " + bAGSIsEnabled );
+					}
+					else
+					{
+						Log.debug( "Did not find bGameCircleIsEnabled in manifest. Leaving Amazon Games Services support as " + bAGSIsEnabled );
+					}
+				</insert>
+			</true>
+		</if>
+	</gameActivityReadMetadataAdditions>
+	
+	<!-- optional additions to GameActivity onCreate in GameActivity.java
+	<gameActivityOnCreateAdditions>
+	</gameActivityOnCreateAdditions>
+	-->
+
+	<!-- optional additions to GameActivity onDestroy in GameActivity.java-->
+	<gameActivityOnDestroyAdditions>
+		<if condition="bGameCircleIsEnabled">
+			<true>
+				<insert>
+					if(agsClient != null)
+					{
+						agsClient.shutdown();
+					}
+				</insert>
+			</true>
+		</if>
+	</gameActivityOnDestroyAdditions>
+	
+	<!-- optional additions to GameActivity onStart in GameActivity.java
+	<gameActivityOnStartAdditions>
+	
+	</gameActivityOnStartAdditions>
+	-->
+
+	<!-- optional additions to GameActivity onStop in GameActivity.java
+	<gameActivityOnStopAdditions>
+	</gameActivityOnStopAdditions>
+	-->
+
+	<!-- optional additions to GameActivity onPause in GameActivity.java -->
+	<gameActivityOnPauseAdditions>
+		<if condition="bGameCircleIsEnabled">
+			<true>
+				<insert>
+					if(agsClient != null)
+					{
+						agsClient.release();
+					}
+				</insert>
+			</true>
+		</if>
+	</gameActivityOnPauseAdditions>
+
+	<!-- optional additions to GameActivity onResume in GameActivity.java -->
+	<gameActivityOnResumeAdditions>
+		<if condition="bGameCircleIsEnabled">
+			<true>
+				<insert>
+					if (bAGSIsEnabled)
+					{
+						if(agsClient == null || !agsClient.isInitialized())
+						{
+							AmazonGamesClient.initialize(this, new AmazonGamesCallback() {
+
+								@Override
+								public void onServiceNotReady(AmazonGamesStatus status)
+								{
+									Log.debug("Amazon Games Client Service Did Not Initialize. Returned Status - " + status);
+									nativeOnAmazonGamesInitCallback(false);
+								}
+
+								@Override
+								public void onServiceReady(AmazonGamesClient amazonClient)
+								{
+									agsClient = amazonClient;
+	
+									// Turn this on for more verbose logging
+									com.amazon.ags.html5.factory.ServiceFactory.setDebugLoggingEnabled(true);
+	
+									Log.debug("Amazon Games Client Service Is Ready");
+
+									SetUpAmazonIAPService();
+
+									nativeOnAmazonGamesInitCallback(true);
+								}
+							}, AmazonGamesFeature.all());
+						}
+
+						if(agsClient != null)
+						{
+							Log.debug("[JAVA] Calling nativeGameCircleOnResume----------------------------------");
+							nativeGameCircleOnResume();
+						}
+					}
+				</insert>
+			</true>
+		</if>
+	</gameActivityOnResumeAdditions>
+
+	<!-- optional additions to GameActivity onActivityResult in GameActivity.java
+	<gameActivityOnActivityResultAdditions>
+	</gameActivityOnActivityResultAdditions>
+	-->
+
+	<!-- optional libraries to load in GameActivity.java before libUE4.so -->
+	<soLoadLibrary>
+		<if condition="bGameCircleIsEnabled">
+			<true>
+				<loadLibrary name="AmazonGamesJni" failmsg="AmazonGamesJni library not loaded and required!" />
+			</true>
+		</if>
+	</soLoadLibrary>
+</root>

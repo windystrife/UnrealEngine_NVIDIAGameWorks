@@ -1,0 +1,43 @@
+﻿INTSourceChangelist:3591289
+Availability:Public
+Title: 리플레이 시스템
+Crumbs: %ROOT%, Engine
+Description:게임플레이 녹화 및 재생을 위한 리플레이 시스템에 대한 개요입니다.
+Version: 4.13
+parent:Engine
+order:18
+topic-image:replay_topic.png
+tags:Replays
+
+
+[REGION:banner]
+![](replay_banner.png)(convert:false)
+[/REGION]
+
+[TOC (start:2 end:2)]
+
+## 리플레이 시스템 개요
+언리얼 엔진 4 에는 게임플레이를 녹화하여 나중에 시청할 수 있도록 해주는 리플레이 시스템이 제공됩니다. 일반적인 수준에서 리플레이 시스템 작동 방식은 `DemoNetDriver` 로 내장 리플리케이션 시스템에서 뽑은 데이터를 읽어옵니다. 이 데이터는 라이브, 네트워크 게임플레이 환경에서 `NetDriver` 가 작동되는 방식과 유사합니다. 멀티플레이어 게임처럼 데이터 리플리케이션이 일어나도록 구성된 프로젝트는, 실제 멀티플레이어 모드가 없다 하더라도 별도의 변경 작업 없이 리플레이 시스템과 호환됩니다. 여기서 `DemoNetDriver` 가 네트워크 데이터를 Replay Streamer (리플레이 스트리머)로 전송하는데, 여기서 데이터의 필터링 및 저장 프로세스를 처리합니다. 리플레이를 시청할 때, `DemoNetDriver` 는 라이브 플레이 도중 사용 가능했던 리플리케이션 정보 뿐 아니라, 리플레이에만 연관성이 있는 것으로 지정된 특수 데이터 필드에도 전부 접근할 수 있으며, 이 데이터에서 게임의 이벤트를 재구성할 수 있습니다.
+
+## 리플레이 시스템 함수 기능
+리플레이 시스템의 기본 함수는 데모 녹화 시작 또는 중지, 아니면 기존에 녹화된 데모의 재생입니다. 재생 모드에서 리플레이 시스템은 일시정지, 재생 속도 변경, 특정 시간으로 점프하는 명령을 지원합니다. 이 시스템의 보다 고급적인 사용 예라면, 리플레이에 텍스트 태그 (보통 메타 태그 또는 게임에 연관된 플레이어 이름) 추가한다거나, 버전 정보 또는 텍스트 태그로 기존 리플레이를 질의하는 작업을 들 수 있습니다. 리플레이 시스템은 C++ 코드로 사용할 수 있는데, 주로 `UGameInstance` 와 `UWorld` 클래스를 통해서, 또는 콘솔 명령이나 명령줄 인수와 함께 사용됩니다. 현재 통합 C++/블루프린트 API 를 제작중이며, 앞으로 나오는 엔진 버전에 릴리즈될 예정입니다.
+
+| 함수 또는 변수 이름 | 해당하는 콘솔 명령 | 효과 |
+| --- | --- | --- |
+| `UGameInstance::StartRecordingReplay` | "demorec (ReplayName)" | 리플레이 녹화를 시작합니다. (ReplayName) 파라미터가 제공되지 않은 경우, 리플레이 시스템 자체적으로 이름을 생성할 수 있습니다. |
+| `UGameInstance::StopRecordingReplay` | "demostop" | 현재 리플레이 녹화를 중지합니다. |
+| `UGameInstance::PlayReplay` | "demoplay (ReplayName)" | 지정된 리플레이를 재생합니다. |
+| `UDemoNetDriver::GotoTimeInSeconds` | "demoscrub (ReplayTime)" | 리플레이의 (초 단위로) 지정된 시간으로 점프합니다. |
+| `UWorld::Pauser` (variable) | "demopause" | 이 변수를 월드의 `DemoNetDriver->ServerConnection->OwningActor` 변수에 담긴 PlayerController 로 설정하면 리플레이가 일시정지됩니다. 다시 `NULL` 로 설정하면 리플레이가 재개됩니다. "demopause" 콘솔 명령은 그 변수를 자동으로 설정 또는 소거시킵니다. |
+| `WorldSettings->DemoPlayTimeDilation` (variable) | "demospeed (ReplaySpeed)" | 시간 스케일 인수 설정을 통해 재생 속도를 높이거나 낮춥니다. 값이 1.0 이면 정상 속도입니다. |
+| `AGameMode::bHandleDedicatedServerReplays` (variable) | N/A | 이 변수를 true 로 설정하면 데디케이티드 서버가 게임 녹화를 자동으로 하도록 만듭니다. |
+
+## DemoNetDriver 및 스트리머
+
+`DemoNetDriver` 는 **Streamer** (스트리머)를 사용하여 리플레이 생성에 필요한 정보의 실제 추출 및 녹화 작업을 수행합니다. 리플레이 데이터를 시청하고자 하는 방식에 따라 각기 다른 스트리머를 `DemoNetDriver` 에 붙일 수 있습니다. 엔진에 포함된 스트리머는 용도에 따라 세 종류로 나뉩니다. **NULL Streamer** 는 기본 옵션으로, 호스트 플레이어 소유 머신에서 디스크에 이벤트를 바로 녹화하여 싱글 플레이 게임이나 로컬에 리플레이를 저장하는 게임에 좋습니다. **Memory Streamer** 는 클라이언트 머신에서 실행되어 메모리에 데이터를 저장, 스포츠 게임이나 슈팅 게임에서의 "킬 캠" 처럼 "즉석 리플레이" 를 구현하는 데 좋습니다. 마지막으로 **HTTP Streamer** 는 랜 또는 인터넷 환경의 이차 머신에 리플레이 데이터를 전송하는 데 사용되며, 데디케이티드 서버 게임이나 다수의 시청자들에게 실시간 반응하는 라이브 스트리밍을 제공하는 데 좋습니다.
+
+`DemoNetDriver` 와 그 스트리머 관련 자세한 내용은 [](Engine/Replay/Streamers) 문서를 참고하세요.
+
+## 하위 호환성
+
+리플레이 시스템에는 4.13 버전부터 하위 호환성이 지원됩니다. 즉 리플리케이트되는 프로퍼티를 추가 또는 제거하는 등 빌드에 변경을 가한 후에도 원본 빌드로 녹화했던 리플레이 로드 및 시청이 가능하다는 뜻입니다. 대부분의 경우 리플리케이트되는 필드 중 제거된 것은 자동으로 생략하고 추가된 것에는 기본 값을 사용하도록 리플레이 시스템이 자동 처리해 줍니다. 참고로 `NetSerialize` 로 덮어쓴 구조체는 이와 같은 데이터 포맷 차이를 수동으로 처리해 줘야 합니다. 이를 위해 `FArchive` 는 이제 `EngineNetVer` 와 `GameNetVer` 함수를 제공하는데, 각각 엔진과 게임 버전을 알아내어 게임플레이 데이터가 현재 빌드에 맞도록 조절할 수 있도록 해줍니다. `FNetworkVersion` 의 `GetLocalNetworkVersionOverride` 는 선택한 것의 `uint32` 버전 번호를 반환하는 함수에 바인딩할 수 있습니다. 호환을 위해 정확히 일치할 필요가 없는 경우 `FNetworkVersion` 에는 `IsNetworkCompatibleOverride` 라는 델리게이트가 있는데, 이를 덮어써서 두 버전을 비교하여 호환 여부를 결정하도록 할 수 있습니다.

@@ -1,0 +1,213 @@
+﻿INTSourceChangelist:2946765
+Availability:Public
+Title:游戏性类
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture/Reference
+Description:创建和实现游戏性类的参考。
+Version:4.11
+
+[TOC(start:2)]
+
+虚幻引擎中每个游戏性类由一个类头文件（`.h`）和一个类源文件（`.cpp`）构成。类头包含类和类成员（如变量和函数）的声明，而在类源文件中通过 _实现_ 属于类的函数来定义类的功能。
+
+虚幻引擎中的类拥有一个标准化的命名方案，通过首字母或前缀即可立即明了其为哪种类。游戏性类的前缀有：
+
+| 前缀 | 含义 |
+| ------ | ------- |
+| `A` | 从 _可生成的_ 游戏性对象的基础类进行延伸。它们是 Actor，可直接生成到世界场景中。|
+| `U` | 从所有游戏性对象的基础类进行延伸。它们无法被实例到世界场景中，必须从属于 Actor。总体而言，它们是与 [](Programming/UnrealArchitecture/Actors/Components) 相似的对象。|
+
+
+
+## 添加类
+
+[](Programming\Development\ManagingGameCode\CppClassWizard) 将设置新类所需要的头文件和源文件，并随之更新游戏模块。头文件和源文件自动包含类声明和类构造函数，以及虚幻引擎专有代码 - 例如 `UCLASS()` 宏。
+
+## 类头
+
+虚幻引擎中的游戏性类通常拥有单独且唯一的类头文件。通常这些文件的命名与其中定义的类相匹配，减去 `A` 或 `U` 前缀，并使用 `.h` 文件扩展名。因此，`AActor` 类的类头文件命名为 `Actor.h`。虽然 Epic 代码遵循这些规则，但当前引擎中类名称和源文件名之间不存在正式关系。
+
+游戏性类的类头文件使用标准 C++ 语法，并结合专门的宏，以简化类、变量和函数的声明过程。
+
+在每个游戏性类头文件的顶端，需要包含生成的头文件（自动创建）。因此在 `ClassName.h` 的顶端不许出现以下行：
+
+	#include "ClassName.generated.h"
+
+### 类声明
+
+类声明定义类的名称、其继承的类，以及其继承的函数和变量。类声明还将定义通过 [类说明符](#ClassSpecifiers) 和元数据要求的其他引擎和编辑器特定行为。 
+
+类声明的语法如下所示：
+
+	UCLASS([specifier, specifier, ...], [meta(key=value, key=value, ...)])
+	class ClassName : public ParentName
+	{
+		GENERATED_BODY()
+	}
+
+声明包含一个类的标准 C++ 类声明。在标准声明之上，描述符（如类说明符和元数据）将被传递到 `UCLASS` 宏。它们用于创建被声明类的 `UClass`，它可被看作引擎对类的专有表达。此外，`GENERATED_BODY()` 宏必须被放置在类体的最前方。
+
+(#ClassSpecifiers)
+#### 类说明符
+
+[INCLUDE:Programming/UnrealArchitecture/Reference/Classes/Specifiers#main(offset:3)]
+
+## 类实现
+
+所有的游戏性类必须使用 `GENERATED_BODY` 宏进行正常实现。该执行在定义类和其所有变量和函数的类头（.h）文件中完成。最佳方法是使类源和头文件的命名与实现的类相匹配，减去 `A` 或 `U` 前缀。因此，`AActor` 类的源文件命名为 `Actor.cpp`，其头文件命名为 `Actor.h`。对编辑器中“Add C++ Class”菜单选项创建的类而言，此操作将自动进行。
+
+源文件（.cpp）必须囊括包含 C++ 类声明的头文件（.h），C++ 类声明通常为自动生成，但也可手动生成（如有必要）。例如，`AActor` 类的 C++ 声明在 `EngineClasses.h` 头文件中自动生成。这意味着 `Actor.cpp` 文件必须包括 `EngineClasses.h` 文件或轮流包含的另一个文件。总体而言只包含游戏项目的头文件，其中包含了游戏项目中游戏性类的标头。以 `AActor` 和 `EngineClasses.h` 为例，其中包含了 `EnginePrivate.h` 标头，此标头则包含了 `Engine.h` - **Engine** 项目的头文件 - 而该头文件又包含 `EngineClasses.h` 头文件。
+
+	#include "EnginePrivate.h"
+
+如在类函数实现中引用其他类（包含一个该文件未将类函数包括在内），则可能还需要包含额外的文件。
+
+### 类构造函数
+
+`UObjects` 使用 **Constructors** 设置属性和其他变量的默认值，并执行其他必要的初值设定。类构造函数通常放置在类实现文件中，如 `AActor::AActor` 构造函数位于 `Actor.cpp` 中。 
+
+[REGION:note]
+部分构造函数可能以每个模块为基础放置在一个特殊的“constructors”文件中。例如 `AActor::AActor` 构造函数可能存在于 `EngineConstructors.cpp` 中。这是自动转换过程的结果，从之前 `DEFAULTS` 块的使用到构造函数的使用。它们将随时间被移至其相应的类源文件。
+[/REGION]
+
+也可以将构造函数内联放置在类头文件中。然而，如果构造函数在类头文件中，UClass 必须结合 `CustomConstructor` 说明符进行声明，因为这阻止了自动代码生成器在标头中创建构造函数声明。
+
+#### 构造函数格式
+
+UObject 构建函数最基本的形式如下所示：
+
+	UMyObject::UMyObject()
+	{
+		// 在此处初始化 Class Default Object 属性。
+	}
+
+该构造函数初始化类默认对象（CDO），CDO 是类的新实例所基于的原版。此外还有一个次要构造函数，支持一个特殊的属性调整结构：
+
+	UMyObject::UMyObject(const FObjectInitializer& ObjectInitializer)
+	:Super(ObjectInitializer)
+	{
+		// 在此处初始化 CDO 属性。
+	}
+
+虽然以上构造函数实际上并不执行任何初始化，但引擎已将所有字段初始化为零、NULL，或其默认构造函数实现的任意值。然而，写入构建函数的任意初始化代码将被应用至 CDO，因此将被复制到引擎中正确创建的对象新实例上，正如 `CreateNewObject` 或 `SpawnActor`。
+
+被传入构造函数的 `FObjectInitializer` 参数除被标记为常数外，还可通过嵌入可变函数进行配置，以覆写属性和子对象。被创建的 `UObject` 将 
+受到这些变更的影响，这可用于变更注册属性或组件的数值。
+
+	AUDKEmitterPool::AUDKEmitterPool(const FObjectInitializer& ObjectInitializer)
+	:Super(ObjectInitializer.DoNotCreateDefaultSubobject(TEXT("SomeComponent")).DoNotCreateDefaultSubobject(TEXT("SomeOtherComponent")))
+	{
+		// 在此处初始化 CDO 属性。
+	}
+
+在上例中，超类将在其构建函数中创建名为“SomeComponent”和“SomeOtherComponent”的子对象，但由于 FObjectInitializer 的原因，该操作将不会执行。在下例中，`SomeProperty` 在 CDO 中将默认为 26，因此在 AUTDemoHUD 的每个新实例中均为如此。
+
+	AUTDemoHUD::AUTDemoHUD()
+	{
+		// 在此处初始化 CDO 属性。
+		SomeProperty = 26;
+	}
+
+#### 构建函数静态属性和助手
+
+为更负责的数据类型设置数值（尤其是类引用、命名和资源引用）时，需要在构造函数中定义并实例化一个 **ConstructorStatics** 结构体，以保存所需的诸多属性数值。`ConstructorStatics` 结构体在构造函数首次运行时才会被创建。在随后的运行上它只会复制一个指针，使其处理速度极快。`ConstructorStatics` 被创建时，数值将被指定到结构体成员，以便稍后在构建函数上指定数值到实际属性时进行访问。
+
+**ContructorHelpers** 是 `ObjectBase.h` 中定义的特殊命名空间。`ObjectBase.h` 包含用于执行构建函数特定常规操作的助手模板。例如为资源或类寻找引用、以及创建并寻找组件的助手模板。
+
+##### 资源引用
+
+理想状态下，类中的资源引用并不存在。硬编码资源引用很脆弱，优选方法是使用蓝图配置资源属性。然而，仍然完全支持硬编码引用。不需要在每次构造对象时搜索资源，因此这些搜索只执行一次。一个静态结构体可确保只执行一次资源搜索：
+
+`ConstructorHelpers::FObjectFinder` 通过 `StaticLoadObject` 为特定的 `UObject` 寻找引用。它常用于引用存储在内容包中的资源。如未找到对象， 
+则报告失败。
+
+	ATimelineTestActor::ATimelineTestActor()
+	{
+		// 进行一次性初始化的结构
+		struct FConstructorStatics
+		{
+			ConstructorHelpers::FObjectFinder<UStaticMesh> Object0;
+			FConstructorStatics()
+			:Object0(TEXT("StaticMesh'/Game/UT3/Pickups/Pickups/Health_Large/Mesh/S_Pickups_Base_Health_Large.S_Pickups_Base_Health_Large'"))
+			{
+			}
+		};
+		static FConstructorStatics ConstructorStatics;
+
+		// 属性初始化
+
+		StaticMesh = ConstructorStatics.Object0.Object;
+	}
+
+##### 类引用
+
+`ConstructorHelpers::FClassFinder` 为特定的 `UClass` 寻找引用。如类未找到，则报告失败。
+
+	APylon::APylon(const class FObjectInitializer& ObjectInitializer)
+	:Super(ObjectInitializer)
+	{
+		// 进行一次性初始化的结构
+		static FClassFinder<UNavigationMeshBase> ClassFinder(TEXT("class'Engine.NavigationMeshBase'"));
+		if (ClassFinder.Succeeded())
+		{
+			NavMeshClass = ClassFinder.Class;
+		}
+		else
+		{
+			NavMeshClass = nullptr;
+		}
+	}
+
+在许多情况下，可只使用 `USomeClass::StaticClass()`，绕开复杂的全部 ClassFinder。例如，在多数情况下均可使用以下方法：
+
+	NavMeshClass = UNavigationMeshBase::StaticClass();
+
+对跨模块的引用而言，使用 ClassFinder 法较好。
+
+##### 组件和子对象
+
+在构造函数中还可创建组件子对象并将其附着到 actor 的层级。生成一个 actor 时，将从 CDO 复制其组件。为确保组件固定被创建、被销毁和被正确地垃圾回收，构建函数中创建的每个组件的指针应被存储在拥有类的一个 UPROPERTY 中。
+
+	UCLASS()
+	class AWindPointSource : public AActor
+	{
+		GENERATED_BODY()
+		public:
+
+		UPROPERTY()
+		UWindPointSourceComponent* WindPointSource;
+
+		UPROPERTY()
+		UDrawSphereComponent* DisplaySphere;
+	};
+
+	AWindPointSource::AWindPointSource()
+	{
+		// 创建一个新组件并对其命名。
+		WindPointSource = CreateDefaultSubobject<UWindPointSourceComponent>(TEXT("WindPointSourceComponent0"));
+		
+		// 将新组件设为该 actor 的根组件，如已存在一个根组件，则将其附着到根上。
+		if (RootComponent == nullptr)
+		{
+			RootComponent = WindPointSource;
+		}
+		else
+		{
+			WindPointSource->AttachTo(RootComponent);
+		}
+
+		// 再创建一个组件。将其附着到刚才创建的第一个组件上。
+		DisplaySphere = CreateDefaultSubobject<UDrawSphereComponent>(TEXT("DrawSphereComponent0"));
+		DisplaySphere->AttachTo(RootComponent);
+		
+		// 在新组件上设置一些属性。
+		DisplaySphere->ShapeColor.R = 173;
+		DisplaySphere->ShapeColor.G = 239;
+		DisplaySphere->ShapeColor.B = 231;
+		DisplaySphere->ShapeColor.A = 255;
+		DisplaySphere->AlwaysLoadOnClient = false;
+		DisplaySphere->AlwaysLoadOnServer = false;
+		DisplaySphere->bAbsoluteScale = true;
+	}
+
+通常没有必要对属于父类的组件进行修改。然而，在任何 `USceneComponent`（包括根组件）上调用 `GetAttachParent`、`GetParentComponents`、`GetNumChildrenComponents`、`GetChildrenComponents` 和 `GetChildComponent` 即可获得当前所有附着组件（包括父类创建的组件）的列表。
+

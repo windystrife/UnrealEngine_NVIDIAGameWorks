@@ -1,0 +1,60 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+#include "Common.ush"
+
+float3 TransformLocalToWorld(float3 LocalPosition)
+{
+	//expand the matrix multiply to avoid a code-gen bug on PS4.
+	//float3 RotatedPosition = mul(LocalPosition.xyz, (float3x3)Primitive.LocalToWorld); 
+	//invariant code!
+	return INVARIANT((Primitive.LocalToWorld[0].xyz * LocalPosition.xxx + Primitive.LocalToWorld[1].xyz * LocalPosition.yyy + Primitive.LocalToWorld[2].xyz * LocalPosition.zzz) + Primitive.LocalToWorld[3].xyz);	
+}
+
+float4 TransformLocalToTranslatedWorld(float3 LocalPosition)
+{
+	float3 RotatedPosition = Primitive.LocalToWorld[0].xyz * LocalPosition.xxx + Primitive.LocalToWorld[1].xyz * LocalPosition.yyy + Primitive.LocalToWorld[2].xyz * LocalPosition.zzz;
+	return float4(RotatedPosition + (Primitive.LocalToWorld[3].xyz + ResolvedView.PreViewTranslation.xyz),1);
+}
+
+#if VERTEXSHADER && FEATURE_LEVEL >= FEATURE_LEVEL_SM4 && ONEPASS_POINTLIGHT_SHADOW && USING_VERTEX_SHADER_LAYER
+	/** This is the instance count per-face, since we are use 6*N to render to all faces of the cube without a GS. */
+	uint InstanceCount;
+#endif
+
+uint GetLayerInstanceID( uint InstanceID )
+{
+#if VERTEXSHADER && ONEPASS_POINTLIGHT_SHADOW && USING_VERTEX_SHADER_LAYER
+	return InstanceID % InstanceCount;
+#else
+	return InstanceID;
+#endif
+}
+
+// Octahedron Normal Vectors
+// [Cigolle 2014, "A Survey of Efficient Representations for Independent Unit Vectors"]
+//						Mean	Max
+// oct		8:8			0.33709 0.94424
+// snorm	8:8:8		0.17015 0.38588
+// oct		10:10		0.08380 0.23467
+// snorm	10:10:10	0.04228 0.09598
+// oct		12:12		0.02091 0.05874
+
+float2 UnitToOct( float3 N )
+{
+	N.xy /= dot( 1, abs(N) );
+	if( N.z <= 0 )
+	{
+		N.xy = ( 1 - abs(N.yx) ) * ( N.xy >= 0 ? float2(1,1) : float2(-1,-1) );
+	}
+	return N.xy;
+}
+
+float3 OctToUnit( float2 Oct )
+{
+	float3 N = float3( Oct, 1 - dot( 1, abs(Oct) ) );
+	if( N.z < 0 )
+	{
+		N.xy = ( 1 - abs(N.yx) ) * ( N.xy >= 0 ? float2(1,1) : float2(-1,-1) );
+	}
+	return normalize(N);
+}

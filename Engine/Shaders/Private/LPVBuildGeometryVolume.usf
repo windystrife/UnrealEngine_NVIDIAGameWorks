@@ -1,0 +1,80 @@
+//-----------------------------------------------------------------------------
+// File:		LPVBuildGeometryVolume.usf
+//
+// Summary:		Compute shader to build a geometry volume from a VPL list
+//
+// Created:		2013-03-01
+//
+// Author:		mailto:benwood@microsoft.com
+//
+//				Copyright (C) Microsoft. All rights reserved.
+//-----------------------------------------------------------------------------
+
+/*------------------------------------------------------------------------------
+	Compile time parameters:
+------------------------------------------------------------------------------*/
+
+#include "Common.ush"
+#include "LPVWriteCommon.ush"
+#include "LPVGeometryVolumeCommon.ush"
+
+//------------------------------------------------------------------------------
+
+#define LPV_MULTIPLE_BOUNCES_ENABLED	LPV_MULTIPLE_BOUNCES
+#define DEBUG_HIGHLIGHT_BORDERS			0
+
+//------------------------------------------------------------------------------
+
+StructuredBuffer<VplListEntry>			gGvListBuffer; 
+ByteAddressBuffer						gGvListHeadBuffer;   
+
+//------------------------------------------------------------------------------
+
+[numthreads(4,4,4)]
+void CSBuildGeometryVolume(uint3 DTid : SV_DispatchThreadID) 
+{
+	int index = GetGridAddress( DTid );
+	if ( index == -1 ) return;
+
+	uint listIndex = gGvListHeadBuffer.Load( index*4 ) - 1; // 0-terminated lists to prevent infinite recursion
+
+	GeometryVolumeEntry cell;
+
+	ClearGvEntry( cell );
+	const float RsmAreaMultiplier = LpvWrite.RsmAreaIntensityMultiplier * 0.25;
+
+	uint count = 0;
+	while (listIndex != -1 )
+	{
+		VplListEntry listEntry = gGvListBuffer[ listIndex ];
+		Vpl	vpl = UnpackVpl( listEntry );  
+
+		// Weight according to projected texel size 1 / N dot L
+		float nDotL = abs( dot( LpvWrite.GeometryVolumeCaptureLightDirection.xyz, vpl.normal ) );
+		nDotL = max( nDotL, 0.25f ); // Clamp to prevent divBy0 and and general weirdness due to undersampling
+		float weight = 0.15 / nDotL;
+
+#if LPV_MULTIPLE_BOUNCES_ENABLED
+		cell.color += vpl.flux * RsmAreaMultiplier;
+#endif
+
+#if DEBUG_HIGHLIGHT_BORDERS
+		if ( DTid.x==0 || DTid.x == 31 || DTid.y == 0 || DTid.y == 31 )
+		{
+			weight = 100;
+		}
+#endif
+		AccumulateCoeffsGeometryVolume( weight * RsmAreaMultiplier, vpl.normal, cell );
+
+		count++;
+		if ( count > 128 ) break; // Prevent huge spikes in this shader on PC
+		listIndex = listEntry.nextIndex-1; // 0-terminated lists to prevent infinite recursion
+	}
+
+#if LPV_MULTIPLE_BOUNCES_ENABLED
+	count = max(count,1);
+	cell.color /= (float)(count);
+#endif
+
+	WriteGvCell( index, cell );
+}

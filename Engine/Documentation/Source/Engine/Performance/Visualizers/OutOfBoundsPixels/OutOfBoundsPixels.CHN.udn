@@ -1,0 +1,99 @@
+﻿INTSourceChangelist:2704715
+Availability:Public
+Title:越界像素
+Crumbs: %ROOT%, Engine, Engine/Performance/Visualizers
+Description:在虚幻编辑器视口中显示越界像素。
+version:4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Performance/Visualizers/OutOfBoundsPixels:title%](OOBP_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Performance/Visualizers/OutOfBoundsPixels:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Performance/Visualizers/OutOfBoundsPixels:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Performance/Visualizers/OutOfBoundsPixels]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Performance/Visualizers/OutOfBoundsPixels:title%](OOBP_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Performance/Visualizers/OutOfBoundsPixels:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Performance/Visualizers/OutOfBoundsPixels:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Performance/Visualizers/OutOfBoundsPixels]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:banner]
+
+[/REGION]
+
+[TOC(start:2)]
+
+
+如果一个物体出现闪烁或消失（一部分有可能仍然在屏幕中），原因有可能是它的一部分已越界。出现此状况的常见原因：在选色器中使用了世界位置偏移或位移、骨骼网格体未包含物理资源、或组件设置为继承所有者边界。
+
+这会导致视锥剔除、遮蔽剔除、阴影投射、间接光照缓存和其他诸多渲染功能出现异常。最明显的穿帮是摄像机旋转时出现的闪烁，因为边界出屏后它便会被错误剔除。
+
+选择 **Visualize -> Out of Bounds Pixels** 即可显示处于物体边界外的像素。
+
+## 用法
+
+如需在视口中启用该模式 - 在视口上 **左键单击** **Show 按钮** 并选择 **Visualize -> Out of Bounds Pixels**。
+
+![](OOBP_showMenu.png)
+
+## 继承所有者边界
+
+蓝图组件通常可设为继承其父项的边界，如父项的边界比子项小，则可能出现问题。
+
+下图中的方块物体是由一个盒子组件（图中红色盒子）和一个静态网格体组件所构成的蓝图。静态网格体被设为从盒子继承边界。如盒子的范围比静态网格体小，越界的像素部分将以各种颜色显示（蓝、黄、白）。
+
+[REGION:lightbox]
+[![](OOBP_smallBounds_boxExtents.png)(w:300)](OOBP_smallBounds_boxExtents.png) [![](OOBP_smallBounds.png)(w:300)](OOBP_smallBounds.png) [![](OOBP_smallBoundsRotated.png)(w:300)](OOBP_smallBoundsRotated.png)
+
+边界框（图中蓝色框）固定与世界场景对齐，旋转盒子即可使越界的网格体部分重新回到边界框中。然而如果越界的网格体部分仍处于摄像机画面中，边界框完全移出摄像机后它便会从画面中消失。
+
+下图是修正后的蓝图，盒子组件的范围已正确设置。
+
+[![](OOBP_correctBounds_boxExtents.png)(w:300)](OOBP_correctBounds_boxExtents.png) [![](OOBP_correctBounds.png)(w:300)](OOBP_correctBounds.png) [![](OOBP_correctBoundsRotated.png)(w:300)](OOBP_correctBoundsRotated.png)
+[/REGION]
+
+## 世界位置偏移或位移
+
+可能出现越界的另一种常见情况：着色器正在对顶点的世界位置进行即时修改，将它们推出物体原有的边界框外：
+
+[REGION:lightbox]
+[![](OOBP_worldPostionOffsetIssue_02.png)(h:300)](OOBP_worldPostionOffsetIssue_02.png) [![](OOBP_worldPostionOffsetIssue_01.png)(h:300)](OOBP_worldPostionOffsetIssue_01.png)
+[/REGION]
+
+该物体的部分在边界框隐藏或离开摄像机时将变为可见，因此它会在不恰当的时机闪烁或消失。
+
+在此状况下，使用组件 **Details** 面板中 **Rendering** 扩展菜单下的 **Bounds Scale** 即可扩大网格体的边界框，使其将所有像素包含在内。在阴影投射物上执行此操作需格外注意，因为较大的阴影投射物的性能消耗较高。骨骼网格体上的边界源自物理资源，可单独对个体骨骼进行标记，确定是否对边界产生影响。
+
+![](OOBP_BoundsScale.png)
+
+## 骨骼网格体
+
+骨骼网格体离开其边界的主要原因是由于动画导致网格体从其 Actor 的根移开。然而，带物理资源的骨骼网格体可通过物理资源计算其边界。启用方法：在 **Content Browser** 中 **右键单击** 骨骼网格体并选择 **Create Physics Asset**。使用默认设置将消除骨骼网格体边界引起的问题，但可能需要对结果进行编辑。 
+如需了解 **物理资源** 编辑的详细内容，请查阅 [物理资源工具](Engine/Physics\PhAT) 文档。

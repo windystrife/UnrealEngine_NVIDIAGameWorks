@@ -1,0 +1,201 @@
+﻿INTSourceChangelist:3388666
+Availability:Public
+Title:2.3- キャラクターの Movement 関数を実装する
+Crumbs: %ROOT%, Programming, Programming/Tutorials/FirstPersonShooter, Programming/Tutorials/FirstPersonShooter/2
+Description:FPS キャラクターの Movement 関数の実装方法を学びます。
+SkillLevel:Beginner
+Version:4.15
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[前のステップ](Programming/Tutorials/FirstPersonShooter/2/2)
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[セクション ホーム](Programming/Tutorials/FirstPersonShooter/2)
+	[/PARAM]	
+	[PARAM:next]
+		[次のステップ](Programming/Tutorials/FirstPersonShooter/2/4)
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+このステップでは、Player Input コンポーネントをセットアップし、以下の関数を `FPSCharacter`クラスに実装します。
+
+*	`MoveForward`
+*	`MoveRight`
+
+## Movement 関数のインターフェース
+
+`FPSCharacter` の軸マッピングをセットアップしたので、Visual Studio のご自身のプロジェクトに切り替えることができます。
+
+1.	 `FPSCharacter.h` で、以下の関数の宣言を`SetupPlayerInputComponent` の下に追加します。
+
+		// Handles input for moving forward and backward. (前後方向の移動の入力を処理) 
+		UFUNCTION()
+		void MoveForward(float Value);
+		// Handles input for moving right and left. (左右の移動の入力を処理) 
+
+		UFUNCTION()
+		void MoveRight(float Value);
+
+	`UFUNCTION` マクロ (各関数の上にあります) は、エンジンにこれらの関数を認識させて、関数をシリアライズやその他のエンジン機能に含めることができるようにします。
+
+1.	`FPSCharacter.h` は以下のようになります。
+
+		// Fill out your copyright notice in the Description page of Project Settings. (Project Settings の Description ページに著作権情報を入力してください) 
+		#pragma once
+
+		#include "GameFramework/Character.h"
+
+		#include "FPSCharacter.generated.h"
+		UCLASS()
+
+		class FPSPROJECT_API AFPSCharacter : public ACharacter
+		{
+			GENERATED_BODY()
+		public:
+
+			// Sets default values for this character's properties. (このキャラクターのプロパティのデフォルト値を設定) 
+			AFPSCharacter();
+		protected:
+
+			// Called when the game starts or when spawned (ゲーム開始時またはスポーン時に呼び出される)
+			virtual void BeginPlay() override;
+			public:
+
+			// Called every frame (フレームごとに呼び出される)
+			virtual void Tick( float DeltaSeconds ) override;
+		// Called to bind functionality to input (機能と入力をバインドするために呼ばれます)
+
+			virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+		// Handles input for moving forward and backward. (前後方向の移動の入力を処理) 
+
+			UFUNCTION()
+			void MoveForward(float Value);
+		// Handles input for moving right and left. (左右の移動の入力を処理) 
+
+			UFUNCTION()
+			void MoveRight(float Value);
+			};
+
+
+## Movement 関数の実装
+
+典型的な FPS 制御スキームでは、キャラクターの移動軸はカメラに対して相対的です。つまり、「forward (前方) 」の動きは「カメラが向いている方向」を意味し、「right (右) 」はカメラが向いている右方向を意味します。`PlayerController` を使用してキャラクターの回転の制御を取得します。上下方向を向いている間も地面に沿った動作になるように、`MoveForward` 関数は回転制御のピッチ コンポーネントを無視して、入力を XY プレーンに制限します。
+
+1.	 `FPSCharacter.cpp` で、以下の行を `Super::SetupPlayerInputComponent(PlayerInputComponent)` の下の `SetupPlayerInputComponent` 関数に追加します。
+
+		// Called to bind functionality to input (機能と入力をバインドするために呼ばれます)
+		void AFPSCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent)
+		{
+			Super::SetupPlayerInputComponent(PlayerInputComponent);
+			// Set up "movement" bindings. (移動のバインディングをセットアップ) 
+
+			PlayerInputComponent->BindAxis("MoveForward", this, &AFPSCharacter::MoveForward);
+			PlayerInputComponent->BindAxis("MoveRight", this, &AFPSCharacter::MoveRight);
+		}
+
+	[REGION:note]
+	`InputComponent` は、入力データの処理方法を定義するコンポーネントです。`InputComponent` は、入力を受けさせたいアクタにアタッチすることができます。
+	[/REGION]
+
+1.	以下の `MoveForward` 関数定義を `FPSCharacter.cpp` に『追加します。
+
+		void AFPSCharacter::MoveForward(float Value)
+		{
+			// Find out which way is "forward" and record that the player wants to move that way. (前進方向を確認し、プレイヤーがそちらの方向に移動するように記録) 
+			FVector Direction = FRotationMatrix(Controller->GetControlRotation()).GetScaledAxis(EAxis::X);
+			AddMovementInput(Direction, Value);
+		}
+
+1.	以下の `MoveRight` 関数定義を `FPSCharacter.cpp` に追加します。
+
+		void AFPSCharacter::MoveRight(float Value)
+		{
+			// Find out which way is "forward" and record that the player wants to move that way. (右方向を確認し、プレイヤーがそちらの方向に移動するように記録) 
+			FVector Direction = FRotationMatrix(Controller->GetControlRotation()).GetScaledAxis(EAxis::Y);
+			AddMovementInput(Direction, Value);
+		}
+
+1.	`FPSCharacter.cpp` は以下のようになります。
+
+		// Fill out your copyright notice in the Description page of Project Settings. (Project Settings の Description ページに著作権情報を入力してください) 
+		#include "FPSProject.h"
+
+		#include "FPSCharacter.h"
+				// Sets default values (デフォルト値を設定) 
+
+		AFPSCharacter::AFPSCharacter()
+		{
+		 	// Set this character to call Tick() every frame. (このキャラクターがフレーム毎に Tick() を呼び出すように設定します) You can turn this off to improve performance if you don't need it. (必要がなければパフォーマンスを向上させるためにオフにすることができます) 
+			PrimaryActorTick.bCanEverTick = true;
+		}
+
+		// Called when the game starts or when spawned (ゲーム開始時またはスポーン時に呼び出される)
+
+		void AFPSCharacter::BeginPlay()
+		{
+			Super::BeginPlay();
+			if (GEngine)
+
+			{
+				// Put up a debug message for five seconds. (デバッグ メッセージを 5 秒間表示) The -1 "Key" value (first argument) indicates that we will never need to update or refresh this message. ( -1 のキー値 (最初の引数) は、このメッセージを更新、リフレッシュする必要がないことを示しています) 
+				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("We are using FPSCharacter."));
+			}
+		}
+		// Called every frame (フレームごとに呼び出される)
+
+		void AFPSCharacter::Tick( float DeltaTime )
+		{
+			Super::Tick( DeltaTime );
+		}
+
+		// Called to bind functionality to input (機能と入力をバインドするために呼ばれます)
+
+		void AFPSCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent)
+		{
+			Super::SetupPlayerInputComponent(PlayerInputComponent);
+		// Set up "movement" bindings. (移動のバインディングをセットアップ) 
+
+			PlayerInputComponent->BindAxis("MoveForward", this, &AFPSCharacter::MoveForward);
+			PlayerInputComponent->BindAxis("MoveRight", this, &AFPSCharacter::MoveRight);
+		}
+		void AFPSCharacter::MoveForward(float Value)
+
+		{
+			// Find out which way is "forward" and record that the player wants to move that way. (前進方向を確認し、プレイヤーがそちらの方向に移動するように記録) 
+			FVector Direction = FRotationMatrix(Controller->GetControlRotation()).GetScaledAxis(EAxis::X);
+			AddMovementInput(Direction, Value);
+		}
+		void AFPSCharacter::MoveRight(float Value)
+
+		{
+			// Find out which way is "forward" and record that the player wants to move that way. (右方向を確認し、プレイヤーがそちらの方向に移動するように記録) 
+			FVector Direction = FRotationMatrix(Controller->GetControlRotation()).GetScaledAxis(EAxis::Y);
+			AddMovementInput(Direction, Value);
+		}
+
+## キャラクターの移動のテスト
+
+新規で実装したキャラクターの移動の関数をコンパイルし、テストします。
+
+1.	Visual Studio に `FPSCharacter` のヘッダ (\*.h) と CPP (\*.cpp) ファイルを保存します。
+
+1.	**[Solution Explorer (ソリューション エクスプローラ)]** で **[FPSProject]** を探します。
+
+1.	**[FPSProject]** 上で右クリックして **[Build]** を選択してプロジェクトをコンパイルします。
+
+	![](BuildProject.png)
+
+1.	ビルドが終了したらアンリアル エディタで **FPSProject** を開きます。
+
+1.	レベル エディタのツールバー で、**[Play (プレイ)]** ボタンをクリックします。ここまでで、前方、後方、左右への移動ができるようになったはずです。
+
+1.	[PIE (Play In Editor)] モードを終了するには、レベル エディタで Escape キーを押すか、**[Stop]** ボタンをクリックします。
+
+%Steps%

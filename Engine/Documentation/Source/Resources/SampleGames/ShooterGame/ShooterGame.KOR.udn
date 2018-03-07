@@ -1,0 +1,233 @@
+﻿INTSourceChangelist:3108692
+Availability: Public
+Title:슈팅 게임
+Crumbs:%ROOT%, Resources
+Description:ShooterGame 프로젝트 C++ 예제 게임에 대한 문서입니다.
+Related: Programming/Basics
+Related: Gameplay/ClassCreation/CodeOnly
+Related: Programming/UnrealArchitecture/Reference/Functions
+Related: Gameplay/Networking/Actors/Components
+Related: Gameplay/Networking/Actors/RPCs
+Related: Engine/Blueprints/Editor
+Related: Engine/Animation/AnimMontage
+Related: Engine/Animation/Blendspaces
+Related: Engine/Audio/Overview
+Related: Programming/Slate
+Related: Gameplay/Input
+Related: Engine/Rendering/ParticleSystems
+Version: 4.9
+
+
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Resources/SampleGames/ShooterGame:title%](Shooter_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%\anim_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/ShooterGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/ShooterGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/ShooterGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Resources/SampleGames/ShooterGame:title%](Shooter_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%\anim_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/ShooterGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/ShooterGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/ShooterGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+
+[REGION:fullwidth]
+![](ShooterGame.png)
+[/REGION]
+
+[TOC(start:2)]
+
+First Person Shooter 샘플은 PC 멀티플레이어 FPS 게임 예제입니다. 웨폰, 게임타입과 아울러 
+단순한 프론트엔드 메뉴 시스템에 대한 기본적인 구현이 포함되어 있습니다.
+
+특징적인 개념을 전부 나열해 보면 이렇습니다:
+
+* 즉시 적중 무기 (ShooterWeapon_Instant)
+* 발사체 기반 무기 (ShooterWeapon_Projectile + ShooterProjectile)
+* 솔로 기반 게임 모드 (ShooterGame_FreeForAll)
+* 팀 기반 게임 모드 (ShooterGame_TeamDeathMatch)
+* 픽업 (ShooterPickup)
+* 메인 메뉴 (ShooterHUD_Menu)
+
+
+## 무기 발사 시스템
+
+탄환 관리, 재장전, 리플리케이션 등 무기 발사에 관련된 기본적인 함수성은 
+`AShooterWeapon` 클래스에 구현되어 있습니다.
+
+무기는 로컬 클라이언트와 서버에서 (RPC 콜을 통해) 발사 상태로 전환됩니다. `StartFire()`/`StopFire()` 에서 
+`DetermineWeaponState()` 를 호출하여 무기가 어느 상태에 있어야 하는지를 결정하기 위한 로직을 약간 거친 다음 
+`SetWeaponState()` 를 호출하여 무기를 적합한 상태에 놓습니다. 발사 상태에 있으면 로컬 클라이언트는 
+`HandleFiring()` 를 반복 호출하게 되고, 이어서 `FireWeapon()` 를 호출합니다. 그러면 탄환을 업데이트하고 `ServerHandleFiring()` 를 호출하여 
+서버에서도 똑같이 해 줍니다. 서버 버전은 `BurstCounter` 변수를 통해서 발사된 한 방에 대해 원격 클라이언트에 알리는 역할을 
+담당하기도 합니다.
+
+원격 클라이언트에서 수행되는 동작은 순전히 겉치레에 불과합니다. 무기 발사시 원격 클라이언트가 애니메이션을 재생과 
+이펙트 스폰 등, 무기 발사의 시각적인 면을 담당할 수 있도록 `BurstCounter` 프로퍼티를 사용하여 리플리케이트 
+처리합니다.
+
+### 즉시 적중 무기 발사
+
+즉시 적중 감지는 라이플이나 레이저처럼 빠른 속도의 발사 무기에 사용됩니다. 기본적인 개념은, 플레이어의 무기 발사 순간 
+무기의 조준 방향으로 선 검사를 하여 걸리는 것이 있는지 확인합니다.
+
+이 방법은 정밀도가 높으며, (장식이나 잔해처럼) 서버측에는 존재하지 않는 액터를 가지고 작업할 수 있습니다.
+로컬 클라이언트에서는 계산을 통해 서버에 무엇이 맞았는지 알려줍니다. 그러면 서버는 적중을 검증하고, 필요하다면 
+리플리케이션을 합니다.
+
+`FireWeapon()` 에서, 로클 클라이언트는 카메라 위치에서의 트레이스를 하여 조준선 아래 처음 막힌 적중물을 찾아 
+`ProcessInstantHit()` 에 전해줍니다. 거기서 다음 셋 중 한가지 일이 벌어집니다:
+
+* 적중을 서버에 전송하여 검증합니다 (`ServerNotifyHit()` --> `ProcessInstantHit_Confirmed()`).
+* 적중된 액터가 서버에 존재하지 않는 경우, 적중은 로컬에서 처리합니다 (`ProcessInstantHit_Confirmed()`).
+* 아무것도 적중하지 않은 경우, 서버에 알립니다 (`ServerNotifyMiss()`).
+
+
+적중이 확인되면 적중된 액터에 대미지를 적용, 흔적과 충격 이펙트를 스폰시킨 뒤 `HitNofity` 변수에 적중 관련 데이터를 
+설정하여 원격 클라이언트에 알립니다. 빗나가면 흔적만 스폰시키고 원격 클라이언트에 대해 `HitNotify` 를 설정하며, 
+클라이언트에서는 `HitNotify` 변화를 기다리다가 로컬 클라이언트와 같은 트레이스를 하고, 흔적과 충격 이펙트를 필요에 따라 스폰합니다.
+
+즉시 적중의 구현에는 무기 반동이 수반되기도 합니다. 트레이스/검증 일관성을 위해, 로컬 클라이언트는 `FireWeapon()` 실행시마다 
+랜덤 시드를 고른 다음 모든 RPC 와 `HitNotify` 팩에 끼워 전달합니다.
+
+### 발사체 무기 발사
+
+발사체 발사는 천천히 날아가고, 충격시 폭발하고, 중력의 영향을 받는 등의 탄환을 발사하는 무기를 흉내내는 데 사용됩니다.
+수류탄을 투척할 때처럼, 무기 발사 결과를 무기 발사 시점에는 알 수 없는 경우가 있습니다.
+이러한 유형의 무기에 대해서는 실제 물리적 오브젝트, 즉 발사체 (_projectile_) 를 스폰시켜 무기 조준 방향으로 
+이동시킵니다. 발사체가 월드의 다른 오브젝트와 충돌하면 적중 판정을 내립니다.
+
+발사체 발사의 경우, 로컬 클라이언트는 `FireWeapon()` 안에서 조준선 아래 어느 액터가 있는지 검사하기 위해 
+카메라에서 트레이스를 합니다. 즉시 적중 구현에서와 비슷하지요. 플레이어가 무언가를 조준하고 있다면, 그 지점에 맞게끔 발사 방향을 
+조정하고 서버에서 `ServerFireProjectile()` 를 호출하여 무기의 조준 방향으로 발사체 액터를 스폰시킵니다.
+
+서버에서 발사체 이동 관련 컴포넌트의 적중을 감지하면, 폭발하면서 대미지를 입히고, 이펙트를 스폰하고, 
+리플리케이션에서 떼어내어 클라이언트에 그 이벤트를 알립니다. 그러면 발사체는 콜리전, 이동, 표시여부를 끈 뒤 1 초간의 
+클라이언트 리플리케이션 업데이트 시간을 준 뒤 자체 소멸시킵니다.
+
+클라이언트에서 폭발 이펙트는 `OnRep_Exploded()` 를 통해 리플리케이트됩니다.
+
+## 플레이어 인벤토리
+
+플레이어의 인벤토리는 플레이어 폰 (`AShooterCharacter`) 의 `Inventory` 프로퍼티에 저장된 `AShooterWeapon` 레퍼런스 
+배열입니다. 현재 장착된 무기는 서버에서 리플리케이션 되며, 추가적으로 `AShooterCharacter` 는 그 현재 무기를 
+`CurrentWeapon` 프로퍼티에 로컬 저장하여 새 무기가 장착될 때 기존 무기를 장착 해제할 수 
+있도록 합니다.
+
+플레이어가 무기를 장착할 때는 적합한 무기 메시, 로컬의 경우 1인칭 무기, 그 외의 경우 3인칭 무기를 
+Pawn 에 붙이고 무기에 애니메이션을 재생합니다. 애니메이션 도중에는 무기가 장착중 상태로 
+전환됩니다.
+
+## 플레이어 카메라
+
+1인칭 모드에서는, 플레이어의 시야를 기준으로 팔이 항상 보일 수 있도록 폰의 메시를 카메라에 강결합(hard-attach)시킵니다. 
+이러한 접근법의 단점은, 전체 메시가 카메라의 yaw 와 pitch 에 일치되도록 회전하기 때문에, 
+다리가 플레이어의 시야에 보이지 않는다는 점입니다.
+
+카메라 업데이트의 기본적인 흐름은 이렇습니다:
+
+* 매 틱마다 `AShooterCamera::UpdateCamera()` 가 실행됩니다.
+* 플레이어의 입력에 따른 카메라 로테이션 업데이트를 위해 `APlayerCamera::UpdateCamera()` 를 호출합니다.
+* 카메라에 맞춰 1인칭 메시를 회전시키는 데 필요한 계산을 하기 위해 `AShooterCharacter::OnCameraUpdate()` 를 호출합니다.
+
+
+플레이어가 죽으면 `AShooterPlayerController::PawnDied()` 핸들러에 설정된 고정 위치 방향의 _death_ 카메라로 전환됩니다.
+이 함수는 `AShooterPlayerController::FindDeathCameraSpot()` 를 호출해서 여러가지 다른 위치를 둘러보다가
+레벨 지오메트리에 막히지 않는 첫 번째 것을 사용합니다.
+
+## 온라인 멀티플레이어
+
+온라인 멀티플레이어 경기는 3 단계로 나뉩니다:
+
+* 워밍업
+* 경기 시작
+* 게임 오버
+
+
+첫 플레이어가 게임에 참가하면 **워밍업** 단계가 시작됩니다. 카운트다운 타이머가 찍히는 짧은 기간으로, 
+다른 플레이어가 참가할 수 있는 시간을 줍니다. 이 기간 동안 플레이어는 _관람자_ 모드로 맵을 날아다닐 수 
+있습니다. 카운트다운 타이머 시간이 다 되면 `StartMatch()` 를 호출하여 모든 플레이어를 재시작시키고 그 Pawn 을 
+스폰시킵니다.
+
+경기 시간은, 서버측 `AShooterGameMode::DefaultTimer()` 함수에서의 게임 시간 계산과 함께 이루어지는데,
+이는 _게임_ 시간 1 초당 한 번에 해당하는 현재 시간 길이 속도의 루핑 타이머를 사용하여 실행합니다.
+이는 게임 리플리케이션 인포 클래스 (`AShooterGRI`) 의 `RemainingTime` 프로퍼티에 저장되는데, 나중에 이것이 
+클라이언트에 리플리케이션 됩니다. 남은 시간이 0 에 도달하면 `FinishMatch()` 를 호출하여 게임 세션을 끝냅니다. 그러면 
+모든 플레이어에게 경기 종료를 알리고 이동과 생명력을 비활성화시킵니다.
+
+## 메뉴 시스템
+
+메뉴 시스템은 [슬레이트 UI 프레임워크](Programming/Slate) 를 사용하여 생성되며, **메뉴**, **메뉴 위젯**, **메뉴 아이템** 으로 구성됩니다. 
+각 메뉴에는 하나의 메뉴 위젯 (`SSHooterMenuWidget`) 이 있어 레이아웃, 내부 이벤트 처리, 모든 메뉴 아이템에 대한 애니메이션을 
+담당합니다. 메뉴 아이템 (`SSHooterMenuItem`) 은 여러 동작을 할 수 있는 복합 오브젝트로, 다른 메뉴 아이템도 몇이든 포함시킬 수 
+있습니다. 이들은 라벨이나 버튼처럼 간단할 수도, 다른 메뉴 아이템으로 구성된 서브메뉴 전체가 들어갈 수도 있는 "탭" 도 가능합니다.
+이 메뉴는 키보드나 콘트롤러를 사용하여 조작할 수 있지만, 현재 마우스는 지원에는 한계가 있습니다.
+
+각 메뉴는 `Construct()` 함수를 통해 _생성_ 되며, 서브 아이템을 포함한 모든 필수 메뉴 아이템을 추가시켜 주고, 
+필요한 경우 그에 대한 델리게이트도 붙여 줍니다. 이 작업은 `SShooterMenuWidget.h` 파일의 `MenuHelper` 네임스페이스에 정의된 
+`AddMenuItem()`, `AddMenuItemSP()` 등의 헬퍼 메소드를 사용하여 이루어집니다.
+
+예전 메뉴로의 이동은 메뉴로의 공유 포인터 배열을 사용하여 이루어지며, 이는 메뉴 위젯의 `MenuHistory` 변수에 저장됩니다. 
+`MenuHistory` 는 예전에 들어갔던 메뉴를 저장하는 스택처럼 작동하여 뒤로 돌아가기가 쉽습니다. 이러한 메소드를 사용함으로써 
+메뉴들 사이에 직접적인 상관관계가 생기지 않으며, 필요하다면 다른 위치에서도 같은 메뉴를 재사용할 수 있습니다.
+
+애니메이션은 `SShooterMenuWidget::SetupAnimations()` 에 정의된 인터폴레이션 커브를 사용하여 이루어집니다. 각 커브는 시작 시간, 
+기간, 인터폴레이션 메소드가 있습니다. 애니메이션의 재생은 정방향 역방향으로 가능하며, 0.0f 에서 1.0f 범위 값을 반환하는 
+`GetLerp()` 를 사용하여 특정 시간에 특성 애니메이션도 가능합니다. `SlateAnimation.h` 의 `ECurveEaseFunction::Type` 에 정의된 
+인터폴레이션 메소드도 여러가지 다양하게 있습니다.
+
+
+### 메인 메뉴
+
+![](menu.png)
+
+메인 메뉴는 _ShooterEntry_ 맵을 기본으로 지정해서 게임을 시작하면 자동으로 열립니다. 그러면 특수한 GameMode, `AShooterGameMode` 를 로드하는데, 
+거기서는 `AShooterPlayerController_Menu` 클래스를 사용하여 그 `PostInitializeComponents()` 함수를 통해 `FShooterMainMenu` 클래스의 
+인스턴스를 새로 만드는 것으로 메인 메뉴를 엽니다.
+
+### 인게임 메뉴
+
+![](ingame_menu.png)
+
+인게임 메뉴는 `AShooterPlayerController` 클래스의 `PostInitializeComponents()` 에서 생성되며, `OnToggleInGameMenu()` 함수를 통해 
+열리고 닫힙니다.
+
+### 옵션 메뉴
+
+옵션 메뉴는 메인 메뉴와 인게임 메뉴 둘 다의 서브메뉴로 사용가능하며, 그 둘의 유일한 차이점은 변화 적용 방식입니다:
+
+* 메인 메뉴에서 접근한 경우, 변화는 플레이어가 게임을 시작하면 적용됩니다.
+* 인게임 메뉴에서 접근한 경우, 변화는 메뉴가 닫히는 즉시 적용됩니다.
+
+
+옵션 메뉴의 세팅은 `GameUserSettings.ini` 에 저장되며, 시작시 자동으로 로드됩니다.

@@ -1,0 +1,84 @@
+﻿INTSourceChangelist:3242329
+Availability:Public
+Title:Custom 표현식
+Crumbs: %ROOT%, Engine, Engine/Rendering/Materials, Engine/Rendering/Materials/ExpressionReference
+Description:커스텀, 보통 셰이더 코드를 사용할 수 있는 표현식입니다.
+Skilllevel: Advanced
+Version: 4.9
+tags:Materials
+
+## Custom
+
+Custom 은 임의의 입력에 일정한 연산을 하여 그 결과를 출력하는 커스텀 HLSL 셰이더 코드를 작성할 수 있는 표현식입니다.
+
+| 항목 | 설명 |
+| ---- | ---- |
+| [REGION:tablesection]프로퍼티[/REGION] ||
+| **Code** | 표현식이 실행할 셰이더 코드가 들어갑니다. (아래 [경고](#Warnings) 참고) |
+| **Output Type** | 표현식의 출력 값 유형을 나타냅니다. |
+| **Description** | 머티리얼 에디터에서 표현식 제목줄에 표시되는 텍스트를 나타냅니다. |
+| **Inputs** | 표현식에 사용되는 입력 배열입니다. |
+|[INCLUDE:Engine/Rendering/Materials/ExpressionReference/Custom#CustomInputItem] | [INCLUDE:Engine/Rendering/Materials/ExpressionReference/Custom#CustomInputDesc]|
+
+<!--
+[EXCERPT:CustomInputItem]
+[REGION:prop_sublist]
+**입력 이름**
+[/REGION]
+[/EXCERPT:CustomInputItem]
+
+[EXCERPT:CustomInputDesc]
+[REGION:prop_sublist]
+입력의 이름을 나타냅니다. 머티리얼 에디터의 표현식 위에 표시되는 용도는 물론 HSLS 코드 안에서 입력 값을 레퍼런스하는 데 사용되기도 하는 이름입니다.
+[/REGION]
+[/EXCERPT:CustomInputDesc]
+-->
+
+Inputs 배열에 필요한 만큼 입력을 추가하고 이름을 붙입니다. 그런 다음 Code 프로퍼티에 코드를 작성합니다. 예처럼 return 문이 포함된 함수 본문을 제대로 입력해도 되고, "Input.bgr" 처럼 단순한 표현식을 입력해도 됩니다. OutputType 에 출력 데이터형도 지정해 줘야 합니다.
+
+![](T_Custom_Node.png)
+
+Custom 노드를 직접 시험해 보실 수 있도록 코드를 제공해 드립니다.
+
+	float3 blur = Texture2DSample(Tex, TexSampler, UV);
+
+	for (int i = 0; i < r; i++)
+	{
+
+	  blur += Texture2DSample(Tex, TexSampler, UV + float2(i * dist, 0));
+	  blur += Texture2DSample(Tex, TexSampler, UV - float2(i * dist, 0));
+
+	}
+
+	for (int j = 0; j < r; j++)
+	{ 
+
+	  blur += Texture2DSample(Tex, TexSampler, UV + float2(0, j * dist));
+	  blur += Texture2DSample(Tex, TexSampler, UV - float2(0, j * dist));
+
+	}
+
+	blur /= 2*(2*r)+1;
+	return blur;
+
+(#Warnings)
+[REGION:warning]
+**커스텀 노드를 사용하면 상수 폴딩을 사용하지 못하게 되어 내장 노드의 동일한 버전보다 인스트럭션 수를 훨씬 많이 사용하게 될 수 있습니다!** 상수 폴딩이란 필요한 경우 UE4 내부적으로 셰이더 인스트럭션 수를 줄이는 데 사용되는 최적화입니다. 예를 들어 'Time->Sin->파라미터로 곱(Mul)하고->뭔가에 더(Add)하는' 표현식 체인은 UE4 에서 최종 Add 하나로 압축 가능하고 또 그렇게 됩니다. 이것이 가능한 이유는, 그 표현식에 있는 (Time, 파라미터 등의) 모든 입력이 전체 드로 콜에 있어서 상수이고, 픽셀별로 달라지지 않기 때문입니다. UE4 는 커스텀 노드에 있는 것을 압축할 수 없기에, 기존의 노드로 똑같은 기능을 하도록 만든 버전에 비하면 셰이더 효율이 떨어집니다. 결과적으로 기존 노드로는 할 수 없는 기능이 필요할 때만 커스텀 노드를 사용하는 것이 최선입니다.
+[/REGION]
+
+
+[REGION:warning]
+**커스텀 노드에 작성된 셰이더 코드는 '있는 그대로' 타겟 플랫폼에 대해 컴파일됩니다.** 즉 셰이더가 PC 용으로 컴파일되고 있다면, HLSL 이 되는 것으로 가정합니다. PS3 용으로 컴파일하는 경우, Cg 인 것으로 가정합니다.
+[/REGION]
+
+
+<!--
+## CustomTexture
+
+CustomTexture 는 [Custom](#Custom) 표현식 안에 있는 HLSL 코드 내 텍스처를 가리킬 수 있도록 해 주는 표현식으로, 보통 Tex2D 나 비슷한 함수를 사용하여 HLSL 안의 텍스처를 샘플링하는 데 사용됩니다.
+
+Custom 노드의 입력으로 보통의 TextureSample 을 사용할 수도 있지만, 그 경우 샘플은 Custom 노드 밖에서 계산하여 그 결과를 float4 값으로 전달합니다. 이는 그다지 유연하지 않아서, 루프를 통해 같은 텍스처를 여러번 샘플링한다거나, tex2Dbias, tex2Dlod, tex2Dproj 같은 다른 샘플링 인스트럭션을 사용하기에 적합하지 않습니다 (그 목적에 대해서는 HLSL 문서를 참고하시기 바랍니다.)
+
+![customtex.jpg](customtex.jpg)
+
+-->

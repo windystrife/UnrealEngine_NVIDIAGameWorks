@@ -1,0 +1,91 @@
+﻿INTSourceChangelist:3108692
+Availability: Public
+Title:피직스 서브스테핑
+Crumbs: %ROOT%, Engine
+Description: 피직스 서브스테핑이란 무엇인가, 언제 사용하는가에 대한 설명입니다.
+Version: 4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Physics:title%](Engine/Physics/physics_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/physics_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Physics:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Physics:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Physics]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Physics:title%](Engine/Physics/physics_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/physics_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Physics:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Physics:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Physics]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+
+Physics Sub-stepping, 피직스 서브스테핑을 사용하면 퍼포먼스 비용을 추가로 들여 보다 정확하고 안정적인 물리 시뮬레이션을 얻을 수 있습니다. 특히나 래그돌 꿈틀이나 기타 복잡한 피직스 애셋 관련 부분을 향상시킬 수 있습니다.
+
+## 서브스테핑 켜기
+
+서브스테핑은 **프로젝트 세팅** -> **피직스** 탭에서 켤 수 있습니다:
+
+[REGION:raw]
+![](SS_Enabled.png)(w:940)
+[/REGION]
+
+[REGION:note]
+이 기능은 아직 작업중이며, APEX 디스트럭션에 완벽 지원되지 않습니다. 모바일 디바이스에도 아직 지원되지 않습니다. 하지만 모양과 느낌이 크게 향상되므로 계속해서 작업중입니다.
+[/REGION]
+
+[REGION:raw]
+| 프로퍼티 | %spacer% | 설명 |
+| --- | :---: | :--- |
+| **Substepping** || 서브스테핑 - 현재 프로젝트에서 서브스테핑을 켜거나 끕니다. |
+| **Substepping Async** || 비동기 서브스테핑 - 비동기 물리 시뮬레이션 서브스테핑을 할 것인지 입니다. |
+| **Max Substep Delta Time** || 최대 서브스텝 델타 시간 - 서브스텝에 허용된 최대 시간으로, 초 단위입니다. 한 스텝이 .05 초 걸리고, **Max Substep Delta Time** 이 .025 로 설정되었다면, 한 스텝은 두 개의 서브스텝으로 나뉘는 것입니다. 그리고 한 스텝에 상당한 시간, 이를테면 2 초 정도 걸린다면, 이 스텝은 `(2.0/0.025=)` **80** 개가 아닌 **Max Substeps** 개의 서브스텝으로 고르게 나뉩니다. 피직스 스텝에 걸리는 기간을 **Max Physics Delta Time** 이 제한한다는 점 참고해 둘만 하겠습니다. |
+| **Max Substeps** || 최대 서브스텝 - 한 스텝을 최대 몇 개의 서브스텝으로 나눌 수 있는가 입니다. |
+[/REGION]
+
+[VAR:spacer]![](%ROOT%/spacer.png)(w:150 convert:false)[/VAR]
+
+[VAR:spacer2]![](%ROOT%/spacer.png)(w:40 convert:false)[/VAR]
+
+## 기술적 세부사항
+
+언리얼 엔진 4 는 프레임 속도가 가변적입니다. 폭넓은 하드웨어 지원을 위해서는 좋지만, 짧은 고정 시간 단위에 최적화된 물리 엔진에는 힘겨운 일이 될 수도 있습니다. 서브스테핑은 총 프레임 시간을 구해 서브 스텝으로 나누는 것입니다. 그런 다음 물리 시뮬레이션의 틱을 프레임당 여러번 진행합니다. 서브스텝 수는 프레임당 서브스텝 최대 경과시간이 얼마나 짧은가에 따라 결정됩니다. 서브스텝 최대 시간이 짧을 수록 시뮬레이션 안정성도 높아지는 반면, CPU 비용은 올라갑니다.
+
+사용자 입장에서 서브스테핑은 완전히 가려져 있어서, 물리 엔진에 대한 몇몇 호출은 보간 또는 관리를 해 주어야 한다는 뜻입니다. 예를 들어, 사용자가 한 프레임동안 한 액터에 힘을 가하는 데 프레임이 내부적으로 N 번 서브스테핑되는 경우, 같은 가속도를 얻기 위해서는 시뮬레이션에 N 회 연속 힘을 가해야 합니다. 비슷하게, 사용자가 액터에 목표 위치를 설정한 경우, 올바른 속력을 유지하기 위해서는 여러 서브스텝에 걸쳐 목표 위치로 보간을 해 주어야 합니다. 이러한 모든 세부사항은 이미 UE4 내부적으로 처리되고 있지만, 필수적인 부기를 위해 필요한 CPU 및 메모리 비용이 있습니다.
+
+또 한가지 알아둬야 할 기술적 세부사항이라면, 서브스테핑 도중 콜리전 콜백 작동방식입니다. UE4 는 물리 서브스테핑 실행시 게임 스레드가 계속해서 작업을 할 수 있도록 별도의 물리 스레드로 처리합니다. 최적의 퍼포먼스를 내기 위하여 최종 서브스텝이 완료될 때까지 콜리전 콜백을 지연시킵니다. 즉 같은 콜리전에 대한 콜백을 여럿 받을 수 있다는 뜻입니다. 예를 들어 A 가 B 와 충돌하여 튕기는 경우, A 와 B 의 겹침에 대한 콜백과 아울러 같은 프레임 안에서 A 와 B 가 더이상 겹치지 않는 콜백도 받을 수 있다는 뜻입니다. 내부적으로 모든 콜백이 하나의 큐에 푸시되므로, 서브스탭 1 에서의 콜백을 먼저 처리한 다음 서브스텝 2 를 처리합니다.
+
+
+## 사용법
+
+서브스테핑은 래그돌에 사용되는 것과 같은 복잡한 물리 애셋의 퀄리티를 크게 향상시킵니다. 하지만 항상 CPU 비용과 퀄리티 향상을 저울질해 보고, 게임에 정말 중요한 것이 무엇인지 고민해 보셔야 할 것입니다.
+
+
+
+

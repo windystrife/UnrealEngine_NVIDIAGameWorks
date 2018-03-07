@@ -1,0 +1,210 @@
+Availability:Public
+Title:Unreal Smart Pointer Library
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture
+Description:Custom implementation of shared pointers, including weak pointers and non-nullable shared references.
+Version: 4.9
+
+[TOC(start:2)]
+
+## Smart Pointers
+
+[EXCERPT:Overview]
+The **Unreal Smart Pointer Library** is a custom implementation of shared references (**TSharedRef**), shared pointers (**TSharedPtr**), weak pointers (**TWeakPtr**) as well as related helper functions and classes.  This implementation is modeled after the C++0x standard library's shared_ptr as well as Boost smart pointers.
+
+| Type | Description |
+| --- | --- |
+| [](Programming/UnrealArchitecture/SmartPointerLibrary/SharedPointer) (TSharedPtr) | Reference counted non-intrusive authoritative smart pointer. |
+| [](Programming/UnrealArchitecture/SmartPointerLibrary/SharedReference) (TSharedRef) | Non-nullable, reference counted non-intrusive authoritative smart pointer. |
+| [](Programming/UnrealArchitecture/SmartPointerLibrary/WeakPointer) (TWeakPtr) | Reference counted non-intrusive weak pointer reference. |
+[/EXCERPT:Overview]
+
+### Benefits of Shared References and Pointers
+
+| Benefit | Description |
+| --- | --- |
+| Clean syntax | You can copy, dereference, and compare shared pointers just like regular C++ pointers. |
+| Prevents memory leaks | Resources are destroyed automatically when there are no more shared references. |
+| Weak referencing | Weak pointers allow you to safely check when an object has been destroyed. |
+| Thread safety | Includes thread safe version that can be safely accessed from multiple threads. |
+| Ubiquitous | You can create shared pointers to virtually any type of object. |
+| Runtime safety | Shared references are never null and can always be de-referenced. |
+| No reference cycles | Use weak pointers to break reference cycles. |
+| Confers intent | You can easily tell an object owner from an observer. |
+| Performance | Shared pointers have minimal overhead.  All operations are constant-time. |
+| Robust features | Supports const, forward declarations to incomplete types, type-casting, etc. |
+| Memory | Only twice the size of a C++ pointer in 64-bit (plus a shared 16-byte reference controller.) |
+
+
+### Reasons for Creating a Custom Library
+
+* std::shared_ptr (and even tr1::shared_ptr) is not yet available on all platforms.
+* Allows for a more consistent implementation on all compilers and platforms.
+* Can work seamlessly with other Unreal containers and types.
+* Better control over platform specifics, including threading and optimizations.
+* We want thread-safety features to be optional (for performance).
+* We have added our own improvements (**MakeShareable**, assign to NULL, etc.).
+* Exceptions were not needed nor desired in our implementation.
+* We wanted more control over performance (inlining, memory, use of virtuals, etc.).
+* Potentially easier to debug (liberal code comments, etc.).
+* Prefer not to introduce new third party dependencies when not needed.
+
+
+### Helper Classes and Functions
+
+Several helpers in the form of classes and functions are provided in the library to make using smart pointers easier and more intuitive.
+
+| Helper | Description |
+| --- | --- |
+|[REGION:tablesection]Classes[/REGION]||
+| TSharedFromThis | You can derive your own class from this to acquire a TSharedRef from "this." |
+|[REGION:tablesection]Functions[/REGION]||
+| MakeShareable() | Used to initialize shared pointers from C++ pointers (enables implicit conversion). |
+| StaticCastSharedRef() | Static cast utility function, typically used to downcast to a derived type. |
+| ConstCastSharedRef() | Converts a 'const' reference to 'mutable' smart reference. |
+| DynamicCastSharedRef() | Dynamic cast utility function, typically used to downcast to a derived type. |
+| StaticCastSharedPtr() | Static cast utility function, typically used to downcast to a derived type. |
+| ConstCastSharedPtr() | Converts a 'const' smart pointer to 'mutable' smart pointer. |
+| DynamicCastSharedPtr() | Dynamic cast utility function, typically used to downcast to a derived type. |
+
+## Smart Pointer Implementation Details
+
+The various types of smart pointers implemented in the Unreal Smart Pointer Library all share some general characteristics in terms of performance, memory, etc.
+
+### Performance
+
+Always keep performance in mind when considering using shared pointers. They are generally pretty fast; however, shared pointers are not meant to be used everywhere. They are great for certain high level systems, or tools programming, but not well-suited for low level engine/rendering paths.
+
+ Some of the general performance benefits of shared pointers are:
+
+* All operations are constant time.
+* Shared pointer deference is just as fast as C++ pointer.
+* Copying shared pointers never allocates memory.
+* Thread-safe versions are lock-free.
+* Fast implementation compared to Boost or STL.
+
+
+Performance drawbacks of shared pointers include:
+
+* Overhead to creating and copying pointers.
+* Reference count housekeeping.
+* Shared pointers use more memory than C++ pointers.
+* Extra heap allocation for reference controller.
+* One for each unique object referenced by any number of shared pointers.
+* Weak pointer access is a bit slower than shared pointer access.
+
+
+### Memory Usage
+
+All shared pointers (TSharedPtr, TSharedRef, TWeakPtr) are 8 bytes (when compiling for 32-bit) consisting of:
+
+* C++ pointer (uint32)
+* Reference controller pointer (uint32)
+
+
+[REGION:note]
+TSharedFromThis is also 8 bytes as it embeds weak pointer.
+[/REGION]
+
+The Reference controller object is 12 bytes (when compiling for 32-bit) consisting of:
+
+* C++ pointer (uint32)
+* Shared reference count (uint32)
+* Weak reference count (uint32)
+
+
+[REGION:note]
+Only one reference controller is created per object, no matter how many shared/weak pointers refer to an object.
+[/REGION]
+
+### Reflection
+
+Shared pointers are non-intrusive which means the class itself does not know whether it is owned by a shared pointer (or reference). In general, this is okay, but sometimes you really want to access the current instance as a shared reference. The solution to this is to derive the class from `TSharedFromThis<>`.
+
+By deriving from `TSharedFromThis<>`, you can use the **AsSharedRef()** method to convert 'this' to a shared reference. This can be very useful with class factories that always return shared references.
+
+	class FAnimation : public TSharedFromThis<FMyClass>
+	{
+		void Register()
+		{
+			// Access a shared reference to 'this'
+			TSharedRef<FMyClass> SharedThis = AsSharedRef();
+
+			// Class a function that is expecting a shared reference
+			AnimationSystem::RegisterAnimation( SharedThis );
+		}
+	}
+
+### Casting
+
+You can cast shared pointers (and references) easily. Up-casting is implicit, just like with C++ pointers.
+
+Cast away const (evil, but sometimes necessary):
+
+	ConstCastSharedPtr<T>( ... )
+
+Static cast (often used to downcast to derived class pointers):
+
+	StaticCastSharedPtr<T>( ... )
+
+[REGION:note]
+Dynamic cast is not supported (no RTTI.)  Instead, you should use the static cast above.
+[/REGION]
+
+### Thread Safety
+
+Regular shared pointers are only safe to access on a single thread. If you need multiple threads to have access, use the thread-safe versions of pointer classes:
+
+* `TThreadSafeSharedPtr<T>`
+* `TThreadSafeSharedRef<T>`
+* `TThreadSafeWeakPtr<T>`
+* `TThreadSafeSharedFromThis<>`
+
+
+These versions are a bit slower due to atomic reference counting, and behavior is mostly consistent with regular C++ pointers:
+
+* Reads and copies are always thread-safe.
+* Writes/resets must be synchronized to be safe.
+
+
+[REGION:warning]
+If you know your pointer will never be accessed by more than one thread, do not use the thread safe version.
+[/REGION]
+
+## Usage Details
+
+The SharedPointerTesting.h file (located in [UE4RootLocation]/Engine/Source/Runtime/Core/Public/Templates/) contains various examples of using shared pointers and references.
+
+### Tips
+
+* Usually you should "operator new" when passing a C++ pointer to a new shared pointer.
+* Use TSharedRef or TSharedPtr when passing smart pointers as function parameters, not TWeakPtr.
+* The "thread-safe" versions of smart pointers are a bit slower -- only use them when needed.
+* You can forward declare shared pointers to incomplete types, just how you would expect to!
+* Shared pointers of compatible types will be converted implicitly (e.g. upcasting).
+* You can create a typedef to `TSharedRef< MyClass >` to make it easier to type.
+* For best performance, minimize calls to TWeakPtr::Pin (or conversions to TSharedRef/TSharedPtr).
+* Your class can return itself as a shared reference if you derive from TSharedFromThis.
+* To downcast a pointer to a derived object class, use the **StaticCastSharedPtr()** function.
+* const objects are fully supported with shared pointers!
+* You can make a const shared pointer mutable using the **ConstCastSharedPtr()** function.
+* Always convert to C++ references in deep stack frames. Shared pointers are best for member references, not stack temporaries.
+* Unlike C++ pointers, shared pointers cannot be memcpy'd, so be sure to consider this when using arrays of shared pointers.
+
+
+### Limitations
+
+* Shared pointers are not compatible with Unreal objects (UObject classes)!
+* Dynamically-allocated arrays are not supported yet (e.g. `MakeSharable( new int32[20] )`).
+* Implicit conversion of TSharedPtr/TSharedRef to bool is not supported yet.
+
+
+### Differences from Other Implementations
+
+* Type names and method names are more consistent with Unreal's codebase.
+* Thread-safety features are optional instead of forced.
+* TSharedFromThis returns a shared reference, not a shared pointer.
+* Some features were omitted (e.g. use_count(), unique(), etc.).
+* No exceptions are allowed (all related features have been omitted).
+* Our implementation supports non-nullable smart pointers (TSharedRef).
+* Several other new features added, such as MakeShareable and NULL assignment.
+

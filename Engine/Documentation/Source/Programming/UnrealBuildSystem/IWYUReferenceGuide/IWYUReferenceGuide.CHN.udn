@@ -1,0 +1,118 @@
+﻿INTSourceChangelist:3356804
+Availability:Public
+Title:IWYU 参考指南
+Crumbs:
+Description:UE4 更新基本代码总览。此基本代码使用“包含您所使用（IWYU）”依赖性模型。
+version:4.15
+parent:Programming/UnrealBuildSystem
+type:Overview
+level:advanced
+tags:Programming
+tags:Unreal Build System
+related:Programming/UnrealBuildSystem
+prereq:Programming/Development
+prereq:Programming
+topic-image:topic_IWYU.png
+
+[TOC(start:1 end:4)]
+
+![](IWYU.png)
+
+“包含您所使用”（**IWYU**），正如名称所述，意味着引擎的源代码只包括其需要编译的依赖性。IWYU 的目的是为避免包含单块头文件，如 `Engine.h` 或 `UnrealEd.h`，借此减少不必要的依赖性。以下参考指南将为您说明 IWYU 的含义，包括 
+如何启用 IWYU 的高阶解释，确保您的项目遵循 IWYU 规则。此外，如选择在游戏项目中使用 IWYU 模式，您将学习到一些总体技巧，有助于在 IWYU 模式中充分开展工作。 
+
+[REGION:note]
+
+IWYU 在游戏和游戏插件中默认禁用，但在引擎和引擎插件中默认启用。 
+
+[/REGION]
+
+## IWYU 的含义
+
+在旧版本的虚幻引擎 4（UE4），引擎的大部分功能通过大型、以模块为中心的头文件进行包含（如 `Engine.h` 和 `UnrealEd.h`）。 
+通过预编译头文件（PCH）快速编译这些文件即可达成较快的编译时间。随着引擎的更新，这成为了一个瓶颈。 
+
+通过 IWYU，每个文件只包括其需要的内容。我们选择使用的所有 PCH 文件纯粹只是作为基础源文件的优化层。可对它们进行修改，将编译时间缩至最短。其独立于源文件本身的修改，不会影响代码是否成功编译。 
+
+编写 IWYU 代码时，我们需要遵循四个特定规则： 
+
+1.	**所有头文件包括其所需的依赖性。**
+1.	**\*.cpp 文件首先包含其匹配的 \*.h 文件。**
+1.	**PCH 文件已不再是显式包含。**
+1.	**不再包含单块头文件。**
+
+### IWYU 规则
+
+以下 IWYU 规则描述可助您了解 IWYU 的含义。
+
+1.	**所有头文件包括其所需的依赖性。**
+	
+	*	**CoreMinimal** 头文件包含一套来自 UE4 核心编程环境的普遍存在类型（包括 FString、FName、TArray 等。） 
+	
+	*	`CoreMinimal` 头文件（位于 UE4 根目录 `\Engine\Source\Runtime\Core\Public\CoreMinimal.h` 下）首先被多数引擎头文件所包含。
+
+	![](CoreMinimalHeader.png)
+
+	*	在 `Core` 模块中，多数头文件首先包含 `CoreTypes.h` 头文件。这只包含基元 C++ 类型的 typedefs、UE4 编译宏和指令配置编译环境。
+
+	[REGION:tip]
+	主要的概念是每个头文件现在都包含编译所需的全部内容。
+	[/REGION]
+
+1.	**\*.cpp 文件首先包含其匹配的 \*.h 文件。**
+
+	![](CPPFileIncludingHeader.png)
+
+	*	禁用 PCH 文件，在非统一模式中编译游戏项目，即可验证所有源文件包含其必须的所有依赖性。
+
+1.	**PCH 文件已不再是显式包含。**
+
+	*	虽然 PCH 文件仍在使用，但虚幻编译工具（UBT）将其强制包含在编译器命令行上。
+
+1.	**不再包含单块头文件。**
+
+	*	如引擎代码包含单块头文件（如 `Engine.h` 或 `UnrealEd.h`），编译器将发出警告。
+
+	[REGION:note]
+	单块头文件仍存在于 UE4 中，以保证游戏项目的兼容性。如游戏项目包含单块头文件，（默认）将不会发出警告。
+	[/REGION]
+
+##启用 IWYU
+
+随 4.15 版发布建立 IWYU 规则之前，UE4 代码通常在每个 CPP 文件上方包含一个 PCH 文件，这和开发者希望 IWYU 合规代码所包含的内容相悖。新建 IWYU 规则后，PCH 文件可被视为编译时优化的层，独立于代码原始编写的方式进行应用。因此我们不组成和包含 PCH 文件，而是让 UBT 决定使用的 PCH 文件（如有）。
+
+如果需要启用 IWYU 模式，确保模块合乎 IWYU 规则，打开模块的 \*.build.cs 文件并将 `PCHUsage` 设为 `PCHUsageMode.UseExplicitOrSharedPCHs`。 
+
+![](ExamplePlugin_PCHUsage.png)
+
+将 `PCHUsage` 设为 `PCHUsageMode.UseExplicitOrSharedPCHs` 会为模块创建一个显式 PCH 文件，必备的条件是模块的 \*.build.cs 文件中拥有一个 `PrivatePCHHeaderFile` 设置。否则模块将与另一个模块共享一个 PCH，使工具无需生成不必要的 PCH 文件。另外需要注意的是：启用 `UseExplicitOrSharedPCHs` 模式时，源文件必须包含其相匹配的头文件。此外，如希望模块不遵守 IWYU 规则，可将 `PCHUsage` 设为 `PCHUsageMode.UseSharedPCHs`。
+
+![](ExamplePlugin_UseSharedPCHs.png)
+
+[REGION:note]
+
+将引擎的代码库转换为 IWYU 模型后，UE4 编译时间将得到极大提升。 
+
+[/REGION]
+
+### 在 IWYU 模式中运行
+
+如在 IWYU 模式中运行游戏，则需要首先确保 \*.cpp 文件包含其相应的 \*.h 文件。这是一项很实用的操作，因为将启用编译器确保 \*.h 文件包含其所需的全部依赖性（PCH 文件和统一编译禁用）。如不首先包含匹配的头文件（针对其相应的 CPP 文件），虚幻编译工具（UBT）将发出警告。 
+
+如希望禁用编译器发出警告，可在模块的 \*.build.cs 文件中将 `bEnforceIWYU` 设为 `false`。
+
+![](ModuleBuildCS_bEnforceIWYUfalse.png)
+
+[REGION:tip]
+
+如希望禁用整个目标的警告，可在 \*.target.cs 文件中将 `bEnforceIWYU` 设为 false。
+
+[/REGION]
+
+## 常规提示
+
+如需要游戏使用 IWYU，需要注意以下几点：
+
+1.	在每个头文件的顶部包含 `CoreMinimal.h`。
+1.	禁用 PCH 文件，在非统一模式中编译游戏项目，即可验证所有源文件包含其必须的所有依赖性。
+1.	如需要访问在 `Runtime\Engine\Classes\Engine\Engine.h` 中定义的 **UEngine** 或 **Gengine，**，可 `#include Engine/Engine.h`（有别于 `Runtime\Engine\Public\Engine.h` 中的单块头文件）。

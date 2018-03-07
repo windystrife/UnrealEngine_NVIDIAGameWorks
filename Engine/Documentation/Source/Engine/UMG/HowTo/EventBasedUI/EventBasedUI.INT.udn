@@ -1,0 +1,143 @@
+Availability: Public
+Title:Drive UI Updates with Events
+Crumbs: %ROOT%, Engine, Engine/UMG, Engine/UMG/HowTo
+Description:Learn how to optimize your UI elements by driving updates through the use of Events. 
+Related: Engine/UMG
+Related: Engine/UMG/UserGuide
+Related: Engine/Blueprints
+Related: Resources\SampleGames\UnrealMatch3
+Version: 4.10
+SkillLevel: Advanced
+tags:UMG UI Designer
+
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/UMG/HowTo/EventBasedUI:title%](EventUI.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/start_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/UMG/HowTo/EventBasedUI:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/UMG/HowTo/EventBasedUI:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/UMG/HowTo/EventBasedUI]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/UMG/HowTo/EventBasedUI:title%](EventUI.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/start_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/UMG/HowTo/EventBasedUI:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/UMG/HowTo/EventBasedUI:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/UMG/HowTo/EventBasedUI]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:note]
+It is recommended that you have a general understanding of the [](Engine/UMG) before proceeding with this How-to. 
+[/REGION]
+
+When crafting your UI elements, it's a good habit to be thinking of ways you can optimize the content you create as this can help increase your performance and decrease the need to optimize later. For example, based on the scope of your project, [](Engine/UMG/UserGuide/PropertyBinding) may be fine for communicating information to your UI. However if you have a more complex UI setup or need to optimize your project, you may want to consider updating your UI on a need-to-know basis rather than doing so every frame. 
+
+For this How-to we will take a look at three examples of communicating information to a HUD. While all three accomplish the task, our third example cites the most cost effective way by moving the update process away from tick events and manually updating the information through the use of [Event Dispatchers](Engine/Blueprints/UserGuide/EventDispatcher). 
+
+
+## Example 1. Function Binding
+
+For this example we will take a look at updating Health/Energy for a player using **Function Binding**. 
+
+Here we have a basic Health/Energy setup. 
+
+![](CastBinding_SimpleHealth.png)
+	
+With display in place, we **Create Bindings** for our progress bars called _GetHealth_ and _GetEnergy_. The function bindings then get the Player Character Blueprint and the variables we have defined for Health and Energy and assign those (our _GetHealth_ binding is shown below). 
+
+![](CastBinding_BindingScript.png)
+
+For debugging, we also added a **Print String** node to print to the screen the value of our Health variable. 
+
+In game (depicted below) our Health and Energy values from our player character are passed through to and reflected in our HUD. However you can see that even when we are not updating our Health Value, our blue debug text illustrates that we are still checking our Health Value every frame. 
+
+![](CastBinding_InGame.png)
+
+If this were the only thing we were doing, it probably isn't going to impact us all too much. If we had a more complex system and several properties were setup in this fashion, all checking for updates every frame, this might bog down and affect our performance which is something we would want to avoid. 
+
+
+
+## Example 2. Property Binding
+
+Instead of using Function Binding, we could use **Property Binding** which is a little more cost effective. 
+
+Taking our same Health/Energy setup. 
+
+![](CastBinding_SimpleHealth.png)
+
+On the **Graph** tab of our [Widget Blueprint](Engine/UMG/UserGuide/WidgetBlueprints) we use the **Event Construct** to get a reference to the Player Character Blueprint. 
+
+![](PropBinding_EventConstruct.png)
+
+In the first example, we were [](Engine/Blueprints/UserGuide/CastNodes) to our Character Blueprint every frame to access the variables for Health and Energy. Here we are doing that once and storing it as a reference so that we don't have to do it every frame. This is a little more cost effective than the previous method. 
+
+We could then bind the values for our progress bars directly to the variables inside our Character Blueprint. 
+
+![](PropBinding_HealthBound.png)
+
+With this method, we are no longer casting every frame and checking "what is the player character blueprint" and once I have it "give me the values for health and energy". We know what the player character is, however we are still looking at it and every frame asking "what is the character's health and energy". 
+
+Similar to the previous method, based on the scope of your project, this is generally safe to do. But as you expand optimizations are needed, if you have several properties that are set up this way you can begin to see how this could affect your performance.
+
+
+
+## Example 3. Event Driven
+
+Here we take a look at using Events to update our HUD only when it changes. 
+
+Continuing with our Health/Energy setup. 
+
+![](CastBinding_SimpleHealth.png)
+
+Inside our Character Blueprint we add an **Event Dispatcher** to the end of the script that decrements our Health. 
+
+![](DecreaseHealth.png)
+
+For testing purposes we set our Health to decrease whenever the **F** key is pressed. 
+
+Now whenever we decrease our Health, we also call this Event Dispatcher. On the Graph of our HUD Widget Blueprint, we can use the Event Construct again to get and store a reference to the Player Character Blueprint. We can also Bind a Custom Event to the Event Dispatcher inside that Character Blueprint so that the Custom Event is called when the Event Dispatcher is called. 
+
+[REGION:lightbox]
+[![](Event_WBGraph.png)](Event_WBGraph.png)
+[/REGION]
+
+[REGION:caption]
+Click image for full view. 
+[/REGION]
+
+The Custom Event inside our HUD Widget Blueprint now only checks and updates the display of player's Health when it changes instead of always checking the value regardless of whether or not it has changed. You could apply the same setup to the Energy of the character for example and end up with something like below for the HUD Widget Blueprint. 
+
+[REGION:lightbox]
+[![](FullSetup.png)](FullSetup.png)
+[/REGION]
+
+[REGION:caption]
+Click image for full view. 
+[/REGION]
+
+Above the Custom Events _UpdateHealth_ and _UpdateEnergy_ are bound to Event Dispatchers from our Character Blueprint which are only called when the character's Health/Energy change values. We also initialize the display by calling those two Custom Events when the HUD is constructed following the binding process. 
+

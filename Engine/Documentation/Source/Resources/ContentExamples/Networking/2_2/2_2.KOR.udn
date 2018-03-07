@@ -1,0 +1,76 @@
+﻿INTSourceChangelist:3108692
+Availability: Public
+Title:2.2 - 네트워크 연관성 [2 부 - 함수 리플리케이션 솔루션 시도]
+Crumbs:%ROOT%, Resources, Resources/ContentExamples, Resources/ContentExamples/Networking
+Description:Network Feature 예제 레벨에 대한 개요로, 예제 2.2: Network Relevancy, Part 2 - Function Replication Solution Attempt 입니다.
+Related: Gameplay/Networking
+Related: Gameplay/Networking/Actors/Components
+Related: Gameplay/Networking/Actors
+Related: Gameplay/Networking/Actors/RPCs
+Related: Engine/UI/LevelEditor/InEditorTesting/NetworkedPlayInEditor
+Version: 4.9
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[예전 예제](Resources/ContentExamples/Networking/2_1 "%Resources/ContentExamples/Networking/2_1:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[네트워킹 홈](Resources/ContentExamples/Networking)
+	[/PARAM]
+	[PARAM:next]
+		[다음 예제](Resources/ContentExamples/Networking/2_3 "%Resources/ContentExamples/Networking/2_3:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Resources/ContentExamples\Networking\2_2:title%](2_2.png)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/ContentExamples\Networking\2_2:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/ContentExamples\Networking\2_2:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/ContentExamples\Networking\2_2]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+[REGION:fullwidth]
+![](2_2.png)
+[/REGION]
+
+[REGION:tip]
+**서버** 와 **클라이언트** 시점 모두를 확인하기 위해서는, **Play** (플레이) 드롭다운 아래 **Number of Clients** (클라이언트 수) 칸을 2 로 설정합니다.
+[/REGION]
+
+
+
+이 예제는 상자의 행위 관련해서 Replicated Multicast Function 를 사용하여 네트워킹 시도합니다. 상자에 상호작용이 생기면 상자가 멀티캐스트 호출하여 모든 클라이언트에서 상자 열기 비주얼 재생을 처리한다는 개념입니다.
+
+그러나 연관성 이슈 데모를 위해, 이 상자는 매우 짧은 거리에서 네트워크 연관성이 없도록 수정되었습니다. 클라이언트를 파랑 고리 밖에 세워두면 상자가 보일지라도 클라이언트에 연관성이 없습니다. 이제 서버를 상자로 옮긴 다음 작동시켜 클라이언트에 어떤 일이 벌어지는지 관찰합니다. 클라이언트에 아무런 변화가 보이지 않습니다! 예상된 것으로, 상자가 아직 클라이언트에 연관성이 없기 때문입니다. 클라이언트를 파랑 고리 안으로 이동시켜 상자가 연관성이 있도록 만듭니다. 어떤 일이 벌어질까요? 그대로입니다. 바라던 상황이 아니지요.
+
+이 솔루션 시도 관련 문제는, 상자 업데이트관련 모든 동작이 리플리케이트되는 함수를 통해 전송되었다는 점입니다. 클라이언트는 연관성에 따라 함수 호출이 하는 일을 받지 못했으며, 상자를 열기 위한 어떤 것도 실행하지 않았습니다.
+
+## 블루프린트 분석
+**BP_Relevancy_Replication_RPC** 블루프린트의 이벤트 그래프에서, 예제 2.1 로부터 상속되는 것을 볼 수 있으나, 약간의 수정이 가해졌습니다 (또한 이 예제에서 연관성 거리를 보여주기 위해 고리가 생성되었습니다). 우선 OnChestTouched 함수를 덮어써서 새로운 **Chest Touch Multicast** 이벤트가 호출됩니다. **Chest Touch Multicast** 이벤트가 서버에서 호출되며, 이벤트가 **Multicast** 설정되어 있기에 모든 머신에 리플리케이트 됩니다.
+
+**클릭하면 크게 볼 수 있습니다.**
+[REGION:lightbox]
+	[![](Resources/ContentExamples/Networking/2_2/2_2_EventGraph.png)(w:640)](Resources/ContentExamples/Networking/2_2/2_2_EventGraph.png)
+[/REGION]
+
+**Chest Touch Multicast** 이벤트 자체는 부모 블루프린트의 **Open Chest** 와 **Play Gold FX** 함수를 실행하여 상자 열기 및 관련 이펙트 재생을 처리합니다.
+
+그러나 상자가 연관성이 없는 경우, 아래 그림에서 보듯이 클라이언트는 이 스크립트 부분의 실행을 놓치게 됩니다.
+

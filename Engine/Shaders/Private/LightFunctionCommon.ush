@@ -1,0 +1,58 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	LightFunctionCommon.usf: Utility functions for light functions.
+=============================================================================*/
+
+/** Tan of spotlight cone outer angle in x, ShadowFadeFraction in y, IsSpotLight in z, IsPointLight in w. */
+float4 LightFunctionParameters;
+float4x4 LightFunctionWorldToLight;
+
+/** 
+ * Calculates the light function color with the given light vector. 
+ * LightVector is the vector from the light to the position being shaded, in the light's coordinate space.
+ */
+float3 GetLightFunctionColor(float3 LightVector, float3 AbsoluteWorldPosition)
+{
+	// Swizzle so that LightVector.xy are perpendicular to the light direction and LightVector.z is distance along the light direction
+	LightVector.xyz = LightVector.zyx;
+
+	// By default, map textures using the vectors perpendicular to the light direction
+	float2 LightFunctionUVs = LightVector.xy;
+
+	if (LightFunctionParameters.z > 0)
+	{
+		// For spotlights, setup UVs that go from 1 at one side of the spotlight cone to 0 at the other side, at any distance from the light
+		// This minimizes artist setup when they just want to use the spotlight like a projector
+		LightFunctionUVs = LightVector.xy / (LightVector.z * LightFunctionParameters.x) * .5f + .5f;
+	}
+	else if (LightFunctionParameters.w > 0)
+	{
+		float3 UnitLightVector = normalize(LightVector);
+		// Setup 2d UVs for a pointlight that map the texture using spherical coordinates, which is how max handles a 2d texture projector on a point light
+		// Artists should use a cubemap indexed by a light vector to get better quality
+		LightFunctionUVs = float2((atan2(UnitLightVector.y, UnitLightVector.x) + PI) / (2 * PI), acos(UnitLightVector.z) / PI);
+	}
+
+	FMaterialPixelParameters MaterialParameters = MakeInitializedMaterialPixelParameters();
+#if NUM_MATERIAL_TEXCOORDS
+	for(int CoordinateIndex = 0;CoordinateIndex < NUM_MATERIAL_TEXCOORDS;CoordinateIndex++)
+	{
+		MaterialParameters.TexCoords[CoordinateIndex] = LightFunctionUVs;
+	}
+#endif
+	MaterialParameters.VertexColor = 1;
+	MaterialParameters.CameraVector = LightVector.xyz;
+	MaterialParameters.ReflectionVector = LightVector.xyz;
+	MaterialParameters.LightVector = LightVector.xyz;
+	MaterialParameters.AbsoluteWorldPosition = AbsoluteWorldPosition;
+
+	FPixelMaterialInputs PixelMaterialInputs;
+	CalcPixelMaterialInputs(MaterialParameters, PixelMaterialInputs);
+
+#if COMPUTESHADER
+	return GetMaterialEmissiveForCS(MaterialParameters);
+#else
+	return GetMaterialEmissive(PixelMaterialInputs);
+#endif
+}

@@ -1,0 +1,94 @@
+Availability: Docs
+Title:Material Expressions Technical Guide
+Crumbs:%ROOT%, Programming, Programming/Rendering
+Description:Guide to creating new material expressions for use in the Material Editor.
+Version: 4.9
+tags:Rendering
+
+[TOC (start:2 end:3)]
+
+Creating a new material expression in UE4 is straightforward.  As an example, I will create a new material expression that squares the input, called MaterialExpressionSquare.  Note that all material expressions in UE4 are implemented in `MaterialExpressions.cpp`.
+
+
+
+## Declaration
+
+First, add a new engine script file with a new type that derives from MaterialExpression.  Declare the expression's inputs and virtual functions, for example: 
+
+	MaterialExpressionSquare.h
+
+	UCLASS(HeaderGroup=Material, collapsecategories, hidecategories=Object)
+	public class UMaterialExpressionSquare : public UMaterialExpression
+	{
+		GENERATED_UCLASS_BODY()
+
+		UPROPERTY()
+		FExpressionInput   A;
+
+	#if CPP
+		virtual int32 Compile(FMaterialCompiler* Compiler);
+		virtual FString GetCaption() const;
+	#endif
+
+	}
+
+If you are adding expression variables that you want to be editable in the properties pages of the material editor, remember to define a category in the `UPROPERTY()` macro:
+
+	UPROPERTY(Category=MaterialExpressionSquare)
+	float ClampMin;
+
+
+## Implementation
+
+The constructor is used to set default values for the properties. In this example, it is assigning the Material expression to various categories in the expression library inside the Material Editor.
+
+	UMaterialExpressionSquare::UMaterialExpressionSquare(const FObjectInitializer& ObjectInitializer)
+		: Super(ObjectInitializer)
+	{
+		// Structure to hold one-time initialization
+		struct FConstructorStatics
+		{
+			FName NAME_Particles;
+			FName NAME_Constants;
+			FConstructorStatics()
+				: NAME_Particles(TEXT("Particles"))
+				, NAME_Constants(TEXT("Constants"))
+			{
+			}
+		};
+		static FConstructorStatics ConstructorStatics;
+
+		// Property initialization
+		MenuCategories.Add(ConstructorStatics.NAME_Particles);
+		MenuCategories.Add(ConstructorStatics.NAME_Constants);
+	}
+
+`Compile()` calls the appropriate functions on the `FMaterialCompiler`.  In this case, we can implement Square using existing compiler functionality (`Mul`), but you may need to add new material compiler functionality depending on your custom expression.
+
+	int32 UMaterialExpressionSquare::Compile(FMaterialCompiler* Compiler)
+	{
+	   if(!A.Expression)
+		  return Compiler->Errorf(TEXT("Missing Multiply input A"));
+	   else
+	   {
+		  int32 Arg1 = A.Compile(Compiler);
+		  return Compiler->Mul(
+			 Arg1,
+			 Arg1
+			 );
+	   }
+	}
+
+`GetCaption()` returns the text to display as the caption for the node in the Material editor graph.
+
+	FString UMaterialExpressionSquare::GetCaption() const
+	{
+	   return TEXT("Square");
+	}
+
+
+Your new material expression should now be in the list in the material editor.  Here you can see the Square expression in action:  
+
+[REGION:todo]
+![](MaterialExpression.png)
+[/REGION]

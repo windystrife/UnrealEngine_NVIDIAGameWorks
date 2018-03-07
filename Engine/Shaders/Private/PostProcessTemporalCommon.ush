@@ -1,0 +1,519 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	   PostProcessTemporalCommon.usf: Common Temporal AA Functionality
+-------------------------------------------------------------------------------
+This is the common bits of the temporal AA shader
+which can be configured via defines for various temporal AA passes.
+=============================================================================*/
+
+// Num samples of current frame
+#ifndef AA_SAMPLES
+	#define AA_SAMPLES 5
+#endif
+
+// 1 = Use tighter AABB clamp for history.
+// 0 = Use simple min/max clamp.
+#ifndef AA_AABB
+	#define AA_AABB 0
+#endif
+
+// 0 = Input doesn't have or need the alpha channel. Don't AA or preserve the alpha. Potentially use alpha channel of the output to improve quality.
+//     Leverages dead code removal to work in RGB instead of RGBA.
+// 1 = Anti-alias the alpha channel also. 
+#ifndef AA_ALPHA
+	#define AA_ALPHA 0
+#endif
+
+// Cross distance in pixels used in depth search X pattern.
+// 0 = Turn this feature off.
+// 2 = Is required for standard temporal AA pass.
+#ifndef AA_CROSS
+	#define AA_CROSS 2
+#endif
+
+// 1 = Use dynamic motion.
+// 0 = Skip dynamic motion, currently required for half resolution passes.
+#ifndef AA_DYNAMIC
+	#define AA_DYNAMIC 1
+#endif
+
+// 1 = Use filtered sample.
+// 0 = Use center sample.
+#ifndef AA_FILTERED
+	#define AA_FILTERED 1
+#endif
+
+// 0 = Dynamic motion based lerp value (default).
+// non-zero = Use 1/LERP fixed lerp value (used for reflections).
+#ifndef AA_LERP
+	#define AA_LERP 0
+#endif
+
+// 1 = Use higher quality round clamp.
+// 0 = Use lower quality but faster box clamp.
+#ifndef AA_ROUND
+	#define AA_ROUND 1
+#endif
+
+// 1 = Use extra clamp to avoid NANs
+// 0 = Don't use.
+#ifndef AA_NAN
+	#define AA_NAN 1
+#endif
+
+// Fix for lack of borders during current frame filter.
+#ifndef AA_BORDER
+	#define AA_BORDER 0
+#endif
+
+// Force clamp on alpha.
+#ifndef AA_FORCE_ALPHA_CLAMP
+	#define AA_FORCE_ALPHA_CLAMP 0
+#endif
+
+// Use YCoCg path.
+#ifndef AA_YCOCG
+	#define AA_YCOCG 1
+#endif
+
+// Bicubic filter history
+#ifndef AA_BICUBIC
+	#define AA_BICUBIC 0
+#endif
+
+// Tone map to kill fireflies
+#ifndef AA_TONE
+	#define AA_TONE 0
+#endif
+
+// Neighborhood clamping. Disable for testing reprojection.
+#ifndef AA_CLAMP
+	#define AA_CLAMP 1
+#endif
+
+// Antighosting using dynamic mask
+#ifndef AA_DYNAMIC_ANTIGHOST
+	#define AA_DYNAMIC_ANTIGHOST 0
+#endif
+
+// Variance clamping
+#ifndef AA_VARIANCE
+	#define AA_VARIANCE 0
+#endif
+
+// Sample the stencil buffer inline rather than multiple masked passes.
+#ifndef AA_SINGLE_PASS_RESPONSIVE
+	#define AA_SINGLE_PASS_RESPONSIVE	0
+#endif
+
+#if AA_SAMPLES != 9 && AA_SAMPLES != 5
+	#error Samples must be 5 or 9
+#endif
+
+
+	float2 ScreenPos = ( UV * PostprocessInput0Size.xy - 0.5 - ScreenPosToPixel.zw ) / ScreenPosToPixel.xy;
+
+	// Handle single or multi-pass responsive AA
+#if RESPONSIVE
+	const float bIsResponsiveAAPixel = 1.f;
+#elif AA_SINGLE_PASS_RESPONSIVE
+	#define STENCIL_TEMPORAL_RESPONSIVE_AA_MASK (1 << 3)
+	int2 SceneStencilUV = (int2)trunc(UV * PostprocessInput0Size.xy);
+	uint SceneStencilRef = SceneStencilTexture.Load(int3(SceneStencilUV, 0)) STENCIL_COMPONENT_SWIZZLE;
+	const float bIsResponsiveAAPixel = (SceneStencilRef & STENCIL_TEMPORAL_RESPONSIVE_AA_MASK) ? 1.f : TemporalAAComputeParams.x;
+#else
+	const float bIsResponsiveAAPixel = 0.f;
+#endif
+
+	// FIND MOTION OF PIXEL AND NEAREST IN NEIGHBORHOOD
+    // ------------------------------------------------
+	float3 PosN; // Position of this pixel, possibly later nearest pixel in neighborhood.
+	PosN.xy = ScreenPos;
+	PosN.z = SceneDepthTexture.SampleLevel(SceneDepthTextureSampler, UV, 0).r;
+	// Screen position of minimum depth.
+	float2 VelocityOffset = float2(0.0, 0.0);
+	#if AA_CROSS
+		// For motion vector, use camera/dynamic motion from min depth pixel in pattern around pixel.
+		// This enables better quality outline on foreground against different motion background.
+		// Larger 2 pixel distance "x" works best (because AA dilates surface).
+		float4 Depths;
+		Depths.x = SceneDepthTexture.SampleLevel(SceneDepthTextureSampler, UV, 0, int2(-AA_CROSS, -AA_CROSS)).r;
+		Depths.y = SceneDepthTexture.SampleLevel(SceneDepthTextureSampler, UV, 0, int2( AA_CROSS, -AA_CROSS)).r;
+		Depths.z = SceneDepthTexture.SampleLevel(SceneDepthTextureSampler, UV, 0, int2(-AA_CROSS,  AA_CROSS)).r;
+		Depths.w = SceneDepthTexture.SampleLevel(SceneDepthTextureSampler, UV, 0, int2( AA_CROSS,  AA_CROSS)).r;
+
+		float2 DepthOffset = float2(AA_CROSS, AA_CROSS);
+		float DepthOffsetXx = float(AA_CROSS);
+#if HAS_INVERTED_Z_BUFFER
+		// Nearest depth is the largest depth (depth surface 0=far, 1=near).
+		if(Depths.x > Depths.y) 
+		{
+			DepthOffsetXx = -AA_CROSS;
+		}
+		if(Depths.z > Depths.w) 
+		{
+			DepthOffset.x = -AA_CROSS;
+		}
+		float DepthsXY = max(Depths.x, Depths.y);
+		float DepthsZW = max(Depths.z, Depths.w);
+		if(DepthsXY > DepthsZW) 
+		{
+			DepthOffset.y = -AA_CROSS;
+			DepthOffset.x = DepthOffsetXx; 
+		}
+		float DepthsXYZW = max(DepthsXY, DepthsZW);
+		if(DepthsXYZW > PosN.z) 
+		{
+			// This is offset for reading from velocity texture.
+			// This supports half or fractional resolution velocity textures.
+			// With the assumption that UV position scales between velocity and color.
+			VelocityOffset = DepthOffset * PostprocessInput0Size.zw;
+			// This is [0 to 1] flipped in Y.
+			//PosN.xy = ScreenPos + DepthOffset * ViewportSize.zw * 2.0;
+			PosN.z = DepthsXYZW;
+		}
+#else
+#error Fix me!
+#endif // HAS_INVERTED_Z_BUFFER
+	#endif	// AA_CROSS
+
+	// Camera motion for pixel or nearest pixel (in ScreenPos space).
+	float4 ThisClip = float4( PosN.xy, PosN.z, 1 );
+	float4 PrevClip = mul( ThisClip, View.ClipToPrevClip );
+	float2 PrevScreen = PrevClip.xy / PrevClip.w;
+	float2 BackN = PosN.xy - PrevScreen;
+
+	float2 BackTemp = BackN * ViewportSize.xy;
+	#if AA_DYNAMIC
+		float2 VelocityN;
+		#if AA_CROSS
+			VelocityN = PostprocessInput3.SampleLevel(PostprocessInput3Sampler, UV + VelocityOffset, 0).xy;
+		#else
+			VelocityN = PostprocessInput3.SampleLevel(PostprocessInput3Sampler, UV, 0).xy;
+		#endif
+		bool DynamicN = VelocityN.x > 0.0;
+		if(DynamicN)
+		{
+			BackN = DecodeVelocityFromTexture(VelocityN);
+		}
+		BackTemp = BackN * ViewportSize.xy;
+	#endif
+	float Velocity = sqrt(dot(BackTemp, BackTemp));
+	#if !AA_BICUBIC
+		// Save the amount of pixel offset of just camera motion, used later as the amount of blur introduced by history.
+		float HistoryBlurAmp = 2.0;
+		float HistoryBlur = saturate(abs(BackTemp.x) * HistoryBlurAmp + abs(BackTemp.y) * HistoryBlurAmp);
+	#endif
+	// Easier to do off screen check before conversion.
+	// BackN is in units of 2pixels/viewportWidthInPixels
+	// This converts back projection vector to [-1 to 1] offset in viewport.
+	BackN = ScreenPos - BackN;
+	bool OffScreen = max(abs(BackN.x), abs(BackN.y)) >= 1.0;
+	// Also clamp to be on screen (fixes problem with DOF).
+	// The .z and .w is the 1/width and 1/height.
+	// This clamps to be a pixel inside the viewport.
+	BackN.x = clamp(BackN.x, -1.0 + ViewportSize.z, 1.0 - ViewportSize.z);
+	BackN.y = clamp(BackN.y, -1.0 + ViewportSize.w, 1.0 - ViewportSize.w);
+	// Convert from [-1 to 1] to view rectangle which is somewhere in [0 to 1].
+	// The extra +0.5 factor is because ScreenPosToPixel.zw is incorrectly computed
+	// as the upper left of the pixel instead of the center of the pixel.
+	float2 HistoryUV = (BackN * ScreenPosToPixel.xy + ScreenPosToPixel.zw + 0.5) * PostprocessInput0Size.zw;
+	//HistoryUV.y += 0.01;
+
+
+	// FILTER PIXEL (RESAMPLE TO REMOVE JITTER OFFSET) AND GET NEIGHBORHOOD
+    // --------------------------------------------------------------------
+	// 012
+	// 345
+	// 678
+	const int2 Offsets[9] =
+	{
+		int2(-1, -1),
+		int2( 0, -1),
+		int2( 1, -1),
+		int2(-1,  0),
+		int2( 0,  0),
+		int2( 1,  0),
+		int2(-1,  1),
+		int2( 0,  1),
+		int2( 1,  1),
+	};
+	const uint PlusIndexes[5] = { 1, 3, 4, 5, 7 };
+
+	float4 Neighbors[9];
+	for( uint i = 0; i < 9; i++ )
+	{
+		Neighbors[i] = PostprocessInput0.SampleLevel( PostprocessInput0Sampler, UV, 0, Offsets[i] );
+
+		if( AA_YCOCG )
+			Neighbors[i].xyz = RGBToYCoCg( Neighbors[i].rgb );
+	}
+
+	#if AA_FILTERED
+		// Filter neighbors
+		float4 Filtered = 0;
+		float TotalWeight = 0;
+		for( uint i = 0; i < AA_SAMPLES; i++ )
+		{
+		#if AA_SAMPLES == 9
+			float4 SampleColor = Neighbors[i];
+			float  SampleWeight = SampleWeights[i];
+		#else
+			float4 SampleColor = Neighbors[ PlusIndexes[i] ];
+			float  SampleWeight = PlusWeights[i];
+		#endif
+
+			if( AA_TONE )
+			{
+				if( AA_YCOCG )
+					SampleWeight *= HdrWeightY( SampleColor.x, InExposureScale );
+				else
+					SampleWeight *= HdrWeight4( SampleColor.rgb, InExposureScale );
+						
+				TotalWeight += SampleWeight;
+			}
+
+			Filtered += SampleColor * SampleWeight;
+		}
+		if( AA_TONE )
+			Filtered /= TotalWeight;
+
+		#if AA_BORDER
+			// Use unfiltered for 1 pixel border.
+			float2 TestPos = abs(ScreenPos);
+			// Add 1 pixel and check if off screen.
+			TestPos += ViewportSize.zw * 2.0;
+			bool FilteredOffScreen = max(TestPos.x, TestPos.y) >= 1.0;
+			if(FilteredOffScreen) 
+			{
+				Filtered = Neighbors[4];
+			}
+		#endif
+	#else
+		// Unfiltered.
+		float4 Filtered = Neighbors[4];
+	#endif
+
+	// Neighborhood bounding box
+	float4 NeighborMin;
+	float4 NeighborMax;
+	if( AA_VARIANCE )
+	{
+		float4 m1 = 0;
+		float4 m2 = 0;
+		for( uint i = 0; i < AA_SAMPLES; i++ )
+		{
+		#if AA_SAMPLES == 9
+			float4 SampleColor = Neighbors[i];
+		#else
+			float4 SampleColor = Neighbors[ PlusIndexes[i] ];
+		#endif
+
+			m1 += SampleColor;
+			m2 += Pow2( SampleColor );
+		}
+
+		m1 *= (1.0 / AA_SAMPLES);
+		m2 *= (1.0 / AA_SAMPLES);
+
+		float4 Variance = sqrt( abs(m2 - m1 * m1) );
+		NeighborMin = m1 - 1.25 * Variance;
+		NeighborMax = m1 + 1.25 * Variance;
+
+		NeighborMin = min( NeighborMin, Filtered );
+		NeighborMax = max( NeighborMax, Filtered );
+	}
+	else
+	{
+		NeighborMin = min3( Neighbors[1], Neighbors[3], Neighbors[4] );
+		NeighborMin = min3( NeighborMin,  Neighbors[5], Neighbors[7] );
+
+		NeighborMax = max3( Neighbors[1], Neighbors[3], Neighbors[4] );
+		NeighborMax = max3( NeighborMax,  Neighbors[5], Neighbors[7] );
+
+		if( AA_SAMPLES == 9 )
+		{
+			float4 NeighborMinPlus = NeighborMin;
+			float4 NeighborMaxPlus = NeighborMax;
+
+			NeighborMin = min3( NeighborMin, Neighbors[0], Neighbors[2] );
+			NeighborMin = min3( NeighborMin, Neighbors[6], Neighbors[8] );
+
+			NeighborMax = max3( NeighborMax, Neighbors[0], Neighbors[2] );
+			NeighborMax = max3( NeighborMax, Neighbors[6], Neighbors[8] );
+
+			if( AA_ROUND )
+			{
+				NeighborMin = NeighborMin * 0.5 + NeighborMinPlus * 0.5;
+				NeighborMax = NeighborMax * 0.5 + NeighborMaxPlus * 0.5;
+			}
+		}
+	}
+
+	// FETCH HISTORY
+	// -------------
+	#if AA_BICUBIC
+		float4 HistoryColor = Texture2DSampleBicubic( PostprocessInput1, PostprocessInput1Sampler, HistoryUV, PostprocessInput1Size.xy );
+	#else
+		float4 HistoryColor = PostprocessInput1.SampleLevel(PostprocessInput1Sampler, HistoryUV, 0);
+	#endif
+
+	#if AA_YCOCG
+		HistoryColor.rgb = RGBToYCoCg(HistoryColor.rgb);
+	#endif
+
+	#if AA_DYNAMIC_ANTIGHOST && AA_DYNAMIC && !AA_ALPHA
+		bool Dynamic1 = PostprocessInput3.SampleLevel(PostprocessInput3Sampler, UV, 0, int2( 0, -1)).x > 0;
+		bool Dynamic3 = PostprocessInput3.SampleLevel(PostprocessInput3Sampler, UV, 0, int2(-1,  0)).x > 0;
+		bool Dynamic4 = PostprocessInput3.SampleLevel(PostprocessInput3Sampler, UV, 0).x > 0;
+		bool Dynamic5 = PostprocessInput3.SampleLevel(PostprocessInput3Sampler, UV, 0, int2( 1,  0)).x > 0;
+		bool Dynamic7 = PostprocessInput3.SampleLevel(PostprocessInput3Sampler, UV, 0, int2( 0,  1)).x > 0;
+
+		bool Dynamic = Dynamic1 || Dynamic3 || Dynamic4 || Dynamic5 || Dynamic7;
+		if( !Dynamic && HistoryColor.a > 0 )
+		{
+			HistoryColor = Filtered;
+			HistoryColor.a = 0;
+		}
+	#endif
+
+	// FIND LUMA OF CLAMPED HISTORY
+	// ----------------------------
+	// Save off luma of history before the clamp.
+	#if AA_YCOCG
+		float LumaMin		= NeighborMin.x;
+		float LumaMax		= NeighborMax.x;
+		float LumaHistory	= HistoryColor.x;
+	#else
+		float LumaMin		= Luma4( NeighborMin.rgb );
+		float LumaMax		= Luma4( NeighborMax.rgb );
+		float LumaHistory	= Luma4( HistoryColor.rgb );
+	#endif
+
+	#if AA_CLAMP
+		#if AA_AABB
+			// Clip history, this uses color AABB intersection for tighter fit.
+			//float4 TargetColor = 0.5 * ( NeighborMin + NeighborMax );
+			float4 TargetColor = Filtered;
+			float ClipBlend = HistoryClip( HistoryColor.rgb, TargetColor.rgb, NeighborMin.rgb, NeighborMax.rgb );
+			//float DistToClamp = saturate(-ClipBlend) / ( saturate(-ClipBlend) + 1 );
+			//float DistToClamp = abs( ClipBlend ) / ( 1 - ClipBlend );
+			ClipBlend = saturate( ClipBlend );
+
+			HistoryColor = lerp( HistoryColor, TargetColor, ClipBlend );
+
+			#if AA_FORCE_ALPHA_CLAMP
+				HistoryColor.a = clamp( HistoryColor.a, NeighborMin.a, NeighborMax.a );
+			#endif
+		#else
+			HistoryColor = clamp( HistoryColor, NeighborMin, NeighborMax );
+		#endif
+	#endif
+
+	// ADD BACK IN ALIASING TO SHARPEN
+    // -------------------------------
+	#if AA_FILTERED && !AA_BICUBIC
+		// Blend in non-filtered based on the amount of sub-pixel motion.
+		float AddAliasing = saturate(HistoryBlur) * 0.5;
+		float LumaContrastFactor = 32.0;
+		#if AA_YCOCG
+			// 1/4 as bright.
+			LumaContrastFactor *= 4.0;
+		#endif
+		float LumaContrast = LumaMax - LumaMin;
+		AddAliasing = saturate(AddAliasing + rcp(1.0 + LumaContrast * LumaContrastFactor));
+		Filtered = lerp(Filtered, Neighbors[4], AddAliasing);
+	#endif
+		
+	// COMPUTE BLEND AMOUNT 
+    // --------------------
+	float BlendFinal = CurrentFrameWeight;
+
+	BlendFinal = lerp( BlendFinal, 0.2, saturate( Velocity / 40 ) );
+	
+#if 0
+	// Anti-flicker
+	float DistToClamp = 2 * abs( min( LumaHistory - LumaMin, LumaMax - LumaHistory ) / ( LumaMax - LumaMin ) );
+	//BlendFinal *= lerp( 0, 1, saturate(4 * DistToClamp) );
+	BlendFinal += 0.8 * saturate( 0.02 * LumaHistory / abs( Filtered.x - LumaHistory ) );
+	BlendFinal *= (LumaMin * InExposureScale + 0.5) / (LumaMax * InExposureScale + 0.5);
+#endif
+
+	// Make sure to have at least some small contribution
+	BlendFinal = max( BlendFinal, saturate( 0.01 * LumaHistory / abs( Filtered.x - LumaHistory ) ) );
+
+	#if AA_NAN && (COMPILER_GLSL || COMPILER_METAL)
+		// The current Metal & GLSL compilers don't handle saturate(NaN) -> 0, instead they return NaN/INF.
+		BlendFinal = -min(-BlendFinal, 0.0);
+	#endif
+
+	// Responsive forces 1/4 of new frame.
+	BlendFinal = bIsResponsiveAAPixel ? (1.0/4.0) : BlendFinal;
+
+	#if AA_LERP 
+		BlendFinal = 1.0/float(AA_LERP);
+	#endif
+	
+	// Offscreen feedback resets.
+	if(OffScreen) 
+	{
+		HistoryColor = Filtered;
+		#if !AA_ALPHA
+			HistoryColor.a = 0.0;
+		#endif
+	}
+	
+	// DO FINAL BLEND BETWEEN HISTORY AND FILTERED COLOR
+	// -------------------------------------------------
+	// Luma weighted blend
+	#if AA_YCOCG
+		float FilterWeight = HdrWeightY( Filtered.x, InExposureScale );
+		float HistoryWeight = HdrWeightY( HistoryColor.x, InExposureScale );
+	#else
+		float FilterWeight = HdrWeight4( Filtered.rgb, InExposureScale );
+		float HistoryWeight = HdrWeight4( HistoryColor.rgb, InExposureScale );
+	#endif
+	OutColor = WeightedLerp( HistoryColor, HistoryWeight, Filtered, FilterWeight, BlendFinal );
+	//OutColor = lerp(HistoryColor, Filtered, BlendFinal);
+
+	#if AA_YCOCG
+		OutColor.rgb = YCoCgToRGB(OutColor.xyz);
+	#endif
+
+	#if AA_NAN
+		// Transform NaNs to black, transform negative colors to black.
+		OutColor.rgb = -min(-OutColor.rgb, 0.0);
+		#if AA_ALPHA
+			OutColor.a = isnan(OutColor.a) ? 0.0 : OutColor.a;
+		#endif
+	#endif
+
+	#if AA_DYNAMIC_ANTIGHOST && AA_DYNAMIC && !AA_ALPHA
+		OutColor.a = Dynamic4 ? 1 : 0;
+	#elif !AA_ALPHA
+		// Zero out to remove any prior computation of alpha
+		OutColor.a = 0;
+	#endif
+
+	//OutColor.rg = abs( UV - HistoryUV );
+	//OutColor.b = 0;
+	//OutColor.a = 0;
+
+#undef AA_SAMPLES
+#undef AA_AABB
+#undef AA_ALPHA
+#undef AA_CROSS
+#undef AA_DYNAMIC
+#undef AA_FILTERED
+#undef AA_LERP
+#undef AA_ROUND
+#undef AA_NAN
+#undef AA_BORDER
+#undef AA_FORCE_ALPHA_CLAMP
+#undef AA_YCOCG
+#undef AA_BICUBIC
+#undef AA_TONE
+#undef AA_CLAMP
+#undef AA_DYNAMIC_ANTIGHOST
+#undef AA_SINGLE_PASS_RESPONSIVE

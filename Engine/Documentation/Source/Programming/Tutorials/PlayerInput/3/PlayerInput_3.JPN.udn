@@ -1,0 +1,267 @@
+﻿INTSourceChangelist:2620071
+Availability:Public
+Title:3.ゲームアクションのプログラミングとバインド
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/PlayerInput
+Description:入力と C++ コードのバインド
+バージョン:4.9
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[前の手順](Programming\Tutorials\PlayerInput\2 "%Programming\Tutorials\PlayerInput\2:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[プレイヤー入力と Pawn クラス](Programming\Tutorials\PlayerInput)
+	[/PARAM]
+	[PARAM:next]
+		[次の手順](Programming\Tutorials\PlayerInput\4 "%Programming\Tutorials\PlayerInput\4:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+1. **Visual Studio** で「MyPawn.h」を開いて MyPawn のクラス定義の下部に以下のコードを追加します:
+
+		//Input functions (入力関数)
+		void Move_XAxis(float AxisValue);
+		void Move_YAxis(float AxisValue);
+		void StartGrowing();
+		void StopGrowing();
+
+		//Input variables (入力変数)
+		FVector CurrentVelocity;
+		bool bGrowing;
+
+	[REGION:note]4 つの入力関数は入力イベントと結合されます。実行時に、新規の入力変数に格納した値を更新します。この値は MyPawn がインゲームの動作を判断するために使用します。[/REGION]
+
+1. "MyPawn.cpp" に切り替えて、宣言したばかりの 4 つの関数をプログラミングします。次のコードを追加します。
+
+		void AMyPawn::Move_XAxis(float AxisValue)
+		{
+			// Move at 100 units per second forward or backward (1 秒間に前後へ 100 単位移動)
+			CurrentVelocity.X = FMath::Clamp(AxisValue, -1.0f, 1.0f) * 100.0f;
+		}
+
+		void AMyPawn::Move_YAxis(float AxisValue)
+		{
+			// Move at 100 units per second right or left (1 秒間に左右へ 100 単位移動)
+			CurrentVelocity.Y = FMath::Clamp(AxisValue, -1.0f, 1.0f) * 100.0f;
+		}
+
+		void AMyPawn::StartGrowing()
+		{
+			bGrowing = true;
+		}
+
+		void AMyPawn::StopGrowing()
+		{
+			bGrowing = false;
+		}
+	入力から受け取る値を「－1」から「＋1」の範囲にコンストレイントするために **FMath::Clamp** を使用します。サンプルでは問題ありませんが、軸に対し同じように影響を与える複数キーがある場合は、プレイヤーがこれらの値を同時にパスすると値は一緒に加算されます。例えば「W」と「↑」が両方ともスケール値 1.0 で MoveX にマッピングされている場合は、両方のキーを同時に押すと AxisValue は値 2.0 になります。クランプしなければ、この値は結果的にプレイヤーを倍速で移動させます。
+	[REGION:note]2 つの "Move" 関数は軸値を浮動小数値で受け取る一方で、"Grow" 関数はそうでないことにお気づきのユーザーがいるかもしれません。Move 関数は軸マッピングの MoveX と MoveY にマッピングされているため、浮動小数点パラメータになります。アクション マッピングにこのパラメータはありません。[/REGION]
+
+1. 入力関数を定義したので、適切な入力に対応するようにこれらをバインドしなくてはいけません。**AMyPawn::SetupPlayerInputComponent** に以下のコードを追加します：
+
+		// Respond when our "Grow" key is pressed or released. (Grow キーが押された時またはリリースされた時に反応)
+		InputComponent->BindAction("Grow", IE_Pressed, this, &AMyPawn::StartGrowing);
+		InputComponent->BindAction("Grow", IE_Released, this, &AMyPawn::StopGrowing);
+
+		// Respond every frame to the values of our two movement axes, "MoveX" and "MoveY".
+		InputComponent->BindAxis("MoveX", this, &AMyPawn::Move_XAxis);
+		InputComponent->BindAxis("MoveY", this, &AMyPawn::Move_YAxis);
+
+1. 設定した入力値で更新を行う変数を設定しました。最後に変数を使用するコードを記述します。次のコードを **AMyPawn::Tick** に追加しましょう：
+
+		// Handle growing and shrinking based on our "Grow" action (Grow アクションに基づいて拡大と縮小を処理)
+		{
+			float CurrentScale = OurVisibleComponent->GetComponentScale().X;
+			if (bGrowing)
+			{
+				// Grow to double size over the course of one second (1 秒間に倍のサイズに成長)
+				CurrentScale += DeltaTime;
+			}
+			else
+			{
+				// Shrink half as fast as we grow (拡大と同じ速さで半分に縮小)
+				CurrentScale -= (DeltaTime * 0.5f);
+			}
+			// Make sure we never drop below our starting size, or increase past double size.(開始サイズ以下またはダブルサイズ以上にしない)
+			CurrentScale = FMath::Clamp(CurrentScale, 1.0f, 2.0f);
+			OurVisibleComponent->SetWorldScale3D(FVector(CurrentScale));
+		}
+
+		// Handle movement based on our "MoveX" and "MoveY" axes (MoveX や MoveY 軸に基づいて移動を処理)
+		{
+			if (!CurrentVelocity.IsZero())
+			{
+				FVector NewLocation = GetActorLocation() + (CurrentVelocity * DeltaTime);
+				SetActorLocation(NewLocation);
+			}
+		}
+
+1. コードをコンパイルした後に **アンリアル エディタ** へ戻って **Play (再生)** を押します。WASD キーで操作可能な **Pawn** があります。このポーンは **スペースバー** を押すと拡大、バーをリリースすると縮小します。
+
+[![](PlayingGame1.png)](PlayingGame1.png)
+[![](PlayingGame2.png)](PlayingGame2.png)
+
+----
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    コード
+    [/PARAMLITERAL]
+    [PARAM:heading]
+    完成コード
+    [/PARAM]
+    [PARAM:content]
+		**MyPawn.h**
+			// Copyright 1998-2017 Epic Games, Inc.All Rights Reserved.
+
+			#pragma once
+
+			#include "GameFramework/Pawn.h"
+			#include "MyPawn.generated.h"
+
+			UCLASS()
+			class HOWTO_PLAYERINPUT_API AMyPawn : public APawn
+			{
+				GENERATED_BODY()
+
+			public:
+				// Sets default values (デフォルト値を設定)
+				AMyPawn();
+
+				// Called when the game starts or when spawned (ゲーム開始またはスポーン時に呼ばれます)
+				virtual void BeginPlay() override;
+
+				// Called every frame (フレームごとに呼ばれます)
+				virtual void Tick(float DeltaSeconds) override;
+
+				// Called to bind functionality to input (機能と入力をバインドするために呼ばれます)
+				virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override;
+
+				UPROPERTY(EditAnywhere)
+				USceneComponent* OurVisibleComponent;
+
+				//Input functions (入力関数)
+				void Move_XAxis(float AxisValue);
+				void Move_YAxis(float AxisValue);
+				void StartGrowing();
+				void StopGrowing();
+
+				//Input variables (入力変数)
+				FVector CurrentVelocity;
+				bool bGrowing;
+			};
+
+		**MyPawn.cpp**
+			// Copyright 1998-2017 Epic Games, Inc.All Rights Reserved.
+
+			#include "HowTo_PlayerInput.h"
+			#include "MyPawn.h"
+
+			// Sets default values (デフォルト値を設定)
+			AMyPawn::AMyPawn()
+			{
+				// Set this pawn to call Tick() every frame.You can turn this off to improve performance if you don't need it.　(フレームごとに Tick() を呼び出すためこのポーンを設定します。必要なければパフォーマンスを向上させるためにオフにできます。)
+				PrimaryActorTick.bCanEverTick = true;
+
+				// Set this pawn to be controlled by the lowest-numbered player (このポーンが最小値のプレイヤーで制御されるように設定)
+				AutoPossessPlayer = EAutoReceiveInput::Player0;
+
+				// Create a dummy root component we can attach things to.(親子付け可能なダミーのルートコンポーネントを作成)
+				RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+				// Create a camera and a visible object (カメラと可視オブジェクトを作成)
+				UCameraComponent* OurCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("OurCamera"));
+				OurVisibleComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("OurVisibleComponent"));
+				// Attach our camera and visible object to our root component. (カメラと可視オブジェクトをルートコンポーネントに親子付け。カメラをオフセットして回転)
+				OurCamera->AttachTo(RootComponent);
+				OurCamera->SetRelativeLocation(FVector(-250.0f, 0.0f, 250.0f));
+				OurCamera->SetRelativeRotation(FRotator(-45.0f, 0.0f, 0.0f));
+				OurVisibleComponent->AttachTo(RootComponent);
+			}
+
+			// Called when the game starts or when spawned (ゲーム開始またはスポーン時に呼ばれます)
+			void AMyPawn::BeginPlay()
+			{
+				Super::BeginPlay();
+
+			}
+
+			// Called every frame (フレームごとに呼ばれます)
+			void AMyPawn::Tick(float DeltaTime)
+			{
+				Super::Tick(DeltaTime);
+
+				// Handle growing and shrinking based on our "Grow" action (Grow アクションに基づいて拡大と縮小を処理)
+				{
+					float CurrentScale = OurVisibleComponent->GetComponentScale().X;
+					if (bGrowing)
+					{
+						// Grow to double size over the course of one second (1 秒間に倍のサイズに成長)
+						CurrentScale += DeltaTime;
+					}
+					else
+					{
+						// Shrink half as fast as we grow (拡大と同じ速さで半分に縮小)
+						CurrentScale -= (DeltaTime * 0.5f);
+					}
+					// Make sure we never drop below our starting size, or increase past double size.(開始サイズ以下またはダブルサイズ以上にしない)
+					CurrentScale = FMath::Clamp(CurrentScale, 1.0f, 2.0f);
+					OurVisibleComponent->SetWorldScale3D(FVector(CurrentScale));
+				}
+
+				// Handle movement based on our "MoveX" and "MoveY" axes (MoveX や MoveY 軸に基づいて移動を処理)
+				{
+					if (!CurrentVelocity.IsZero())
+					{
+						FVector NewLocation = GetActorLocation() + (CurrentVelocity * DeltaTime);
+						SetActorLocation(NewLocation);
+					}
+				}
+			}
+
+			// Called to bind functionality to input (機能と入力をバインドするために呼ばれます)
+			void AMyPawn::SetupPlayerInputComponent(class UInputComponent* InputComponent)
+			{
+				Super::SetupPlayerInputComponent(InputComponent);
+
+				// Respond when our "Grow" key is pressed or released. (Grow キーが押された時またはリリースされた時に反応)
+				InputComponent->BindAction("Grow", IE_Pressed, this, &AMyPawn::StartGrowing);
+				InputComponent->BindAction("Grow", IE_Released, this, &AMyPawn::StopGrowing);
+
+				// Respond every frame to the values of our two movement axes, "MoveX" and "MoveY".
+				InputComponent->BindAxis("MoveX", this, &AMyPawn::Move_XAxis);
+				InputComponent->BindAxis("MoveY", this, &AMyPawn::Move_YAxis);
+			}
+
+			void AMyPawn::Move_XAxis(float AxisValue)
+			{
+				// Move at 100 units per second forward or backward (1 秒間に前後へ 100 単位移動)
+				CurrentVelocity.X = FMath::Clamp(AxisValue, -1.0f, 1.0f) * 100.0f;
+			}
+
+			void AMyPawn::Move_YAxis(float AxisValue)
+			{
+				// Move at 100 units per second right or left (1 秒間に左右へ 100 単位移動)
+				CurrentVelocity.Y = FMath::Clamp(AxisValue, -1.0f, 1.0f) * 100.0f;
+			}
+
+			void AMyPawn::StartGrowing()
+			{
+				bGrowing = true;
+			}
+
+			void AMyPawn::StopGrowing()
+			{
+				bGrowing = false;
+			}
+
+
+	[/PARAM]
+[/OBJECT]
+
+%Steps%

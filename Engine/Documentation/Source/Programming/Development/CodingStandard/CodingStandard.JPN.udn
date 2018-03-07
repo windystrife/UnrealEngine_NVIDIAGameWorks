@@ -1,0 +1,748 @@
+﻿INTSourceChangelist:3599948
+Availability:Public
+Title:コーディング標準
+Crumbs:%ROOT%, Programming, Programming\Development
+Description:アンリアル・エンジン 4 コードベースでエピックが使用する標準と規則
+Version:4.11
+
+[TOC(start:2)]
+
+
+
+エピックではいくつかの基本的なコーディング標準や規則を使用しています。このドキュメントは考察や現在開発中のものを示すのではなく、エピックのコーディング標準の現状を反映させたものです。
+
+コードの規則がプログラマーにとって重要な理由は以下のように数多くあります。
+
+* ソフトウェアのライフタイム コストの 80 ％は、メンテナンスに関するものです。
+* ライフタイムを通して、元の製作者がソフトウェアをメンテナンスし続けることはほとんどありません。
+* コードの規則によってソフトウェアの可読性が向上するため、エンジニアは新しいコードを迅速かつ十分に理解できるようになります。
+* ソースコードを MOD コミュニティのデベロッパーに公開する際も、コードを理解しやすくすることは重要です。
+* これらの規則の多くは、クロスコンパイラの互換性を維持するためにも実際に必要です。
+
+以下のコーディング基準は、C++ を中心としたものですが、どの言語を使用するかに関わらずこの基準の考え方に従うことを想定しています。該当する場合は、特定の言語に対して同等のルールや例外を示します。
+
+
+## クラスの構成
+
+クラスは、書き手の都合ではなく読み手の立場で構成するべきです。読み手のほとんどがクラスのパブリック インタフェースを使用するため、最初にこれを宣言し、次にクラスの内部実装を隠ぺいします。
+
+
+## 著作権表示
+
+エピックが配布目的で提供するすべてのソースファイル (.h、 .cpp、 .xaml、等) は、ファイルの最初の行に必ず著作権表示がされてなくてはいけません。表示フォーマットは下記の例と正確に一致させてください。
+
+	// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+この行の表示がない場合やフォーマットに誤りがある場合、CIS がエラーとなり失敗します。
+
+## 命名規則
+
+* 名前の最初の文字 (例、 型や変数) は大文字とし、通常は文字間にアンダースコアを使用しません。例えば、「Health」や「UPriitiveComponent」はOKですが、「lastMouseCoordinates」や「delta_coordinates」は使用しません。
+* 型名には大文字を接頭辞として追加し、変数名と区別します。例えば「FSkin」は型名で、「Skin」は「FSkin」のインスタンスとなります。
+    * テンプレートクラスには T が接頭辞として付きます。
+    * UObject から継承されるクラスには U が接頭辞として付きます。
+    * AActor から継承されるクラスには A が接頭辞として付きます。
+    * SWidget から継承されるクラスには S が接頭辞として付きます。
+    * 抽象インターフェースのクラスには I が接頭辞として付きます。
+    * 列挙型変数は E が接頭辞として付きます。
+    * ブール変数には、必ず接頭辞として「b」を付けてください(例、「bPendingDestruction」や「"bHasFadedIn」)。
+    * その他のほとんどのクラスには F が接頭辞として付きますが、サブシステムによってはその他の文字が使用されます。
+    * Typedef には、その型に対して適切な接頭辞が付きます。構造体の typedef の場合は、F に、UObject の typedef の場合は、U になる等のようになります。
+        特定のテンプレートのインスタンス化の typedef は、テンプレートではなくなり、それに応じて接頭辞が付きます。例えば、以下のようになります。
+
+                typedef TArray<FMyType> FArrayOfMyTypes;
+    * C# では接頭辞は省略されます。
+    * UnrealHeaderTool では、多くの場合、正しい接頭辞を必要とするため正しいものを使うことが重要です。
+* 型と変数の名前には名詞を使用します。
+* メソッド名は、その効果を説明する動詞、または効果のないメソッドの戻り値を説明する動詞を使用します。
+
+
+変数、メソッド、クラス名には明確で記述的な名前を使用します。名前のスコープが大きいほど、名前のわかりやすさがより重要となります。過度な省略名は避けてください。
+
+変数は一つずつ宣言するようにして、変数の意味をコメントとして付けられるようにします。これは JavaDocs のスタイルの要求事項でもあります。変数の前のコメントは一行でも複数行でもかまいません。変数をグループ化する空白行の挿入は任意となっています。
+
+bool を返す全ての関数は、true または false の質問形式とします。例えば、「IsVisible()」や「ShouldClearBuffer()」です。
+
+プロシージャ (戻り値のない関数) の名前には、明確な動詞の後にオブジェクトが続きます。ただし、メソッドのオブジェクトがそのメソッドが所属するオブジェクト自体である場合は例外です。その場合はコンテキストからオブジェクトが認識されます。「Handle」や「Process」のような動詞は曖昧になるので、使用は避けてください。
+
+必須ではありませんが、参照から渡されたり、関数によって値が書かれる場合は、関数パラメータ名に「Out」を接頭辞として付けることを推奨します。こうすることで引数に渡された値が関数によって置き換えられることが明白になります。
+
+In または Out のパラメータも boolean の場合、In/Out の接頭辞の前に b を付けます (例、"bOutResult")。
+
+値を返す関数は戻り値を名前で説明すべきです。関数が返す値を名前によって明確にします。これは特にブール関数で重要です。以下の例を参考にしてください。以下の例で 2 通りの方法を見てみましょう。
+
+		bool CheckTea(FTea Tea) {...} // what does true mean? (true は何を意味するのでしょう？) 
+		bool IsTeaFresh(FTea Tea) {...} //name makes it clear true means tea is fresh (この名前は true が、tea is fresh という意味になります)。
+
+
+### 例
+
+		float myFloat;
+
+		int32 TeaCount;
+
+		bool bDoesTeaStink;
+
+		FName TeaName;
+
+		FString TeaFriendlyName;
+
+		UClass* TeaClass;
+
+		USoundCue* TeaSound;
+
+		UTexture* TeaTexture;
+
+
+## C++ 基本型に移植可能なエイリアス
+
+* Boolean 値に使う bool (Bool のサイズは想定しない)BOOL はコンパイルしません。
+* character 用の TCHAR (TCHAR のサイズは想定しない)
+* 符号なしバイト用の uint8 (1 byte)
+* 符号付きバイト用の int8 (1 byte)
+* 符号なし "shorts" 用の uint16 (2 bytes)
+* 符号付き "shorts" 用の int16 (2 bytes)
+* 符号なし ints 用の uint32 (4 bytes)
+* 符号付き ints 用の int32 (4 bytes)
+* 符号なし「quad words」用の uint64 (8 bytes)
+* 符号付き「quad words」用の int64 (8 bytes)
+* 単精度浮動小数点用の float (4 bytes)
+* 倍精度浮動小数点用の double (8 bytes)
+* ポインタを保持する整数用の PTRINT (PTRINT のサイズは想定しない)
+
+
+C+\+ の int 型と符号なしの int 型 (そのサイズはプラットフォームによって変わることがあります) を使用することは、整数の幅が重要でない場合に認められます 。シリアル化または複製されたフォーマットでは、明示的にサイズ指定された型を指定しなければなりません。
+
+
+##コメント
+
+コメントはコミュニケーションの手段であり、コミュニケーションは必要不可欠です。コメントを書く際は、以下の点に注意してください (Kernighan & Pike _The Practice of Programming_から引用)。
+
+
+### ガイドライン
+
+* 自己説明的なコードを書いてください。
+
+		// Bad (悪い例) :
+		t = s + l - b;
+		// Good (良い例) :
+
+		TotalLeaves = SmallLeaves + LargeLeaves - SmallAndLargeLeaves;
+
+
+* 役立つコメントを書く：
+
+		// Bad (悪い例) :
+		// increment Leaves (Leaves をインクリメント) 
+		++Leaves;
+
+		// Good (良い例) :
+		// we know there is another tea leaf (別の茶葉があることがわかっています) 
+		++Leaves;
+
+
+* 悪いコードはコメントでごまかさず、コードを書き直してください！
+
+		// Bad (悪い例) :
+		// total number of leaves is sum of
+		// small and large leaves less the (小さな葉と大きな葉から) 
+		// number of leaves that are both (両方を差し引くことです) 
+		t = s + l - b;
+		// Good (良い例) :
+
+		TotalLeaves = SmallLeaves + LargeLeaves - SmallAndLargeLeaves;
+
+
+* コードを矛盾させないでください。
+
+		// Bad (悪い例) :
+		// never increment Leaves! (葉を絶対にインクリメントしないでください)
+		++Leaves;
+		// Good (良い例) :
+
+		// we know there is another tea leaf (別の茶葉があることがわかっています) 
+		++Leaves;
+
+
+### Const の正しさ
+
+const はドキュメンテーションでもあり、コンパイラ ディレクティブでもあります。そのため、すべてのコードで const を正しく設定するようにします。
+
+これには、引数が関数によって書き換えられない場合に const ポインタや参照によって関数の引数を渡すことを含みます。オブジェクトを書き換えない場合は const としてメソッドにフラグ付けします。ループがコンテナを書き換えない場合は、コンテナに const のイタレーションを使います。
+
+		void SomeMutatingOperation(FThing& OutResult, const TArray<int32>& InArray); // InArray will not be modified by SomeMutatingOperation, but OutResult probably will be (InArray は SomeMutatingOperation によって変更されませんが、OutResult はおそらく変更されます。)
+
+		void FThing::SomeNonMutatingOperation() const
+		{
+			// This code will not modify the FThing it is invoked on (このコードは、それが呼び出された FThing を変更しません)
+		}
+
+		TArray<FString> StringArray;
+		for (const FString& :StringArray)
+		{
+			// The body of this loop will not modify StringArray (このループのボディは、StringArray を変更しません)
+		}
+
+Const は値渡しの関数パラメータやローカルでも推奨されるものです。これは読み手に変数が関数のボディで変更されないことを示し、理解を助けます。これを行う場合、JavaDoc プロセスに影響を及ぼしうるため宣言とその定義が一致するようにします。
+
+		void AddSomeThings(const int32 Count);
+
+		void AddSomeThings(const int32 Count)
+		{
+			const int32 CountPlusOne = Count + 1;
+
+			// Neither Count nor CountPlusOne can be changed during the body of the function (関数のボディの中では Count または CountPlusOne のいずれも変更できません) 
+		}
+
+このひとつの例外として、値渡しパラメータがあります。これは、最終的にコンテナに移動しますが ("Move semantics" を参照)、滅多に起こらないはずです。
+
+		void FBlah::SetMemberArray(TArray<FString> InNewArray)
+		{
+			MemberArray = MoveTemp(InNewArray);
+		}
+
+ポインタ自体を const にする場合は (ポイント先ではなく)、最後に const キーワードを入れます。参照はいかなる方法でも再代入できないため、同じ方法で const にすることはできません。
+
+		// Const pointer to non-const object - pointer cannot be resassigned, but T can still be modified (Const ポインタから非 const オブジェクト、ポインタは再代入できませんが T を変更することはできます) 
+		T* const Ptr = ...;
+
+		// Illegal (不正)
+		T& const Ref = ...;
+
+戻り型で const は絶対に使用しないでください。これは複合型に対するムーブ セマンティクスを禁止し、組み込み型に対してコンパイルの警告をするからです。このルールは戻り型自体にのみ適用されます。ポインタのターゲット型や戻されている参照には適用されません。
+
+		// Bad - returning a const array (悪い例 -const 配列を戻します)
+		const TArray<FString> GetSomeArray();
+
+		// 良い例 - const array への参照を戻します。
+		const TArray<FString>& GetSomeArray();
+
+		// Fine - returning a pointer to a const array (良い例 - const 配列へのポインタを戻します)
+		const TArray<FString>* GetSomeArray();
+
+		// Bad - returning a const pointer to a const array ( 悪い例 - const 配列へのconst ポインタを戻します) 
+		const TArray<FString>* const GetSomeArray();
+
+
+### フォーマットの例
+
+Epic では JavaDoc に基づいたシステムを使用し、コードから自動的にコメントを抽出してドキュメントを作成します。その際にコメントのフォーマットに関する従うべきルールがいくつかあります。
+
+以下はクラス、ステート、メソッド、変数コメントのフォーマットの実例です。コメントはコードを補強するということを覚えておいてください。コードは実装を文書化し、意図を文書化するのがコメントです。部分的であってもコードの意図を修正した場合は、必ずコメントも更新してください。
+
+Steep 方式および Sweeten 方式で具体化された二通りのパラメータ コメント スタイルがサポートされています。Steep 方式の @param スタイルが従来のスタイルですが、シンプルな関数に関しては Sweeten 方式に見られるようにパラメータ文書を説明コメントとまとめるとより明確になります。
+
+メソッド コメントは、メソッドがパブリックに宣言された場所で一度だけ書いてください。メソッド コメントは、呼び出し元に関連するメソッドのオーバーライドに関する情報など、メソッドの呼び出し元に関連した情報のみを書きます。メソッドの実装と呼出し元に関係のないメソッドのオーバーライドに関する詳細は、メソッドの実装の中でコメントとして残してください。
+
+
+		class IDrinkable
+		{
+		public:
+			/**
+			 * プレイヤーがこのオブジェクトを飲むと呼び出される。
+			 * @param OutFocusMultiplier - 戻り時に飲んだ人のフォーカスに適用する乗数を含みます。
+			 * @param OutThirstQuenchingFraction - 戻り時に、プレイヤーの喉の渇きの癒し度 (0-1) を情報として含みます。
+			 */
+			virtual void Drink(float& OutFocusMultiplier, float& OutThirstQuenchingFraction) = 0;
+		};
+
+		class FTea : public IDrinkable
+		{
+		public:
+			/**
+			 * お茶を淹れる際に使用した茶葉の量と水温に基づいて風味のデルタ値を計算する。
+			 * @param VolumeOfWater - お茶入れに使用した水の量 (mL)
+			 * @param TemperatureOfWater - ケルビン温度で示す水温
+			 * @param OutNewPotency - お茶を淹れ始めた後のお茶の効能、0.97 から1.04
+			 * @return - お茶の強度の変化を風味の単位 (TTU) / 分で表した戻り値
+			 */
+			float Steep(
+				const float VolumeOfWater,
+				const float TemperatureOfWater,
+				float& OutNewPotency
+				);
+
+			void Sweeten(const float EquivalentGramsOfSucrose);
+
+			float GetPrice() const
+			{
+				return Price;
+			}
+
+			virtual void Drink(float& OutFocusMultiplier, float& OutThirstQuenchingFraction) override;
+
+		private:
+
+			float Price;
+
+			float Sweetness;
+		};
+
+		float FTea::Steep(const float VolumeOfWater, const float TemperatureOfWater, float& OutNewPotency)
+		{
+			...
+		}
+
+		void FTea::Sweeten(const float EquivalentGramsOfSucrose)
+		{
+			...
+		}
+
+		void FTea::Drink(float& OutFocusMultiplier, float& OutThirstQuenchingFraction)
+		{
+			...
+		}
+
+
+クラスコメントには何が含まれていますか？
+* このクラスが解決する問題の説明。何故このクラスは作成されたのか？
+
+メソッドコメントが持つ意味とは？
+* 最初に関数の目的： _この関数が処理する問題_ を文書化します。上記でも述べましたが、コメントは _意図_ を文書化し、コードは _実装_ を文書化します。
+* 次にパラメータコメントを書きます。各パラメータ コメントには、測定単位、期待値範囲、「不可能」な値、ステータス /エラーのコードの意味を情報として書きます。
+* そして戻りのコメントを書きます。出力変数を文書化するように期待される戻り値を文書化します。
+
+
+## C++11 と モダン言語の記法
+
+アンリアル エンジンは数多くの C++ コンパイラへ一括して移植するためにビルドされます。サポートを想定するコンパイラと互換性をもつ機能の使用には注意しています。機能が非常に便利なため、それらをマクロにラップし幅広く使用する場合もありますが、通常はサポートを想定するコンパイラがすべて最新標準になるまで待つことになります。 
+
+最新コンパイラで十分にサポートされていると考えられる、range-based-for、move semantics、lambda などの一部のC++ 11 言語機能を使用しています。これらの機能の使用をプリプロセッサ条件にラップすることが可能な場合があります (コンテナの rvalue 参照など)。ただし、記法に対応できない新しいプラットフォームがなくなるまでは、一部の言語機能を使わない選択をすることができます。
+
+サポートしている最新の C++ コンパイラ機能として以下で指定していない場合で、プリプロセッサ マクロあるいは条件演算子でラップして慎重な使用ができない限りは、コンパイラ固有の言語機能の使用は控えてください。
+
+
+### static_assert
+
+このキーワードはコンパイル時間のアサーションが必要な場合の使用で有効です。
+
+
+### override と final
+
+こうしたキーワードの使用は有効であり、使用することを強くお勧めします。これらが省略される場合が多くありますが、時間の経過とともに修正されます。
+
+
+### nullptr
+
+あらゆる場合に、C-style NULL マクロの代わりに nullptr を使うようにします。
+
+唯一の例外は、 C++/CX ビルド (Xbox One など) nullptr が実際には null 参照型によって管理されることです。型といくつかのテンプレートのインスタンス化のコンテキスト以外は、ネイティブ C++ の nullptr とほとんど互換性があります。従って、互換性のためには、より一般的な decltype(nullptr) ではなく TYPE_OF_NULLPTR マクロを使用するべきです。
+
+
+### auto キーワード
+
+以下の例外がなければ、C++ コードで auto を使わないようにします。初期化している型について常に明示的でなければなりません。つまり、その型は読み手に対して可視でなくてはなりません。このルールは C# の ‘var’ キーワードの使用にも適用されます。
+
+auto の使用はどのような場合に認められますか？
+
+* lambda を変数にバインドする必要がある場合です。lambda 型はコードで表現できないからです。
+* iterator 変数に対して認められます。しかし、iterator の型が非常に詳細で読みづらくなります。
+* テンプレートのコードで認められます。この場合、式の型は簡単に見分けることはできません。これは高度な事例です。
+
+コードの読み手に型が明確に可視であることは非常に重要です。一部の IDE では型を推測できますが、これはコンパイル可能な状態にあるコードに依存します。merge/diff ツールのユーザーもサポートしません。または、GitHub 上など各ソース ファイルを別個に見る場合などもサポートしません。
+
+認められる方法で auto を使う場合、型名で使うように常に正しく const、 & または * を使うようにしてください。auto を使うと、推測された型を希望の型にします。
+
+
+### Range Based For
+
+コードをわかりやすくし、管理しやすくするにはお勧めです。古い TMap イタレータを使うコードを移行する場合は、イタレータ型のメソッドであった古い Key() 関数と Value() 関数が、単に基本のキー値 TPair のキー フィールドと値フィールドになっていることに注意してください。
+
+		TMap<FString, int32> MyMap;
+
+		// Old style (古いスタイル) 
+		for (auto It = MyMap.CreateIterator(); It; ++It)
+		{
+			UE_LOG(LogCategory, Log, TEXT("Key: %s, Value: %d"), It.Key(), *It.Value());
+		}
+
+		// New style (新しいスタイル) 
+		for (TPair<FString, int32>& Kvp :MyMap)
+		{
+			UE_LOG(LogCategory, Log, TEXT("Key: %s, Value: %d"), Kvp.Key, *Kvp.Value);
+		}
+
+一部のスタンドアローンのイタレータ型に対して範囲も置き換えました。
+
+		// Old style (古いスタイル) 
+		for (TFieldIterator<UProperty> PropertyIt(InStruct, EFieldIteratorFlags::IncludeSuper); PropertyIt; ++PropertyIt)
+		{
+			UProperty* Property = *PropertyIt;
+			UE_LOG(LogCategory, Log, TEXT("Property name: %s"), *Property->GetName());
+		}
+
+		// New style (新しいスタイル) 
+		for (UProperty* Property :TFieldRange<UProperty>(InStruct, EFieldIteratorFlags::IncludeSuper))
+		{
+			UE_LOG(LogCategory, Log, TEXT("Property name: %s"), *Property->GetName());
+		}
+
+
+### Lambda と 匿名関数
+
+Lambda はあらゆるコンパイラで使用できるようになりましたが、その使用には配慮してください。ベストな lambda は、2、3 個程度の処理文で構成されるものです。特に、大きな式や処理文の一部として使用する場合、例えば汎用アルゴリズムの術語としての場合にこれが該当します。
+
+		// Find first Thing whose name contains the word "Hello" (名前に "Hello" を含む最初のものを見つけます) 
+		Thing* HelloThing = ArrayOfThings.FindByPredicate([](const Thing& Th){ return Th.GetName().Contains(TEXT("Hello")); });
+
+		// Sort array in reverse order of name (名前の逆順で配列をソートします) 
+		AnotherArray.Sort([](const Thing& Lhs, const Thing& Rhs){ return Lhs.GetName() > Rhs.GetName(); });
+
+また、ステートフルな lambda は、頻繁に使用しがちな関数ポインタへの代入ができないことに注意してください。
+
+非自明な lambda 関数と匿名関数のドキュメンテーションは、通常の関数と同様に考えてください。コメントを入れるために、必要に応じて数行に分けてください。
+
+自動キャプチャよりも明示的キャプチャにしてください ([&] および [=])。特に大きな lambda や遅延実行の場合は、これが該当します。誤ったキャプチャのセマンティクスで変数を間違ってキャプチャすると、望ましくない結果が生じることがあります。これはコードが長期にわたり維持されると起こる可能性が高くなります。
+
+* ポインタの by-reference キャプチャと by-value キャプチャは、lambda がキャプチャーした変数のコンテキスト外で実行されると間違ったダングリング参照の原因になることがあります。
+
+		void Func()
+		{
+			int32 Value = GetSomeValue();
+
+			// Lots of code (コードが沢山あります) 
+
+			AsyncTask([&]()
+			{
+				// Value is invalid here (ここでは値が無効です) 
+				for (int Index = 0; Index != Value; ++Index)
+				{
+					// ...
+				}
+			});
+		}
+
+* By-value キャプチャーは、不要なコピーによってパフォーマンス上の問題が生じる可能性があります。
+
+		void Func()
+		{
+			int32 ValueToFind = GetValueToFind();
+
+			// The lambda takes a copy of ArrayOfThings because it is accidentally captured by [=] when it was only meant to capture ValueToFind (lambda は、ArrayOfThings をコピーします。 ValueToFind をキャプチャーすることのみを意図していたのに、誤って [=] によってキャプチャ－されたからです) 
+			FThing* Found = ArrayOfThings.FindByPredicate(
+				[=](const FThing& Thing)
+				{
+					return Thing.Value == ValueToFind && Thing.Index < ArrayOfThings.Num();
+				}
+			);
+		}
+
+* 間違ってキャプチャーした UObject ポインタは、ガーベジ コレクターからは見えません。
+
+		void Func(AActor* MyActor)
+		{
+			// Capturing the MyActor pointer will not prevent the object from being collected (MyActor ポインタのキャプチャーは、オブジェクトが収集されるのを防ぎません) 
+			AsyncTask([=]()
+			{
+				MyActor->DoSlowThing();
+			});
+		}
+
+* [=] があってもメンバー変数が参照されると自動キャプチャーは常にこれを暗黙的にキャプチャーします。[=] は、そうではないのに lambda がメンバーの独自のコピーを持っているかのような印象を与えます。
+
+		void FStruct::Func()
+		{
+			int32 Local = 5;
+			Member = 5;
+
+			auto Lambda = [=]()
+			{
+				UE_LOG(LogTest, Log, TEXT("Local: %d, Member: %d"), Local, Member);
+			};
+
+			Local = 100;
+			Member = 100;
+
+			Lambda(); // Logs "Local: 5, Member: 100" ("Local: 5, Member: 100" のログをとります。) 
+		}
+
+大きな lambda または別の関数呼び出しの結果を戻している場合は、明示的な戻り型にします。これらは、'auto' キーワードと同じように考えます。
+
+		// Without the return type here, the return type is unclear (ここで戻り型がないと、戻り型が不明確になります) 
+		auto Lambda = []() -> FMyType
+		{
+			return SomeFunc();
+		};
+
+自動キャプチャーと暗黙的な戻り型は、例えば Sort 呼び出しなどの自明な lambda では認められます。この場合、セマンティクスは明らかであり、明示的であることで過剰に詳細になります。ご自身で最適な判断をしてください。
+
+
+### Strongly-Typed Enums
+
+Enum クラスは、一般的な列挙型変数と UENUM の両方に対して、ネームスペースが入っている旧式の列挙型変数と置き換えることが推奨されています。例：
+
+		// Old enum (旧式の列挙型変数) 
+		UENUM()
+		namespace EThing
+		{
+			enum Type
+			{
+				Thing1,
+				Thing2
+			};
+		}
+
+		// New enum (新しい列挙型変数) 
+		UENUM()
+		enum class EThing : uint8
+		{
+			Thing1,
+			Thing2
+		};
+
+これらも uint8 に基づいている限り UPROPERTY でサポートされており、古い `TEnumAsByte<>` ワークアラウンドを置き換えます。
+
+		// Old property (古いプロパティ)
+		UPROPERTY()
+		TEnumAsByte<EThing::Type> MyProperty;
+
+		// New property (新しいプロパティ)
+		UPROPERTY()
+		EThing MyProperty;
+
+Enum クラスをフラグとして使用すると、新しい ENUM_CLASS_FLAGS(EnumType) マクロを使ってビット演算子をすべて自動的に定義することができます。
+
+		enum class EFlags
+		{
+			None  = 0x00,
+			Flag1 = 0x01,
+			Flag2 = 0x02,
+			Flag3 = 0x04
+		};
+
+		ENUM_CLASS_FLAGS(EFlags)
+
+ひとつの例外として、 'truth' コンテキストでのフラグの使用があります。これは言語上の制約です。代わりにすべてのフラグの列挙型変数は、'None' という enumerator を持つようにします。enumerator は比較のために 0 に設定されます。
+
+		// Old (旧式) 
+		if (Flags & EFlags::Flag1)
+
+		// New (新しいもの) 
+		if ((Flags & EFlags::Flag1) != EFlags::None)
+
+
+### ムーブ セマンティクス
+
+TArray, TMap, TSet, FString といった主要なコンテナ タイプはすべて、移動コンストラクタと移動代入演算子が定義されています。これらは、値で型の受け渡しをする際に自動的に使用されてしまうことが多いですが、MoveTemp (UE4 の std::move に匹敵) を使って明示的に呼び出すこともできます。
+
+値でコンテナまたは文字列を返すことは、一時コピーによる通常の負荷を発生させず表現力で勝っています。値渡し (pass-by-value) および MoveTemp の使用方法に関する規則は現在も作成中ですが、コードベースが最適化された領域では既にあります。
+
+
+## 第三者コード
+
+エンジンで使用しているライブラリにコード変更を反映する際は、「//@UE4 コメント」と変更理由を必ずタグ付けしてください。タグ付けにより、新規ライブラリバージョンへの変更の反映が容易に出来ます。また、ライセンシーの方々に簡単に変更箇所を知らせることも出来ます。
+
+エンジンに格納される第三者コードは、簡単に検索できるフォーマットのコメントでマークします。例：
+
+		// @third party code - BEGIN PhysX
+		#include <PhysX.h>
+		// @third party code - END PhysX
+
+		// @third party code - BEGIN MSDN SetThreadName
+		// [http://msdn.microsoft.com/en-us/library/xcb2z8hs.aspx]
+		// Used to set the thread name in the debugger
+		...
+		//@third party code - END MSDN SetThreadName
+
+
+## コードのフォーマット
+
+
+### 中括弧 { }
+
+中括弧論争はやっかいなものです。Epic では、改行した新しい行に中括弧を付ける方式を長年にわたって使用してきました。引き続きこの方式に従ってください。
+
+単独の処理文のブロックには常に中括弧を含むようにしてください。
+
+		if (bThing)
+		{
+			return;
+		}
+
+
+### If - Else
+
+if-else 文中の実行ブロックは全て中括弧で囲んでください。囲むことにより編集ミスを防ぐことが出来ます。中括弧を使用していないと、気付かないうちに if ブロックに行を追加してしまう恐れがあります。行が追加されても if 式の制御対象とならず、問題になります。最悪のケースでは、条件付きでコンパイルされた行によって、if/else 文がブレークしてしまいます。以上の理由から必ず中括弧を使用してください。
+
+		if (HaveUnrealLicense)
+		{
+			InsertYourGameHere();
+		}
+		else
+		{
+			CallMarkRein();
+		}
+
+多分岐選択のある if 文は、各 else if が最初の if と同じインデント位置にくるようにインデントを使用してください。読み手にとってわかりやすい構造となります：
+
+		if (TannicAcid < 10)
+		{
+			UE_LOG(LogCategory, Log, TEXT("Low Acid"));
+		}
+		else if (TannicAcid < 100)
+		{
+			UE_LOG(LogCategory, Log, TEXT("Medium Acid"));
+		}
+		else
+		{
+			UE_LOG(LogCategory, Log, TEXT("High Acid"));
+		}
+
+
+### タブ
+
+* 実行ブロックでコードをインデントする。
+
+* 行始まりの空白文字は、スペースではなくタブキーを使用します。タブのインデント文字数を 4 文字に設定します。しかしタブに設定された文字数に関係なく、コードを揃える際などにスペースが必要となる場合もあります。例：タブを使用していない文字行に揃えてコードを整列させたい時など。
+
+* C# でコードを書いている場合も、スペースではなくタブキーを使用してください。理由は、プログラマーは作業中に C# と C++ 間でコードの切り替えをしばしばするため、一貫性のあるタブの使用法が必要となります。Visual Studio は C# ファイルにスペースの使用がデフォルトで設定されているので、アンリアル・エンジンのコードで作業する際には、この設定の変更を忘れないでください。
+
+
+### Switch 文
+
+空のケースを除いて (同じコードで書かれた複数のケース)、 switch ケース文は、ケースが次のケースへ意図的にフォールスルーすることを明示的に表示してください。つまり、break またはフォールスルーをするコメントが各ケースにあるようにしてください。その他の制御移行コマンド (return、continue 等) を使用しても構いません。
+
+後で他のプログラマーが新規ケースを追加しても対応できるように、常にデフォルトケースを保ち、break を含めてください。
+
+		switch (condition)
+		{
+			case 1:
+				...
+				// falls through
+			case 2:
+				...
+				break;
+			case 3:
+				...
+				return;
+			case 4:
+			case 5:
+				...
+				break;
+			default:
+				break;
+		}
+
+
+## 名前空間
+
+下記のルールに従う限り、名前空間を使用してクラス、関数、変数を適切な場所で管理することが出来ます。
+
+* 現状のアンリアルのコードは、グローバル名前空間にラップされていません。特に第三者コードで使用する際など、グローバル スコープとの衝突に気を付けてください。
+* グローバル スコープで、「using」宣言を使用しないでください。「.cpp」ファイルも例外ではありません (弊社が使用する「unity」ビルドシステムで問題が生じます)。
+* その他の名前空間や関数本体で「using」を使用した宣言の使用は問題ありません。
+* 名前空間に「using」を使用した場合、同じ翻訳単位内の名前空間の他のオカレンスへ引き継がれることを覚えておいてください。一貫性が保たれている場合は特に問題はありません。
+* 上記のルールが守られている場合のみ「using」をヘッダファイル内で安全に使用することが出来ます。
+前方宣言された型は、それぞれの名前空間内で宣言されなければいけません。そうしないとリンクエラーとなります。
+* たくさんのクラスと型を名前空間で宣言した場合、これらを他のグローバルスコープにあるクラスで使用することは難しくなります (クラス宣言で使用する場合、関数シグネチャは明示的な名前空間を使用する必要があります)。
+* 名前空間内にある特定の変数のみ、「using」ディレクティブを使用してスコープにエイリアスを作成することが可能です (例 using Foo::FBar)。この方法は、アンリアル コードではあまり使用されません。
+* 名前空間は UnrealHeaderTool でサポートされません。従って UCLASS やUSTRUCT などを定義するのには使用しないでください。
+
+
+## 物理的な依存性
+
+* ファイル名には可能な限り接頭辞は使用しません。例えば、「UnScene.cpp」ではなく「Scene.cpp」とします。これにより、必要なファイルを明確にするために必要な文字数を減らすことで、ソリューションで Workspace Whiz や Visual Assist の Open File in Solution 等のツールを使いやすくします。
+* 全てのヘッダを #pragma once ディレクティブを使用して複数の include から保護します。使用する必要があるすべてのコンパイラは、最近は #pragma once をサポートしています。
+	#pragma once
+
+
+		<file contents>
+
+* 一般的に、物理的な結合は最小限にとどめてください。
+* ヘッダを include する代わりに前方宣言が可能な際は、その方法を優先してください。
+* 出来る限り綿密なインクルードをしてください。「Core.h」ファイルをインクルードせずに、そこから定義が必要な特定のヘッダファイルを Core にインクルードしてください。
+* 綿密なインクルードを簡単に行うために、必要なヘッダファイル全てを直接インクルードしてください。
+* インクルードした他のヘッダファイルに間接的にインクルードされているヘッダファイルには依存しないでください。
+* 他のヘッダファイルを通じてインクルードされるような依存はしないでください。必要なファイルは全てインクルードしてください。
+* モジュールには、プライベートとパブリックのソースディレクトリが存在します。他のモジュールが必要とする定義はパブリック ディレクトリのヘッダファイルに格納されなければいけません。その他は全てプライベートディレクトリに格納してください。古いバージョンのアンリアルモジュールでは Src と Inc と呼ばれていましたが、目的はプライベートとパブリックコードを区別するためで、ソースファイルとヘッダファイルを区別するためではありません。
+* プリコンパイル済ヘッダ生成にヘッダファイルを設定することに配慮する必要はありません。UnrealBuildTool がうまく対処します。
+* 大きな関数を論理的なサブ関数に分けます。コンパイラの最適化のひとつのエリアとして、共通部分式の除去があります。関数が大きくなるほど、それらを特定するためにコンパイラが行わなければならない作業が増え、ビルド時間が大幅に長くなります。
+* インラインの関数はよく考えて使用してください。それらを使用しないファイルでさえ再ビルドを強制してしまうからです。インライン化は、トリビアルなアクセサおよびプロファイリングでそれを行うメリットがあるとわかった場合に限り使用してください。
+* FORCEINLINE の使用についてはさらに注意深く行ってください。すべてのコードとローカル変数は呼び出している関数に展開され、大きな関数と同じビルド時間の問題を生じます。
+
+
+## カプセル化
+
+protection キーワードでカプセル化を実行します。クラスに対するパブリック / 保護されたインターフェースの一部である場合を除いて、クラス メンバーは private に宣言します。ご自身で最適な判断をしてください。しかし、アクセサがないとプラグインや既存のプロジェクトをブレークせずに後でリファクタリングするのが難しくなります。
+
+特定のフィールドが派生クラスによってのみ使用できるようにしたい場合は、private にし、保護されたアクセサを提供します。
+
+クラスが派生元になることを意図していない場合は、final を使用します。
+
+
+##一般的なスタイルの問題
+
+* プログラミングの依存距離を最小限にします。ある特定の値を持つ変数にコードが依存する場合、変数値の設定は値を使用する直前に行います。変数を実行ブロックの先頭で初期化して、この変数が何百行後まで使用されない場合、依存関係が分からずプログラマーが間違って値を変更してしまう可能性があります。次の行に明記することによって、変数が初期化される理由と使用箇所が明確になります。
+* 可能な場合はメソッドをサブメソッドへ細分化します。人間は、詳細から全体像を想像するのではなく、全体像を見据えたうえで関心を引く詳細へ掘り下げていくことが得意です。同様に、サブ処理全てをまとめたコードが書かれているメソッドよりも、適切な名前が付けられたいくつかのサブメソッドを呼び出す単純なメソッドを理解するほうが簡単です。
+* 関数宣言または関数呼び出しサイトでは、関数名と引数リストの前に置かれている括弧 () 間にスペース (空白) を挿入しないでください。
+* コンパイラの警告に対処します。コンパイラの警告メッセージは、何か問題があることを意味します。メッセージに基づいて問題を解決してください。問題をどうしても解決できない場合、#pragma を使用して警告を削除することが出来ます。これは最後の手段として使用してください。
+* ファイルの最後に空行を残してください。gcc がスムーズにコンパイル処理出来るように、「.cpp」ファイルと「.h」ファイルは全てに空行を残してください。
+* float の int32 への暗黙変換を決して許可しないでください。* この変換は時間を要するオペレーションであるため、全てのコンパイラ上でコンパイル処理がされません。代わりに appTrunc() 関数を常に使用して int32 へ変換します。これによってクロス コンパイラの互換性と処理の速いコードが生成されます。
+* インターフェース クラス (I の接頭語を持つクラス) は常に抽象化しメンバー変数を持ってはいけません。インターフェースはインラインに実装されている限り、純粋仮想ではないメソッド、また非仮想や静的なメソッドを含むことが出来ます。
+* デバッグ コードは普通、便利な完成品か、チェックインされていないかのいずれかです。デバッグ コードを他のコードと混ぜるとコードの解読が難解になります。
+* 文字列リテラルの周囲には TEXT() マクロを常に使用してください。それがないと、リテラルから FStrings を構築すると、望ましくない文字列変換プロセスが行われます。
+* ループ内で同じ操作を重複して繰り返さないようにしてください。計算の重複を避けるためにループから共通のサブ式をホイストしてください。一部のケースでは、統計を使って例えば、文字列リテラルから FName を構築するなど関数呼び出しでグローバルに重複する操作を回避します。
+* ホット リロードは注意して行ってください。イタレーション時間を短縮するために依存関係を最小限にしてください。リロードで変化しそうな関数に対してインライン化やテンプレートは使用しないでください。リロードしても一定のままであると予測されるものに限り統計を使用してください。
+* 複雑な式を簡素化させるため中間変数を使用します。* 複雑な式が存在する場合、部分式に分けることによって簡単に理解することが出来ます。部分式は、親の式内の部分式の意図を名前で表した中間変数に代入されます。例：
+
+		if ((Blah->BlahP->WindowExists->Etc && Stuff) &&
+			!(bPlayerExists && bGameStarted && bPlayerStillHasPawn &&
+			IsTuesday())))
+		{
+			DoSomething();
+		}
+
+	_上記は以下で置き換えます。_
+
+		const bool bIsLegalWindow = Blah->BlahP->WindowExists->Etc && Stuff;
+		const bool bIsPlayerDead = bPlayerExists && bGameStarted && bPlayerStillHasPawn && IsTuesday();
+		if (bIsLegalWindow && !bIsPlayerDead)
+		{
+			DoSomething();
+		}
+
+
+* オーバーライドするメソッドを宣言する場合は、仮想およびオーバーライドのキーワードを使用します。親クラスの仮想関数をオーバーライドする派生クラスに仮想関数を宣言する場合、仮想と OVERRIDE のキーワードを必ず使用しなくてはいけません。例：
+		class A
+
+		{
+		public:
+			virtual void F() {}
+		};
+		class B : public A
+		{
+		public:
+			virtual void F() override;
+		};
+
+
+OVERRIDE キーワードは最近追加されたため、このキーワードを含まない既存コードが多数存在します。ご都合のよいときにキーワードを追加してください。
+
+* ポインタと参照は、それぞれの右側に一個だけスペースを開けます。これで、特定の型に対する全てのポインタや参照を迅速に行うことが出来ます。
+		以下を使用
+
+		FShaderType* Type
+
+		以下は使用しない
+
+		FShaderType *Type
+
+		FShaderType * Type
+
+
+* シャドウされた変数は認められません。C++ では、外部のスコープから変数をシャドウすることは認められており、読み手からは使用が曖昧になります。例えば、このメンバー関数には、3 つの使用可能な 'Count' 変数があります。
+
+		class FSomeClass
+		{
+		public:
+			void Func(const int32 Count)
+			{
+				for (int32 Count = 0; Count != 10; ++Count)
+				{
+					// Use Count (Count を使用) 
+				}
+			}
+
+		private:
+			int32 Count;
+		};

@@ -1,0 +1,317 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	PostProcessVisualizeHDR.usf: PostProcessing shader to visualize HDR histogram
+=============================================================================*/
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+#include "PostProcessHistogramCommon.ush"
+#include "DeferredShadingCommon.ush"
+#include "TonemapCommon.ush"
+#include "MiniFontCommon.ush"		// for PrintFloat()
+
+// .xy:GatherExtent.xy, .zw:TexelPerThreadGroupXY
+uint4 HistogramParams;
+
+// the prior frame's eye adaptation settings
+Texture2D EyeAdaptationTexture;
+
+// only needed for nice visualization
+float ComputeHistogramMax(Texture2D HistogramTexture)
+{
+	float Max = 0;
+
+	for(uint i = 0; i < HISTOGRAM_SIZE; ++i)
+	{
+		Max = max(Max, GetHistogramBucket(HistogramTexture, i));
+	}
+
+	return Max;
+}
+
+
+uint ComputeAdvice(float3 HDRColor)
+{
+	float Lum = max(HDRColor.r, max(HDRColor.g, HDRColor.b));
+
+	if(Lum < EyeAdaptationParams[0].z)
+	{
+		return 1;
+	}
+
+	// for some reasons HLSL compiler seems to suppress  the return 1 when we comment in this code
+//	if(Lum > EyeAdaptationParams[0].w)
+//	{
+//		return 2;
+//	}
+
+	return 0;
+}
+
+uint ComputeAdviceUV(float2 UV)
+{
+	float3 HDRColor = Texture2DSample(PostprocessInput2, PostprocessInput2Sampler, UV).rgb;
+	
+	return ComputeAdvice(HDRColor);
+}
+
+// to highlight areas that have unrealistic materials
+void HighlightAdvice(inout float3 OutColor, float2 UV, int2 PixelPos)
+{
+	uint AdviceInner = ComputeAdviceUV(UV);
+	uint AdviceOuter = 0;
+
+	bool SpecialDotInArea = ((PixelPos.x + PixelPos.y) % 6) == 0 && ((PixelPos.x - PixelPos.y) % 6) == 0;
+	
+	AdviceOuter = max(AdviceOuter, ComputeAdviceUV(UV + float2( 1,  0) * PostprocessInput0Size.zw));
+	AdviceOuter = max(AdviceOuter, ComputeAdviceUV(UV + float2( 0,  1) * PostprocessInput0Size.zw));
+	AdviceOuter = max(AdviceOuter, ComputeAdviceUV(UV + float2(-1,  0) * PostprocessInput0Size.zw));
+	AdviceOuter = max(AdviceOuter, ComputeAdviceUV(UV + float2( 0, -1) * PostprocessInput0Size.zw));
+
+	uint Advice = (AdviceInner == AdviceOuter && !SpecialDotInArea) ? 0 : AdviceOuter;
+
+	FLATTEN if(Advice)
+	{
+		 FLATTEN if(Advice == 1)
+		 {
+			 // heavy shading cost
+			 OutColor = float3(0, 0, 0.8f);
+		 }
+		 else
+		 FLATTEN if(Advice == 2)
+		 {
+			 // warning
+			 OutColor = float3(0.8f, 0.8f, 0);
+		 }
+		 else // if(Advice == 3)
+		 {
+			 // error
+			 OutColor = float3(1, 0, 0);
+		 }
+	}
+}
+
+bool InUnitBox(float2 UV)
+{
+	return UV.x >= 0 && UV.y >= 0 && UV.y < 1 && UV.y < 1;
+}
+
+
+// @param x 0=cold..1=hot
+float3 Colorize(float x)
+{
+	x = saturate(x);
+
+	float3 Heat = float3(1.0f, 0.0f, 0.0f);
+	float3 Middle = float3(0.0f, 1.0f, 0.0f);
+	float3 Cold = float3(0.0f, 0.0f, 1.0f);
+
+	float3 ColdHeat = lerp(Cold, Heat, x);
+
+	return lerp(Middle, ColdHeat, abs(0.5f - x) * 2);
+}
+
+//
+void MainPS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
+{
+	float2 UV = UVAndScreenPos.xy;
+	int2 PixelPos = (int2)SvPosition.xy;
+	float2 ViewLocalUV = float2(UVAndScreenPos.z * 0.5f + 0.5f, 0.5f - 0.5f * UVAndScreenPos.w);
+
+	int2 ViewportCenter = (int2)(ViewportRect.xy + ViewportSize.xy / 2);
+
+
+	// background is the scene color
+	float4 SceneColor = Texture2DSample(PostprocessInput0, PostprocessInput0Sampler, UV);
+
+//	OutColor = SceneColor;
+	float LuminanceVal = max(SceneColor.r, max(SceneColor.g, SceneColor.b));
+	OutColor = float4(Colorize(ComputeHistogramPositionFromLuminance(LuminanceVal)), 1.0f);
+
+	// Compute and apply weight value at this location 
+	float WeightSlope = EyeAdaptationParams[2].w;
+	float2 NdPos = ViewportSize.zw * (PixelPos.xy - ViewportRect.xy);
+	float weight = AdaptationWeight(NdPos.x, WeightSlope) * AdaptationWeight(NdPos.y, WeightSlope);
+	OutColor *= max(weight, 0.05f);  
+
+	// crosshair
+	{
+		float CrossHairMask = PixelPos.x == ViewportCenter.x || PixelPos.y == ViewportCenter.y;
+		float2 DistAbs = abs(PixelPos - ViewportCenter);
+		float Dist = max(DistAbs.x, DistAbs.y);
+		float DistMask = Dist >= 2 && Dist < 7;
+
+		OutColor.xyz = lerp(OutColor.xyz, float3(1, 1, 1), CrossHairMask * DistMask);
+	}
+
+	// value under crosshair
+	{
+		float3 CenterViewportHDRColor = Texture2DSample(PostprocessInput0, PostprocessInput0Sampler, ViewportCenter * PostprocessInput0Size.zw).rgb;
+		float Value = Luminance(CenterViewportHDRColor);
+
+		int2 Cursor;
+
+		Cursor = ViewportCenter + int2(-35, 7 + 0 * 8);
+		PrintCharacter(PixelPos, OutColor.xyz, float3(1, 1, 1), Cursor, 10 + 11);	// 'L'
+		PrintFloat(PixelPos, OutColor.xyz, float3(1, 1, 1), Cursor, Value);
+	
+		Cursor = ViewportCenter + int2(-35, 7 + 1 * 8); 
+		PrintCharacter(PixelPos, OutColor.xyz, float3(1, 0, 0), Cursor, 10 + 17);	// 'R'
+		PrintFloat(PixelPos, OutColor.xyz, float3(1, 1, 1), Cursor, CenterViewportHDRColor.r);
+
+		Cursor = ViewportCenter + int2(-35, 7 + 2 * 8); 
+		PrintCharacter(PixelPos, OutColor.xyz, float3(0, 1, 0), Cursor, 10 + 6);	// 'G'
+		PrintFloat(PixelPos, OutColor.xyz, float3(1, 1, 1), Cursor, CenterViewportHDRColor.g);
+
+		Cursor = ViewportCenter + int2(-35, 7 + 3 * 8); 
+		PrintCharacter(PixelPos, OutColor.xyz, float3(0, 0, 1), Cursor, 10 + 1);	// 'B'
+		PrintFloat(PixelPos, OutColor.xyz, float3(1, 1, 1), Cursor, CenterViewportHDRColor.b);
+	}
+
+
+
+	float2 IDAreaLocalUV = ViewLocalUV * 2 + float2(-1, 0);
+
+	// disabled for now, useful for debgugging the histogram content
+	if(0)
+	BRANCH if(InUnitBox(IDAreaLocalUV))
+	{
+		float2 HistogramUV = frac(IDAreaLocalUV * HistogramParams.xy / HistogramParams.zw);
+
+		int2 HistogramXY = int2(IDAreaLocalUV * HistogramParams.xy / HistogramParams.zw);
+
+		bool bChecker = dot(HistogramXY, 1) % 2;
+	
+		int HistogramId = HistogramXY.x + HistogramXY.y * ceil(HistogramParams.x / (float)HistogramParams.z);
+
+		float2 UnrolledHistogramUV = float2(HistogramUV.x, (HistogramId + 0.5f) * PostprocessInput3Size.w);
+
+		float4 HistogramRGBA = Texture2DSampleLevel(PostprocessInput3, PostprocessInput3Sampler, UnrolledHistogramUV, 0);
+
+		// 16 buckets are good enough for the small space there
+		float Value = max(max(HistogramRGBA.r,HistogramRGBA.g), max(HistogramRGBA.b,HistogramRGBA.a));
+
+		// we want the histogram to be 0 at the bottom
+		float HistogramY = 1 - HistogramUV.y;
+		// /2 as we rea covering a quarter of the screen
+		float HistogramPixelHeight = ViewportSize.y / 2 / HistogramXY.y; 
+
+		// checked overlay
+		OutColor = bChecker ? float4(0.2f,0,0,0) : float4(0,0.15f,0,0);
+		
+		// SceneColor overlay
+		OutColor += 0.1f * Texture2DSampleLevel(PostprocessInput0, PostprocessInput0Sampler, IDAreaLocalUV * View.ViewSizeAndInvSize.xy * View.BufferSizeAndInvSize.zw, 0);
+
+		// could be the same as (HistogramY < Value) but a bit more antialiased
+//		float HistogramMask = HistogramY < Value;
+		float HistogramMask = saturate((Value - HistogramY) * HistogramPixelHeight);
+
+		OutColor = lerp(OutColor, float4(Colorize(HistogramUV.x), 1.0f), HistogramMask);
+	}
+
+
+
+	// not fully functional yet
+//	HighlightAdvice(OutColor.rgb, UV, PixelPos);
+
+	// left top of the border
+	const int2 HistogramLeftTop = int2(64, ViewportRect.w - 128 - 32);
+	const int2 HistogramSize = int2(ViewportRect.z - ViewportRect.x - 64 * 2, 128);
+	const int HistogramOuterBorder = 4;
+
+	// (0, 0) .. (1, 1)
+	float2 InsetPx = PixelPos - HistogramLeftTop;
+	float2 InsetUV = InsetPx / HistogramSize;
+	
+//	const float3 BorderColor = float3(0.5f, 0.5f, 0.5f);
+	const float3 BorderColor = Colorize(InsetUV.x);
+
+	float BorderDistance = ComputeDistanceToRect(PixelPos, HistogramLeftTop, HistogramSize);
+	
+	// thin black border around the histogram
+	OutColor.xyz = lerp(float3(0, 0, 0), OutColor.xyz, saturate(BorderDistance - (HistogramOuterBorder + 2)));
+
+	// big solid border around the histogram
+	OutColor.xyz = lerp(BorderColor, OutColor.xyz, saturate(BorderDistance - (HistogramOuterBorder + 1)));
+
+	// thin black border around the histogram
+	OutColor.xyz = lerp(float3(0, 0, 0), OutColor.xyz, saturate(BorderDistance - 1));
+
+	if(BorderDistance > 0)
+	{
+		// outside of the histogram
+		return;
+	}
+
+	// inside the histogram
+
+	uint Bucket = (uint)(InsetUV.x * HISTOGRAM_SIZE);
+	
+	
+//	Texture2D HistogramTexture = InputNew1;
+#define HistogramTexture PostprocessInput1 // WAR (workaround) for HLSLCC not allowing assignment to samplers (yet)
+
+	float HistogramSum = ComputeHistogramSum(HistogramTexture);
+
+	if(InsetUV.x < ComputeHistogramPositionFromLuminance(EyeAdaptationParams[0].z))
+	{
+		// < min: grey
+		OutColor.xyz = lerp(OutColor.xyz, float3(0.5f, 0.5f, 0.5f), 0.5f);
+	}
+	else if(InsetUV.x < ComputeHistogramPositionFromLuminance(EyeAdaptationParams[0].w))
+	{
+		// >= min && < max: green
+		OutColor.xyz = lerp(OutColor.xyz, float3(0.5f, 0.8f, 0.5f), 0.5f);
+	}
+	else
+	{
+		// >= max: grey
+		OutColor.xyz = lerp(OutColor.xyz, float3(0.5f, 0.5f, 0.5f), 0.5f);
+	}
+
+	float LocalHistogramValue = GetHistogramBucket(HistogramTexture, Bucket) / ComputeHistogramMax(HistogramTexture);
+	if(LocalHistogramValue >= 1 - InsetUV.y)
+	{
+		// histogram bars
+		OutColor.xyz = lerp(OutColor.xyz, Colorize(InsetUV.x), 0.5f);
+	}
+
+	// retrieve the exposure scale and target exposure scale from the eye-adaptation buffer.
+	float EyeAdaptationResult = EyeAdaptationTexture.Load(int3(0, 0, 0)).r;
+	float EyeAdaptationTarget = EyeAdaptationTexture.Load(int3(0, 0, 0)).g;
+	{
+		// HDR luminance >0
+		float LuminanceVal = ComputeLuminanceFromHistogramPosition(InsetUV.x);
+		// HDR > 0
+		float3 AdpatedLuminance = EyeAdaptationResult * float3(LuminanceVal, LuminanceVal, LuminanceVal);
+		// 0..1
+		float3 TonemappedLuminance = FilmPostProcess(AdpatedLuminance);
+		float3 DistMask = saturate(1.0 - 100.0 * abs(TonemappedLuminance - (1.0 - InsetUV.y)));
+		OutColor = lerp(OutColor, float4(1, 1, 1, 0), float4(DistMask, 0.0));
+	}
+
+	{
+		float ValuePx = ComputeHistogramPositionFromLuminance(1.0f / EyeAdaptationTarget)  * HistogramSize.x ;
+		if(abs(InsetPx.x - ValuePx) < 3)
+		{
+			// blue line to show the clamped percentil
+			OutColor = lerp(OutColor, float4(0, 0, 1, 0), 0.5f);
+		}
+	}
+
+	// eye adaptation
+	{
+		float EyeAdaptationValue = ComputeHistogramPositionFromLuminance(1.0f / EyeAdaptationResult);
+
+		float ValuePx = EyeAdaptationValue * HistogramSize.x;
+
+		PrintFloat(PixelPos, OutColor.xyz, float3(1, 1, 1), HistogramLeftTop + int2(ValuePx + - 3 * 8 - 3, 1), EyeAdaptationValue);
+
+		if(abs(InsetPx.x - ValuePx) < 2 && PixelPos.y > HistogramLeftTop.y + 9)
+		{
+			// white line to show the smoothed exposure
+			OutColor = lerp(OutColor, float4(1, 1, 1, 0), 1.0f);
+		}
+	}
+}

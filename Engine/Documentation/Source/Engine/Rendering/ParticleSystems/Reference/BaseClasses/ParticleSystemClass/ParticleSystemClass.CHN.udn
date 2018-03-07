@@ -1,0 +1,84 @@
+﻿INTSourceChangelist:2750589
+Availability:Public
+Title:粒子系统类
+Crumbs: %ROOT%, Engine, Engine/Rendering/ParticleSystems, Engine/Rendering/ParticleSystems/Reference
+Description:说明基础 ParticleSystem 类属性的技术参考。
+Version:4.9
+
+ParticleSystem 是一个包含任何数量 ParticleEmitters 的完整粒子特效。在一个系统中应用多个发射器后，设计师可以创建出精美细致的粒子特效，并存放于单个系统中。使用级联完成创建后，即可将 ParticleSystem 置于关卡中或创建于脚本中。
+
+ParticleSystem 类包含下列公共变量： 
+
+| 属性 | 描述 |
+| -------- | ----------- |
+| [REGION:tablesection]ParticleSystem[/REGION] ||
+| **SystemUpdateMode** | 此列举说明系统更新其发射器所使用的方法。有两种模式可用：[INCLUDE:#SystemUpdate] |
+| **UpdateTime_FPS** | 在 EPSUM_FixedTime 中运算时所使用的时间步长。|
+| **WarmupTime** | 粒子系统启动时所需的准备时间。它可使发射器从开始便全力发射。但运行性能将受到影响，建议不要大量使用，尤其是数值较高时。对关卡最初加载时便已开始运行的系统（如烟柱或环境特效）而言使用效果较好。|
+| **Warmup Tick Rate** | 在系统准备期间控制每个标记的时间步长。增加该数值可提升性能，减少该数值可提高精度。数值 0 表示默认标记时间。|
+| **Orient ZAxis Toward Camera** | 如为 _true_, ParticleSystem 的局部 Z 轴将保持对准相机。|
+| **SecondsBeforeInactive** | 如这段时间内（以秒为单位）没有对粒子系统进行渲染，其将进入不活动状态，不再接受标记。输入 0 值，防止系统被强制变为不活动状态。|
+| [REGION:tablesection]Thumbnail[/REGION] ||
+| **ThumbnailWarmup** | 在 _Use Real-Time Thumbnail_ 为勾选状态下，捕捉缩略图渲染之前粒子系统所需的准备时间。|
+| **Use Real-Time Thumbnail** | 如为 _true_，将使用默认相机位置自动捕捉 ParticleSystem 资源在 **Content Browser** 中显示的缩略图，并反映出 ParticleSystem 的当前设置和外观，而不使用保存的缩略图。[REGION:note]使用实时缩略图渲染会降低 **Content Browser**.的运行性能。[/REGION]|
+| [REGION:tablesection]LOD[/REGION] ||
+| **LOD Distance Check Time** | 确定系统执行一次距离检测的时间频率（以秒为单位），以明确使用的 LOD 级别。（仅在 LODMethod 设为 Automatic 时使用）。|
+| **LOD Method** | 此列举说明系统选择适当 LOD 级别时所使用的方法。有两种方法可用：[INCLUDE:#LODMethod] |
+| **LODDistances** | 确定使用 LOD 级别的距离阵列。（仅在 LODMethod 设为 Automatic 时使用）。这些数值将提供选择 LOD 级别的推荐最小距离。例如，3 种 LOD 级别的粒子系统：[INCLUDE:#LODDistance] |
+| **LODSettings** | 一种结构阵列，决定每个 LOD 使用的特定设置。当前使用指定 LOD 时，唯一的设置 _Lit_ 用于控制 ParticleSystem 是否接受光照。|
+| [REGION:tablesection]Bounds[/REGION] ||
+| **Use Fixed Relative Bounding Box** | 如为 _true_，代码将使用 FixedRelativeBoundingBox 作为粒子系统的边界。|
+| **Fixed Relative Bounding Box** | 允许用户为粒子系统设置边界框。移除每帧边界框更新所产生的性能消耗，代价是特效不可见时执行后台渲染/更新，或特效不在画面中时不执行渲染/更新。除非发射器有非常广的尺寸范围，通常推荐使用固定边界框，以确保运行性能稳定。[REGION:note]**右键单击** 级联工具栏上的“Toggle Bounds”按钮，用级联动态边界框当前所用值填充对话框，您可从基础开始将其调整为所需的值。[/REGION]|
+| [REGION:tablesection]Delay[/REGION] ||
+| **Delay** | 执行 ActivateSystem() 时 ParticleSystem 在激活前的等待时间（以秒数计）。同时，当 _Use Delay Range_ 为 _true_ 时，该值为随机延迟值的范围上限。|
+| **Delay Low** | 当 _Use Delay Range_ 为 _true_ 时，该值为随机延迟值的范围下限。|
+| **Use Delay Range** | 如为 _true_，_Delay Low_ 和 _Delay_ 之间的随机值被选为实际延迟值使用。|
+| [REGION:tablesection]MacroUV[/REGION] ||
+| **Macro UV Position** | 相对于 ParticleSystem 的局部空间位置作为中心点，生成 ParticleMacroUV 材质表现的 UV 纹理坐标。|
+| **Macro UV Radius** | 它是决定着 _Macro UV Position_ 距离的全局空间半径，在此位置上生成的 ParticleMacroUV 材质表现纹理坐标将开始铺制。|
+| [REGION:tablesection]Occlusion[/REGION] ||
+| **Occlusion Bounds Method** | 计算 ParticleSystem 遮挡时所用方法。[INCLUDE:#OcclusionBounds] |
+| **Custom Occlusion Bounds** | 使用 _EPSOBM_CustomBounds_ _Occlusion Bounds Method_ 时，用于计算遮挡的边界。|
+
+
+<!-- Begin ParticleSystem Table Includes -->
+<!--
+[EXCERPT:LODDistance]
+[REGION:simpletable]
+| LODDistanceIndex | 值| 范围 | 所选 LOD 级别 |
+| --- | --- | --- | --- |
+| 0 | 0.0 | 0.0 - 2499.9 | 0 (最大值) |
+| 1 | 2500.0 | 2500.0 - 4999.9 | 1 |
+| 2 | 5000.0 | 5000.0 - 无限| 2 |
+[/REGION]
+[/EXCERPT:LODDistance]
+[EXCERPT:LODMethod]
+[REGION:simpletable]
+| 方法 | 描述 |
+| --- | --- |
+| Automatic | 基于 LOD 距离和检测时间自动设置 LOD 级别。|
+| DirectSet | 游戏将直接为系统设置使用的 LOD 级别。|
+| ActivateAutomatic | 激活时决定 LOD 级别。除非游戏代码直接设置，其将保持不变。|
+[/REGION]
+[/EXCERPT:LODMethod]
+[EXCERPT:OcclusionBounds]
+[REGION:simpletable]
+| 方法 | 描述 |
+| --- | --- |
+| `EPSOBM_None` | 不计算 ParticleSystem 的遮挡。|
+| `EPSOBM_ParticleBounds` | 用于计算 ParticleSystem 遮挡的 ParticleSystemComponent 边界。|
+| `EPSOBM_CustomBounds` | _Custom Occlusion Bounds_ 值用于计算 ParticleSystem 的遮挡。|
+[/REGION]
+[/EXCERPT:OcclusionBounds]
+[EXCERPT:SystemUpdate]
+[REGION:simpletable]
+| 模式 | 描述 |
+| --- | --- |
+| `EPSUM_RealTime` | 实时更新发射器。|
+| `EPSUM_FixedTime` | 以固定时间步长更新发射器。它将系统锁定在游戏的更新时间上，并依赖于运行性能。帧率越低，系统更新时间则更低（即更新时间减慢）；反之，帧率越高，更新时间则更快。通常仅用于特殊情况。|
+[/REGION]
+`EPSUM_FixedTime`将无视当前帧率为系统设置特定时间步长。该模式仅用于特效时间并非另一个系统关键因素的情况下 – 比如将发射器绑定到一个动画上。
+[/EXCERPT:SystemUpdate]
+-->
+<!-- End ParticleSystem Includes -->
+

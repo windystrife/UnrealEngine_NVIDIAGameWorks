@@ -1,0 +1,395 @@
+Availability:Public
+Title: Lightmass Global Illumination
+Crumbs: %ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description:A run down of all the features and settings of Lightmass.
+Version: 4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/Lightmass:title%](%ROOT%/Engine/Rendering/LightingAndShadows/lighting_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/Lightmass:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/Lightmass:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/Lightmass]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:fullwidth raw]
+![](Engine/Rendering/LightingAndShadows/lighting_overview_banner_001.png)(convert:false)
+[/REGION]
+
+[TOC(start:2 end:2)]
+
+
+
+
+[EXCERPT:LightMass_002]
+**Lightmass** creates lightmaps with complex light interactions like area shadowing and diffuse interreflection.  It is used to precompute portions of the lighting contribution of lights with stationary and static mobility. 
+[/EXCERPT:LightMass_002]
+
+Communication between the editor and Lightmass is handled by the **Swarm Agent**, which manages the lighting build locally and can also distribute the lighting build to remote machines. The Swarm Agent, which opens minimized by default, also tracks lighting build progress and keeps you up to date with which machines are working for you, what they are working on, and how many threads each one is using.  
+
+A sample image of the Swarm Agent is pictured below (the bar near the bottom shows how much of the build is complete).
+
+![](SwarmAgent.png)(w:640)
+
+## Features for Static and Stationary lights
+
+### Diffuse Interreflection
+
+**Diffuse Interreflection** is by far the most visually important global illumination lighting effect.  Light bounces by default with Lightmass, and the BaseColor term of your material controls how much light (and what color) bounces in all directions.  This effect is sometimes called Color Bleeding.  Diffuse Interreflection is incoming light reflecting equally in all directions, which means that it is not affected by the viewing direction or position.
+
+Here is a scene built by Lightmass with a single Directional Light and only direct lighting shown.  The areas that are not directly visible to the light are black.  This is the result without global illumination.
+
+![3DirectOnly.jpg](3DirectOnly.jpg)(w:720)
+
+This is what the first diffuse global illumination bounce looks like.  Notice the shadow behind the chair on the left, this is called an Indirect Shadow because it is the shadow of the indirect light.  The brightness and color of the diffuse bounce depends on the incoming light and the diffuse term of the material that the light interacts with.  Each bounce is darker than the previous, since some of the light gets absorbed by surfaces instead of being reflected.  The pillar bases get more indirect light than other surfaces because they are closer to the areas in direct light.
+
+![3FirstBounceOnly.jpg](3FirstBounceOnly.jpg)(w:720)
+
+This is the second diffuse bounce.  The light has become much more attenuated and evenly distributed.
+
+![3SecondBounceOnly.jpg](3SecondBounceOnly.jpg)(w:720)
+
+And here is the scene with four diffuse bounces combined.  Simulating global illumination creates much more detailed and realistic lighting than manually placing fill lights.  Indirect shadows in particular are not possible with fill lights.
+
+![3FourBounces.jpg](3FourBounces.jpg)(w:720)
+
+
+Bounced lighting picks up the diffuse color of the underlying material, as you can see below.  This is where the term Color Bleeding comes from.  Color Bleeding is most noticeable with highly saturated colors.  You can exaggerate the effect by raising _DiffuseBoost_ on the Primitive, Material, or Level.
+
+[REGION:imagetable]
+| ![diffusebounce_T.JPG](diffusebounce_T.JPG)(h:445) | ![diffusebounce_L.JPG](diffusebounce_L.JPG)(h:445) |
+| ------ | ------ |
+| | |
+[/REGION]
+
+
+### Character lighting
+
+Lightmass places samples in a uniform 3d grid inside the [**Lightmass Importance Volume**](#LightmassImportanceVolume) at a low resolution, and also on top of upward facing surfaces that characters are likely to walk on, at a higher resolution.  Each lighting sample captures indirect lighting from all directions, but not direct lighting.
+
+The first image is a debug visualization of lighting samples placed above the floor, the second image is the same scene in Lit mode.  Notice how the samples above the red tapestry picked up the red bounced light.  The samples are visualized as a single color, but they really capture lighting from all directions.
+
+[REGION:imagetable]
+| ![02CharacterLighting.jpg](02CharacterLighting.jpg)(w:465) | ![02CharacterLightingLit.jpg](02CharacterLightingLit.jpg)(w:465) |
+| ------ | ------ |
+| | |
+[/REGION]
+
+
+The Indirect Lighting Cache then interpolates the indirect lighting for a movable object using these lighting samples.  The indirect lighting affects the color of the light environment shadow, but not the direction.  Use Show->Visualize->Volume Lighting Samples to preview these in your viewport.
+
+For more information, see the [**Indirect Lighting Cache**](Engine/Rendering/LightingAndShadows/IndirectLightingCache) documentation.
+
+#### Limitations
+
+   * The default settings for volume sample placement will result in a large number of samples in a large map.  This will cause Indirect Lighting Cache interpolation times to be very large.  Use Static Lighting Level Scale to reduce the sample count in large maps.
+   * Movable objects outside the Lightmass Importance Volume will have black indirect lighting.
+
+
+### Ambient Occlusion
+
+Lightmass calculates detailed indirect shadows automatically, but it can be useful to exaggerate indirect shadows for artistic purposes or to enhance the perception of proximity in a scene.  
+
+**Ambient occlusion** is the indirect shadowing you would get from a uniformly bright upper hemisphere, like an overcast sky.  Lightmass supports calculating ambient occlusion, applying it to direct and indirect illumination, and then baking it into lightmaps.  Ambient occlusion is enabled by default, and can be disabled by unchecking the checkbox Use Ambient Occlusion in the Lightmass Settings of Lightmass under the World Settings.
+
+In the first image is a scene with indirect lighting but no ambient occlusion.  In the second image is the same scene with ambient occlusion applied to both the direct and indirect lighting, note the darkening where objects come together.
+
+[REGION:imagetable]
+![9NoAO.jpg](9NoAO.jpg)(w:465) | ![9WithAO.jpg](9WithAO.jpg)(w:465) |
+| ------ | ------ |
+|No Ambient Occlusion | Ambient Occlusion |
+[/REGION]
+
+#### Ambient Occlusion Settings
+
+| Property | Description |
+| ------- | ------------ |
+| **Visualize Ambient Occlusion** | Overrides lightmaps with just the occlusion factor when lighting is built.  This is useful for seeing exactly what the occlusion factor is, and comparing the effects of different settings. |
+| **Max Occlusion Distance** | Maximum distance for an object to cause occlusion on another object. |
+| **Fully Occluded Samples Fraction** | Fraction of samples taken that must be occluded in order to reach full occlusion.  Note that there is also a per-primitive FullyOccludedSamplesFraction, which allows controlling how much occlusion an object causes on other objects. |
+| **Occlusion Exponent** | Higher exponents increase contrast. |
+
+[REGION:imagetable]
+| ![92Defaults.jpg](92Defaults.jpg)(w:230) | ![92MaxDist5.jpg](92MaxDist5.jpg)(w:230) | ![92MaxPct80.jpg](92MaxPct80.jpg)(w:230) | ![92Exponent2.jpg](92Exponent2.jpg)(w:230) |
+| ------ | ------ | ------ | ------ |
+| Default AO settings (MaxOcclusionDistance of 200, FullyOccludedSamplesFraction of 1.0, OcclusionExponent of 1.0). | MaxOcclusionDistance of 5.  Low frequency occlusion is removed, only occlusion in corners is left. | FullyOccludedSamplesFraction of 0.8.  Occlusion is shifted darker across all ranges, any areas that were at 80% occluded or above saturate to black. | OcclusionExponent of 2.  The occlusion transitions from midrange to saturated dark much more quickly, occlusion is pushed into corners. |
+[/REGION]
+
+
+Ambient occlusion is nearly free as far as lighting build time goes when Num Indirect Lighting Bounces is greater than 0.
+
+#### Limitations
+
+   * Ambient occlusion requires a fairly high lightmap resolution to look good, since it changes quickly in corners. 
+   * Preview quality builds do not do a very good job at previewing ambient occlusion, since AO requires pretty dense lighting samples (just like indirect shadows).
+
+
+### Masked shadows
+
+Lightmass takes the opacity mask of BLEND_Masked Materials into account when calculating shadows.  The part of the material that gets clipped in the editor viewports also does not cause any shadowing, which allows much more detailed shadowing from trees and foliage.
+
+[REGION:imagetable]
+| ![masked.JPG](masked.JPG)(h:420) | ![masked_L.JPG](masked_L.JPG)(h:420) |
+| ------ | ------ |
+| | |
+[/REGION]
+
+## Features for Stationary Lights Only
+
+### Bent Normal sky occlusion
+
+Lightmass generates directional occlusion in the form of a bent normal whenever a [**Sky Light**](Engine/Rendering/LightingAndShadows/LightTypes/SkyLight) with Stationary Mobility is enabled.  
+
+### Distance field shadowmaps
+
+Lightmass computes distance field shadowmaps for [**Stationary Lights**](Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights).  Distance field shadow maps maintain their curvy shape very well even under lower resolutions; however they do not support area shadowing or translucent shadows.
+
+## Features for Static Lights Only
+
+### Area lights and shadows
+
+With Lightmass, all lights with Static Mobility are area lights by default.  The shape used by Point and Spot Light sources is a sphere, whose radius is set by Light Source Radius under Lightmass Settings.  Directional Light sources use a disk, positioned at the edge of the scene.  Light source size is one of the two factors controlling shadow softness, as larger light sources will create softer shadows.  The other factor is distance from the receiving location to the shadow caster.  Area shadows get softer as this distance increases, just like in real life.
+
+In the first image is a Static Directional Light with only static lighting, the penumbra size is the same everywhere.  In the second image, Lightmass calculated area shadows whose sharpness is controlled by both the light source size and occluder distance.  Notice how the shadow of the pillar is much sharper close to where the pillar meets the ground.
+
+[REGION:imagetable]
+| ![7OldUE3Shadows.jpg](7OldUE3Shadows.jpg)(h:520) | ![7LightmassShadows.jpg](7LightmassShadows.jpg)(h:520) |
+| ------ | ------ |
+| | |
+[/REGION]
+
+The light source radius for Point and Spot Lights is drawn in yellow wireframe, while the influence radius is drawn in teal.  In most cases, you will want to make sure the light source does not intersect any shadow casting geometry, or the light will be emitting on both sides of that geometry.
+
+![](AreaLight.png)
+
+### Translucent shadows
+
+Light passing through a translucent material that is applied to a static shadow casting mesh will lose some energy, resulting in a translucent shadow.  
+
+![translucent_T.JPG](translucent_T.JPG)(h:400)
+
+
+#### Translucent shadow color
+
+The amount of light passing through the material is called Transmission, and ranges between 0 and 1 for each color channel.  A value of 0 would be fully opaque, and a value of 1 would mean that the incident light passes through unaffected.  There is no material input for Transmission, so currently it is derived from the other material inputs as follows:
+
+* Lit materials
+	* BLEND_Translucent and BLEND_Additive: Transmission = Lerp(White, BaseColor, Opacity)
+	* BLEND_Modulate: Transmission = BaseColor
+* Unlit materials
+	* BLEND_Translucent and BLEND_Additive: Transmission = Lerp(White, Emissive, Opacity)
+	* BLEND_Modulate: Transmission = Emissive
+
+This means that at an opacity of 0, the material will not filter out incident lighting and there will be no translucent shadow.  At an opacity of 1, incident lighting will be filtered by the material's emissive or Base Color (depending on whether it is lit).  Note that indirect lighting will sometimes wash out the translucent shadows and make them less saturated than the emissive or diffuse of the translucent material.
+
+#### Translucent shadow sharpness
+
+There are several factors controlling translucent shadow sharpness.
+
+In the first image, a large light source was used (directional light with a Light Source Angle of 5) and in the second, a small light source was used (Light Source Angle of 0).
+
+[REGION:imagetable]
+| ![5LargeLightSource.jpg](5LargeLightSource.jpg)(h:560) | ![5SmallLightSource.jpg](5SmallLightSource.jpg)(h:560) |
+| ------ | ------ |
+| | |
+[/REGION]
+
+In the first image, a small light source was used, but the lightmap resolution was too low to capture the sharp translucent shadows.  In the second image, the material was exported at too low of a resolution (controlled by Export Resolution Scale in the Material Editor) to capture the sharp shadows.
+
+[REGION:imagetable]
+| ![5LowLightmapResolution.jpg](5LowLightmapResolution.jpg)(h:565) | ![5LowExportResolutionScale.jpg](5LowExportResolutionScale.jpg)(h:565) |
+| ------ | ------ |
+| | |
+[/REGION]
+
+Indirect light is also affected by Translucent Materials.  The window in this image filters incoming light based on its Transmission, and that light then bounces around the scene with its color modified.
+
+![TranslucentShadowIndirectLight.jpg](TranslucentShadowIndirectLight.jpg)
+
+
+#### Limitations
+
+   * **Translucent Materials** currently do not scatter light, so they will not bleed color onto objects around them.
+   * The first diffuse bounce is currently not affected by translucent shadows.  This means that first bounce indirect light passing through a translucent material will not be filtered by the material's **Transmission**.
+   * Refraction (caustics from transmission) is currently not supported.
+
+## Getting the Best Quality with Lightmass
+
+### Making lighting noticeable
+
+#### Diffuse Textures
+
+During rendering, lit pixel color is determined as BaseColor * Lighting, so base color directly affects how visible the lighting will be.  High contrast or dark diffuse textures make lighting difficult to notice, while low contrast, mid-range diffuse textures let the lighting details show through.
+
+Compare the lighting clarity between the scene in the first image built with mid-range diffuse textures, to the scene in the second image also built with Lightmass but with noisy, dark diffuse textures.  Only the most high-frequency changes are noticeable in the scene in the second image, like the shadow transitions.
+
+[REGION:imagetable]
+![94MidToneDiffuse.jpg](94MidToneDiffuse.jpg)(w:465) | ![94DarkDiffuse.jpg](94DarkDiffuse.jpg)(w:465) |
+| ------ | ------ |
+| | |
+[/REGION]
+
+The **Unlit** view mode is useful for viewing the Diffuse term.  The scene in the first image looks flatter and more monotone in the Unlit view mode, which means the lighting is doing all the work and variations in final pixel color are mostly due to lighting differences.  (To get good lighting, your scene should look flat and boring in the Unlit view mode.)  Baking lighting and macro features into the diffuse textures will counteract the lighting.
+
+[REGION:imagetable]
+![94MidToneDiffuseUnlit.jpg](94MidToneDiffuseUnlit.jpg)(w:465) | ![94DarkDiffuseUnlit.jpg](94DarkDiffuseUnlit.jpg)(w:465) |
+| ------ | ------ |
+| | |
+[/REGION]
+
+
+Using the editor's color picker on several parts of the unlit image, we can see that the scene in the first image has diffuse values around 0.5, while the scene in the second image has diffuse values around 0.08.  Looking at the histogram of these unlit images in Photoshop gives a good idea of the distribution of the diffuse textures.  
+
+[REGION:note]
+Photoshop shows you color values in gamma space, so a value of 186 (.73) is actually halfway between black and white, NOT a value of 127 (.5).* The first image shows what the histogram should look like to get noticeable lighting.
+[/REGION]
+
+![hist_Spo.jpg](hist_Spo.jpg)
+![hist_UT.jpg](hist_UT.jpg)
+
+
+#### Lighting Setup
+
+   * Avoid ambient lighting!  Ambient lighting like the Ambient cubemap adds a constant ambient term to your level, which reduces contrast in indirectly lit areas.  
+   * Setup lights so that there is high contrast between the directly lit areas and indirectly lit areas.  The contrast will make it easier to pick out where shadow transitions are and will give your level a better sense of depth.
+   * Setup lights so that the bright areas are not too bright, and the dark areas are not completely black, but still have detail noticeable.  It is important to check out the dark areas on the final target display.
+
+### Improving lighting quality
+
+#### Lightmap resolution
+
+Using texture lightmaps with high resolution is the best way to get detailed, quality lighting.  Using high lightmap resolution has the downsides of taking up more texture memory and increasing build times, so it is a tradeoff.  Ideally, most of the lightmap resolution in your scene should be allocated around the high visual impact areas and in places where there are high frequency shadows.  
+
+#### Lightmass Solver quality
+
+**Lightmass Solver** settings are automatically set based on what quality of build is requested in the Lighting Build Options dialog.  Production should give good enough quality that the artifacts are not clearly noticeable with a diffuse texture applied.  
+
+## Getting the Best Lighting Build Times
+
+There are several ways to improve your Lightmass build times:
+
+   * Only have high resolution lightmaps in areas that have high-frequency (quickly changing) lighting. Reduce the lightmap resolution for Brush surfaces and Static Meshes that are not in direct lighting or affected by sharp indirect shadows. This will give you high resolution shadows in the areas that are most noticeable.
+   * Surfaces that are never visible to the player should be set to the lowest possible lightmap resolution.
+   * Use a [Lightmass Importance Volume](#LightmassImportanceVolume) to contain the areas that are most important (just around the playable area).
+   * Optimize the lightmap resolutions across the map so that build time for meshes is more even.  The lighting build can never be faster than the slowest single object, regardless of how many machines are doing the distributed build.  Avoid large continuous meshes that surround a large part of the level and with high lightmap resolution. You will get better build times if you break these up into more modular pieces, especially on machines with many cores.
+   * Meshes with a lot of self-occlusion will take longer to build, for example a rug with many layers parallel to each other will take much longer to build than a flat floor.
+
+The **Lighting Build Info** dialog is a very important tool for improving lighting build times.  First, build lighting in the level that you want to see stats for.  Then, open the dialog under *Build->Lighting Info->Lighting StaticMesh Info*.  Change the drop down to *Lighting Build Info*.  This will show a sorted list of meshes and how long they took to compute lighting for.
+
+![](LightingBuildInfo.png)
+
+## Lightmass Settings
+
+### Lightmass Importance Volume
+
+[EXCERPT:LightMass_001]
+Many maps have meshes out to the edge of the grid in the editor, but the actual playable area that needs high quality lighting is much smaller.  Lightmass emits photons based on the size of the level, so those background meshes will greatly increase the number of photons that need to be emitted, and lighting build times will increase.  The Lightmass Importance Volume controls the area that Lightmass emits photons in, allowing you to concentrate it only on the area that needs detailed indirect lighting.  Areas outside the importance volume get only one bounce of indirect lighting at a lower quality.
+[/EXCERPT:LightMass_001]
+
+An overhead wireframe view of a multiplayer map is shown in the first image.  The actual playable area that needs high quality lighting is the small green blob at the center.  
+
+In the second image, a close-up of the playable area of the multiplayer map is shown, with the correctly setup **Lightmass Importance Volume** selected.  The Lightmass Importance Volume reduced the radius of the region to light from 80,000 units to 10,000 units, which is 64x less area to light.
+
+[REGION:imagetable]
+![JacintoImportanceFar.jpg](JacintoImportanceFar.jpg)(w:465) | ![JacintoImportanceNear.jpg](JacintoImportanceNear.jpg)(w:465) |
+| ------ | ------ |
+| | |
+[/REGION]
+
+[EXCERPT:LightMass_003]
+You can add a Lightmass Importance Volume to a level by dragging a **Lightmass Importance Volume** object from the **Volumes** tab of the **Modes** menu into the level then scaling it to the needed size.
+
+![](AddingLightMassVolume.png)(w:840)
+
+You can also convert a Brush into a Lightmass Importance Volume by clicking the **Convert Actor** drop down box inside the **Details** panel under **Actor**.
+
+![](ConvertBrush_Actor.png)
+
+After clicking the drop down box, a menu will appear where you can select the type of Actor to replace the Brush with.
+
+![](ConvertBrush_LightMassVol.png)
+
+If you place multiple Lightmass Importance Volumes, most of the lighting work will be done with a bounding box that contains all of them.  However, Volume Lighting Samples are only placed inside the smaller volumes.
+[/EXCERPT:LightMass_003]
+
+### World Settings 
+	
+Lightmass settings can be adjusted inside the **World Settings** window under the **Lightmass** section. 
+
+![worldlightmasssettings.png](worldlightmasssettings.png)
+
+You can access **World Settings** by clicking the ![](WorldSettings_Icon.png) icon from the main **Toolbar**.
+
+| Property | Description |
+| ------- | ------------ |
+| **Force No Precomputed Lighting** | This essentially deactivates Lightmass' ability to produce light and shadowmaps, forcing the level to only use dynamic lighting. |
+| **Static Lighting Level Scale** | Scale of the level relative to the scale of the engine, which is 1 Unreal Unit == 1cm.  This is used to decide how much detail to calculate in the lighting and smaller scales will greatly increase build times.  For a huge level, larger scales around 2 or 4 can be used to lower build times. |
+| **Num Indirect Lighting Bounces** | Number of times light is allowed to bounce off surfaces, starting from the light source. 0 is direct lighting only, 1 is one bounce, etc. Bounce 1 takes the most time to calculate, followed by bounce 2. Successive bounces are nearly free, but also do not add very much light, as light attenuates at each bounce. |
+| **Indirect Lighting Quality** | Scales the sample counts used by the Lightmass GI solver.  Higher settings result in fewer solver artifacts (noise, splotchiness) at much increased build times.  Note that this will not affect artifacts due to using lightmaps (texture seams, compression artifacts, texel shapes).  |
+| **Indirect Lighting Smoothness** | Higher values cause the indirect lighting to be smoothed more, which can hide solver noise, but also causes detailed indirect shadows and Ambient Occlusion to be lost.  It can be useful to lower this somewhat (.66 or .75) when increasing *Indirect Lighting Quality* for highest quality. |
+| **Environment Color** | Color that rays which miss the scene will pick up.  The environment can be visualized as a sphere surrounding the level, emitting this color of light in each direction. |
+| **Environment Intensity** | Scales Environment Color to allow an HDR environment color. |
+| **Diffuse Boost** | Scales the diffuse contribution of all materials in the scene.  Increasing DiffuseBoost is an effective way to increase the intensity of the indirect lighting in a scene. The diffuse term is clamped to 1.0 in brightness after DiffuseBoost is applied, in order to keep the material energy conserving (meaning light must decrease on each bounce, not increase).  If raising DiffuseBoost does not result in brighter indirect lighting, the diffuse term is being clamped and the Light's IndirectLightingScale should be used to increase indirect lighting instead. |
+| **Use Ambient Occlusion** | Enables static Ambient Occlusion to be calculated by Lightmass and built into your lightmaps. |
+| **Direct Illumination Occlusion Fraction** | How much of the AO to apply to direct lighting. |
+| **Indirect Illumination Occlusion Fraction** | How much of the AO to apply to indirect lighting. |
+| **Occlusion Exponent** | Higher exponents increase contrast. |
+| **Fully Occluded Samples Fraction** | Fraction of samples taken that must be occluded in order to reach full occlusion. |
+| **Max Occlusion Distance** | Maximum distance for an object to cause occlusion on another object. |
+| **Visualize Material Diffuse** | Override normal direct and indirect lighting with just the material diffuse term exported to Lightmass.  This is useful when verifying that the exported material diffuse matches up with the actual diffuse. |
+| **Visualize Ambient Occlusion** | Override normal direct and indirect lighting with just the AO term.  This is useful when tweaking ambient occlusion settings, as it isolates the occlusion term. |
+| **Level Lighting Quality** | This reflects the current level lighting build quality settings. |
+
+### Light Settings
+
+Below are Lightmass settings that can be adjusted inside the properties of a light under the **Lightmass** section. 
+
+![LightLightmassSettings.png](LightLightmassSettings.png)
+
+| Property | Description |
+| ------- | ------------ |
+| **Indirect Lighting Saturation** | 0 will result in indirect lighting being completely desaturated, 1 will be unchanged. |
+| **Shadow Exponent** | Controls the falloff of shadow penumbras, or how fast areas change from fully lit to fully shadowed. |
+| **Light Source Angle** | For **Directional Lights Only**, determines the angle that the light's emissive surface extends relative to a receiver, affects penumbra sizes. |
+
+
+### Primitive Component Settings
+
+Below are Lightmass settings that can be adjusted on a **Brush** added from the **Geometry** tab of the **Modes** menu. These options are found under the **Details** panel of the **Brush**. 
+
+![objectlightmasssettings.png](objectlightmasssettings.png)
+
+| Property | Description |
+| ------- | ------------ |
+| **Diffuse Boost** | Scales the diffuse contribution of all materials applied to this object. |
+| **Fully Occluded Samples Fraction** | Fraction of AO samples taken from this object that must be occluded in order to reach full occlusion on other objects.  This allows controlling how much occlusion an object causes on other objects. |
+| **Shadow Indirect Only** | If checked, this object will only shadow indirect lighting.  This is useful for grass, since the geometry that is rendered is just a representation of the actual geometry and does not necessarily cast accurately shaped shadows.  It is also useful for grass because the resulting shadows would be too high frequency to be stored in precomputed lightmaps. |
+| **Use Two Sided Lighting** | If checked, this object will be lit as if it receives light from both sides of its polygons. |
+
+
+### Base Material Settings
+Below are the Lightmass settings that can be adjusted inside a Material for the Base Node under the **Details** panel. 
+
+For more information on the Material Editor, see the **[Material Editor User Guide](Engine/Rendering/Materials/Editor)**.
+
+![materialsettings.png](materialsettings.png)
+
+| Property | Description |
+| ------- | ------------ |
+| **Cast Shadow as Masked** | For translucent materials, treats the material as if it is masked for the purposes of shadow casting. |
+| **Diffuse Boost** | Scales the diffuse contribution of this material to static lighting. | 
+| **Export Resolution Scale** | Scales the resolution that this material's attributes are exported at. This is useful for increasing material resolution when details are needed. |
+
+

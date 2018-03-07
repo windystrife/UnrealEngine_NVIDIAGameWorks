@@ -1,0 +1,296 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	PostProcessSelectionOutline.usf: Post processing outline effect.
+=============================================================================*/
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+
+#if MSAA_SAMPLE_COUNT > 1
+Texture2DMS<float, MSAA_SAMPLE_COUNT> PostprocessInput1MS;
+Texture2DMS<uint2, MSAA_SAMPLE_COUNT> EditorPrimitivesStencil;
+#else
+// note: opengl compiler doesn't like Texture2D<float> so we don't do it
+Texture2D PostprocessInput1MS;
+Texture2D<uint2> EditorPrimitivesStencil;
+#endif
+
+// RGB: selection color, A:SelectionHighlightIntensity
+float4 OutlineColor;
+// RGB:subdued selection color (for inactive selection), A:unused
+float4 SubduedOutlineColor;
+
+float BSPSelectionIntensity;
+
+// r. value of r.Editor.OpaqueGizmo .g:r.Editor.MovingPattern ba: unused
+float4 EditorRenderParams;
+
+struct FPixelInfo
+{
+	// if there is an selected object
+	bool bObjectMask;
+	// 
+	int ObjectId;
+	// if the current pixel is not occluded by some other object in front of it
+	float fVisible;
+	// hard version of fVisible
+	bool bVisible;
+};
+
+// @param DeviceZPlane plane in screenspace .x: ddx(DeviceZ), y: ddy(DeviceZ) z:DeviceZ 
+float ReconstructDeviceZ(float3 DeviceZPlane, float2 PixelOffset)
+{
+	return dot(DeviceZPlane, float3(PixelOffset.xy, 1));
+}
+
+
+// @param DeviceZPlane plane in screenspace .x: ddx(DeviceZ), y: ddy(DeviceZ) z:DeviceZ
+FPixelInfo GetPixelInfo(int2 PixelPos, int SampleID, int OffsetX, int OffsetY, float3 DeviceZPlane, float2 DeviceZMinMax)
+{
+	FPixelInfo Ret;
+
+	PixelPos += int2(OffsetX, OffsetY);
+
+	// slightly more flicking artifacts on the silhouette
+//	float2 ReconstructionOffset = int2(OffsetX, OffsetY) + 0.5f - View.TemporalAAParams.zw;
+	// more stable on the silhouette
+	float2 ReconstructionOffset = 0.5f - View.TemporalAAParams.zw;
+
+#if MSAA_SAMPLE_COUNT > 1
+	float DeviceZ = PostprocessInput1MS.Load(PixelPos, SampleID).r;
+	int Stencil = EditorPrimitivesStencil.Load(PixelPos, SampleID) STENCIL_COMPONENT_SWIZZLE;
+
+#if !COMPILER_GLSL && !PS4_PROFILE && !COMPILER_METAL && !COMPILER_HLSLCC
+	// not yet supported on OpenGL, slightly better quality
+	ReconstructionOffset += PostprocessInput1MS.GetSamplePosition(SampleID);
+#endif
+
+#else
+	float DeviceZ = PostprocessInput1MS.Load(int3(PixelPos, 0)).r;
+	int Stencil = EditorPrimitivesStencil.Load(int3(PixelPos, 0)) STENCIL_COMPONENT_SWIZZLE;
+#endif
+
+	float SceneDeviceZ = ReconstructDeviceZ(DeviceZPlane, ReconstructionOffset);
+
+	// clamp SceneDeviceZ in (DeviceZMinMax.x .. DeviceZMinMax.z)
+	// this avoids flicking artifacts on the silhouette by limiting the depth reconstruction error
+	SceneDeviceZ = max(SceneDeviceZ, DeviceZMinMax.x);
+	SceneDeviceZ = min(SceneDeviceZ, DeviceZMinMax.y);
+
+	// test against far plane
+	Ret.bObjectMask = DeviceZ != 0.0f;
+
+	// outline even between multiple selected objects (best usability)
+	Ret.ObjectId = Stencil;
+
+#if (COMPILER_GLSL == 1 && FEATURE_LEVEL < FEATURE_LEVEL_SM4) || (COMPILER_METAL && FEATURE_LEVEL < FEATURE_LEVEL_SM4) || (VULKAN_PROFILE_SM5 || VULKAN_PROFILE_SM4 || VULKAN_PROFILE)
+	// Stencil read in opengl is not supported on older versions
+	Ret.ObjectId = Ret.bObjectMask ? 2 : 0;
+#endif
+
+	// Soft Bias with DeviceZ for best quality (larger bias than usual because SceneDeviceZ is only approximated)
+	const float DeviceDepthFade = 0.00005f;
+
+	// 2 to always bias over the current plane
+	Ret.fVisible = saturate(2.0f - (SceneDeviceZ - DeviceZ) / DeviceDepthFade);
+
+	Ret.bVisible = Ret.fVisible >= 0.5f;
+
+	return Ret;
+}
+
+bool BoolXor(bool bA, bool bB)
+{
+	int a = (int)bA;
+	int b = (int)bB;
+
+	return (a ^ b) != 0;
+}
+
+// computes min and max at once
+void MinMax(inout int2 Var, int Value)
+{
+	Var.x = min(Var.x, Value);
+	Var.y = max(Var.y, Value);
+}
+
+float4 PerSample(int2 PixelPos, int SampleID, FPixelInfo CenterPixelInfo, float3 DeviceZPlane, float2 DeviceZMinMax)
+{
+	float4 Ret = 0;
+
+	// [0]:center, [1..4]:borders
+	FPixelInfo PixelInfo[5];
+	
+	PixelInfo[0] = CenterPixelInfo;
+
+	// diagonal cross is thicker than vertical/horizontal cross
+	PixelInfo[1] = GetPixelInfo(PixelPos, SampleID,  1,  1, DeviceZPlane, DeviceZMinMax);
+	PixelInfo[2] = GetPixelInfo(PixelPos, SampleID, -1, -1, DeviceZPlane, DeviceZMinMax);
+	PixelInfo[3] = GetPixelInfo(PixelPos, SampleID,  1, -1, DeviceZPlane, DeviceZMinMax);
+	PixelInfo[4] = GetPixelInfo(PixelPos, SampleID, -1,  1, DeviceZPlane, DeviceZMinMax);
+
+	// with (.x != .y) we can detect a border around and between each object
+	int2 BorderMinMax = int2(255,0);
+	{
+		MinMax(BorderMinMax, PixelInfo[1].ObjectId);
+		MinMax(BorderMinMax, PixelInfo[2].ObjectId);
+		MinMax(BorderMinMax, PixelInfo[3].ObjectId);
+		MinMax(BorderMinMax, PixelInfo[4].ObjectId);
+	}
+
+	int2 VisibleBorderMinMax = int2(255,0);
+	{
+		FLATTEN	if(PixelInfo[1].bVisible) MinMax(VisibleBorderMinMax, PixelInfo[1].ObjectId);
+		FLATTEN	if(PixelInfo[2].bVisible) MinMax(VisibleBorderMinMax, PixelInfo[2].ObjectId);
+		FLATTEN	if(PixelInfo[3].bVisible) MinMax(VisibleBorderMinMax, PixelInfo[3].ObjectId);
+		FLATTEN	if(PixelInfo[4].bVisible) MinMax(VisibleBorderMinMax, PixelInfo[4].ObjectId);
+	}
+
+	// this border around the object
+	bool bVisibleBorder = VisibleBorderMinMax.y != 0;
+	bool bBorder = BorderMinMax.x != BorderMinMax.y;
+
+	bool bInnerBorder = BorderMinMax.y == 4;
+	
+	// moving diagonal lines
+//	float PatternMask = saturate(sin((PixelPos.x + PixelPos.y) * 0.8f + 8.0f * View.RealTime * EditorRenderParams.g));
+	float PatternMask = ((PixelPos.x/2 + PixelPos.y/2) % 2) * 0.6f;
+	// non moving high frequency pattern
+//	float PatternMask = ((PixelPos.x + PixelPos.y) % 2) * 0.7f;
+
+	// the contants express the two opacity values we see when the primitive is hidden
+	float LowContrastPatternMask = lerp(0.2, 1.0f, PatternMask);
+	
+	float3  SelectionColor;
+	FLATTEN if(VisibleBorderMinMax.x >= 128 )
+	{
+		SelectionColor = SubduedOutlineColor.rgb;
+	}
+	else
+	{
+		SelectionColor = OutlineColor.rgb;
+	}
+	FLATTEN if(bBorder)
+	{
+		FLATTEN if(bVisibleBorder)
+		{
+			// unoccluded border
+			Ret = float4(SelectionColor, 1);
+		}
+		else
+		{
+			// occluded border
+			Ret = lerp(float4(0, 0, 0, 0), float4(SelectionColor, 1), LowContrastPatternMask);
+		}
+	}
+
+	FLATTEN if(bInnerBorder)
+	{
+		// even occluded object is filled
+		// occluded object is rendered differently(flickers with TemporalAA)
+		float VisibleMask = lerp(PatternMask, 1.0f, PixelInfo[0].fVisible);
+
+		// occluded parts are more tranparent
+//		Ret = lerp(Ret, float4(SelectionColor.rgb, 1), OutlineColor.a * VisibleMask);
+		// darken occluded parts
+		Ret = lerp(Ret, float4(SelectionColor * VisibleMask, 1), OutlineColor.a );
+	}
+
+	// highlight inner part of the object
+	if(PixelInfo[0].bObjectMask)
+	{
+		float VisibleMask = lerp(PatternMask, 1.0f, PixelInfo[0].fVisible);
+		float InnerHighlightAmount = PixelInfo[0].ObjectId == 1 ? BSPSelectionIntensity : OutlineColor.a;
+		Ret = lerp(Ret, float4(SelectionColor, 1), VisibleMask * InnerHighlightAmount);
+	}
+
+	return Ret;
+}
+
+void MainPS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
+{
+	float2 UV = UVAndScreenPos.xy;
+ 	int2 PixelPos = (int2)SvPosition.xy;
+	
+	OutColor = Texture2DSample(PostprocessInput0, PostprocessInput0Sampler, UVAndScreenPos.xy);
+
+	// Scout outwards from the center pixel to determine if any neighboring pixels are selected
+	int ScountStep = 2;
+#if MSAA_SAMPLE_COUNT > 1
+	int4 StencilScout = int4(
+		EditorPrimitivesStencil.Load(PixelPos + int2( ScountStep,  0), 0) STENCIL_COMPONENT_SWIZZLE,
+		EditorPrimitivesStencil.Load(PixelPos + int2(-ScountStep,  0), 0) STENCIL_COMPONENT_SWIZZLE,
+		EditorPrimitivesStencil.Load(PixelPos + int2( 0,  ScountStep), 0) STENCIL_COMPONENT_SWIZZLE,
+		EditorPrimitivesStencil.Load(PixelPos + int2( 0, -ScountStep), 0) STENCIL_COMPONENT_SWIZZLE
+	);
+#else
+	int4 StencilScout = int4(
+		EditorPrimitivesStencil.Load(int3(PixelPos + int2( ScountStep,  0), 0)) STENCIL_COMPONENT_SWIZZLE,
+		EditorPrimitivesStencil.Load(int3(PixelPos + int2(-ScountStep,  0), 0)) STENCIL_COMPONENT_SWIZZLE,
+		EditorPrimitivesStencil.Load(int3(PixelPos + int2( 0,  ScountStep), 0)) STENCIL_COMPONENT_SWIZZLE,
+		EditorPrimitivesStencil.Load(int3(PixelPos + int2( 0, -ScountStep), 0)) STENCIL_COMPONENT_SWIZZLE
+	);
+#endif
+	int ScoutSum = dot(saturate(StencilScout), 1);
+
+	// If this sum is zero, none of our neighbors are selected pixels and we can skip all the heavy processing
+	if (ScoutSum > 0) {
+		float SceneDepth = CalcSceneDepth(UV);
+
+		// This allows to reconstruct depth with a small pixel offset without many tetxure lookups (4xMSAA * 5 neighbors -> 20 samples)
+		// It's an approximation assuming the surface is a plane
+		float3 DeviceZPlane;
+		DeviceZPlane.z = Texture2DSampleLevel(SceneDepthTexture, SceneDepthTextureSampler, UV, 0).r;
+
+		float Left = Texture2DSampleLevel(SceneDepthTexture, SceneDepthTextureSampler, UV + float2(-1, 0) * View.BufferSizeAndInvSize.zw, 0).r;
+		float Right= Texture2DSampleLevel(SceneDepthTexture, SceneDepthTextureSampler, UV + float2(1, 0) * View.BufferSizeAndInvSize.zw, 0).r;
+		float Top  = Texture2DSampleLevel(SceneDepthTexture, SceneDepthTextureSampler, UV + float2(0, -1) * View.BufferSizeAndInvSize.zw, 0).r;
+		float Bottom = Texture2DSampleLevel(SceneDepthTexture, SceneDepthTextureSampler, UV + float2(0, 1) * View.BufferSizeAndInvSize.zw, 0).r;
+
+		float2 DeviceZMinMax;
+		DeviceZMinMax.x = min(DeviceZPlane.z, min(min(Left, Right), min(Top, Bottom)));
+		DeviceZMinMax.y = max(DeviceZPlane.z, max(max(Left, Right), max(Top, Bottom)));
+
+		DeviceZPlane.x = (Right - Left) / 2;
+		DeviceZPlane.y = (Bottom - Top) / 2;
+
+		// even stronger appromiation (faster but too many artifacts)
+	//	DeviceZPlane.x = ddx(DeviceZPlane.z);
+	//	DeviceZPlane.y = ddy(DeviceZPlane.z);
+
+		FPixelInfo CenterPixelInfo = GetPixelInfo(PixelPos, 0, 0,  0, DeviceZPlane, DeviceZMinMax);
+
+		float4 Sum = 0;
+#if COMPILER_GLSL && FEATURE_LEVEL >= FEATURE_LEVEL_SM4
+	UNROLL
+#endif
+		for(int SampleID = 0; SampleID < MSAA_SAMPLE_COUNT; ++SampleID)
+		{
+			Sum += PerSample(PixelPos, SampleID, CenterPixelInfo, DeviceZPlane, DeviceZMinMax);
+		}
+		float4 Avg = Sum / MSAA_SAMPLE_COUNT;
+
+		OutColor = Texture2DSample(PostprocessInput0, PostprocessInput0Sampler, UVAndScreenPos.xy);
+
+		// Dest color has gamma applied so we need to remove it before applying linear color
+		OutColor.rgb = pow( OutColor.rgb, 2.2f );
+
+		OutColor.rgb = lerp(OutColor.rgb, Avg.rgb, Avg.a);
+
+		// Re-apply gamma corrrection
+		OutColor.rgb = pow( OutColor.rgb, 1/2.2f );
+	}
+/*
+	if(MSAA_SAMPLE_COUNT == 2)
+	{
+		OutColor = 1;
+	}
+*/
+
+//	OutColor.rgb = Avg.rgb;
+//	OutColor.rgb = Avg.a;
+
+	// SceneColor from the pass before
+//	OutColor = Texture2DSample(PostprocessInput0, PostprocessInput0Sampler, UVAndScreenPos.xy);
+}

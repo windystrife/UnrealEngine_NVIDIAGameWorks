@@ -1,0 +1,143 @@
+Availability: Docs
+Crumbs: %ROOT%
+Title: Asset Management
+Description: Asset Loading and Unloading
+Type: Overview
+SkillLevel: Intermediate
+Version: 4.17
+Parent: Engine/Basics/AssetsAndPackages
+Order: 0
+Tags: Assets
+Tags: Asset Management
+Related: Engine/Basics/AssetsAndPackages
+Related: Engine/Basics/AssetsAndPackages/AssetManagement/CookingAndChunking
+
+
+[TOC (start:2 end:3)]
+
+Unreal Engine 4 handles [Asset](Engine/Basics/AssetsAndPackages/) loading and unloading automatically, which relieves developers of the burden of coding systems to tell the Engine exactly when each asset is going to be needed. However, there are cases where a developer might want more precise control over when and how Assets are discovered, loaded, and audited. For these cases, the **Asset Manager** can help. The Asset Manager is a unique, global object that exists in the Editor as well as in packaged games, and can be overridden and customized for any project. It provides a framework for managing Assets that can divide content into chunks that make sense in the context of your project, without losing the advantages of Unreal Engine 4's [loose package architecture](Engine/Basics/AssetsAndPackages/). It also provides a set of tools to help audit disk and memory usage, giving you the information you need to optimize the organization of your Assets for [cooking and chunking](Engine/Basics/AssetsAndPackages/AssetManagement/CookingAndChunking) when deploying your game.
+
+
+## Primary Assets, Secondary Assets, and Primary Asset Labels
+
+Conceptually, the Asset management system in Unreal Engine 4 breaks all Assets into two types: **Primary Assets** and **Secondary Assets**. Primary Assets can be manipulated directly by the Asset Manager via their [**Primary Asset ID**](API:FPrimaryAssetId), which is obtained by calling `GetPrimaryAssetId`. In order to designate Assets made from a specific `UObject` class as Primary Assets, override `GetPrimaryAssetId` to return a valid `FPrimaryAssetId` structure. Secondary Assets are not handled directly by the Asset Manager, but instead are loaded automatically by the Engine in response to being referenced or used by Primary Assets. By default, only `UWorld` Assets (levels) are Primary; all other Assets are Secondary. In order to make a Secondary Asset into a Primary Asset, the `GetPrimaryAssetId` function for its class must be overridden to return a valid `FPrimaryAssetId` structure.
+
+
+## Asset Manager and Streamable Managers
+
+The [Asset Manager](API:UAssetManager) object is a singleton that manages discovery and loading of Primary Assets. The base Asset Manager class that is included in the Engine provides basic management functionality, but can be extended to suit project-specific needs. A [**Streamable Manager**](API:FStreamableManager) structure, contained within the Asset Manager, performs the actual work of asynchronously loading objects, as well as keeping objects in memory via the use of **Streamable Handles** until they are no longer needed and can be unloaded. Unlike the singleton Asset Manager, there are multiple Streamable Managers in different parts of the Engine and for different use cases.
+
+
+## Asset Bundles
+
+An **Asset Bundle** is a named list of specific Assets associated with a Primary Asset. Asset Bundles are created by tagging the `UPROPERTY` section of a `TAssetPtr` or `FStringAssetReference` member of a `UObject` with the "AssetBundles" meta tag. The value of the tag will indicate the name of the bundle where the Secondary Asset should be stored. For example, the following Static Mesh Asset, stored in the member variable called `MeshPtr`, will be added to the Asset Bundle called "TestBundle" when the UObject is saved:
+
+	/** Mesh */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = Display, AssetRegistrySearchable, meta = (AssetBundles = "TestBundle"))
+	TAssetPtr<UStaticMesh> MeshPtr;
+
+A second way to use Asset Bundles is by registering them at runtime with the project's Asset Manager class. In this case, a programmer will need to write code that fills in an `FAssetBudleData` structure and then passes that structure to the Asset Manager's `AddDynamicAsset` function, along with a Primary Asset ID to be associated with the Secondary Assets in the bundle.
+
+
+### Registering and Loading Primary Assets From Disk
+
+Most Primary Assets can be found in the **Content Browser** and exist as Asset files stored on disk, so that they can be edited by artists or designers. The easiest way for a programmer to create a class that can be used in this way is to inherit from `UPrimaryDataAsset`, which is a version of `UDataAsset` that has the functionality for loading and saving Asset Bundle data built in. If a different base class is desired, such as `APawn`, `UPrimaryDataAsset` is useful as a minimal example of the features that must be added to get Asset Bundles working for your class. The following class stores Zone Theme data in Fortnite, which tells the game what art Assets to use when building the visual representation of an area in the game's map selection mode:
+
+	/** A zone that can be selected by the user from the map screen */
+	UCLASS(Blueprintable)
+	class FORTNITEGAME_API UFortZoneTheme : public UPrimaryDataAsset
+	{
+		GENERATED_UCLASS_BODY()
+
+		/** Name of the zone */
+		UPROPERTY(EditDefaultsOnly, Category=Zone)
+		FText ZoneName;
+
+		/** The map that will be loaded when entering this zone */
+		UPROPERTY(EditDefaultsOnly, Category=Zone)
+		TAssetPtr<UWorld> ZoneToUse;
+
+		/** The blueprint class used to represent this zone on the map */
+		UPROPERTY(EditDefaultsOnly, Category=Visual, meta=(AssetBundles = "Menu"))
+		TAssetSubclassOf<class AFortTheaterMapTile> TheaterMapTileClass;
+	};
+
+
+Because this class inherits from `UPrimaryDataAsset`, it has a working version of `GetPrimaryAssetId` that uses the Asset’s short name and native class. For example, a `UFortZoneTheme` saved under the name "Forest" would have a Primary Asset ID of "FortZoneTheme:Forest". Whenever a `UFortZoneTheme` Asset is saved in the Editor, the `AssetBundleData` member of `PrimaryDataAsset` will be updated to include it as a Secondary Asset.
+
+Registering and loading our Primary Assets requires the following actions:
+
+1. **Make the Engine aware of the project's custom Asset Manager class, if one exists.** Do this by modifying the project's `DefaultEngine.ini` file, and setting the `AssetManagerClassName` variable under the `[/Script/Engine.Engine]` section. The final value should be in the following format:
+	[/Script/Engine.Engine]
+	AssetManagerClassName=/Script/Module.UClassName
+Where "Module" refers to your project's module name, and "UClassName" refers to the name of the `UClass` you wish to use. In our Fortnite example, the module name for the project is "FortniteGame", and the class we want to use is called `UFortAssetManager` (meaning its `UClass` name is `FortAssetManager`), so the second line would read:
+	AssetManagerClassName=/Script/FortniteGame.FortAssetManager
+[REGION:note]The default Asset Manager class does not need to be overridden unless there is a need for special functionality. The default Engine class, `UAssetManager`, can be used, in which case this step can be skipped.[/REGION]
+
+1. **Register your Primary Assets with the Asset Manager.** This can be done in three ways: by configuring with the **Project Settings** menu, by manually adding an array of Asset paths to scan in `DefaultGame.ini`, or by programming your Asset Manager class to do so during startup.
+	
+	* Configuring via **Project Settings** (under the **Game / Asset Manager** section) looks like this:
+	![](ProjectSettingsAssetManager.png)
+	[REGION:caption]Paths to scan for primary Assets can be configured.[/REGION]
+	[REGION:note]
+	| Setting | Effect |
+	| --- | --- |
+	| Primary Asset Types to Scan | Lists the types of Primary Assets to discover and register, as well as where to look for them and what to do with them. |
+	| Directories to Exclude | Directories that will explicitly not be scanned for Primary Assets. This is useful for excluding test Assets. |
+	| Primary Asset Rules | Lists the specific Rules Overrides, which dictate how Assets are handled. See [](Engine/Basics/AssetsAndPackages/AssetManagement/CookingAndChunking) for more information. |
+	| Only Cook Production Assets | Assets designated as DevelopmentCook will cause errors during the cook process if this is checked. Good for ensuring that final, shipping builds are free of test Assets. |
+	| Primary Asset ID Redirects | When the Asset Manager looks up data about a Primary Asset whose ID appears in this list, the ID will be substituted for the alternate ID provided. |
+	| Primary Asset Type Redirects | When the Asset Manager looks up data about a Primary Asset, the type name provided in this list will be used instead of its native type. |
+	| Primary Asset Name Redirects | When the Asset Manager looks up data about a Primary Asset, the Asset name provided in this list will be used instead of its native name. |
+	[/REGION]
+	
+	* To edit `DefaultGame.ini`, find (or create) a section called `/Script/Engine.AssetManagerSettings` and add your Primary Asset classes manually. The format looks like this:
+			[/Script/Engine.AssetManagerSettings]
+			!PrimaryAssetTypesToScan=ClearArray
+			+PrimaryAssetTypesToScan=(PrimaryAssetType="Map",AssetBaseClass=/Script/Engine.World,bHasBlueprintClasses=False,bIsEditorOnly=True,Directories=((Path="/Game/Maps")),SpecificAssets=,Rules=(Priority=-1,bApplyRecursively=True,ChunkId=-1,CookRule=Unknown))
+			+PrimaryAssetTypesToScan=(PrimaryAssetType="PrimaryAssetLabel",AssetBaseClass=/Script/Engine.PrimaryAssetLabel,bHasBlueprintClasses=False,bIsEditorOnly=True,Directories=((Path="/Game")),SpecificAssets=,Rules=(Priority=-1,bApplyRecursively=True,ChunkId=-1,CookRule=Unknown))
+
+	* If you want to register Primary Assets directly in code, override the `StartInitialLoading` function in your Asset Manager class and call `ScanPathsForPrimaryAssets` from there. In this case, it is recommended that you put all Primary Assets of the same type in the same subfolder. This will make Asset discovery and registration faster.
+	
+1. **Load the Asset.** The Asset Manager functions `LoadPrimaryAssets`, `LoadPrimaryAsset`, and `LoadPrimaryAssetsWithType` can be used to begin loading Primary Assets at the appropriate time. Assets can be unloaded later with `UnloadPrimaryAssets`, `UnloadPrimaryAsset`, and `UnloadPrimaryAssetsWithType`. When using these load functions, a list of Asset Bundles can be specified. Loading this way will cause the Asset Manager to load the Secondary Assets referenced by those Asset Bundles as described above.
+
+
+### Registering and Loading Dynamically-Created Primary Assets
+
+Primary Asset Bundles can also be dynamically registered and loaded at runtime. There are two Asset Manager functions that are useful to understand for doing this:
+* `ExtractStringAssetReferences` examines all `UPROPERTY` members of the `UScriptStruct` it is given, and identifies Asset references, which are then stored in an array of Asset names. This array can be used when creating an Asset Bundle.
+`ExtractStringAssetReferences` parameters:
+| Parameter | Purpose |
+| --- | --- |
+| `Struct` | UStruct to search for Asset references. |
+| `StructValue` | A `void pointer` to the struct. |
+| `FoundAssetReferences` | Array used to return Asset references found in the struct. |
+| `PropertiesToSkip` | Array of property names to exclusive from the return array. |
+
+* `RecursivelyExpandBundleData` will find all references to Primary Assets and recursively expands to find all of their Asset Bundle dependencies. In this case, it means that the TheaterMapTileClass referenced by the ZoneTheme above will be added to the AssetBundleData.
+It then registers the named dynamic Asset and starts loading it.
+`RecursivelyExpandBundleData` parameters:
+| Parameter | Purpose |
+| --- | --- |
+| `BundleData` | Bundle Data containing Asset references. These will be expanded recursively, and can be useful for loading a set of related assets. |
+
+For example, Fortnite uses the following code in its custom Asset Manager class to construct and load Assets based on "theater" data that was downloaded during the game:
+
+	// Construct the name from the theater ID
+	UFortAssetManager& AssetManager = UFortAssetManager::Get();
+	FPrimaryAssetId TheaterAssetId = FPrimaryAssetId(UFortAssetManager::FortTheaterInfoType, FName(*TheaterData.UniqueId));
+				
+	TArray<FStringAssetReference> AssetReferences;
+	AssetManager.ExtractStringAssetReferences(FFortTheaterMapData::StaticStruct(), &TheaterData, AssetReferences);
+
+	FAssetBundleData GameDataBundles;
+	GameDataBundles.AddBundleAssets(UFortAssetManager::LoadStateMenu, AssetReferences);
+
+	// Recursively expand references to pick up tile blueprints in Zone
+	AssetManager.RecursivelyExpandBundleData(GameDataBundles);
+
+	// Register a dynamic Asset 
+	AssetManager.AddDynamicAsset(TheaterAssetId, FStringAssetReference(), GameDataBundles);
+
+	// Start preloading
+	AssetManager.LoadPrimaryAsset(TheaterAssetId, AssetManager.GetDefaultBundleState());

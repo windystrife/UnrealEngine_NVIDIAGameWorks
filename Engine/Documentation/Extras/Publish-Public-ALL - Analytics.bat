@@ -1,0 +1,1 @@
+start /wait %~dp0\..\..\..\..\UnrealDocTool\Binaries\DotNET\unrealdoctool.exe  ./;Engine/*;Gameplay/*;GettingStarted/*;Platforms/*;Programming/*;Resources/* -s=%~dp0\..\Source -pathPrefix=%~dp0\..\Source -o=%~dp0\..\Analytics -lang=INT -publish=rocket,licensee,docs,epic -v=info -outputFormat=HTML -doxygenCache=%~dp0\..\XML -env=prod -analyticsupdate

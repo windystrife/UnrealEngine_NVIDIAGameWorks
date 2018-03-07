@@ -1,0 +1,130 @@
+﻿INTSourceChangelist:3348587
+Availability:Public
+Title:トレースの概要
+Crumbs:
+Description:UE4 のトレース システムの概要
+version:4.14
+type:overview
+Parent:Engine/Physics/Tracing
+order:1
+tags:Physics
+tags:Tracing
+tags:Raycast
+tags:Gameplay
+topic-image:trace_overview_topic.png
+related:Engine/Physics/Tracing/HowTo
+
+[TOC(start:1 end:4)]
+
+<!-- Common Variables -->
+
+[VAR:spacer]![](%ROOT%/spacer.png)(w:150 convert:false)[/VAR]
+
+[VAR:spacer2]![](%ROOT%/spacer.png)(w:40 convert:false)[/VAR]
+
+<!-- Overview Text -->
+
+[REGION:fullwidth]
+![](traceTitle.png)(convert:false)
+[/REGION]
+
+**トレース** は、レベルに作用し、ライン セグメントに沿って何が存在するかのフィードバックを集めます。これは 2 つのエンド ポイント (開始と終了の場所) を指定して使用します。物理システムがこうしたポイント間のライン セグメントをトレースし、ヒットしたアクタ (コリジョン) があればレポートします。トレースは基本的に他のソフトウェア パッケージの **レイキャスト** や **レイトレース** と同じです。
+
+ある **アクタ** が、別のアクタを見ることができるかを知りたい場合、特定のポリゴンの法線を計算、高ベロシティの兵器をシミュレート、または **アクタ** がある空間に入ったかを知る必要があるなど、いずれの場合でも、トレースは信頼性が高く、演算処理的に負荷が低いソリューションです。このドキュメントでは UE4 の トレース の基本機能について説明します。
+
+## チャンネルまたはオブジェクトの種類によるトレース
+
+トレースでは物理システムを使用するため、トレース対象のカテゴリを定義することができます。主に Channels と Object Types の 2 種類のカテゴリがあります。Channels は可視性とカメラのようなものに対して使用され、ほぼトレース関連専用になっています。Object Types は、シーン内でコリジョンを持つアクタの物理の種類です。ポーン、ビークル、被破壊アクタなどがあります。
+
+必要に応じて Channels と Object Types を追加することができます。この方法に関する詳細は、[](Engine/Physics/Collision/HowTo/AddCustomCollisionType) をご覧ください。
+
+## Single または Multiple ヒットを戻す
+
+トレース時にトレースでヒットした条件に一致する最初のものを戻します。または、トレースでヒットした条件に一致するものをすべて戻すこともできます。
+
+**Multi Trace by Channel** と **Multi Trace by Object** には考慮すべきことがあります。**Muli Trace by Channel** を使用する場合、トレースは最初の **ブロック** を含めて、そこまでのすべての **オーバーラップ** を戻します。背の高い草に向け銃を撃って、それが壁に衝撃を与えるようなものを想像してください。
+
+**Multi Trace by Object** は、トレースで探しているオブジェクトの種類と一致するものをすべて戻します。コンポーネントがトレースのクエリーを戻すように設定されていることを前提にしています。トレースの開始と終了との間でオブジェクト数をカウントするのに最適です。
+
+[REGION:fullwidth]
+![](singleVSmulti.png)(convert:false)
+[/REGION]
+
+### Hit Results
+
+トレースが何かにヒットすると、"Hit Result" 構造体を戻します。ブループリント (および C++) で利用可能であり、これは構造体がどのように見えるかを示しています。
+
+| --- | --- |
+| ![](BP_HitStruct.png) | [INCLUDE:#ts1] |
+
+<!--
+[EXCERPT:ts1]
+| **メンバー** || **定義** |
+| --- | :---: | :--- |
+| **Blocking Hit** || ヒットがブロックによるヒットかどうかです。これは **Multi Tracing by Channel** の場合に使用されます。単にオーバーラップしてトレースを停止しない機能があるためです。 |
+| **Initial Overlap** || 一連の結果の最初のオーバーラップかどうかです。 |
+| **Time** || [0.0 から 1.0] の範囲のトレース方向に沿った衝撃の時間です。ヒットがなければ 1.0 を戻します。 |
+| **Location** || トレースの形状に応じて修正されるヒットのワールド空間の位置。 |
+| **Impact Point** || ヒットの絶対位置。ヒットのポイントだけでトレースの形状は含みません。 |
+| **Normal** || トレースの方向です。 |
+| **Impact Normal** || ヒットしたサーフェスの法線です。 |
+| **Phys Mat** || ヒットしたサーフェスの **物理マテリアル** です。 |
+| **Hit Actor** || ヒットした **アクタ** |
+| **Hit Component** || ヒットした特定の **コンポーネント** |
+| **Hit Bone Name** || **スケルタルメッシュ** に対してトレースする場合にヒットしたボーン名 |
+| **Hit Item** || プリミティブのどのアイテムにヒットしたかを記録するプリミティブ固有のデータ |
+| **Face Index** || 三角メッシュやランドスケープと衝突する場合に、ヒットした面のインデックスです。 |
+| **Trace Start** || トレースの開始位置です。 |
+| **Trace End** || トレースの終了位置です。 |
+[/EXCERPT]
+-->
+
+## 形状のトレースを使用する
+
+[REGION:fullwidth]
+![](shapeTracesEX.png)(convert:false)
+[/REGION]
+
+Line Trace では不十分な場合は、代わりに Shape Trace を使ってみると結果が出る場合があります。例えば、敵に対して "視覚的なコーン" を作成して、そこに入ったプレイヤーを見つけようとしても、プレイヤーは Line Trace の下をくぐり抜ければ検出されないので、 Line Trace では不十分です。 
+
+そのような場合は、Box Trace 、 Capsule Trace 、 Sphere Trace を使うことができます。 
+
+[REGION:fullwidth]
+![](TracesOverview_ShapeTraces.png)
+[/REGION]
+
+Shape Trace は Line Trace と同様に、開始ポイントから終了ポイントまでコリジョンに対するスイープとチェックを行います。ただし、レイキャストで形状をボリュームのようなものとして使用しているため、 Shape Traces ではチェックするレイヤーが追加されています。Shape Trace を Single Trace または Multi Trace として使用し、それぞれを Line Trace と同じ方法で設定することができます。ただし、使用する形状のサイズまたは方向に関して詳細を追加で与える必要があります。
+
+## トレースからの UV 座標の取得
+
+トレースは、trace complex が使用されることを前提にヒットするアクタの UV 座標を戻します。4.14 時点では、この機能を使えるのは、**Static Mesh コンポーネント**、 **Procedural Mesh コンポーネント**、および **BSP** だけです。**Skeletal Mesh コンポーネント** では **機能しません**。 UV 座標を持たない **Physics Asset** に対してトレースするからです (trace complex を選択した場合でも)。
+
+[REGION:note]
+この機能を使うと CPUのメモリ使用量が増えます。UE4 では頂点の位置と UV 座標のコピーを追加でメイン メモリで維持する必要があるからです。
+[/REGION]
+
+### トレースからの UV 座標を有効にする
+
+この機能を有効にするためには以下のステップに従います。
+
+1. **[Edit Menu (編集メニュー)]** から **[Project Settings (プロジェクト設定)]** にアクセスします。
+
+	![](accessProj.png)
+
+1. **[Project Settings]** の **[Physics Section]** で、**[Support UV From Hit Results]** 機能を有効にします。
+
+	![](ProjectSettings.png)
+
+1. エディタを再起動します。
+
+	[REGION:note]
+	エディタを再起動する前に、この機能を使ってブループリントの **Find Collisoin UV** ノードを調べることはできますが、調べると [0.0、 0.0] を戻すだけです。
+	ノードが正しい UV データを戻すようにするには、エディタを再起動する必要があります。
+	[/REGION]
+
+
+## その他の機能	
+
+トレースには、何を戻すかを制限し、デバッグを簡単にするいくつかの機能があります。スタティックメッシュまたはプロシージャルなメッシュでそれを有効にしていれば、**Complex Collision** をトレースする機能があります。そうした機能が **アクタ** から呼び出される場合、**アクタ** 自体のトレースを有効にすることで、すべてのアタッチされたコンポーネントを無視するように指示することができます。最後に、トレースを赤と緑のラインで表します。大きなボックスはヒットを表します。
+
+<!-- Draw Debug Type, Trace Complex, Ignore Self -->

@@ -1,0 +1,114 @@
+﻿INTSourceChangelist:2714483
+Availability:Public
+Title:可混合物
+Crumbs: %ROOT%, Engine, Engine/Rendering/PostProcessEffects
+Description:可混合物资源可进行平滑的插值，并用于影响渲染（如后期处理、雾气、环境立方体贴图、环境遮蔽）。 
+
+[EXCERPT:Blendables_Desc]
+**可混合物（Blendable）** 资源的属性可与其他可混合物进行平滑插值。可混合物最常用于后期处理材质，但系统可取决于画面用于任意资源（通常取决于摄像机位置）。
+[/EXCERPT:Blendables_Desc]
+
+
+## 可混合物
+
+**可混合物** 加入引擎已有一段时间，但只用于后期处理材质 / 后期处理材质实例。但概念为更整体的应用，因为它可将任意数据（线性值或颜色最为适合）混合到部分最终数据。子系统可拾取画面中的数据并影响渲染。因为数据为每个画面进行混合，意味着分屏情况下每个画面可拥有不同的混合设置（如命中指示器影响后期处理）。
+
+**可混合物** 是拥有 IBlendableInterface 的对象，当前由这些资源类型实现：
+* PostprocessMaterials (todo: link)
+* PostprocessMaterialInstances (todo: link)
+* LightPropagationVolumeBlendable（如下）
+
+**可混合物** 容器存在 PostProcessSettings 中。此资源内置在以下对象中：
+* PostProcessVolume
+* PostProcessComponent
+* SceneCaptureActor
+* CameraComponent
+
+**LightPropagationVolumeBlendable** 资源的创建用于展示如何创建新可混合物，并说明如何替代现有的 PostProcessSettings。现有系统在小规模时工作效率佳，但大量设置需要更为复杂的系统。
+
+[REGION:imagetable]
+| ![](CreateBlendableAsset.png) |
+| ------ |
+| 可混合物资源显示在 content browser 的 **Blendable** 类目中。可使用 **Add New** 或按此类目进行资源过滤。|
+[/REGION]
+
+新系统的优点：
+* 引擎修改时易于延展和维持（无需变更中心架构，可位于其自身的模块中）
+* 在包上使用间接法无需层访问即可调整内容（版本控制）
+* 间接法意味着单一资源可重复在多个情况下使用（冗余更少，性能更佳）
+* 可对每个可混合物的 UI 进行自定义（通过单一结构体执行较难）
+* 每个可混合物引用均拥有其各自的权重，资源可拥有权重（引用 LightPropagationVolumeBlendable），每个属性的权重也容易达成。
+* 分解大型结构体，使和蓝图的互动更加高效简单。
+
+## 可混合物容器
+
+容器作为权重和 IBlendableInterface 引用的阵列实现。 
+
+打开 PostProcessVolume 设置并查看可混合物阵列，可看到一个引用可混合资源的权重阵列。权重通常在 0..1 范围中，引用对象可为包（通过 content browser 创建）中的资源，或包含可混合物阵列的对象中的资源。
+
+[REGION:imagetable]
+| ![](BlendablesUI.png) |
+| ------ |
+| 可在后期处理设置中（此处为后期处理体积域中）找到可混合物容器。此处的阵列拥有三个元素，一个 LightPropagationVolumeBlendable（保存在体积域对象中）、一个尚未使用的阵列元素和一个名为 LPV0 的资源引用（保存在包中）。两个可混合物的权重均为 1.0。|
+[/REGION]
+
+在阵列中创建新元素时，可选择创建一个特定类型（当前只有 LightPropagationVolumeBlendable）的可混合物，或使用资源引用（如 LightPropagationVolumeBlendable、材质、材质实例）。之后将会有更多可混合物类型（如 Bloom、SceneColor、DepthOfField 等）引用可为任意类型的可混合物（拥有 IBlendableInterface）。阵列中的排序与层堆栈的方式相反，因为它们的混合自上而下应用，且混合将覆写之前的数据。注意：许多体积域（或其他对象）的数据组合时将把权重和优先级考虑在内。
+
+注解：在名为“global”的关卡中设置一个低优先级的未绑定后期处理体积域不失为一个好方法。如需对现有关卡进行完整控制，可添加一个高优先级的未绑定体积域。将可混合物的权重调到 0 然后再迅速调回原有数字，即可确认可混合物是否有效。
+
+## 可混合物在包中、作为对象（如体积域）的部分，或在蓝图中动态创建 
+
+您可任意进行选择，但我们建议使用包（引用包中的命名资源），因其便于进行批量调整，可将版本控制冲突最小化。为获得最大的可编程性，可在蓝图中创建一个可混合物。因为蓝图是编程的一种形式，这和将设置放入 UI 或将它们硬编码到代码中相似。代码方法更为复杂，其他用户调整设置更为困难。 
+
+[REGION:imagetable]
+| ![](AssetWithDifferentOuter.png) |
+| ------ |
+| 可在编辑器中看到 LightPropagationVolumeBlendable 的细节。无论可混合物是在 content browser 中（左图）还是在对象（如后期处理体积域）中创建，用户界面皆相似。好办法是 - 为每个属性设置一个复选框（权重为 0 或 1）并为整个结构体设置一个混合权重。|
+[/REGION]
+
+注解：LightPropagationVolumeBlendable 属性仍存在于 PostProcessSettings 中，以便向下兼容。但之后的版本将移除这个设置，将可混合物设为唯一的方法。
+
+## 如何自行创建可混合物（在 C++ 中）
+
+我们建议复制 LightPropagationVolumeBlendable 插件。创建资源后，即可以光线传播系统相同的方式获得混合数据。混合后，**GetSingleFinalDataConst()** 法用于获取数据。为保证性能，建议只在必要时调用此函数（不要进行频繁调用）。
+
+## 蓝图
+
+**AddOrUpdateBlendable** 蓝图函数将在 PostProcessSettings 所在之处公开。可对可混合物容器进行便捷访问。将拥有可混合物容器、权重和混合物引用的对象传入。如容器中已存在引用，它将更新权重。因可能误导遍历容器的其他代码，它不会移除容器元素，并存在对垃圾回收的蕴含。权重为 0 的可混合物引用不存在实际的性能开销，因为不需要移除元素。
+
+您可在此处了解如何在 content browser 中引用可混合物资源。
+
+[REGION:imagetable]
+| ![](AddBlendableVar.png) |
+| ------ |
+| LightPropagationVolumeBlendable（对象引用）类型的变量“BlendableVar”用于引用一个名为“LPV0”的 LightPropagationVolumeBlendable 资源。|
+[/REGION]
+
+可通过 **ConstructObjectFromClass** 蓝图函数在蓝图中新建可混合物。将新对象的 **Outer** 设为拥有可混合物容器的对象，此操作的效果和在 UI 中创建对象相同（将可混合物作为对象的一部分创建）。
+
+[REGION:imagetable]
+| ![](AddBlendableConstruct.png) |
+| ------ |
+| 此处我们创建了一个 LightpropagationVolumeBlendable 类型的对象，获取设置并通过 **SetMembersIn...** 设置成员。|
+[/REGION]
+
+注解：此时需要手动将覆盖标记设为 true（勾选复选框），否则无法获得命名相同的属性。
+
+可使用显示标识 **VisualizeLPV**（编辑器中：Visualize/Light Propagation Volume）显示混合属性。这应用到 C++ 代码中，只用于该可混合物类型，但之后即可在不修改代码的前提下公开属性。
+
+[REGION:imagetable]
+| ![](VisualizeLPV.png) |
+| ------ |
+| 显示标识 **VisualizeLPV** 将显示混合值，便于进行调试。|
+[/REGION]
+
+
+## 未来更新
+* 浏览函数 AddOrUpdateBlendable 时上下文相关功能无法使用（解决方法：禁用“context sensitive”复选框）。
+* 计划将所有 PostprocessSettings 分割为 LightPropagationVolumeBlendable 之类的对象，之后 PostProcessSettings 将被移除。旧版本的关卡可在加载时进行转换，
+不会丢失数据。为避免大量资源过度生成内容包，可能会将对象创建为关卡的一部分。 
+* 将进一步改良蓝图互动，使其更易于使用。
+* 将可混合阵列更简单地公开到世界场景设置和项目设置中。
+* 为使应用的可混合物拥有更高的透明度，将加入调试画面，显示权重、资源/对象名称和类型。
+
+

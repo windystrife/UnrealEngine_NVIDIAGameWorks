@@ -1,0 +1,103 @@
+﻿INTSourceChangelist:2728788
+Availability:Public
+Title:虚幻对象操作
+Crumbs: %ROOT%
+Description:UObject 系统功能总览。
+Version:4.9
+
+[TOC (start:2 end:2)]
+
+使用适当的宏对类、属性和函数进行标记，将它们变为 UClasses、UProperties 和 UFunctions。这使得虚幻引擎可以对它们进行访问，使一些 
+后台处理功能得到实现。
+
+## 垃圾回收
+
+虚幻引擎实现了一个垃圾回收方案，定期清理不再被引用或被显式标记为待销毁的 UObject。引擎创建了一个引用图表，以确定使用中和被弃用的对象。此图表的根部是指定为“根集”的一套对象。任何对象都可被添加到根集。垃圾回收发生时，引擎从根集开始在已知 UObject 的引用树中搜索，从而追踪所有被引用的对象。未被引用的对象将被视为没有存在价值，将被移除。 
+
+此处表达了一个隐含意义 - 必须在要保留的对象上设置一个 UPROPERTY 引用。对 Actor 来说这经常会是例外，因为它们通常被链接回根集的对象所引用，例如它们所属于的等级。通过 `Destroy()` 可将 Actor 显式标记为待销毁。
+
+## 引用自动更新
+
+对象被垃圾回收清理时，对它的 UPROPERTY 引用将自动被更新为 NULL。这可避免指针出现摇晃，造成之后的问题，但这也意味着指针有时可能出乎意料地变为 NULL - 如果它们所指向的对象被显式标记为待销毁。因此，取消引用之前需要进行测试。
+
+请务必注意：此功能只适用于被 UPROPERTY 标记的对象引用。保存在裸指针中的对象引用无法被虚幻引擎识别，它不会自动清空，或阻止垃圾回收。注意：这并不意味着所有 UObject* 变量必须为UProperties。如需要一个非 UProperty 对象指针，可考虑使用 TWeakObjectPtr<>。这是一个弱指针，因此它无法阻止垃圾回收，但它在被访问前可被执行有效性查询。
+
+## 序列化
+
+当一个 UObject 被序列化时，所有 UProperty 数值将被自动书写或读取（除非被显式标记为“transient”）。例如，可在关卡中放置一个 AEnemy 实例，将其生命值设为 500，保存并成功重载，在 UClass 定义之外不编写代码行。
+
+UProperties 被添加或被移除时，既存内容的加载将无缝进行。新属性从新 CDO 复制获取默认值。被移除的属性将被悄然忽略。
+
+如需对行为进行自定义，可根据需求编写自定义初始化和版本化代码，但这并非常规操作。
+
+## 属性值更新
+
+UClass 的 CDO 发生变化时，引擎将尝试把这些变化智能应用到类的所有实例上（在它们被加载时）。对于一个特定的对象实例而言，如更新的变量与之前的默认之间不存在变化，其将被更新到新的默认对象。如变量已发生变化，则会假设数值被刻意进行设置，这些变化将不会被撤销。
+
+例如您保存了一个放置有数个 AEnemy 对象的关卡，并在 AEnemy 构建函数中将默认体力值设为 100。假设您将比较强壮的 Enemy_3 的体力值设为了 500。
+
+而现在您改变了想法，把默认体力值改为了 150。当您下次加载关卡时，虚幻引擎会了解您已经修改 CDO，并将除 Enemy_3 外所有 AEnemy 实例的体力值更新到 150。而 Enemy_3 的体力值为 500。
+ 
+## 自动属性初始化
+
+初始化时，在构建函数被调用之前，UObject 将被自动清零。整类、UProperties 和本地成员之类也会被执行此操作。成员可通过类构建函数中的自定义数值在随后进行初始化。
+
+## 编辑器整合
+
+编辑器理解 UObjects 和 UProperties，还可将这些数值自动公开进行编辑，而无需编写特殊代码。可选择将整合包含在蓝图可视化脚本系统中。有许多选项可对变量和函数的可访问性和公开性进行控制。
+
+## 运行时类型信息
+
+UObject 明确其为何种 UClass，运行时可作出类型相关的决定。 
+
+在本地代码中，每个 UObject 类拥有一个设为其父类的自定义“Super” typedef，以便轻松控制覆盖行为。例如：
+
+
+	class AEnemy : public ACharacter
+	{
+		virtual void Speak()
+		{
+			Say("Time to fight!");
+		}
+	};
+
+	class AMegaBoss : public AEnemy
+	{
+		virtual void Speak()
+		{
+			Say("Powering up! ");
+			Super::Speak();
+		}
+	};
+
+如上所示，调用 Speak() 会使 MegaBoss 说出“Powering up! Time to fight!”。
+
+此外，使用模板化投射函数可将对象从基类安全投射到派生类，或使用 IsA() 查询对象是否为一个特定的类。例如：
+
+	class ALegendaryWeapon : public AWeapon
+	{
+		void SlayMegaBoss()
+		{
+			TArray<AEnemy> EnemyList = GetEnemyListFromSomewhere();
+
+			// The legendary weapon is only effective against the MegaBoss
+			for (AEnemy Enemy :EnemyList)
+			{
+				AMegaBoss* MegaBoss = Cast<AMegaBoss>(Enemy);
+				if (MegaBoss)
+				{
+					Incinerate(MegaBoss);
+				}
+			}
+		}
+	};
+
+此处使用 Cast<> 尝试将 AEnemy 投射到 AMegaBoss。如讨论中的对象实际上不为 AMegaBoss（或其子类），投射将返回 NULL，以便进行恰当操作。在此例中，传奇武器没有效果。
+
+## 网络复制
+
+UObject 系统包括一个稳定的功能集，实现网络通讯和多人游戏。
+
+在联网游戏中，UProperties 可被标记，以告知引擎对其数据进行复制。此处的常用模型为 - 变量在服务器上发生变化，之后引擎会检测到此变化并将其可靠地发送到所有客户端。变量通过复制发生变化时，客户端可选择性地接收回调函数。
+
+UFunctions 还可被标记，以便在远程机器上执行。例如在客户端机器上调用“server”函数时，将导致函数在服务器机器上对 Actor 的服务器版本进行实际执行。从另一方面来说，可从服务器调用“client”函数，并在该 Actor 的拥有客户端版本上运行。

@@ -1,0 +1,115 @@
+﻿Availability:Public
+Title: 符号调试器
+Crumbs: %ROOT%, Engine, Programming, Programming/Development/Tools
+Description: 对引擎崩溃生成的minidump文件进行调试的工具
+
+SymbolDebugger程序被用来辅助同步两部分文件，一部分是远程调试崩溃程序所需的文件(这些程序位于美工或关卡设计师的电脑),另一部分是负责编译的电脑崩溃后生成的minidump文件。
+
+![Symbol Debugger](symbol_debugger.png)
+
+符号调试器使用由版本系统和本地符号库生成的源代码索引来进行调试，从而无需将源代码文件同步至版本创建的时间。
+
+现在从崩溃报告中调试minidump文件已经可以简单到拖曳dmp文件到符号调试器应用程序了。(正确使用符号调试器需要进行一些设置。本文稍后会进行解释。）
+
+## UI描述
+
+![Symbol Debugger UI](symbol_debugger_ui.png)
+
+1. [方法选择](#方法选择)
+1. [输入方法](#输入方法)
+1. [符号库](#符号库)
+1. [平台](#平台)
+1. [引擎版本](#引擎版本)
+1. [变更列表号](#变更列表号)
+1. [源代码控制标签](#源代码控制标签)
+1. [动作按键](#动作按键)
+
+
+### 方法选择
+
+运行符号调试器时有四种方法。可在‘方法选择’标签下通过单选按钮来选中当前方法。根据选择方法的不同，对用户会启用或取消不同的控制，这样用户可以输入更多的信息。支持以下方法：
+
+|方法|描述|
+| ------ | ----------- |
+| CrashDump | 此方法可通过处理一个minidump文件来确定调试所需的文件，从Perforce同步这些文件，并启动调试器。|
+| EngineVersion | 此方法可以定义崩溃程序的引擎版本，这可用来确认合适的源代码控制的版本标签。此后所需的文件可被下沉并且崩溃程序的远程调试将被执行。|
+| Changelist | 此方法可定义崩溃程序所在的变更列表，同步所需文件，并远程调试此程序。|
+| SourceLabel | 此方法可定义版本标签，同步所需文件，并远程调试崩溃的程序。|
+
+### 输入方法
+
+'输入方法‘部分为当前方法提供输入所需信息的文本框。
+
+如果选中了EngineVersion, Changelist 或 SourceLabel，您随后仅需把值输入文本框。
+
+当选中了CrashDump后，minidump文件的完整路径应被输入文本框。当此方法激活后，’打开文件‘按钮也会被显示出来，使得通过标准文件选择对话框可选择崩溃转存文件。
+
+### 符号库
+
+'用户符号库’部分提供了在同步调试所需文件时的文本框来输入本地符号库的位置以供使用。这个值可以从以下部分的`Engine.ini`文件中获得：
+
+	[Engine.CrashDebugHelper]
+	LocalSymbolStore=d:/Symbols/UE4
+
+[REGION:note]
+当前，变更程序的此条目不会更新ini设置。
+[/REGION]
+
+这个值同时需要被在[设置Visual Studio](#设置VisualStudio)中使用。
+
+### 平台
+
+'平台'部分包含此版本的目标平台。当此方法被设置为除CrashDump外的其他方法时，此值应由您设置为合适的平台字符串（比如'Win32' 或 'Win64')。
+
+### 引擎版本
+
+'引擎版本‘部分包含目标版本的引擎版本。如果选取CrashDump，Changelist或SourceLabel，此区域将不可被编辑，但会包含由检查选定方法所决定的结果。如果选取EngineVersion，该区域在执行后将会有整个'Method Input'文本框的内容。
+
+### 变更列表号
+
+'变更列表号‘部分包含所需版本的变更列表号。如果选取CrashDump，EngineVersion或SourceLabel，此区域将不可被编辑，但会包含由检查选定方法所决定的结果。如果选取Changelist，该区域在执行后将会有整个'Method Input'文本框的内容。
+
+### 源代码控制标签
+
+'源代码控制标签‘部分包含目标版本的引擎版本。如果选取CrashDump，EngineVersion或Changelist，此区域将不可被编辑，但会包含由检查选定方法所决定的结果。如果选取SourceLabel，该区域在执行后将会有整个'Method Input'文本框的内容。
+
+### 动作按键
+
+‘动作按键’部分会包含触发不同动作的按键。它们会被根据选中方法的当前状态来被启用。有以下几个按键：
+
+| 按钮 | 描述 |
+| ------ | ----------- |
+| 检查 | 检查的按键被用来评估提供的信息并确认版本的源码控制标签。如果为当前方法输入的信息足够用来评估，则它会被启用。例如，如果CrashDump被选中，设置崩溃转存文件名及本地符号库即可。然而，如果其他模式被激活，平台区域也必须被填入。|
+| 同步 | 每当有效的版本标签被发现，同步按钮将可用。点击后，所有调试所需的文件将会从源文件控制同步到本地符号库位置。|
+| 调试 | 当前只能用于CrashDump评估，点击后，调试按键将会载入调试器及提供的minidump。|
+
+## 设置Visual Studio
+
+### 本地符号库
+
+您想要使用的本地符号库也需要在Visual Studio中设置。这需要在调试设置中添加路径（包括感兴趣的平台）到 **符号文件位置**。
+
+此处是一个对[符号库](#符号库)部分中的`.ini` 示例的符号库进行设置的例子：
+
+![Set Symbol Store](vs_symbol_store.png)
+
+为使调试器能为被调试的pdb文件取得正确的源码文件，您也需要启用源代码服务器。可以在General（常用）菜单下的调试设置中找到：
+
+![Enable Source Server](vs_source_server.png)
+ 
+准备Visual Studio的最后步骤是让其了解P4.exe是一个受信命令。(如果您不这样做，您将会不断看到让P4获取源码文件的对话框). 这可以通过把一个叫`srcsrv.ini`的文件添加到以下文件夹来完成：
+
+	C:\Program Files (x86)\Microsoft Visual Studio 12.0\Common7\IDE (for Visual Studio 2013)
+	C:\Program Files (x86)\Microsoft Visual Studio 11.0\Common7\IDE (for Visual Studio 2012)
+	C:\Program Files (x86)\Microsoft Visual Studio 10.0\Common7\IDE (for Visual Studio 2010)
+
+此文件的内容应为：
+
+	[trusted commands]
+	p4.exe=c:\Program Files\Perforce\p4.EXE
+
+
+<!---## 任务清单--->
+
+<!---* 通过pdb文件的同步来防止出现锁住的情况--->
+

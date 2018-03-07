@@ -1,0 +1,134 @@
+﻿INTSourceChangelist:2711553
+Availability: Public
+Title:输入
+Crumbs:%ROOT%, Gameplay, Gameplay/Framework
+Description: **输入** 目标负责将玩家输入的内容转换为Actor可以理解并使用的数据形式。
+version: 4.9
+
+
+**PlayerInput** (玩家输入）目标负责将玩家输入的内容转换为Actor,例如PlayerController或Pawn，可以理解并使用的数据形式。 这是输入处理流程的一部分，它会将玩家的硬件输入转换成为游戏事件以及随PlayerInput映射及InputComponent而进行的移动行为。
+
+[TOC (start:2 end:4)]
+
+## 硬件输入
+玩家的硬件输入是非常简洁明了的。  一般包含了键盘的按键输入，鼠标点击或鼠标移动，以及控制器按键或摇杆移动。 
+
+
+## PlayerInput(玩家输入)
+[EXCERPT:PlayerInput]
+PlayerInput是PlayerController类内管理玩家输入的UObject。 它仅在客户端生成。  在PlayerInput内有两种结构体被定义。  第一个是FInputActionKeyMapping，定义ActionMapping（动作映射）。 另一个是FInputAxisKeyMapping，定义AxisMapping（轴映射）。 
+在ActionMapping（动作映射）和AxisMapping（轴映射）中使用的硬件输入定义都设立于InputCoreTypes中。
+
+[EXCERPT:ActionMapping]
+$ ActionMappings : 映射离散的按钮或按键到 "friendly name" （友好名称），该值稍后将会被绑定到由事件驱动的行为。 最终效果是在按下（和/或放开）一个键，鼠标按键或小键盘按键后，直接触发一些游戏行为。   
+[/EXCERPT:ActionMapping]
+
+[EXCERPT:AxisMapping]
+$ AxisMappings : 映射键盘，控制器，或鼠标到"friendly name" （友好名称）中，该值稍后会被绑定到持续的游戏行为中，例如移动。  在AxisMapping中映射的输入被持续地查看，即使它们仅仅是报告其当前输入值为零。  这使得移动或其它游戏行为非常地平滑，而不是在ActionMapping中由输入所触发的离散游戏事件。  
+
+	[REGION:tip]
+	硬件轴，例如摇杆控制器，提供输入的不同程度的反馈，而不是离散的1（已按下）或0（未按下）输入。  这表明，这些值可以变小或变大，而您角色的移动也将相应变化。 这些输入方式对提供更多类型移动的输入很有用，AxisMapping还能映射通用的移动键值，例如WASD或上，下，左，右，以及被持续观察的游戏行为。 
+	[/REGION:tip]
+[/EXCERPT:AxisMapping]
+
+### 设置输入映射
+
+输入映射存储在配置文件中，但可以很容易地通过关卡编辑器的项目设置选项卡来设置。
+
+1. 在关卡编辑器中，选择 **Edit > Project Settings** （编辑>项目设置）。
+
+	![](ProjectSettingsMenu.png)
+[PUBLISH:Licensee]
+1. 点击出现在 **Project Settings** （项目设置）选项卡的 **Input** （输入）。
+
+	![](ProjectSettingsWindow.png)
+[/PUBLISH:Licensee]
+[PUBLISH:Rocket]
+1. 点击出现在 **Project Settings** （项目设置）选项卡的 **Input** （输入）。
+
+	![](rocketprojectsettings.png)
+[/PUBLISH:Rocket]
+
+在本窗口中，您可以：
+	
+**变更（硬件）轴输入的属性：**
+![](AxisConfig.png)
+
+**添加或编辑ActionMappings(动作映射）:**
+![](ActionMappings.png)
+
+**添加或编辑AxisMappings（轴映射）:**
+![](AxisMappings.png)
+[/EXCERPT:PlayerInput]
+
+## InputComponent（输入组件）
+InputComponents在Pawn和Controller中最为常见，不过如果需要，仍可以在other Actors（其它Actor）及Level Scripts（关卡脚本）中进行设置。  InputComponent链接您项目中的AxisMapping及ActionMapping到游戏的行为，一般为函数，可在C++代码或蓝图图表中进行设置。  
+
+InputComponents的输入处理的优先堆栈如下（最高优先级排列在最前）：
+
+1. 最近启用"Accepts input"的Actor-可以是从门到可拾取项目的任意物品。
+	1. 启用了 "Accepts input" （接受输入）的所有Actor都会有输入处理,包含从最近启用到最早启用的Actor。
+
+	[REGION:tip]
+	如果您想要把某个特殊的Actor总是作为输入处理的首个处理对象，您可以重新启用其"Accepts input"（接受输入）并且它将会被移动到栈的顶端。 
+	[/REGION:tip]
+1. 控制器
+1. 关卡脚本
+1. Pawn
+
+如果某个InputComponent接受输入，则该堆栈的下方将无法访问。
+
+## 输入处理流程
+
+[REGION:raw]
+![](InputFlow.png)
+[/REGION]
+
+### 示例-向前移动
+
+本示例来自于虚幻引擎4附带的第一人称模板。  
+
+1. **玩家的硬件输入:** 玩家按下 **W** 键。
+1. **PlayerInput Mapping（玩家输入映射）:** AxisMapping（轴映射）将用户输入的 **W** 理解为"向前移动"一格。
+		
+	![](AxisMappingW.png)
+
+1. **InputComponent Priority Stack（InputComponent优先堆栈）:** 在InputComponent优先堆栈处理完成后，"MoveForward"（向前移动）输入的首个绑定发生于AFirstPersonBaseCodeCharacter类内。 此类为当前玩家的Pawn，所以其InputComponent（输入组件）被最后检查。 
+
+		void AFirstPersonBaseCodeCharacter::SetupPlayerInputComponent(class UInputComponent* InputComponent)
+			{
+				// set up gameplay key bindings
+				check(InputComponent);
+				...
+				BIND_AXIS(InputComponent, "MoveForward", &AFirstPersonBaseCodeCharacter::MoveForward);
+				...
+			} 
+
+	此步骤也可以在蓝图中，通过放置一个InputAxis MoveForward 节点到角色的EventGraph（事件图表）中来完成。 此节点连接的对象将会执行在 **W** 键按下后的事件。
+
+	![](InputMappingMoveForward.png)
+
+1. 	**Game Logic（游戏逻辑）:** 执行AFirstPersonBaseCodeCharacter的MoveForward（向前移动）函数。
+
+		void AFirstPersonBaseCodeCharacter::MoveForward(float Value)
+			{
+				if ( (Controller != NULL) && (Value != 0.0f) )
+				{
+					// find out which way is forward
+					FRotator Rotation = Controller->GetControlRotation();
+					// Limit pitch when walking or falling
+					if ( CharacterMovement->IsMovingOnGround() || CharacterMovement->IsFalling() )
+					{
+						Rotation.Pitch = 0.0f;
+					}
+					// add movement in that direction
+					const FVector Direction = FRotationMatrix(Rotation).GetScaledAxis(EAxis::X);
+					AddMovementInput(Direction, Value);
+				}
+			}
+	
+	在蓝图中的实现： 
+
+	[REGION:fullwidth]
+	![](MoveForward_Blueprint.png)
+	[/REGION:fullwidth]

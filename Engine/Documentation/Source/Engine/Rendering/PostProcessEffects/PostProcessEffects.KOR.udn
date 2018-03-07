@@ -1,0 +1,253 @@
+﻿INTSourceChangelist:3474032
+Availability:Public
+Title: 포스트 프로세스 이펙트
+Crumbs: %ROOT%, Engine
+Description:렌더링 직전의 전체 씬에 적용되는 이펙트입니다.
+Navigation:topic
+Version: 4.15
+parent:Engine/Rendering
+order:5
+type:landing
+tags:Rendering
+Topic-image:ppe_topic.png
+
+
+
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Rendering/PostProcessEffects:title%](Engine/Rendering/PostProcessEffects/ppe_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/tech_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/PostProcessEffects:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/PostProcessEffects:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/PostProcessEffects]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/PostProcessEffects:title%](Engine/Rendering/PostProcessEffects/ppe_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/tech_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/PostProcessEffects:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/PostProcessEffects:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/PostProcessEffects]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[REGION:banner]
+![Post Process Effects](ppe_landing_banner1.png)
+[/REGION]
+
+[EXCERPT:Intro]
+언리얼 엔진은 아티스트나 디자이너가 씬의 전체적인 모양새와 느낌을 조정할 수 있도록 여러가지 포스트 프로세스를 제공하고 있습니다. 요소와 이펙트의 예제에는 블룸 (밝은 오브젝트의 HDR 뽀샤시 효과), 앰비언트 오클루전 (구석의 실감나는 음영), 톤 매핑 등이 있습니다.
+[/EXCERPT:Intro]
+
+## 물리 기반 포스트 프로세스
+
+언리얼 엔진 4.15 부로, [Academy Color Encoding System (ACES)](http://www.oscars.org/science-technology/sci-tech-projects/aces) 에서 설정한 표준에 맞추기 위해 필름 톤 매퍼가 기본 활성화되었습니다. 
+이로써 UE4 톤 매퍼는 하이 다이내믹 레인지(HDR) 디스플레이를 포함한 여러 디스플레이 유형을 쉽게 타겟으로 삼을 수 있게 되었습니다. ACES 표준으로의 전환은 여러 포맷이나 디스플레이에서도 일관된 색을 얻을 수 있을 뿐 아니라, 
+소스 머티리얼을 별다른 조정 없이 다른 매체에서도 사용할 수 있도록 해주는 미래 대비 역할을 하기도 합니다.
+
+그 외에도 필름 톤 매퍼의 장점은 다음과 같습니다:
+
+* 텔레비전 및 영화용 ACES 표준과 일치합니다.
+* 추가적인 컬러 그레이딩 및 화이트 밸런스 컨트롤이 가능합니다.
+* 이미시브 컬러 블룸이 보다 물리적으로 바른 방식으로 이루어집니다.
+
+[REGION:warning]
+새로운 필름 톤 매퍼는 기존에 개발한 콘텐츠의 경우 UE4 기존 버전에서와 달라보일 것입니다. 예전 톤 매퍼를 사용하는 콘솔 명령은 다음과 같습니다:
+	r.TonemapperFilm 0
+[/REGION]
+
+
+## 포스트 프로세스 볼륨
+
+**PostProcessVolume** 은 레벨에 추가할 수 있는 특수한 종류의 볼륨으로, 언리얼 엔진 4 에서는 포스트 프로세싱 체인을 활용하지 않기 때문에, 포스트프로세싱 파라미터를 조작할 수 있는 유일한 방법은 현재 이 볼륨 뿐입니다. 새로운 시스템은 아직 완성 단계가 아니라 프로그래밍 여지를 남겨두고는 있지만, 일반적인 상황에서는 시스템을 통해 원활히 처리되도록 하려 하고 있습니다. 아티스트와 디자이너가 더욱 쉽게 사용하도록, 프로그래머가 더욱 잘 최적화하도록 하는 것입니다.
+
+언리얼 엔진 4 에서 각 PostProcessVolume 은 본질적으로 일종의 블렌드 레이어일 뿐입니다. 게임 코드 (적중 이펙트), UI 코드 (포즈 메뉴), 카메라 (비녜트(vignette)), 마티네 (오래된 필름 효과) 등에서 다른 블렌드 레이어가 올 수도 있습니다. 각 레이어는 이펙트를 쉽게 블렌딩할 수 있도록 웨이트(weight, 가중치)를 가질 수 있습니다.
+
+블렌딩은 항상 lerp(linear interpolation, 선형보간)으로 이루어지며, 켜진 볼륨만 블렌딩됩니다. **Unbound** 프로퍼티가 체크되지 않고서야, PostProcessVolume 은 카메라가 볼륨 바운드 안에 있을 때만 적용됩니다.
+
+PostProcessVolume 안에서 찾을 수 있는 프로퍼티에 대한 설명입니다:
+
+| 프로퍼티 | 설명 |
+| -------- | ---- |
+| **Settings 세팅** | 볼륨의 [포스트 프로세스 세팅](#포스트프로세스세팅) 입니다. 대다수 프로퍼티 앞의 체크박스는, 볼륨 안에 있는 선을 볼륨의 **Blend Weight** 를 사용하여 블렌딩할 것인지를 정의합니다.
+| **Priority 우선권** | 여러 볼륨의 블렌딩 순서를 정의합니다. 겹치는 볼륨 중 우선권이 가장 높은 볼륨이 우선권을 갖습니다.
+| **Blend Radius 블렌드 반경** | 볼륨 중심으로 이 언리얼 유닛만큼의 거리까지 볼륨에 세팅된 블렌딩이 일어납니다.
+| **Blend Weight 블렌드 웨이트** | 볼륨의 우선권이 갖는 영향력입니다. 0 이면 효과 없음, 1 이면 최대 효과입니다.
+| **Enabled 켜짐** | 볼륨이 포스트 프로세싱에 영향을 끼칠것인지 입니다. `true` 면 블렌딩에 볼륨의 세팅이 사용됩니다.
+| **Unbound 언바운드** | 볼륨의 바운드를 고려할 것인지 입니다. `true` 면 볼륨은 바운드와 무관하게 전체 월드에 영향을 끼칩니다. `false` 면 볼륨 안에만 영향을 끼칩니다.
+
+
+### 포스트 프로세스 세팅
+
+포스트 프로세스 세팅은 모두 제어하거나 덮어쓸 수 있는 여러가지 포스트 프로세스 이펙트의 프로퍼티입니다. 이 프로퍼티는 `UScene` 클래스에 선언됩니다. **PostProcessVolume** 에는 이 모든 프로퍼티를 담아 볼륨으로 덮어쓸 수 있도록 해 주는 `Settings` 프로퍼티로 `FPostProcessSettings` 구조체가 들어 있습니다.
+
+각각에 대해 사용할 수 있는 세팅에 대해서는, 아래에서 그 이펙트에 해당하는 페이지를 참고해 주시기 바랍니다.
+
+## 이펙트
+
+[DIR(output:"topiccompact" parent:"Engine/Rendering/PostProcessEffects" org:"hierarchy" tags:"Post Process" end:"1")]
+
+
+<!---
+
+[REGION:topics fourth]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/PostProcessEffects/AntiAliasing:title%](aa.png)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/PostProcessEffects/AntiAliasing:title%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/PostProcessEffects/AntiAliasing]
+	[/PARAM]
+[/OBJECT]
+
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/PostProcessEffects/Bloom:title%](bloom.png)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/PostProcessEffects/Bloom:title%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/PostProcessEffects/Bloom]
+	[/PARAM]
+[/OBJECT]
+
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/PostProcessEffects/ColorGrading:title%](grading.png)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/PostProcessEffects/ColorGrading:title%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/PostProcessEffects/ColorGrading]
+	[/PARAM]
+[/OBJECT]
+
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/PostProcessEffects/DepthOfField:title%](dof.png)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/PostProcessEffects/DepthOfField:title%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/PostProcessEffects/DepthOfField]
+	[/PARAM]
+[/OBJECT]
+
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/PostProcessEffects/AutomaticExposure:title%](exposure.png)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/PostProcessEffects/AutomaticExposure:title%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/PostProcessEffects/AutomaticExposure]
+	[/PARAM]
+[/OBJECT]
+
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/PostProcessEffects/LensFlare:title%](flare.png)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/PostProcessEffects/LensFlare:title%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/PostProcessEffects/LensFlare]
+	[/PARAM]
+[/OBJECT]
+
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/PostProcessEffects/PostProcessMaterials:title%](PostProcessMaterials.png)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/PostProcessEffects/PostProcessMaterials:title%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/PostProcessEffects/PostProcessMaterials]
+	[/PARAM]
+[/OBJECT]
+
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/PostProcessEffects/Blendables:title%](Blendables.png)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/PostProcessEffects/Blendables:title%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/PostProcessEffects/Blendables]
+	[/PARAM]
+[/OBJECT]
+
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/PostProcessEffects/SceneFringe:title%](fringe.png)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/PostProcessEffects/SceneFringe:title%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/PostProcessEffects/SceneFringe]
+	[/PARAM]
+[/OBJECT]
+
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/PostProcessEffects/ScreenSpaceReflection:title%](ScreenSpaceReflection.png)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/PostProcessEffects/ScreenSpaceReflection:title%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/PostProcessEffects/ScreenSpaceReflection]
+	[/PARAM]
+[/OBJECT]
+
+
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/PostProcessEffects/Vignette:title%](vignette.png)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/PostProcessEffects/Vignette:title%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/PostProcessEffects/Vignette]
+	[/PARAM]
+[/OBJECT]
+[/REGION]
+
+
+--->
+

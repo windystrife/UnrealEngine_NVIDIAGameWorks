@@ -1,0 +1,55 @@
+﻿INTSourceChangelist:2713401
+Availability:Public
+Title:条件属性复制
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking, Gameplay/Networking/Actors, Gameplay/Networking/Actors/Properties
+Description:关于如何根据条件复制 Actor 属性的详细信息。
+version: 4.9
+
+当属性被注册进行复制后，您将无法再取消注册（涉及到生存期这一话题）。之所以会这样，是因为我们要预制尽可能多的信息，以便针对同一组属性将某一工作分担给多个连接。这样可以节省大量的计算时间。
+
+那么，如何对属性复制过程进行更细化的控制呢？这时就需要用到条件属性了。
+
+默认情况下，每个复制属性都有一个内置条件：如果不发生变化就不会进行复制。
+
+为了加强对属性复制的控制，您可以使用一个专门的宏来添加附加条件。
+
+这个宏被称为 `DOREPLIFETIME_CONDITION`。它的应用示例如下：
+
+	void AActor::GetLifetimeReplicatedProps( TArray< FLifetimeProperty > & OutLifetimeProps ) const
+	{
+		DOREPLIFETIME_CONDITION( AActor, ReplicatedMovement, COND_SimulatedOnly );
+	}
+
+传递给条件宏的 `COND_SimulatedOnly` 标志甚至可以在考虑复制属性前执行一次额外检查。这时，它只会复制到拥有此 actor 模拟复本的客户端。
+
+这样做的一个最明显的好处在于节省带宽；因为我们确信拥有此 actor 的自治代理版本的客户端无需了解这个属性（例如，该客户端为了进行预测而直接设置了这一属性）。另一个好处就是对于不接收该属性的客户端而言，服务器无需干涉这个客户端的本地复本。
+
+下面，让我们快速浏览一下目前支持的条件，它们会在 `Engine\Source\Runtime\CoreUObject\Public\UObject\CoreNet.h` 的 `ELifetimeCondition` 枚举中指定：
+
+| 条件 | 说明 |
+|-----------|-------------|
+| `COND_InitialOnly`		| 该属性仅在初始数据组尝试发送 |
+| `COND_OwnerOnly`			| 该属性仅发送至 actor 的所有者 |
+| `COND_SkipOwner`			| 该属性将发送至除所有者之外的每个连接 |
+| `COND_SimulatedOnly`		| 该属性仅发送至模拟 actor |
+| `COND_AutonomousOnly`		| 该属性仅发送给自治 actor |
+| `COND_SimulatedOrPhysics`	| 该属性将发送至模拟或 bRepPhysics actor |
+| `COND_InitialOrOwner`		| 该属性将发送初始数据包，或者发送至 actor 所有者 |
+| `COND_Custom`				| 该属性没有特定条件，但需要通过 SetCustomIsActiveOverride 得到开启/关闭能力 |
+
+到目前为止，我们已经讨论了基于已知状态的条件。这可以让引擎方便的做出必要的优化，同时让您对属性复制拥有足够的控制。
+
+如果这样的控制力还不够，那该怎么办？关于这个话题，还有一件事需要讨论。有一个名叫 `DOREPLIFETIME_ACTIVE_OVERRIDE` 的宏可以让您进行全面控制，利用您想要的任何定制条件来决定何时复制/不复制某个属性。需要注意的是，这种控制需针对每个 actor（而不是每条连接）逐一进行。换句话说，如果在定制条件中使用一个可根据连接而发生变化的状态，会存在一定的安全风险。具体示例如下。
+
+	void AActor::PreReplication( IRepChangedPropertyTracker & ChangedPropertyTracker )
+	{
+		DOREPLIFETIME_ACTIVE_OVERRIDE( AActor, ReplicatedMovement, bReplicateMovement );
+	}
+
+现在 ReplicatedMovement 属性只会在 bReplicateMovement 为 true 时复制。
+
+为何不一直使用这个宏？主要有两个原因：
+* 如果定制条件的值变化太大，这种做法会降低执行速度。
+* 您不能使用根据连接而变化的条件（此时不检查 RemoteRole）。
+
+属性复制条件可以很好的实现控制力与性能之间的平衡。它们可以使引擎以更快的速度针对多条连接检查并发送属性，同时让程序员对复制属性的方式和时机进行精细控制。

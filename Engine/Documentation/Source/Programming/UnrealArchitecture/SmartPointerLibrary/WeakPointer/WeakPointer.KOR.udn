@@ -1,0 +1,86 @@
+﻿INTSourceChangelist:3485038
+Availability:Public
+Title:약 포인터
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture/SmartPointerLibrary
+Description:약 레퍼런스를 보관, 오브젝트의 소멸을 막지 않는 스마트 포인터입니다.
+Type:reference
+Version: 4.9
+Parent:Programming/UnrealArchitecture/SmartPointerLibrary
+Order:
+Tags:Programming
+
+[TOC(start:2)]
+
+약 포인터는 오브젝트로의 _약 레퍼런스_ (weak reference) 를 보관하는 포인터입니다. 공유 포인터와는 달리 약 포인터는 오브젝트의 소멸을 막지 않습니다. 약 포인터는 무엇에 의해서건 자신의 오브젝트가 소멸되면 자동으로 비워지는 포인터로, 변덕이 심한 오브젝트로의 포인터 캐시 정보를 안전하게 담을 수 있습니다. 이는 약 포인터가 예기치 못하게 비워질 수도, 레퍼런스 사이클을 깨는 데 사용될 수도 있다는 뜻이기도 합니다.
+
+약 포인터의 오브젝트는 그것을 가리키는 공유 레퍼런스가 없어지면 소멸됩니다.
+
+약 포인터는 의도를 명확히 하는 데 도움이 됩니다. 클래스에 약 포인터가 보인다면 그저 오브젝트에 대한 포인터의 캐시 역할만 할 뿐, 그 수명 자체를 좌지우지하지는 않는 다는 뜻입니다.
+
+## 선언과 초기화
+
+약 포인터는 항상 공유 포인터/레퍼런스나 다른 약 포인터에서 생성됩니다.
+
+	// Allocate a new tree node  새 트리 노드를 할당합니다.
+	TSharedRef<FTreeNode> NodeOwner( new FTreeNode() );
+
+	// Create a weak pointer to the new tree node  새 트리 노드로의 약 포인터를 생성합니다.
+	TWeakPtr<FTreenode> NodeObserver( NodeOwner );
+
+기억하실 것은, 약 포인터는 오브젝트의 소멸을 막지 못합니다. NodeOwner 가 리셋되면, NodeObserver 가 여전히 영역 안에 있을 지라도 오브젝트는 삭제됩니다:
+
+	// Destroy the node  노드를 소멸시킵니다.
+	NodeOwner.Reset();
+
+약 포인터는 공유 포인터와 마찬가지로 안전하게 복사할 수 있습니다.
+
+	TWeakPtr<FTreeNode> NodeObserverB = NodeObserver;
+
+약 포인터는 할 일이 끝나면 리셋(이나 재할당)시킬 수 있습니다.
+
+	NodeObserver = null;
+
+## 레퍼런스 해제와 접근
+
+약 포인터의 오브젝트에 접근하려면 먼저 `Pin()` 메소드를 호출하여 공유 포인터로 승격시킵니다.
+
+	// Get access to the node through the weak pointer  약 포인터를 통해 노드에 접근합니다.
+	TSharedPtr<TFreeNode> LockedObserver( NodeObserver.Pin() );
+
+	// 약 레퍼런스에서 공유 레퍼런스를 생성하는 데 성공했는지 확인합니다.
+	If( LockedObserver.IsValid() )
+	{
+		// Object still exists, so it can be accessed  오브젝트가 여전히 존재, 접근 가능한지.
+		LockedObserver->ListChildren();
+	}
+
+`Pin()` 은 빠릅니다. Pin 이라 불리우는 이유는 약 포인터가 임시 접근하는 동안 오브젝트가 소멸되지 않도록 하기 때문입니다.
+
+약 포인터는 오브젝트가 소멸되면 자동으로 알기에, 이러한 경우는 `IsValid()` 메소드를 사용하여 안전하게 처리 가능합니다.
+
+	//Make sure the weak pointer's object still exists before accessing it  약 포인터에 접근하기 전 아직 존재하는지 확인합니다.
+	if( NodeObserver.IsValid() )
+	{
+		...
+	}
+
+## 약 포인터로 사이클 끊기
+
+약 포인터를 사용하여 사이클을 끊을 수 있습니다:
+
+	class FTreeNode
+	{
+		/** Child nodes, owned by this node   이 노드에 소유된 자손 노드 */
+		TArray< TSharedPtr<FTreeNode> > Children;
+
+		/** Weak pointer back to this node's parent  이 노드의 부모를 되가리키는 약 포인터 */
+		TWeakPtr<FTreeNode> Parent;
+	}
+
+`FTreeNode` 에는 자신이 _소유하는_ 자손 노드로의 공유 포인터가 있습니다. 즉 자손 노드는 `FTreeNode` 와 함께 소멸된다는 뜻입니다. 부모 노드로의 레퍼런스를 캐시하는 데 약 포인터를 사용하기도 합니다. 약 포인터는 절대 오브젝트의 소멸을 막지 않습니다. 이런 식으로 공유/약 포인터를 사용하면 권위(authority)의 연쇄관계를 보다 명확히 할 수 있습니다.
+
+약 포인터는 자기 오브젝트의 소멸을 "알기만" 할 뿐이므로, 이렇게 하면 트리 내 어떤 노드로의 포인터도 안전하게 캐시에 담을 수 있습니다.
+
+## 변환
+
+약 포인터를 공유 포인터로 변환하려면 `Pin()` 메소드를 사용해야 합니다. 명시적 생성자(constructor)는 없습니다.

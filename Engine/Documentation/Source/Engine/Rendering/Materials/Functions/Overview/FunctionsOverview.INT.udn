@@ -1,0 +1,263 @@
+Availability: Public
+Title:Material Functions Overview
+Crumbs: %ROOT%, Engine, Engine/Rendering/Materials
+Description:An overview of how material functions work and some critical concepts for their use.
+Version: 4.9
+tags:Materials
+
+[REGION:banner]
+![](matfunc_overview_banner_NEW.jpg)
+[/REGION]
+
+[TOC(start:2)]
+
+
+
+**Material Functions** are little snippets of material graphs that can be saved in packages and reused across multiple materials.  Their purpose is to streamline the process of material creation by giving instant access to commonly used networks of material nodes. For example, if you find yourself often creating a network just to handle chaotic texture panning, then it will be much faster to save that portion of your network out as a material function and just use that whenever you need such behavior.
+
+Functions are edited in the material editor like a normal material, but with some restrictions on what nodes can be used.  When used properly, they can reduce material redundancy which in turn reduces artist maintenance effort keeping those duplicate expressions in sync, and the inevitable bugs that arise when one duplicate is missed during a modification. 
+
+Material functions are also assets that can appear within the **Content Browser**. Their graphs will be different from those of materials in that instead of a main material node, material functions will instead have output nodes that represent the output connections of the final function. 
+
+It may help to think of a material function like an electronics project enclosure. You may add as many inputs and outputs as you deem necessary. The heart of the function is what it does between those inputs and outputs.  This example takes two layers and blends them together like a [Photoshop screen blend](http://www.webdesign.org/photoshop/photoshop-basics/using-blend-modes-screen.14859.html).  The function abstracts the details from an artist that might want to use it, so they do not have to actually know the math of a screen blend to use a screen blend operation.  If anyone wants to change the way the screen blend operation works later, they can do so to this function and the change will automatically be propagated to all materials that use it.
+
+![ScreenBlendFunction.png](ScreenBlendFunction.png)(w:720)
+
+As you can see above, what happens between the input and the output is entirely up to you and will be defined by any network of standard material expression nodes. However, once you deploy a material function into a material, you will only see the function's node with its inputs and outputs.
+
+![ScreenBlendInMaterial.png](ScreenBlendInMaterial.png)(w:720)
+
+
+## Material Function Library
+
+When your material function is finished, it should be published to the material function library for easy access during material creation. The material function library is a window in the Material Editor that contains a categorized and filterable list of available material functions.  This list is populated from any loaded functions, but also from any functions which were not loaded but were found through the **Content Browser Database** which is used by the Content Browser.  
+
+![FunctionLibrary.png](FunctionLibrary.png)
+
+You can hover over these entries to see their Description as a tooltip, or drag and drop one into your material. 
+
+[REGION:note]
+	In order for a material function to appear in the Material Function Library, its _Expose To Library_ property must be checked. While within a function, deselect all nodes to show the base properties for the function itself, where you will find this property.
+[/REGION]
+
+For a full listing of the existing functions within the Material Function Library by default, please see the [Material Function Reference](Engine/Rendering/Materials/Functions/Reference).
+
+
+
+
+## Function Related Nodes
+
+Below are the material expression nodes that relate to material functions, along with their purpose:
+
+* **MaterialFunctionCall** - Allows using an external function from another material or function.  The external function's input and output nodes become inputs and outputs of the function call node.
+* **FunctionInput** - Can only be placed in a material function, where it defines one of the function's inputs.  
+* **FunctionOutput** - Can only be placed in a material function, where it defines one of the function's outputs.
+* **TextureObject** - Useful for providing a default texture for a texture function input within a function.  This node does not actually sample the texture, so it must be used in conjunction with a TextureSample node.    
+* **TextureObjectParameter** - Defines a texture parameter and outputs the texture object, used in materials that call a function with texture inputs.  This node does not actually sample the texture, so it must be used in conjunction with a TextureSample node.  
+* **StaticSwitch** - Performs a compile time choice between two inputs, based on the input value.
+* **StaticBool** - Useful for providing a default bool value for a static bool function input within a function.  This node does not switch between anything, so it must be used in conjunction with a StaticSwitch node.
+* **StaticBoolParameter** - Defines a static bool parameter and outputs the static bool value, used in materials that call a function with static bool inputs.  This node does not switch between anything, so it must be used in conjunction with a StaticSwitch node.
+
+
+## Input and Output
+
+Since material functions are encapsulated networks of nodes, it is up to the user to make sure that data can flow into and out of them. This is handled by way of *FunctionInput* and *FunctionOutput* nodes. Understanding these nodes is critical for using material functions.
+
+Within the function itself, FunctionInput and FunctionOutput nodes appear like so:
+
+![InputOutput_Within.png](InputOutput_Within.png)
+
+From the outside, however, when the function is used within a material, those nodes serve as pins for input and output:
+
+![InputOutput_Without.png](InputOutput_Without.png)
+
+
+### FunctionInput Nodes
+
+As stated, Material Input nodes serve as the gateway through which data will enter a material function. A given function may have any number of these input nodes, each corresponding with an input pin that will appear on the function itself.
+
+![InputNode.png](InputNode.png)
+
+They have the following properties and data pins:
+
+| Item | Description | 
+|---|---|
+|[REGION:tablesection]Properties[/REGION]||
+| **Input Name** | This provides the name for the input that will be visible from outside the function. |
+| **Description** | This provides a description of this input that will be visible when a user hovers over the function's input pin. |
+| **Input Type** | This tells the input what type of data to expect. See [Input Types](#InputTypes) below. |
+| **Preview Value** | This serves as a means of testing and a way to help visualize that the function is doing during the construction process. Any value entered here will be used as if it was being sent in via an input from outside the function. |
+| **Use Preview Value as Default** | This checkbox simply allows any data set in the preview value to be used as a default value. This is useful if you do not want to force the user to provide an input into the function for this value. |
+| **Sort Priority** | This number is used to control the order in which input pins will be listed on the function's node. The order is lowest to highest. |
+|[REGION:tablesection]Input Pins[/REGION]||
+| **Preview** | This input will take in a value that supersedes the Preview Value property. As with its associated property, this is useful for testing the function during construction and setting up default values. |
+|[REGION:tablesection]Output Pins[/REGION]||
+| **(Unlabled)** | This provides the output for the incoming data that will be processed by the function. |
+
+
+
+### FunctionOutput Nodes
+
+
+**FunctionOutput** nodes provide the means by which processed data will exit the final function for further use in a material. As with FunctionInput nodes, a function may have any number of these nodes, leading to any number of potential outputs.
+
+
+![OutputNode.png](OutputNode.png)
+
+**FunctionOutput** nodes have the following properties:
+
+| Item | Description | 
+|---|---|
+|[REGION:tablesection]Properties[/REGION]||
+| **Output Name** | This provides the name for the output that will be visible from outside the function. |
+| **Description** | This provides a description of this input that will be visible when a user hovers over the function's output pin. |
+| **Sort Priority** | This number is used to control the order in which input pins will be listed on the function's node. The order is lowest to highest. |
+|[REGION:tablesection]Input Pins[/REGION]||
+| **(Unlabeled)** | This provides the input for the  data that has been processed by the function. This data will be sent out of the function for use in the material. |
+
+
+### Input Types
+
+Inputs have a specified type that is required of any expressions connected to them. This is set via the _Input Type_ property on a FunctionInput node. From outside the function, this type is then displayed in a few letters next to the input connectors when the function is used in a material.  In this case, both the inputs were Vector3's so V3 is displayed.  Anything connected to an input when used in a material **must** be convertible to the input type, or you will receive an error.
+
+![InputType.png](InputType.png)
+
+Below are the available input types and their associated abbreviations:
+
+| Input Type | Abbreviation|
+| --- | --- |
+| **Scalar** | S |
+| **Vector2** | V2 |
+| **Vector3** | V3 |
+| **Vector4** | V4 |
+| **Texture2D** | T2D |
+| **TextureCube** | TCube |
+| **StaticBool** | B |
+
+
+
+
+## Common Properties
+
+While designing a function, deselecting all nodes will make available the base properties for the function itself. 
+
+
+| Item | Description | 
+|---|---|
+|[REGION:tablesection]Properties[/REGION]||
+| **Description** | This description will appear as a tooltip when users mouse over the function within the function list, or mouse over the body of the function node within the material editor. |
+| **Expose to Library** | If this box is checked, then the Material Function will appear within the Material Functions list inside the material editor and can be used within materials. You may need to restart the editor for a new function to appear. |
+| **Library Categories** | This array holds all of the categories of the Material Functions tab under which this function will appear. |
+
+
+
+## Previewing
+
+When editing a material function, the preview window shows whichever node is being previewed. You can **right-click** on any node and choose _Start Previewing Node_ in order to preview the results of the network up to that point. 
+
+![StartPreviewing.png](StartPreviewing.png)
+
+Most of the time you will want to preview a function output, so those will be previewed by default.
+
+![PreviewingOutput.png](PreviewingOutput.png)
+
+Function input nodes have some options for specifying preview values, since they do not know the actual values that will be used with in a material.  Each input has a built in _Preview Value_ that can be used to show a constant for float input types.  Function inputs also have a 'Preview' connector which allows you to override that built in value with any value that matches the input's type.  In this example, a texture sample has been used to provide the preview for a float 3 input.
+
+![PreviewTexture.png](PreviewTexture.png)
+
+In this example, a Static Bool node is being used to provide a default value for a static bool input.
+
+![PreviewStaticBool.png](PreviewStaticBool.png)
+
+Note that the input has an option called "Use Preview Value As Default".  When this is enabled, the preview value will be used any time the function is used in a material and nothing is connected to that input, instead of causing a compilation error.  This makes the input an optional input, so it is drawn in gray.
+
+
+## Parameters
+
+Functions can now contain parameter node types. These parameters can be passed directly to any material for use.
+
+
+To use a texture parameter with a function, make a texture input and connect it to the texture object override in a texture sample node:
+
+![TextureParameterFunction.png](TextureParameterFunction.png)(w:720)
+
+Then, in the material that uses the function, place a **TextureObjectParameter** node and connect it to the texture input:
+
+![TextureParameterMaterial.png](TextureParameterMaterial.png)(w:720)
+
+Similarly for static switch parameters, make a **Static Bool** input and connect it to a StaticSwitch node:
+
+![StaticSwitchFunction.png](StaticSwitchFunction.png)(w:720)
+
+Then, in the material that uses the function, place a **StaticBoolParameter** node and connect it to the static bool input:
+
+![StaticSwitchMaterial.png](StaticSwitchMaterial.png)(w:720)
+
+
+
+## Organization
+
+Functions are expected to be created by a few people, but used by many people, so it is important to have good documentation of what the functions do, and what values are needed for their inputs and outputs.  For this reason, functions have several documentation fields on top of the function name and input/output names:
+
+
+* **Function description** - Click on an empty area to see the function's properties, where Description is located.  **If you are going to fill in only one description field, make it this one!**  It will be displayed as a tooltip anywhere that the function is shown (**Content Browser**, material function library, function call node).
+
+* **Input / output descriptions** - These are located on the input and output nodes in a function.  They show up as tooltips when hovering over the function call node's inputs and outputs.
+
+
+Function Description filled out:
+
+![FunctionProperties2.png](FunctionProperties2.png)(w:720)
+
+Corresponding tooltip when used in a material:
+
+![FunctionTooltip.png](FunctionTooltip.png)
+
+## Propagation
+
+When you edit a function and click apply changes, the new version is propagated to any loaded materials or functions which reference this function.  Any unloaded materials which reference the function will be updated with the changes when they are next loaded.
+
+**When an input or output is deleted from a function and the changes are propagated, any links to these deleted connectors in materials that use the function will be broken!**  It is important to be aware of this, because the propagation cannot be undone.  The more materials a function is used in, the bigger the potential for breakage so be careful.
+
+All loaded materials that use the function will be marked dirty when the function change is propagated, which can be used to see which packages could be resaved to prevent increased load times.  You can find all the loaded materials which use a function by **right clicking** in the **Content Browser** and choosing this option:
+
+![FindUsingMaterials.png](FindUsingMaterials.png)
+
+
+## Nesting Functions
+
+Functions can be nested (function within a function) and chained together arbitrarily, except that they must not create a circular dependency. 
+
+## Compile Errors
+
+Compile errors within a function will highlight the MaterialFunctionCall node in red in materials that use it.  The error message will also say what function the error occurred in.  In this example, the error is that the function's inputs have not been connected.
+
+![CompileErrors0.png](CompileErrors0.png)
+
+[REGION:note]
+	The above set of errors can be avoided altogether by supplying preview values for your inputs and then activating each input's **Use Preview Value as Default** property. However, this practice may serve as a double-edged sword, as there will be no highly obvious alert (such as an error message) to remind you that you have left an input unplugged.
+[/REGION]
+
+The function's inputs have now been connected, but according to the error message there is an error with OneMinus node within the function.  
+
+![CompileErrors1.png](CompileErrors1.png)
+
+**Double-click** the function to open the editor for it, where the OneMinus node is highlighted with red due to the error:
+
+![CompileErrors2.png](CompileErrors2.png)
+
+
+
+## Default Material Functions
+
+Many material functions have already been created and are included with Unreal Engine 4. These will already be available via the [Material Editor Palette](Engine/Rendering/Materials/Editor/Interface#PalettePanel). 
+
+The default material functions can be accessed for editing via the **Content Browser** within the **Engine > Functions** folder. 
+
+[REGION:note]
+	If any changes are made and saved to the default material functions, those changes will exist in all instances of those functions. For this reason, it is generally advisable to make your own copies of existing functions if you need to make changes.
+[/REGION]
+
+For more information about these default functions, please see the [Material Function Reference](Engine/Rendering/Materials/Functions/Reference).
+
+

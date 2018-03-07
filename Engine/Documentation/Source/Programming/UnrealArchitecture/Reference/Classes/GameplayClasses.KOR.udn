@@ -1,0 +1,243 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title: 게임플레이 클래스
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture/Reference
+Description:게임플레이 클래스 생성 및 구현을 위한 참고서입니다.
+Version: 4.11
+
+[TOC(start:2)]
+
+언리얼 엔진의 모든 게임플레이 클래스는 클래스 헤더 (`.h`) 파일과 클래스 소스 (`.cpp`) 파일로 이루어져 있습니다.
+클래스 헤더에는 클래스와 그 멤버, 즉 변수와 함수에 대한 선언이 들어 있는 반면,
+클래스 구현에는 해당 클래스에 속하는 함수 _구현_ (implement)을 통해 클래스의 함수성을 
+정의하는 곳입니다.
+
+언리얼 엔진의 클래스에는 표준화된 작명 규칙이 있어, 클래스 이름 첫 글자, 다른말로 접두사만 봐도 클래스의 종류를 
+바로 알 수 있습니다. 게임플레이 클래스 접두사는 다음과 같습니다:
+
+| 접두사 | 의미 |
+| ------ | ------- |
+| `A` | _스폰가능한_ 게임플레이 오브젝트의 베이스 클래스에서 확장됩니다. 이들은 Actor, 액터로 월드에 바로 스폰 가능합니다. |
+| `U` | 모든 게임플레이 오브젝트의 베이스 클래스에서 확장됩니다. 월드에는 바로 인스턴싱할 수 없으며, 액터에 속해야 합니다. 보통 [](Programming/UnrealArchitecture/Actors/Components) 와 같은 오브젝트입니다. |
+
+
+
+## 클래스 추가하기
+
+[](Programming\Development\ManagingGameCode\CppClassWizard) 를 통해 새 클래스에 필요한 소스 파일과 헤더 파일이 구성되고, 그에 맞게 게임 모듈이 업데이트됩니다.
+헤더 파일과 소스 파일은 클래스 정의와 클래스 생성자를 자동으로 포함할 뿐 아니라, `UCLASS()` 매크로같은 언리얼 엔진 전용 코드도 포함됩니다.
+
+## 클래스 헤더
+
+언리얼 엔진의 게임플레이 클래스에는 일반적으로 별도의 고유 클래스 소스 파일이 있습니다. 이 파일 이름은 보통 그 안에 정의되는 클래스 이름에서 
+접두사 `A` 또는 `U` 를 뺀 것과 일치해야 하며, 확장자는 `.h` 를 사용합니다. 즉, `AActor` 클래스에 대한 클래스 소스 파일은 `Actor.h` 입니다.
+에픽 코드가 이러한 지침을 따르기는 하지만, 현재 엔진에 클래스 이름과 소스 파일 이름 사이의 공식적인 관계가 존재하지는 않습니다.
+
+게임플레이 클래스에 대한 클래스 소스 파일은 표준 C++ 문법을 사용하며, 여기에 클래스, 변수, 함수 선언 과정을 단축하기 위한 전용 매크로도 같이 사용됩니다.
+
+각 게임플레이 클래스 소스 파일 위에는, 클래스에 대해 (자동 생성되는) 제너레이티드 헤더 파일을 포함시켜 줘야 합니다 즉, `ClassName.h` 상단에, 다음과 같은 줄이 와야 합니다:
+
+	#include "ClassName.generated.h"
+
+### 클래스 선언
+
+클래스 선언에는 클래스의 이름, 어떤 클래스로부터 상속받았는지와, 그에 따라 상속된 함수와 변수를 정의합니다. 또한, 별도로 필요할 수도 있는 엔진 및 에디터 전용 기능은 
+[클래스 지정자(specifier)](#클래스지정자) 와 메타데이터를 통해 정의하기도 합니다.
+
+클래스 선언 문법은 다음과 같습니다:
+
+	UCLASS([specifier, specifier, ...], [meta(key=value, key=value, ...)])
+	class ClassName : public ParentName
+	{
+		GENERATED_BODY()
+	}
+
+이 선언은 클래스에 대한 표준 C++ 클래스 선언으로 이루어집니다. 표준 선언 말고도 클래스 지정자나 메타데이터 같은 지시어(descriptor)가 `UCLASS` 매크로에 전달됩니다. 이 매크로는 
+선언중인 클래스에 대한 `UClass` 를 생성하는 데 사용되는데, 이는 그 클래스에 대한 엔진의 특수한 표현으로 생각해 볼 수 있습니다. 또한, `GENERATED_BODY()` 
+매크로는 클래스 본문 제일 처음에 와야 합니다.
+
+#### 클래스 지정자
+
+[INCLUDE:Programming/UnrealArchitecture/Reference/Classes/Specifiers#main(offset:3)]
+
+## 클래스 구현
+
+모든 게임플레이 클래스는 `GENERATED_BODY` 매크로를 사용해야 제대로 구현됩니다. 이 작업은 클래스 헤더 (.h) 파일에서 이루어지는데, 이 파일은 클래스와 거기 속한 
+모든 변수와 함수를 정의합니다. 클래스 구현 파일 이름을 짓는 데 있어 모범 사례라 하면, 구현중인 클래스 이름에서 `A` 또는 `U` 접두사를 빼는 것입니다.
+즉 `AActor` 클래스에 대한 소스 파일 이름은 `Actor.cpp`, 그 헤더 파일 이름은 `Actor.h` 입니다. 에디터 내 "C++ 클래스 추가" 메뉴 옵션으로 생성된 클래스에 대해 자동으로 처리됩니다.
+
+소스 (.cpp) 파일은 C++ 클래스 선언을 포함하는 헤더 (.h) 파일을 포함해야 하는데, 이 파일은 보통 자동 생성되지만 (원한다면) 수동 생성할 수도 있습니다. 예를 들어 `AActor` 클래스에 대한 C++ 선언은 
+`EngineClasses.h` 헤더 파일에 자동 생성됩니다. 즉 `Actor.cpp` 파일은 반드시 `EngineClasses.h` 파일을 포함하거나, 다른 파일의 인클루드에 포함해야 한다는 뜻입니다. 일반적으로는 게임 
+프로젝트에 대한 헤더 파일만 포함하면 게임 프로젝트의 게임플레이 클래스에 대한 헤더가 포함됩니다. `AActor` 와 `EngineClasses.h` 의 경우, `EnginePrivate.h` 헤더가 포함되어 
+있는데, 여기에는 **Engine** 프로젝트에 대한 헤더 파일이 `Engine.h` 가 포함되어 있으며, 거기에 `EngineClasses.h` 헤더 파일이 포함됩니다.
+
+	#include "EnginePrivate.h"
+
+그 파일 하나 포함시켜준 것으로 포함되지 않는 클래스의 함수에 대한 구현에서 다른 클래스를 레퍼런싱한 경우, 파일을 추가로 포함시켜 줘야 할 수도 있습니다.
+
+### 클래스 생성자
+
+`UObject` 는 **생성자** (constructor)를 사용하여 프로퍼티나 기타 변수에 대한 기본값 설정뿐 아니라, 기타 필수적인 초기화 작업도 합니다. 클래스 생성자는 보통 클래스 구현 파일 안에 
+위치합니다. 즉 `AActor::AActor` 생성자는 `Actor.cpp` 에 있습니다. 
+
+[REGION:note]
+일부 생성자는 모듈 단위 기반의 특수한 "생성자" 파일에 위치할 수도 있습니다. 예를 들어 `AActor::AActor` 생성자는 `EngineConstructors.cpp` 찾을 수도 있습니다. 기존의 `DEFAULTS` 
+블록을 사용하던 것에서 생성자를 사용하는 방식으로의 자동 변환 프로세스의 결과입니다. 이러한 부분은 서서히 각자의 클래스 구현 파일로 옮겨질 것입니다.
+[/REGION]
+
+클래스 소스 파일 안에 생성자를 직접 위치시킬 수도 있습니다. 그러나 생성자가 클래스 소스 파일에 있는 경우, UClass 에 `CustomConstructor` 지정자를 붙여 선언해 줘야 자동 코드 
+생성기가 헤더에 생성자 선언부를 만들지 않습니다.
+
+#### 생성자 포맷
+
+UObject 생성자의 가장 기본적인 형태는 다음과 같습니다:
+
+	UMyObject::UMyObject()
+	{
+		// 여기서 클래스 디폴트 오브젝트 프로퍼티를 초기화시킵니다.
+	}
+
+이 생성자는 클래스 디폴트 오브젝트(CDO)를 초기화시키는데, 이는 앞으로의 클래스 인스턴스의 기반이 되는 마스터 사본입니다. 특수한 프로퍼티 변경 구조체를 지원하는 
+부가 생성자도 있습니다:
+
+	UMyObject::UMyObject(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+	{
+		// 여기서 CDO 프로퍼티를 초기화시킵니다.
+	}
+
+위 생성자 중 어느 것도 실제로 초기화 작업을 하지는 않습니다만, 엔진이 이미 모든 칸을 0, NULL, 또는 기본 생성자가 구현하는 값으로 채웠을 것입니다.
+하지만 생성자에 작성된 초기화 코드는 CDO 에 적용될 것이고, 이어서 `CreateNewObject` 또는 `SpawnActor` 와 같은 엔진 내 적절히 생성된 새로운 오브젝트 인스턴스에 
+복사될 것입니다.
+
+생성자에 전달되는 `FObjectInitializer` 파라미터는, const 마킹에도 불구하고, 내장된 뮤트 가능 함수를 통해 프로퍼티와 서브오브젝트를 덮어쓰도록 설정할 수 있습니다. 생성되는 `UObject` 는 이러한 변경사항에 영향을 받을 것이며,
+이를 사용해서 등록된 프로퍼티 또는 컴포넌트의 값을 변경할 수 있습니다.
+
+	AUDKEmitterPool::AUDKEmitterPool(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer.DoNotCreateDefaultSubobject(TEXT("SomeComponent")).DoNotCreateDefaultSubobject(TEXT("SomeOtherComponent")))
+	{
+		// 여기서 CDO 프로퍼티를 초기화시킵니다.
+	}
+
+위의 경우, Super 클래스는 짐작컨데, 생성자에서 SomeComponent 와 SomeOtherComponent 라는 이름의 서브오브젝트를 생성하려던 것이겠지만, FObjectInitializer 때문에 그리 하지 못할 것입니다.
+아래의 경우, SomeProperty 와 아울러 앞으로 새로 생기는 AUTDemoHUD 인스턴스는 CDO 로 인해 기본값이 26 이 됩니다.
+
+	AUTDemoHUD::AUTDemoHUD()
+	{
+		// Initialize CDO properties here.
+		SomeProperty = 26;
+	}
+
+#### 생성자 스태틱 및 헬퍼
+
+좀 더 복잡한 데이터 유형, 특히나 클래스 레퍼런스, 이름, 애셋 레퍼런스 값을 설정하는 데는, 생성자의 **ConstructorStatics** 구조체가 필요한 여러가지 프로퍼티 값을 담을 수 있도록 정의하고 
+인스턴싱하는 것이 필요합니다. 이 `ConstructorStatics` 구조체는 생성자가 처음 실행될 때만 만들어집니다. 그 이후의 실행시에는 그냥 포인터만 복사하므로 매우 빠릅니다. `ConstructorStatics` 
+구조체 생성시 구조체 멤버에 값이 할당되어, 나중에 생성자에서 실제 프로퍼티 자체에 값을 할당할 때 
+접근할 수 있습니다.
+
+**ContructorHelpers** 는 `ObjectBase.h` 에 정의되는 특수한 네임스페이스로, 생성자 전용 흔한 동작을 수행하는 데 사용하는 헬퍼 템플릿이 들어 있습니다. 예를 들어, 애셋이나 클래스로의 
+레퍼런스 검색은 물론 컴포넌트 생성 및 검색용 헬퍼 템플릿이 있습니다.
+
+##### 애셋 레퍼런스
+
+이상적으로 클래스의 애셋 레퍼런스는 존재하지 않습니다. 하드코딩된 애셋 레퍼런스는 취약해서, 애셋 프로퍼티의 환경설정에는 블루프린트를 사용하는 쪽이 선호되는 방식입니다. 
+그러나 하드코딩된 레퍼런스는 여전히 완벽 지원됩니다. 오브젝트를 생성할 때마다 애셋을 검색할 수는 없으니, 이러한 검색은 한 번만 합니다. 이는 애셋 검색을 한 번만 하도록 보장해 주는 정적인 구조체를 
+통해 이루어집니다.
+
+`ConstructorHelpers::FObjectFinder` 는 `StaticLoadObject` 를 사용해서 지정된 `UObject` 로의 레퍼런스를 찾습니다. 이는 보통 콘텐츠 패키지에 저장된 애셋을 레퍼런싱하는 데 사용됩니다. 오브젝트를 찾지 못하면 
+실패했다고 보고됩니다.
+
+	ATimelineTestActor::ATimelineTestActor()
+	{
+		// 일회성 초기화 저장을 위한 구조체입니다.
+		struct FConstructorStatics
+		{
+			ConstructorHelpers::FObjectFinder<UStaticMesh> Object0;
+			FConstructorStatics()
+			: Object0(TEXT("StaticMesh'/Game/UT3/Pickups/Pickups/Health_Large/Mesh/S_Pickups_Base_Health_Large.S_Pickups_Base_Health_Large'"))
+			{
+			}
+		};
+		static FConstructorStatics ConstructorStatics;
+
+		// 프로퍼티 초기화
+
+		StaticMesh = ConstructorStatics.Object0.Object;
+	}
+
+##### 클래스 레퍼런스
+
+`ConstructorHelpers::FClassFinder` 는 지정된 `UClass` 에 대한 레퍼런스를 찾습니다. 클래스를 찾지 못하면 실패 보고를 합니다.
+
+	APylon::APylon(const class FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+	{
+		// 일회성 초기화 저장을 위한 구조체입니다.
+		static FClassFinder<UNavigationMeshBase> ClassFinder(TEXT("class'Engine.NavigationMeshBase'"));
+		if (ClassFinder.Succeeded())
+		{
+			NavMeshClass = ClassFinder.Class;
+		}
+		else
+		{
+			NavMeshClass = nullptr;
+		}
+	}
+
+여러가지 경우에 그냥 `USomeClass::StaticClass()` 를 사용해서 복잡한 ClassFinder 는 한꺼번에 건너뛸 수 있습니다. 예를 들어 대부분의 상황에서 아래 메소드를 사용할 수 있습니다:
+
+	NavMeshClass = UNavigationMeshBase::StaticClass();
+
+크로스 모듈 레퍼런스의 경우, 아마 ClassFinder 메소드를 사용하는 편이 낫습니다.
+
+##### 컴포넌트와 서브오브젝트
+
+컴포넌트 서브오브젝트를 만들고 액터의 계층구조에 붙이는 것은 생성자 안에서도 가능합니다. 액터 스폰시, 그 컴포넌트가 CDO 에서 복제됩니다. 컴포넌트가 항상 
+제대로 생성, 소멸, 가비지 콜렉팅의 과정을 거치도록 하기 위해서는, 생성자에서 생성된 모든 컴포넌트로의 포인터를 소유 클래스의 UPROPERTY 에 저장해야 합니다.
+
+	UCLASS()
+	class AWindPointSource : public AActor
+	{
+		GENERATED_BODY()
+		public:
+
+		UPROPERTY()
+		UWindPointSourceComponent* WindPointSource;
+
+		UPROPERTY()
+		UDrawSphereComponent* DisplaySphere;
+	};
+
+	AWindPointSource::AWindPointSource()
+	{
+		// 새 컴포넌트를 생성하여 이름을 짓습니다.
+		WindPointSource = CreateDefaultSubobject<UWindPointSourceComponent>(TEXT("WindPointSourceComponent0"));
+		
+		// 새로운 컴포넌트를 이 액터의 루트 컴포넌트로 설정하거나, 이미 존재하는 경우 루트에 붙입니다.
+		if (RootComponent == nullptr)
+		{
+			RootComponent = WindPointSource;
+		}
+		else
+		{
+			WindPointSource->AttachTo(RootComponent);
+		}
+
+		// 두 번째 컴포넌트를 생성합니다. 방금 생성한 컴포넌트에 붙일 것입니다.
+		DisplaySphere = CreateDefaultSubobject<UDrawSphereComponent>(TEXT("DrawSphereComponent0"));
+		DisplaySphere->AttachTo(RootComponent);
+		
+		// 새로운 컴포넌트에 프로퍼티를 몇 설정합니다.
+		DisplaySphere->ShapeColor.R = 173;
+		DisplaySphere->ShapeColor.G = 239;
+		DisplaySphere->ShapeColor.B = 231;
+		DisplaySphere->ShapeColor.A = 255;
+		DisplaySphere->AlwaysLoadOnClient = false;
+		DisplaySphere->AlwaysLoadOnServer = false;
+		DisplaySphere->bAbsoluteScale = true;
+	}
+
+부모 클래스에 속하는 컴포넌트 변경은 일반적으로 필요치 않은 작업입니다. 하지만 붙은 모든 컴포넌트의 현재 목록은, 부모 클래스가 생성한 컴포넌트를 포함해서,
+가능한 부분입니다. 루트 컴포넌트를 포함해서 아무 `USceneComponent` 에서도 `GetAttachParent`, `GetParentComponents`, `GetNumChildrenComponents`, `GetChildrenComponents`, `GetChildComponent` 를 
+호출해 보시기 바랍니다.
+

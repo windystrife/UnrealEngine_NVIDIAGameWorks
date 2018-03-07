@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--Tango plugin additions-->
+<root xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- init section is always evaluated once per architecture -->
+  <init>
+    <log text="Tango init"/>
+    <setBoolFromProperty result="bGradle" ini="Engine" section="/Script/AndroidRuntimeSettings.AndroidRuntimeSettings" property="bEnableGradle" default="false"/>
+  </init>
+
+  <!-- optional files or directories to copy to Intermediate/Android/APK -->
+  <resourceCopies>
+    <log text="Copying Tango files to staging"/>
+    <copyDir src="$S(PluginDir)/Java"
+    dst="$S(BuildDir)/src/com/projecttango/unreal" />
+    <copyDir src="$S(PluginDir)/../Java/com" dst="$S(BuildDir)/src/com" />
+    <isArch arch="armeabi-v7a">
+      <copyFile src="$S(EngineDir)/Source/ThirdParty/TangoSDK/lib/armeabi-v7a/libtango_client_api2.so"
+          dst="$S(BuildDir)/libs/armeabi-v7a/libtango_client_api2.so" />
+      <copyFile src="$S(EngineDir)/Source/ThirdParty/TangoSDK/lib/armeabi-v7a/libtango_support.so"
+          dst="$S(BuildDir)/libs/armeabi-v7a/libtango_support.so" />
+      <copyFile src="$S(EngineDir)/Source/ThirdParty/TangoSDK/lib/armeabi-v7a/libtango_3d_reconstruction.so"
+                dst="$S(BuildDir)/libs/armeabi-v7a/libtango_3d_reconstruction.so" />
+    </isArch>
+    <isArch arch="arm64-v8a">
+      <copyFile src="$S(EngineDir)/Source/ThirdParty/TangoSDK/lib/arm64-v8a/libtango_client_api2.so"
+                dst="$S(BuildDir)/libs/arm64-v8a/libtango_client_api2.so" />
+      <copyFile src="$S(EngineDir)/Source/ThirdParty/TangoSDK/lib/arm64-v8a/libtango_support.so"
+                dst="$S(BuildDir)/libs/arm64-v8a/libtango_support.so" />
+      <copyFile src="$S(EngineDir)/Source/ThirdParty/TangoSDK/lib/arm64-v8a/libtango_3d_reconstruction.so"
+                dst="$S(BuildDir)/libs/arm64-v8a/libtango_3d_reconstruction.so" />
+    </isArch>
+
+  </resourceCopies>
+
+  <!-- optional updates applied to AndroidManifest.xml -->
+  <androidManifestUpdates>
+    <addPermission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <addPermission android:name="android.permission.CAMERA"/>
+  </androidManifestUpdates>
+
+
+  <gameActivityImportAdditions>
+    <insert>
+      import com.projecttango.unreal.TangoInitialization;
+      import com.projecttango.unreal.TangoUnrealHelper;
+      import com.projecttango.unreal.TangoNativeEngineMethodWrapper;
+      import com.google.atap.tangoservice.Tango;
+      import com.google.atap.tangoservice.SupportedDevices;
+      import com.google.ar.core.LightingEstimation;
+      import java.nio.ByteBuffer;
+      import android.os.IBinder;
+    </insert>
+  </gameActivityImportAdditions>
+
+  <gameActivityClassAdditions>
+    <insert>
+
+      private TangoUnrealHelper tangoUnrealHelper = null;
+      private Tango tangoObject;
+
+      public TangoUnrealHelper GetTangoUnrealHelper()
+      {
+        if (tangoUnrealHelper == null)
+        {
+          tangoUnrealHelper = new TangoUnrealHelper(this);
+        }
+
+        return tangoUnrealHelper;
+      }
+
+      // Methods for calling via JNI:
+
+      public int AndroidThunkJava_GetDisplayRotation()
+      {
+        return GetTangoUnrealHelper().getDisplayRotation();
+      }
+      public int AndroidThunkJava_GetColorCameraRotation()
+      {
+        return GetTangoUnrealHelper().getColorCameraRotation();
+      }
+      public boolean AndroidThunkJava_IsTangoCorePresent()
+      {
+         return GetTangoUnrealHelper().isTangoCorePresent();
+      }
+      public boolean AndroidThunkJava_IsTangoCoreUpToDate()
+      {
+         return GetTangoUnrealHelper().isTangoCoreUpToDate();
+      }
+
+      public boolean AndroidThunkJava_IsARCoreSupported()
+      {
+          return SupportedDevices.isSupported(this);
+      }
+
+      public void AndroidThunkJava_CreateTangoObject()
+      {
+        _activity.runOnUiThread(new Runnable()
+        {
+          @Override
+          public void run()
+          {
+            tangoObject = new Tango(_activity, new Runnable() {
+              @Override
+              public void run() {
+                TangoNativeEngineMethodWrapper.onTangoServiceConnected(tangoObject);
+              }
+            });
+          }
+        });
+      }
+    </insert>
+  </gameActivityClassAdditions>
+
+  <gameActivityOnPauseAdditions>
+    <insert>
+      TangoNativeEngineMethodWrapper.onApplicationPause();
+    </insert>
+  </gameActivityOnPauseAdditions>
+
+  <gameActivityOnResumeAdditions>
+    <insert>
+       TangoNativeEngineMethodWrapper.onApplicationResume();
+    </insert>
+  </gameActivityOnResumeAdditions>
+
+  <gameActivityOnStartAdditions>
+    <insert>
+       TangoNativeEngineMethodWrapper.onApplicationStart();
+     </insert>
+  </gameActivityOnStartAdditions>
+
+  <gameActivityOnStopAdditions>
+    <insert>
+       TangoNativeEngineMethodWrapper.onApplicationStop();
+     </insert>
+  </gameActivityOnStopAdditions>
+  <gameActivityOnActivityResultAdditions>
+    <insert>
+    </insert>
+  </gameActivityOnActivityResultAdditions>
+
+  <gameActivityOnCreateAdditions>
+    <insert>
+      Log.debug("Tango library loaded successfully from device.");
+      TangoNativeEngineMethodWrapper.onApplicationCreated();
+      GetTangoUnrealHelper().initDisplayManager();
+    </insert>
+  </gameActivityOnCreateAdditions>
+
+  <gameActivityOnDestroyAdditions>
+    <insert>
+      TangoNativeEngineMethodWrapper.onApplicationDestroyed();
+    </insert>
+  </gameActivityOnDestroyAdditions>
+
+  <buildGradleAdditions>
+      <insert>
+        dependencies {
+          compile('com.google.tango:lighting_estimation:0.0.0')
+          compile('com.google.tango:tango_java_lib:0.0.0')
+        }
+      </insert>
+  </buildGradleAdditions>
+
+  <AARImports>
+    <insert>repository $(ENGINEDIR)/Source/ThirdParty/TangoSDK/lib/</insert>
+    <insertNewline/>
+    <if condition="bGradle">
+      <false>
+        <insert>com.google.tango, tango_java_lib, 0.0.0</insert>
+        <insertNewline/>
+        <insert>com.google.tango, lighting_estimation, 0.0.0</insert>
+        <insertNewline/>
+      </false>
+    </if>
+  </AARImports>
+
+</root>

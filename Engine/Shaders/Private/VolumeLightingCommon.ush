@@ -1,0 +1,128 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/**
+ * VolumeLightingCommon.usf
+ */
+
+// use low quality shadow sampling on translucency for better performance
+#define SHADOW_QUALITY 2
+
+#include "ShadowProjectionCommon.ush"
+#include "ShadowFilteringCommon.ush"
+
+/** Parameters needed to access the shadow map of the light. */
+float4x4 WorldToShadowMatrix;
+float4 ShadowmapMinMax;
+// .x:1/SplitNearFadeRegion, .y:1/SplitFarFadeRegion .zw:DistanceFadeMAD
+float4 ShadowInjectParams;
+float2 DepthBiasParameters;
+
+/** Whether to compute static shadowing. */
+uint bStaticallyShadowed;
+
+/** Shadow depth map computed for static geometry by Lightmass. */
+Texture2D StaticShadowDepthTexture;
+SamplerState StaticShadowDepthTextureSampler;
+
+/** Transform used for static shadowing by spot and directional lights. */
+float4x4 WorldToStaticShadowMatrix;
+float4 StaticShadowBufferSize;
+
+/** Computes dynamic and static shadowing for a point anywhere in space. */
+float ComputeVolumeShadowing(float3 WorldPositionForLighting, bool bPointLight, bool bSpotLight)
+{
+	float ShadowFactor = 1;
+
+	BRANCH
+	if (bStaticallyShadowed)
+	{
+		bool bUsePointLightShadowing = bPointLight;
+
+		BRANCH
+		if (bUsePointLightShadowing)
+		{
+			float3 LightVector = WorldPositionForLighting - DeferredLightUniforms.LightPosition;
+			float DistanceToLight = length(LightVector);
+			float3 NormalizedLightVector = LightVector / DistanceToLight;
+
+			//@todo - use parametrization without slow inverse trig.  Dual paraboloid?
+			float NormalizedTheta = atan2(NormalizedLightVector.y, NormalizedLightVector.x) / (2 * PI);
+			// atan2 returns in the range [-PI, PI], wrap the negative portion to [.5, 1]
+			float U = NormalizedTheta > 0 ? NormalizedTheta : 1 + NormalizedTheta;
+			float V = acos(NormalizedLightVector.z) / PI;
+			float2 UnwrappedUVs = float2(U, V);
+
+			float ShadowDepth = Texture2DSampleLevel(StaticShadowDepthTexture, StaticShadowDepthTextureSampler, UnwrappedUVs, 0).x;
+			ShadowFactor = DistanceToLight * DeferredLightUniforms.LightInvRadius < ShadowDepth;
+		}
+		else
+		{
+			// This path is used for directional lights and spot lights, which only require a single projection
+			// Transform the world position into shadowmap space
+			float4 HomogeneousShadowPosition = mul(float4(WorldPositionForLighting, 1), WorldToStaticShadowMatrix);
+			float2 ShadowUVs = HomogeneousShadowPosition.xy / HomogeneousShadowPosition.w;
+
+			// Treat as unshadowed if the voxel is outside of the shadow map
+			if (all(ShadowUVs >= 0 && ShadowUVs <= 1))
+			{
+				FPCFSamplerSettings Settings;
+				Settings.ShadowDepthTexture = StaticShadowDepthTexture;
+				Settings.ShadowDepthTextureSampler = StaticShadowDepthTextureSampler;
+				Settings.ShadowBufferSize = StaticShadowBufferSize;
+				Settings.SceneDepth = HomogeneousShadowPosition.z;
+				Settings.TransitionScale = 40;
+				Settings.bSubsurface = false;
+				// We can sample outside of the static shadowmap, which is centered around the scene.  These 'infinite' depth values should not cause occlusion.
+				Settings.bTreatMaxDepthUnshadowed = true;
+				Settings.DensityMulConstant = 0;
+				Settings.ProjectionDepthBiasParameters = float2(0, 0);
+
+				ShadowFactor = Manual1x1PCF(ShadowUVs, Settings);
+
+				/*
+				// Sample the shadowmap depth and determine if this voxel is shadowed
+				float ShadowDepth = Texture2DSampleLevel(StaticShadowDepthTexture, StaticShadowDepthTextureSampler, ShadowUVs, 0).x;
+				ShadowFactor = HomogeneousShadowPosition.z < ShadowDepth;
+				*/
+			}
+		}
+	}		
+
+	#if DYNAMICALLY_SHADOWED
+		bool bUseCubemapShadowing = bPointLight;
+		float DynamicShadowFactor = 1;
+
+		if (bUseCubemapShadowing)
+		{
+			DynamicShadowFactor = CubemapHardwarePCF(WorldPositionForLighting, DeferredLightUniforms.LightPosition, DeferredLightUniforms.LightInvRadius, 0.03f * 512 * InvShadowmapResolution);
+		}
+		else
+		{
+			// Transform the world position into shadowmap space
+			float4 HomogeneousShadowPosition = mul(float4(WorldPositionForLighting, 1), WorldToShadowMatrix);
+			float2 ShadowUVs = HomogeneousShadowPosition.xy / HomogeneousShadowPosition.w;
+
+			// Treat as unshadowed if the voxel is outside of the shadow map
+			if (all(ShadowUVs >= ShadowmapMinMax.xy && ShadowUVs <= ShadowmapMinMax.zw))
+			{
+				// Sample the shadowmap depth and determine if this voxel is shadowed
+				float ShadowDepth = Texture2DSampleLevel(ShadowDepthTexture, ShadowDepthTextureSampler, ShadowUVs, 0).x;
+				DynamicShadowFactor = HomogeneousShadowPosition.z < ShadowDepth - DepthBiasParameters.x;
+			}
+		}
+
+		// fade shadows in the distance
+		if (!bPointLight && !bSpotLight)
+		{
+			float Depth = dot(WorldPositionForLighting - View.WorldCameraOrigin, View.ViewForward);
+			float DistanceFade = saturate(Depth * ShadowInjectParams.z + ShadowInjectParams.w);
+			DynamicShadowFactor = lerp(DynamicShadowFactor, 1.0f, DistanceFade * DistanceFade);
+		}
+
+		// Combine static shadowing and dynamic shadowing, important for stationary directional lights with CSM
+		ShadowFactor = min(ShadowFactor, DynamicShadowFactor);
+
+	#endif
+
+	return ShadowFactor;
+}

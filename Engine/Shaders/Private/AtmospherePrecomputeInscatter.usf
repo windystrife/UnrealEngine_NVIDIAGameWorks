@@ -1,0 +1,307 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	AtmospherePrecomputeInscatter.usf: Precompute data for Atmospheric fog
+
+	This code contains embedded portions of free sample source code from 
+	http://www-evasion.imag.fr/Membres/Eric.Bruneton/PrecomputedAtmosphericScattering2.zip, Author: Eric Bruneton, 
+	08/16/2011, Copyright (c) 2008 INRIA, All Rights Reserved, which have been altered from their original version.
+
+	Permission is granted to anyone to use this software for any purpose, including commercial applications, and to alter it and redistribute it freely, subject to the following restrictions:
+
+    1. Redistributions of source code must retain the above copyright notice, 
+	   this list of conditions and the following disclaimer.
+    2. Redistributions in binary form must reproduce the above copyright notice, 
+	   this list of conditions and the following disclaimer in the
+       documentation and/or other materials provided with the distribution.
+    3. Neither the name of the copyright holders nor the names of its
+       contributors may be used to endorse or promote products derived from
+       this software without specific prior written permission.
+	
+=============================================================================*/
+
+#include "Common.ush"
+#include "AtmosphereCommon.ush"
+#include "AtmospherePrecomputeCommon.ush"
+
+float4 DhdH;
+float AtmosphereR;
+int AtmosphereLayer;
+
+void MainVS(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out FAtmosphereVSOutput Out
+	)
+{
+	DrawRectangle(InPosition, InTexCoord, Out.OutPosition, Out.OutTexCoord);
+	Out.LayerIndex = AtmosphereLayer;
+}
+
+struct FAtmosphereGSOut
+{
+    FAtmosphereVSOutput Vertex;
+    uint LayerIndex : SV_RenderTargetArrayIndex;
+};
+
+[maxvertexcount(3)]
+void AtmosphereGS(triangle FAtmosphereVSOutput Input[3], inout TriangleStream<FAtmosphereGSOut> OutStream)
+{
+	FAtmosphereGSOut Vertex0;
+	Vertex0.Vertex = Input[0];
+	Vertex0.LayerIndex = AtmosphereLayer;
+
+	FAtmosphereGSOut Vertex1;
+	Vertex1.Vertex = Input[1];
+	Vertex1.LayerIndex = AtmosphereLayer;
+
+	FAtmosphereGSOut Vertex2;
+	Vertex2.Vertex = Input[2];
+	Vertex2.LayerIndex = AtmosphereLayer;
+
+	OutStream.Append(Vertex0);
+	OutStream.Append(Vertex1);
+	OutStream.Append(Vertex2);
+}
+
+void Integrand(float Radius, float Mu, float MuS, float Nu, float T, out float3 Ray, out float3 Mie) 
+{
+    Ray = float3(0, 0, 0);
+    Mie = float3(0, 0, 0);
+    float Ri = sqrt(Radius * Radius + T * T + 2.0 * Radius * Mu * T);
+    float MuSi = (Nu * T + MuS * Radius) / Ri;
+	Ri = max(RadiusGround, Ri);
+	if (MuSi >= -sqrt(1.0 - RadiusGround * RadiusGround / (Ri * Ri)) ) 
+	{
+		float3 Ti = TransmittanceWithDistance(Radius, Mu, T) * Transmittance(Ri, MuSi);
+		Ray = exp(-(Ri - RadiusGround) / View.AtmosphericFogHeightScaleRayleigh) * Ti;
+		Mie = exp(-(Ri - RadiusGround) / HeightScaleMie) * Ti;
+	}
+}
+
+void Inscatter(float Radius, float Mu, float MuS, float Nu, out float3 Ray, out float3 Mie) // For Inscatter 1
+{
+    Ray = float3(0, 0, 0);
+    Mie = float3(0, 0, 0);
+    float Dx = Limit(Radius, Mu) / float(InscatterIntegralSamples);
+    float Xi = 0.0;
+    float3 Rayi;
+    float3 Miei;
+    Integrand(Radius, Mu, MuS, Nu, 0.0, Rayi, Miei);
+    for (int I = 1; I <= InscatterIntegralSamples; ++I) 
+	{
+        float Xj = float(I) * Dx;
+        float3 Rayj;
+        float3 Miej;
+        Integrand(Radius, Mu, MuS, Nu, Xj, Rayj, Miej);
+        Ray += (Rayi + Rayj) / 2.0 * Dx;
+        Mie += (Miei + Miej) / 2.0 * Dx;
+        Xi = Xj;
+        Rayi = Rayj;
+        Miei = Miej;
+    }
+    Ray *= BetaRayleighScattering;
+    Mie *= BetaMieScattering;
+}
+
+void Inscatter1PS(
+	FAtmosphereGSOut Input,
+	out float4 OutColor0 : SV_Target0,
+	out float4 OutColor1 : SV_Target1
+	) 
+{
+    float3 Ray;
+    float3 Mie;
+    float Mu, MuS, Nu;
+    GetMuMuSNu(Input.Vertex.OutTexCoord, AtmosphereR, DhdH, Mu, MuS, Nu);
+    Inscatter(AtmosphereR, Mu, MuS, Nu, Ray, Mie);
+    // Store separately Rayleigh and Mie contributions, WITHOUT the phase function factor
+	// (cf "Angular precision")
+    OutColor0 = float4(Ray,1);
+    OutColor1 = float4(Mie,1);
+}
+
+void CopyInscatter1PS(FAtmosphereGSOut Input, out float4 OutColor : SV_Target0) 
+{
+	float3 UVW = float3(Input.Vertex.OutTexCoord, (float(AtmosphereLayer) + 0.5f) / float(View.AtmosphericFogInscatterAltitudeSampleNum) );
+    float4 Ray = Texture3DSample(AtmosphereDeltaSRTexture, AtmosphereDeltaSRTextureSampler, UVW);
+    float4 Mie = Texture3DSample(AtmosphereDeltaSMTexture, AtmosphereDeltaSMTextureSampler, UVW);
+	OutColor = float4(Ray.rgb, Mie.r);
+}
+
+void CopyInscatter1BackPS(FAtmosphereGSOut Input, out float4 OutColor : SV_Target0) 
+{
+	float3 UVW = float3(Input.Vertex.OutTexCoord, (float(AtmosphereLayer) + 0.5f) / float(View.AtmosphericFogInscatterAltitudeSampleNum) );
+    float4 Ray = Texture3DSample(AtmosphereInscatterTexture, AtmosphereInscatterTextureSampler, UVW);
+	OutColor = Ray;
+}
+
+void Inscatter(float Radius, float Mu, float MuS, float Nu, out float3 RayMie) // InscatterS
+{
+    Radius = clamp(Radius, RadiusGround, RadiusAtmosphere);
+    Mu = clamp(Mu, -1.0, 1.0);
+    MuS = clamp(MuS, -1.0, 1.0);
+    float Variation = sqrt(1.0 - Mu * Mu) * sqrt(1.0 - MuS * MuS);
+    Nu = clamp(Nu, MuS * Mu - Variation, MuS * Mu + Variation);
+
+    float CThetaMin = -sqrt(1.0 - (RadiusGround / Radius) * (RadiusGround / Radius));
+
+    float3 V = float3(sqrt(1.0 - Mu * Mu), 0.0, Mu);
+    float Sx = V.x == 0.0 ? 0.0 : (Nu - MuS * Mu) / V.x;
+    float3 S = float3(Sx, sqrt(max(0.0, 1.0 - Sx * Sx - MuS * MuS)), MuS);
+
+    RayMie = float3(0.f, 0.f, 0.f);
+
+    // Integral over 4.PI around x with two nested loops over W directions (Theta,Phi) - Eq (7)
+    for (int ITheta = 0; ITheta < InscatterSphericalIntegralSamples; ++ITheta) 
+	{
+        float Theta = (float(ITheta) + 0.5) * DeltaTheta;
+        float CTheta = cos(Theta);
+
+        float GReflectance = 0.0;
+        float DGround = 0.0;
+        float3 GTransmittance = float3(0.f, 0.f, 0.f);
+        if (CTheta < CThetaMin) 
+		{ 
+			// If ground visible in direction W, Compute transparency GTransmittance between x and ground
+            GReflectance = AverageGroundRelectance / PI;
+            DGround = -Radius * CTheta - sqrt(Radius * Radius * (CTheta * CTheta - 1.0) + RadiusGround * RadiusGround);
+            GTransmittance = TransmittanceWithDistance(RadiusGround, -(Radius * CTheta + DGround) / RadiusGround, DGround);
+        }
+
+        for (int IPhi = 0; IPhi < 2 * InscatterSphericalIntegralSamples; ++IPhi) 
+		{
+            float Phi = (float(IPhi) + 0.5) * DeltaPhi;
+            float Dw = DeltaTheta * DeltaPhi * sin(Theta);
+            float3 W = float3(cos(Phi) * sin(Theta), sin(Phi) * sin(Theta), CTheta);
+
+            float Nu1 = dot(S, W);
+            float Nu2 = dot(V, W);
+            float Pr2 = PhaseFunctionR(Nu2);
+            float Pm2 = PhaseFunctionM(Nu2);
+
+            // Compute irradiance received at ground in direction W (if ground visible) =deltaE
+            float3 GNormal = (float3(0.0, 0.0, Radius) + DGround * W) / RadiusGround;
+            float3 GIrradiance = Irradiance(AtmosphereDeltaETexture, AtmosphereDeltaETextureSampler, RadiusGround, dot(GNormal, S));
+
+            float3 RayMie1; // light arriving at x from direction W
+
+            // First term = light reflected from the ground and attenuated before reaching x, =T.alpha/PI.deltaE
+            RayMie1 = GReflectance * GIrradiance * GTransmittance;
+
+            // Second term = inscattered light, =deltaS
+            if (FirstOrder == 1.0) 
+			{
+                // First iteration is special because Rayleigh and Mie were stored separately,
+                // without the phase functions factors; they must be reintroduced here
+                float Pr1 = PhaseFunctionR(Nu1);
+                float Pm1 = PhaseFunctionM(Nu1);
+                float3 Ray1 = Texture4DSample(AtmosphereDeltaSRTexture, AtmosphereDeltaSRTextureSampler, Radius, W.z, MuS, Nu1).rgb;
+                float3 Mie1 = Texture4DSample(AtmosphereDeltaSMTexture, AtmosphereDeltaSMTextureSampler, Radius, W.z, MuS, Nu1).rgb;
+                RayMie1 += Ray1 * Pr1 + Mie1 * Pm1;
+            } 
+			else 
+			{
+                RayMie1 += Texture4DSample(AtmosphereDeltaSRTexture, AtmosphereDeltaSRTextureSampler, Radius, W.z, MuS, Nu1).rgb;
+            }
+
+            // Light coming from direction W and scattered in direction V
+            // = light arriving at x from direction W (RayMie1) * SUM(scattering coefficient * phaseFunction) - Eq (7)
+            RayMie += RayMie1 * (BetaRayleighScattering * exp(-(Radius - RadiusGround) / View.AtmosphericFogHeightScaleRayleigh) * Pr2 + BetaMieScattering * exp(-(Radius - RadiusGround) / HeightScaleMie) * Pm2) * Dw;
+        }
+    }
+
+    // output RayMie = J[T.alpha/PI.deltaE + deltaS] (line 7 in algorithm 4.1)
+}
+
+void InscatterSPS(FAtmosphereGSOut Input, out float4 OutColor : SV_Target0) 
+{
+    float3 RayMie;
+    float Mu, MuS, Nu;
+    GetMuMuSNu(Input.Vertex.OutTexCoord, AtmosphereR, DhdH, Mu, MuS, Nu);
+    Inscatter(AtmosphereR, Mu, MuS, Nu, RayMie);
+	OutColor = float4(RayMie, 1);
+}
+
+float3 Integrand(float Radius, float Mu, float MuS, float Nu, float T) 
+{
+    float Ri = sqrt(Radius * Radius + T * T + 2.0 * Radius * Mu * T);
+    float Mui = (Radius * Mu + T) / Ri;
+    float MuSi = (Nu * T + MuS * Radius) / Ri;
+    return Texture4DSample(AtmosphereDeltaJTexture, AtmosphereDeltaJTextureSampler, Ri, Mui, MuSi, Nu).rgb * TransmittanceWithDistance(Radius, Mu, T);
+}
+
+float3 Inscatter(float Radius, float Mu, float MuS, float Nu) // InscatterN
+{
+    float3 RayMie = float3(0.f, 0.f, 0.f);
+    float Dx = Limit(Radius, Mu) / float(InscatterIntegralSamples);
+    float Xi = 0.0;
+    float3 RayMiei = Integrand(Radius, Mu, MuS, Nu, 0.0);
+    for (int I = 1; I <= InscatterIntegralSamples; ++I) 
+	{
+        float Xj = float(I) * Dx;
+        float3 RayMiej = Integrand(Radius, Mu, MuS, Nu, Xj);
+        RayMie += (RayMiei + RayMiej) / 2.0 * Dx;
+        Xi = Xj;
+        RayMiei = RayMiej;
+    }
+    return RayMie;
+}
+
+void InscatterNPS(FAtmosphereGSOut Input, out float4 OutColor : SV_Target0) 
+{
+	float3 Ray;
+    float Mu, MuS, Nu;
+    GetMuMuSNu(Input.Vertex.OutTexCoord, AtmosphereR, DhdH, Mu, MuS, Nu);
+	Ray = Inscatter(AtmosphereR, Mu, MuS, Nu);
+    OutColor = float4(Inscatter(AtmosphereR, Mu, MuS, Nu), 1);
+}
+
+void CopyInscatterNPS(FAtmosphereGSOut Input, out float4 OutColor : SV_Target0) 
+{
+    float Mu, MuS, Nu;
+    GetMuMuSNu(Input.Vertex.OutTexCoord, AtmosphereR, DhdH, Mu, MuS, Nu);
+	float3 UVW = float3(Input.Vertex.OutTexCoord, (float(AtmosphereLayer) + 0.5f) / float(View.AtmosphericFogInscatterAltitudeSampleNum) );
+	float4 Ray = Texture3DSample(AtmosphereDeltaSRTexture, AtmosphereDeltaSRTextureSampler, UVW) / PhaseFunctionR(Nu);
+	OutColor = float4(Ray.rgb, 0.f);
+}
+
+void CopyInscatterFPS(FAtmosphereGSOut Input, out float4 OutColor : SV_Target0) 
+{
+	float3 UVW = float3(Input.Vertex.OutTexCoord, (float(AtmosphereLayer) + 0.5f) / float(View.AtmosphericFogInscatterAltitudeSampleNum) );
+	float4 Ray = Texture3DSample(AtmosphereInscatterTexture, AtmosphereInscatterTextureSampler, UVW);
+	const float Thresh = 0.7f;
+	const float Thresh2 = 0.47f;
+
+	// Remove artifact with various height density scale
+	if (UVW.y > Thresh || UVW.y < Thresh2)
+	{
+		float3 UVW3 = float3(UVW.x, UVW.y - 2.f / (InscatterMuNum), UVW.z);
+		float4 Ray3 = Texture3DSample(AtmosphereInscatterTexture, AtmosphereInscatterTextureSampler, UVW3);
+		float3 UVW4 = float3(UVW.x, UVW.y + 2.f / (InscatterMuNum), UVW.z);
+		float4 Ray4 = Texture3DSample(AtmosphereInscatterTexture, AtmosphereInscatterTextureSampler, UVW4);
+
+		if (Ray.b < Ray3.b && Ray.b < Ray4.b)
+		{
+			Ray.b = (Ray3.b + Ray4.b) * 0.5f;
+		}
+
+		// Remove purple color which break basic formular
+		if (UVW.y > Thresh && Ray.r > Ray.g)
+		{
+			float3 UVW2 = float3(UVW.x, Thresh, UVW.z);
+			float4 Ray2 = Texture3DSample(AtmosphereInscatterTexture, AtmosphereInscatterTextureSampler, UVW2);
+			Ray.b = Ray2.b;
+			Ray.g = min(Ray.g, Ray2.g);
+		}
+	}
+
+	OutColor = Ray;
+}
+
+void CopyInscatterFBackPS(FAtmosphereGSOut Input, out float4 OutColor : SV_Target0) 
+{
+	float3 UVW = float3(Input.Vertex.OutTexCoord, (float(AtmosphereLayer) + 0.5f) / float(View.AtmosphericFogInscatterAltitudeSampleNum) );
+    float4 Ray = Texture3DSample(AtmosphereDeltaSRTexture, AtmosphereDeltaSRTextureSampler, UVW);
+	OutColor = Ray;
+}

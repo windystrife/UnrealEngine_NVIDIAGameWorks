@@ -1,0 +1,121 @@
+Availability: Public
+Title:Collision Modules
+Crumbs: %ROOT%, Engine, Engine/Rendering/ParticleSystems, Engine/Rendering/ParticleSystems/Reference
+Description:These modules handle how particles will deal with actor collisions.
+Version: 4.9
+tags:Particles
+
+[TOC(start:2 end:3)]
+
+## Collision Modules
+
+These modules handle how particles will deal with Actor collisions.
+
+### Collision
+
+[OBJECT:EmbeddedVideo]
+[PARAMLITERAL:width]
+640
+[/PARAMLITERAL]
+[PARAMLITERAL:height]
+360
+[/PARAMLITERAL]
+[PARAMLITERAL:videoid]
+uD7MQf6sZZU
+[/PARAMLITERAL]
+[/OBJECT]
+
+Parameters for having the emitter handle collisions of particles. It contains the following member(s):
+
+| Property | Description |
+| ---- | ---- |
+| [REGION:tablesection]Collision[/REGION]||
+| **Damping Factor** | A vector distribution indicating how much to 'slow' the particle after a collision. The value is retrieved based on the EmitterTime at the spawn of the particle, and is stored in the particle.|
+| **Damping Factor Rotation** | A vector distribution indicating how much to 'slow' the rotation of the particle after a collision. The value is retrieved based on the EmitterTime at the spawn of the particle, and is stored in the particle.|
+| **Max Collisions** | A float distribution indicating the maximum number of collisions a particle can have. The value is retrieved based on the EmitterTime at the spawn of the particle.|
+| **Collision Completion Option** | An enumeration indicating what should happen with the particle once MaxCollisions is reached. It can be one of the following: [INCLUDE:#CollisionCompletionOption]|
+| **Apply Physics** | A Boolean indicating whether physic should be applied between a particle and the object it collides with. [INCLUDE:#ApplyPhysicsNote] |
+| **Particle Mass** | A float distribution indicating the mass of the particle - for use when bApplyPhysics is _true_. The value is retrieved based on the EmitterTime at the spawn of the particle.|
+| **Dir Scalar** | A float value that is used to scale the bound of the particle to 'assist' in avoiding interpenetration or large gaps.|
+| **Pawns Do Not Decrement Count** | If _true_, collisions with Pawns will still react but do not count towards MaxCollisions. This allows for bouncing particles off a pawn, but not having them freeze in mid-air.|
+| **Only Vertical Normals Decrement Count** | If _true_, collisions that do not have a vertical hit normal will still react but do not count towards MaxCollisions. This allows for particles bouncing off walls and coming to rest on floors.|
+| **Vertical Fudge Factor** | A float value used to determine what is vertical. TRUE vertical will have a Hit.Normal.Z == 1.0f. This allows for Z components in the range of [1.0-VerticalFudgeFactor..1.0] to count as a vertical collision.|
+| **Delay Amount** | How long to delay before checking a particle for collisions. Value is retrieved using the EmitterTime. During update, the particle flag IgnoreCollisions will be set until the particle RelativeTime has surpassed the _Delay Amount_.|
+| [REGION:tablesection]Performance[/REGION]||
+| **Drop Detail** | If _true_, the module will be ignored if the _Drop Detail_ property of the WorldSettings is also _true_.|
+| **Collide Only if Visible** | If _true_, collision only occurs if the particle system is being rendered.|
+| **Max Collision Distance** | Max distance at which particle collision will occur.|
+
+
+The **Collision** module will add two vectors (UsedDampingFactor and UsedDampingFactorRotation) and an integer (UsedMaxCollisions) to the particle payload data. These values are used to track the collision information per particle.
+
+The following pseudo-code explains the update process for collision particles.
+    
+    Determine the location of the particle. This is required due to the fact
+    that the actual location isn't calculated until after the Update call.
+    Determine the appropriate extent to use during the line check.
+    if (SingleLineCheck indicates collision)
+    {
+        if (UsedMaxCollisions-- > 0)  // Still collisions available
+        {
+            Adjust the velocity and rotation based on the collision
+            if (Applying physics)
+            {
+                Add an appropriate impulse to the hit object.
+                (The Mass is grabbed from the distribution relative to the
+                    particle time.)
+            }
+        }
+        else
+        {
+            Out of collisions for this particle
+            Perform the appropriate action to take based on the CollisionCompletionOption
+        }
+    }
+
+
+### Particle Collision On iOS Mobile Devices
+
+When using the Particle Collision module with VFX's that are for **iOS** mobile devices you will need to adjust the **Min Desired Frame Rate** to something lower than 30 FPS or your particle collisions will have a high probability of not colliding with objects in the world. 
+This is because when the frame rate of any Unreal Engine 4(UE4) project drops below 30 FPS UE4 will disable particle collisions in an attempt to keep the frame rate above 30 FPS.
+By default iOS projects are locked to 30FPS which means that by design particle collisions will be disabled from the start. 
+To ensure that this does not happen to your UE4 iOS project you need to first go to **Project Settings** > **General Settings** > **Framerate**.
+
+[REGION:lightbox]
+[![](Min_Desired_Frame_Rate.png)](Min_Desired_Frame_Rate.png)
+[/REGION]
+
+Once the Framerate section is opened, set the **Min Desired Frame Rate** to something under **30** FPS like 25 FPS for example.
+Then under the **Performacne** section in your particel effect Collision module, uncheck the **Drop Detail** option.
+
+![](Drop_Detail_CM_Box.png)
+
+After the Min Desired Frame Rate has been changed and the Drop Detail box unchecked, 
+re-cook or re-deploy your project to your iOS mobiel device and check to see if the particle collisions are working. 
+
+<!-----------
+
+#### Includes
+
+[EXCERPT:ApplyPhysicsNote]
+[REGION:note]
+	This is currently one-way: _particle-to-object_. The particle does not have physics applied to it - it just generates an impulse applied to the object it collides with.
+[/REGION]
+[/EXCERPT:ApplyPhysicsNote]
+
+
+[EXCERPT:CollisionCompletionOption]
+[REGION:simpletable]
+|**Options**|**Description**|
+| --- | --- |
+|_EPCC_Kill_|Kill the particle when MaxCollisions is reached. (This is the default behavior.)|
+|_EPCC_Freeze_|Freeze the particle in place.|
+|_EPCC_HaltCollisions_|Stop collision checks, but keep updating. This will likely lead to particles `falling through` objects.|
+|_EPCC_FreezeTranslation_|Stop translating the particle, but keep updating everything else.|
+|_EPCC_FreezeRotation_|Stop rotating the particle, but keep updating everything else.|
+|_EPCC_FreezeMovement_|Stop translating/rotating the particle, but keep updating everything else.|
+[/REGION]
+[/EXCERPT:CollisionCompletionOption]
+
+
+------->

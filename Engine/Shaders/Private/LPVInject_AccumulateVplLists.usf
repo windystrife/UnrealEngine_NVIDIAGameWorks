@@ -1,0 +1,75 @@
+//-----------------------------------------------------------------------------
+// File:		LPVInject_AccumulateVplLists.usf
+//
+// Summary:		LPVInject_AccumulateVplLists.usf: Compute shader to inject lists 
+//				of VPLs into into an LPV
+//
+//				Runs once per LPV
+//
+// Created:		2013-03-01
+//
+// Author:		mailto:benwood@microsoft.com
+//
+//				Copyright (C) Microsoft. All rights reserved.
+//-----------------------------------------------------------------------------
+
+/*------------------------------------------------------------------------------
+	Compile time parameters:
+------------------------------------------------------------------------------*/
+
+#include "Common.ush"
+#include "LPVWriteCommon.ush"
+
+#define LIGHT_INJECTION_ENABLED				 1
+
+#define LIGHT_INJECTION_DEBUG_TEST			 0
+//------------------------------------------------------------------------------
+
+StructuredBuffer<VplListEntry>			gVplListBuffer; 
+ByteAddressBuffer						gVplListHeadBuffer;   
+
+//------------------------------------------------------------------------------
+
+[numthreads(4,4,4)]
+void CSAccumulateVplLists(uint3 DTid : SV_DispatchThreadID) 
+{
+	int index = GetGridAddress( DTid );
+	uint listIndex = gVplListHeadBuffer.Load( index * 4 ) - 1;
+
+#if !LIGHT_INJECTION_ENABLED
+	return;
+#endif
+
+	LPVCell cell = ReadLpvCell( index );
+
+#if LIGHT_INJECTION_DEBUG_TEST
+	float3 testPos = float3(989,-684,565);
+	int testIndex = GetGridIndex( testPos );
+	if ( testIndex == index )
+	{
+		float3 col = float3(0.0f, 10000.0f, 0.0f);
+		float solidAngle = 3.14; // TODO: adjust for splat size 
+		AccumulateLighting( col, float3(-1, 0, 0 ), solidAngle, cell );
+		AccumulateLighting( col, float3( 1, 0, 0 ), solidAngle, cell );
+		AccumulateLighting( col, float3( 0,-1, 0 ), solidAngle, cell );
+		AccumulateLighting( col, float3( 0, 1, 0 ), solidAngle, cell );
+		AccumulateLighting( col, float3( 0, 0,-1 ), solidAngle, cell );
+		AccumulateLighting( col, float3( 0, 0, 1 ), solidAngle, cell );
+	}
+	WriteLpvCell( cell, index );
+	return;
+#else
+
+	uint count = 0;
+	while ( listIndex != -1 )
+	{
+		VplListEntry listEntry = gVplListBuffer[ listIndex ];
+		Vpl vpl = UnpackVpl( listEntry );
+		float solidAngle = 3.14; 
+		AccumulateLighting( vpl.flux, -vpl.normal, solidAngle, cell );
+		listIndex = listEntry.nextIndex - 1; // 0-terminated lists to prevent infinite recursion
+		count++;
+	}
+	WriteLpvCell( cell, index );
+#endif
+}

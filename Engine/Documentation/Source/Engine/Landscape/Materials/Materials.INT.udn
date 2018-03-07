@@ -1,0 +1,381 @@
+Availability: Public
+Title:Landscape Materials
+Crumbs: %ROOT%, Engine, Engine/Landscape
+Description:Setting up materials to work with Landscape terrains.
+version: 4.9
+parent:Engine/Landscape
+order:5
+topic-image:landscape_materials_topic.png
+
+[TOC(start:2 end:3)]
+
+Although any random **Material** can be used with a **Landscape** Actor, the Material system inside Unreal Engine 4 (UE4) does provide some special Landscape specific material nodes that can greatly help you to better texture your Landscape. In the following document, we will be taking an in-depth look at these nodes, how they function, and how you can use them in your Landscapes materials. 
+
+[REGION:note]
+You modify Materials for use with Landscapes the same way you modify other Materials, in the [Material Editor](Engine/Rendering/Materials\Editor).
+[/REGION]
+
+## Layer Weights and Ordering
+
+Landscapes use weight blending rather than alpha blending, so the blend factors for all layers at any location will add up to 1.0. This has the advantage that there is no order dependence - you can paint any layer at any time and its weight is increased and the other existing layers are decreased.  A disadvantage is that when you fully paint one layer to 100%, the weight value for all other layers will be 0%. This is evident when using the [Paint](Engine\Landscape\Editing\PaintMode\#Paint) tool to remove a layer already at 100%. The tool does not know what other layers to use to replace the layer you are removing so it looks like the tool ends up doing nothing.
+
+## Landscape Specific Material Nodes
+
+Inside of the Material editor, you will find that there are six special nodes that can be used with the Landscape system. You can find all the nodes in either the **Context** menu or in the **Palette** menu under the Landscape category. 
+
+**Context Menu**
+
+![Material Editor Context Menu](Landscape_Mat_Context.png)
+
+**Palette Menu**
+
+![](Landscape_Mat_Palette.png)
+
+
+### Landscape Layer Blend Node
+[EXCERPT:LandscapeLayerBlend]
+
+The **LandscapeLayerBlend** node enables you to blend together multiple Textures or Material networks so that they can be used as Landscape layers. The LandscapeLayerBlend uses an array to store information about the Landscape layers. To add layers to this array clicking the plus sign icon that you see next to the entry: "0 elements".
+
+![](Landscape_Add_To_Array.png)
+
+When you add multiple layers to the **LandscapeLayerBlend** node, you get something that looks like the following image.
+
+![LandscapeLayerBlend Node](Landscape_LayerBlend.png)
+
+You can set the properties of the **LandscapeLayerBlend** node in the **Details** panel of the **Material Editor**. 
+
+
+|Number| Property | Description |
+|------------| -------- | ----------- |
+|1:| **Layers** | The list of layers the node contains. You can add layers by clicking the plus icon (![Plus Sign](icon_Landscape_PlusSign.png)). |
+|2:| **Layer Name** | The unique name that you give the layer. The **Layer Name** corresponds to the layer name used in [Paint mode](Engine\Landscape\Editing\PaintMode\#Layers) in the Landscape tool window. |
+|3:| **Blend Type** | Either **LB_AlphaBlend**, **LB_HeightBlend**, or **LB_WeightBlend.** These are described later on this page.|
+|4:| **Preview Weight** | This is used as the weight value for the layer to preview the blending in the Material Editor.|
+|5:| **Const Layer Input** | This is for supplying a numeric value as a color to use in case you do not want to use a texture. This is mainly used for debugging a layer if there is an issue with it.|
+|6:| **Const Height Input**| This is for supplying a numeric value as a height in case you do not want to use a texture. |
+|7:| **Additional Layers** | These are what additional layers look like when they are collapsed.|
+
+![](Landscape_LayerBlend_Node.png)
+
+The following table details the **Layer Blend node's** inputs and outputs.
+
+| Number | Item | Description |
+|--------| -------- | ----------- |
+|1:| **Layer _LayerName_** | Each layer adds an input for the layer to blend together. These inputs will not be available until layers are added in the **Details** panel. |
+|2:| **Height _LayerName_** | This is where you supply a height map to blend with. Please note that this input will only be visible on layers that have their **Blend Type** property set to **LB_HeightBlend**. |
+|3:| **Unlabeled Output** | The result of the layers blended together. |
+
+
+
+When using certain combinations of layer blend modes you could end up with black spots all over your Landscape where different layers meet. This problem is especially prevalent when using the LB_HeightBlend mode for multiple Landscape layers. LB_HeightBlend works by modulating the blend factor, or weight, for the layer using the specified height value. When you have multiple layers painted on an area and they all are set to LB_HeightBlend, it is possible that all the layers painted in a particular area will simultaneously have a 0 height value, so the desired blend factor for each layer becomes 0. Because there is no implicit or explicit ordering, the result will be black spots because no layers will have any contribution to that area. The situation is worse when you are blending a Normal map, because it results in a Normal value of (0,0,0) which is not valid and will cause rendering problems with the lighting. The solution to this problem is to use **LB_AlphaBlend** for one of the layers like in the following example. 
+![LB_HeightBlend Problem](HeightBlendProblem.jpg)(w:800 h:238)
+
+In the left image, all layers are LB_HeightBlend, causing some areas to be black. On the right, the red "1" layer has been changed to use LB_AlphaBlend, which solves the problem.
+
+
+Below is an example of the properties of the **Landscape Layer Blend** node for a number of layers all being blended together. Make sure to note how the **Soil** layer has its blend mode set to LB_AlphaBlend while the other layers have theirs set to LB_HeightBlend. This is to stop the issue mentioned above (having black spots where layers meet) from happening. 
+
+![Layer Blend Properties](LayerBlendProperties.png)
+
+
+To delete a layer, click the Drop-Down Arrow to the right of the layer's element number to open the context menu, and then click **Delete**.
+
+![Delete Layer](Landscape_DeleteBlendLayer2.png)
+
+
+[/EXCERPT:LandscapeLayerBlend]
+
+### Landscape Layer Coords Node
+[EXCERPT:TerrainLayerCoords]
+The **LandscapeLayerCoords** node generates UV coordinates that can be used to map Material networks to Landscape terrains.
+
+![LandscapeLayerCoords Node](Landscape_Material_CoordsExp.png)
+
+You can set the properties of the LandscapeLayerCoords node in the **Details** panel.
+
+| Number | Property | Description |
+|--------| -------- | ----------- |
+|1:| **Mapping Type** | The **ELandscapeCoordMappingType** that specifies the orientation to use when mapping the Material (or network) to the Landscape.|
+|2:| **Custom UVType** | The mapping place to use on the terrain. The **CustomUVType** outputs the UV coordinates to map the Material to the Landscape based on the given property values. |
+|3:| **Mapping Scale** | The uniform scaling to apply to the UV coordinates. |
+|4:| **Mapping Rotation** | The rotation, in degrees, to apply to the UV coordinates.|
+|5:| **Mapping Pan [U]** | The offset in the [U] direction to apply to the UV coordinates.|
+|6:| **Mapping Pan [V]** | The offset in the [V] direction to apply to the UV coordinates.|
+|7:| **Unlabeled Output**| Outputs the UV coordinates to map the material to the Landscape based on the given property values.  |
+
+[/EXCERPT:TerrainLayerCoords]
+
+### Landscape Layer Switch Node
+
+[EXCERPT:TerrainLayerSwitch]
+
+The **LandscapeLayerSwitch** node allows you to exclude some Material operations when a particular layer is not contributing to a region of the Landscape. This allows you to optimize your Material by removing calculations that are not necessary when a particular layer's weight is zero.
+
+![LandscapeLayerSwitch Node](LayerSwitchNode.png)
+
+You can set the properties of the LandscapeLayerSwitch node in the **Details** panel.
+
+| Number | Property | Description |
+|--------| -------- | ----------- |
+|1:| **Parameter Name** | The unique name that you give to the parameter. |
+|2:| **Preview Used**   | If checked, uses a preview. |
+|3:| **LayerUsed**      | The result to use when the layer specified in the node's properties is in use by the current region of the Landscape.|
+|4:| **LayerNotUsed**   | The result to use when the layer is not used by the current region of the Landscape and has a weight of zero.|
+|5:| ** Unlabeled Output**        | Either the **LayerUsed** or **LayerNotUsed** inputs, depending on whether or not the layer contributes to the particular region of the Landscape.|  
+
+[/EXCERPT:TerrainLayerSwitch]
+
+### Landscape Layer Weight Node
+[EXCERPT:TerrainLayerWeight]
+The **LandscapeLayerWeight** expression allows Material networks to be blended based on the weight for the associated layer obtained from the Landscape the Material is applied to.
+
+![LandscapeLayerWeight Node](Landscape_Mat_LayerWeightNode.png)
+
+You can set the properties of the LandscapeLayerWeight node in the **Details** panel.
+
+|Number| Property | Description |
+|------| -------- | ----------- |
+|1:|**Parameter Name** | The name of the layer belonging to the Landscape to be associated with this expression. The weight for this layer is used as the alpha value for blending the two input networks. |
+|2:|**Preview Weight** | The weight to use for preview purposes in the Material Editor. |
+|3:|***Const Base**|You can specify a base color here that you would like for your Landscape to have|
+|4:|***Base**|The network to blend this layer with. This is generally the result of any previous layer blending, but can be empty if this is the first layer.|
+|5:|***Layer**|The network to blend together to create this layer.|
+|6:|***Unlabeled Output**|Outputs the result of the blending between the **Base** and **Layer** inputs based on the layer weights of the layers involved.|
+
+[/EXCERPT:TerrainLayerWeight]
+
+
+### Landscape Visibility Mask Node
+
+[EXCERPT:LandscapeVisibilityMask]
+
+The **LandscapeVisibilityMask** node is used for removing the visibility of parts of your Landscape, so you can create holes, for example, for creating caves. 
+
+![LandscapeVisibilityMask Node](Landscape_VisibilityMask.png)
+
+You can set the properties of the LandscapeVisibilityMask node in the **Details** panel.
+
+| Number| Property | Description |
+|-------| -------- | ----------- |
+| 1:| **Unlabeled Output** | Outputs the visibility mask properties. |
+
+All you have to do to get this node to work correctly is to make sure that its output is connected to the **Opacity Mask** slot of your Material and that the **Materials Blend Mode** is set to **Masked**. 
+
+![](Landscape_VisibilityMaskSetup.png)
+
+[/EXCERPT:LandscapeVisibilityMask]
+
+
+## Layer Blending
+
+The ability to blend multiple textures and materials networks into paintable Landscape layers is the basis for texturing Landscape terrains. In order to blend layers together, you can use either multiple **LandscapeLayerWeight** nodes or one to two **LandscapeLayerBlend** nodes depending on if you are using a Normal Map or not.
+
+### Using Landscape Layer Weight Nodes
+
+Setting up and using **LandscapeLayerWeight** nodes is a quite easy process for which will be outlined below. 
+
+[REGION:note]
+Because Layer names must be unique, it is a best practice to give each layer a descriptive name as possible.
+[/REGION]
+
+
+1. In the **Material Editor**, add a **LandscapeLayerWeight** node to the Material Graph. By default, it will have the **Parameter Name** "None."
+	[REGION:fullwidth]
+	![](Landscape_Layer_Weight_Base.png)
+	[/REGION]
+
+1. In the **Details** panel, change the **Parameter Name** to a descriptive name for the layer, for example, "Rock".
+
+	![Layer Name](Landscape_Mat_ParamName.png)<br/>
+	After you enter a **Parameter Name**, it will be updated on the node itself.<br/>
+	![](Landscape_Layer_Weight_Named_Layer.png)
+
+1. Add additional **LandscapeLayerWeight** nodes, until you have one for each layer that you want your Material to have. In this example, we are going to be using just two **LandscapeLayerWeight** nodes.
+
+1. Add and connect **Texture Samples**, or other material network expressions, to your **LandscapeLayerWeight** nodes.
+
+1. Add a **LandscapeLayerCoords** node, set its UV titling to what you want, and connect it to the **Texture Sample** nodes.
+
+1. Drag from each **Layer** node's output pin to the **Base** pin of the next layer node to connect them with a wire (leaving the first layer node's **Base** pin unconnected).
+
+1. Drag from the final **Layer** node's output pin to the **Base Color** input of the Material's **Base** node.
+
+
+When completed, you should have something that looks like the following example using **LandscapeLayerWeight** nodes:
+
+![Landscape Layer Nodes](Landscape_MaterialLayers.png)
+
+[REGION:note]
+You can preview the effects of different weights on the Material by changing the **Preview Weight** properties of the **LandscapeLayerWeight** nodes. 
+[/REGION]
+
+### Using Landscape Layer Blend Nodes
+
+As an alternative to manually blending layers together with the **LandscapeLayerWeight** node, the **LandscapeLayerBlend** node blends multiple layers together using either alpha blending or alpha blending with a height-based offset. The height-based offset allows a layer to blend with other layers based on a heightmap input. 
+
+**To use a LandscapeLayerBlend node:**
+
+1. In the Material Editor, add a LandscapeLayerBlend node.
+	
+	![](Landscape_LayerBlend_Material_Example_00.png)
+
+1. In the **Details** panel, next to **Layers**, click the plus icon (![Plus Sign](Shared/Icons/icon_PlusSymbol_12x.png)) to add a layer.
+	
+	![](Landscape_LayerBlend_Material_Example_01.png)
+
+1. Expand the layer to view its properties.
+
+	![Layer Properties](Landscape_Mat_LayerBlendDetails.png)
+
+1. Change the **Layer Name** to a descriptive name for the layer, for example, "Rock".
+
+	![Layer Name](Landscape_Mat_LayerName.png)
+
+1. Determine whether you want the layer to be alpha blended or height blended, and set the **Blend Type** accordingly.
+
+	![Blend Type](Landscape_Mat_BlendType.png)
+
+1. Add as many additional layers as you want for your Landscape Material. Rename them and set their **Blend Types** appropriately.
+
+1. Connect the LandscapeLayerBlend node's output to the **Base Color** input of your Material's base node.
+
+1. Add Texture Sample nodes, and connect their main outputs to the **Layer** inputs of the **LandscapeLayerBlend** nodes. (Alternatively, you can create a more complex material network and connect it to the LandscapeLayerBlend's **Layer** input.) For any height-blended layers, connect the Texture Sample's alpha output to the LandscapeLayerBlend's **Height** input. 
+
+
+When you are done, your Landscape Material network will look something like this:
+
+![Landscape Blend Node](Landscape_MaterialBlend.png)
+
+[REGION:note]
+You can preview the effects of different weights on the Material by changing the **Preview Weight** properties of the **LandscapeLayerBlend** nodes. 
+[/REGION]
+
+### Landscape Layer Blend Types
+
+The Landscape **Layer Blend** material node had three different blend modes that you can choose from. 
+Each different **Layer Blend** type is used when you are trying to achieve a different result. 
+
+| Blend Type | Function |
+|------------|----------|
+| **LB Weight Blend** | This mode would be good to use if you have layers coming in form an external program, like World Machine, or if you wanted to be able to paint any layer independent of one another without worrying about layer order. |
+| **LB Alpha  Blend** | This mode would be good if you wanted to paint in the detail  and if you also want a defined layer order, so that painting snow over rock and grass will occlude them, but erasing snow will restore reveal rock and grass beneath it.|
+| **LB Height Blend** | This is the same as LB_WeightBlend but also adds detail to the transition between layers based on a height map. This allows, for example, dirt to appear in the gaps between rocks at the layer transition point, instead of just smoothly blending between rock and dirt.|
+
+Here is an example of the **LB Height Blend** in action. As you can see the dirt to appears in the gaps between rocks at the layer transition point. This way you get a nice transition where layers meet.
+
+![](LB_HeightBlend.png)
+
+
+### Landscape Layer Blend Technical Information
+
+Under the hood, these layer nodes behave like a [Static Switch Parameter](Engine/Rendering/Materials\ExpressionReference\Parameters\#StaticSwitchParameter) node, which enables you to switch from using one part of the Material to using another. 
+Each component of the Landscape has its own MaterialInstanceConstant created from the main Landscape Material, which is applied to just that component. 
+If a particular layer is not used on a particular Landscape component, the sub-tree of nodes connected to the layer will be discarded. 
+This reduces overall Material complexity, allowing the Material applied to the Landscape to contain any number of texture samples as long as the number of samples being used on any individual component never exceeds the maximum set forth by the shader model specifications (16 for SM 3.0). 
+This means it is possible to set up a master Material that contains every texture or network used anywhere on the Landscape, which can end up being a very complex collection of networks, while still keeping the final Materials applied to the components of the Landscape within the parameters allowed by the hardware.
+
+[REGION:note]
+Any network of material expressions can be connected to the **Layer** inputs in place of a simple **TextureSample**. This makes it possible to do more complex effects such as transitioning from detail textures to larger macro textures depending on the distance the layer is being viewed from. 
+[/region]
+
+## Landscape Hole Materials
+
+Creating holes in your Landscape is something that you can do in [Manage Mode](Engine/Landscape/Editing/ManageMode) but only by deleting entire Landscape components at a time. To get around this, you can use a Landscape Hole Material to mask out the visibility and collision of a certain location on your Landscape. This is great if you want to make something like an entrance to cave in the side of a mountain. 
+
+[Region:tip]
+You can use the same Material for your Landscape Material and your Landscape Hole Material, but be aware that Materials that use opacity masks are more expensive, performance-wise, than Materials that do not. That is why you have the option of creating a separate Landscape Hole Material.
+[/region]
+
+**How to create a Landscape Hole Material:**
+
+1. First either open up or create a new Material in the Material Editor. Once the Material is open, look in the **Details** panel and set the **Blend Mode**  to **Masked**.
+
+	![](Landscape_BaseNodeOpacity.png)
+
+	<!--
+	[REGION:tip]
+	If you are using a separate Material for your Landscape hole you need to make sure that you also have a texture feeding into the Base Color slot or when you try and make parts of your Landscape invisible you will end up turning parts of your Landscape black.
+	[/REGION]
+	-->
+
+1. Next, search for and add a **LandscapeVisibilityMask** node to the Material Graph and connect its output to the **Opacity Mask** input.
+
+	![](Landscape_VisibilityMaskNode.png)
+
+1. Now you can set up the rest of your Landscape Material like you normally would and when completed, you should have something that looks similar to this.  
+
+	![](Landscape_VisibilityMaskSetup_In_Material.png)
+
+1. Once the material has been complied, it is now time to assign it to the Landscape so that it can be used. This can be done in the **Landscape Hole Material** section in the **Details** panel.
+
+	![](Landscape_Hole_Materail_Assign.png)
+
+1. When completed with everything, you should now be able to mask and un-mask the visibility of your terrain like in the following video. 
+	[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:width]
+	640
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	360
+	[/PARAMLITERAL]
+	[PARAMLITERAL:videoid]
+	6NxNppmZRss
+	[/PARAMLITERAL]
+	[/OBJECT]
+
+[REGION:note]
+For information about using the painting tools to create a Landscape hole, see [Using Opacity Masking to Create a Hole](Engine\Landscape\Editing\SculptMode\#UsingOpacityMaskingtoCreateaHole).
+[/REGION]
+
+
+## Assigning Materials to Landscapes
+
+
+Once a Material for a Landscape has been created, that Material must be assigned to the Landscape Actor in your level in order for you to be able to use and view it. You assign Materials to Landscape Actors in the following manner.
+
+
+**To assign a Material to a Landscape:**
+
+1. Find the Landscape Material that you want to use in the **Content Browser** and select it.
+1. Select the Landscape, either in the viewport or in the **World Outliner**.
+1. In the Level Editor's **Details** panel for the Landscape, in the **Landscape** section, next to **Landscape Material**, click the Assign arrow (![Assign arrow](Shared/Icons/icon_assign_left_16x.png)) to assign the selected Material.
+
+	![Assigned Material](Landscape_Material_Assigned.png)
+
+You can assign a different Material to act as the **Landscape Hole Material**, which is a Material with specific opacity settings that you can use on sections of the Landscape to remove them, in order to create holes, such as for caves.
+
+**To assign a Landscape Hole Material to a Landscape:**
+
+1. Find the Landscape Hole Material that you want to use in the **Content Browser** and select it.
+1. Select the Landscape, either in the viewport or in the **World Outliner**.
+1. In the Level Editor's **Details** panel for the Landscape, in the **Landscape** section, next to **Landscape Hole Material**, click the Assign arrow (![Assign arrow](Shared/Icons/icon_assign_left_16x.png)) to assign the selected Material.
+
+	![](Landscape_HoleSettings.png)
+
+
+[REGION:note]
+For information about using Landscape Hole Materials, see [Using Opacity Masking to Create a Hole](Engine\Landscape\Editing\SculptMode\#UsingOpacityMaskingtoCreateaHole).
+[/REGION]
+
+<!--
+![Landscape_Material_Default.png](Landscape_Material_Default.png)(w:900 h:327)
+
+![Landscape_Material_Viewport.png](Landscape_Material_Viewport.png)(w:900 h:327)
+-->
+
+## Tessellation and Displacement
+
+The **Tessellation Multipliers** and **World Displacement** channels of the Material can be used in conjunction with Landscape terrains to provide additional detail and deformation when the Landscape is close to the camera. These work exactly as they would with any other standard Material, and the layer blending can be used in conjunction with these just as with the **Base Color**, **Normal**, or any other channel. Landscape will also only render hardware tessellation on the highest level-of-detail(LOD) which will fade out as the Landscape approaches the second LOD. Subsequent LODs will no longer have tessellation enabled which will significantly improve performance when enabling tessellation for displacement on your Landscape Terrain. 
+
+[REGION:note]
+These features are limited for use with DirectX 11 enabled. As such, they should be used as secondary, polish effects unless you are targeting DirectX 11 hardware specifically. You can read more about how to enable and use tessallation in your project by checking out the [Tessellation Multipler](Resources/ContentExamples/MaterialNodes/1_12) page. 
+[/REGION]
+
+![](Landscape_HW_Tess.png)
+
+[REGION:caption]
+In the visualization above, the highest LOD (white) is rendered with tessellation enabled, while the other LODs (colors) are rendered without tessellation.  
+[/REGION]
+
+

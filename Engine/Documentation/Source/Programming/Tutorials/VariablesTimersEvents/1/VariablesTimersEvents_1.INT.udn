@@ -1,0 +1,222 @@
+Availability: Public
+Title:1. Creating an Actor that Uses a Timer
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/VariablesTimersEvents
+Description:Starting and stopping a timer that runs code at a fixed rate.
+version:4.9
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[](Programming\Tutorials\VariablesTimersEvents)
+	[/PARAM]
+	[PARAM:next]
+		[Next Step](Programming\Tutorials\VariablesTimersEvents\2 "%Programming\Tutorials\VariablesTimersEvents\2:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+[REGION:tip]If you are new to **Unreal Engine 4**, you might want to read our [%Programming\QuickStart:title% tutorial](Programming\QuickStart) first. For this tutorial, we will assume you are familiar with creating a project and adding C++ code to it.[/REGION]
+
+1. We will begin by creating a new, Basic Code project, with starter content, named HowTo_VTE, and then adding an **Actor** class to it. We'll name it Countdown in this tutorial.
+
+	[![](ChooseParentClass.png)](ChooseParentClass.png)
+
+	[![](NameYourActor.png)](NameYourActor.png)
+
+1. We'll start by creating a simple countdown timer that we can see in-game. In Countdown.h, add the following lines to the end of our class definition:
+
+		int32 CountdownTime;
+
+		UTextRenderComponent* CountdownText;
+
+		void UpdateTimerDisplay();
+
+1. In Countdown.cpp, we can create our renderable text **Component** and initialize our countdown time to 3 seconds. We can also turn **Ticking** off for this type of **Actor**, since we will not need it. **ACountdown::ACountdown** should look like this:
+
+		PrimaryActorTick.bCanEverTick = false;
+
+		CountdownText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("CountdownNumber"));
+		CountdownText->SetHorizontalAlignment(EHTA_Center);
+		CountdownText->SetWorldSize(150.0f);
+		RootComponent = CountdownText;
+
+		CountdownTime = 3;
+
+1. **ACountdown::UpdateTimerDisplay** should update our text display to show the time remaining, or zero if the time is up. This code should run when we first spawn our ACountdown into the game, and once per second until our CountdownTime variable hits zero.
+
+		void ACountdown::UpdateTimerDisplay()
+		{
+			CountdownText->SetText(FString::FromInt(FMath::Max(CountdownTime, 0)));
+		}
+
+1. Whenever we assign a **Timer** to run a function, we are given a **Timer Handle**. We need to hold onto that handle so that we can shut the Timer down when the countdown finishes. Let's add the function to count time down, and the Timer Handle we'll need to control it, to the class definition in Countdown.h. While we're there, let's also add a function to do something special when the countdown ends:
+
+		void AdvanceTimer();
+
+		void CountdownHasFinished();
+
+		FTimerHandle CountdownTimerHandle;
+
+	We can also write the body of **ACountdown::AdvanceTimer** and **ACountdown::CountdownHasFinished** in `Countdown.cpp` now:
+
+		void ACountdown::AdvanceTimer()
+		{
+			--CountdownTime;
+			UpdateTimerDisplay();
+			if (CountdownTime < 1)
+			{
+				//We're done counting down, so stop running the timer.
+				GetWorldTimerManager().ClearTimer(CountdownTimerHandle);
+				CountdownHasFinished();
+			}
+		}
+
+		void ACountdown::CountdownHasFinished()
+		{
+			//Change to a special readout
+			CountdownText->SetText(TEXT("GO!"));
+		}
+
+1. Let's initialize the text display in **ACountdown::BeginPlay** by adding a call to our new update function, and setting a timer to advance and update the countdown once per second:
+
+		UpdateTimerDisplay();
+		GetWorldTimerManager().SetTimer(CountdownTimerHandle, this, &ACountdown::AdvanceTimer, 1.0f, true);
+
+	[REGION:note]We are updating the display in ACountdown::BeginPlay rather than ACountdown::ACountdown because values set to variables in the **Unreal Editor** will be assigned after the constructor, but before **BeginPlay**. We will want to respect those values later, when we expose CountdownTime to the editor.[/REGION]
+
+1. Let's check our progress so far by going to the **Unreal Editor** and pressing **Compile**.
+
+	[![](CompileFromEditor.png)](CompileFromEditor.png)
+
+	We can then drop our updated ACountdown class from the **Content Browser** into the **Level Editor**.
+
+	[![](ClassInContentBrowser.png)](ClassInContentBrowser.png)
+
+	[![](LevelEditorText.png)](LevelEditorText.png)
+
+	[REGION:note]Because we set our countdown text during ACountdown::BeginPlay and not ACountdown::ACountdown, the default Text is shown in the **Level Editor**.[/REGION]
+	When we press **Play**, the countdown will progress as expected, saying 3, 2, 1, and finally GO!
+
+----
+
+At this point, we've already created a simple class that uses a timer. Non-programming users would get much more out of it if they could set the countdown time, or change the behavior when the countdown finishes. Next, we'll expose these features to the editor.
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    code
+    [/PARAMLITERAL]
+    [PARAM:heading]
+	    Work-In-Progress Code
+    [/PARAM]
+    [PARAM:content]
+		**Countdown.h**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "GameFramework/Actor.h"
+			#include "Countdown.generated.h"
+
+			UCLASS()
+			class HOWTO_VTE_API ACountdown : public AActor
+			{
+				GENERATED_BODY()
+	
+			public:	
+				// Sets default values for this actor's properties
+				ACountdown();
+
+			protected:
+				// Called when the game starts or when spawned
+				virtual void BeginPlay() override;
+	
+			public:
+				// Called every frame
+				virtual void Tick( float DeltaSeconds ) override;
+
+				//How long, in seconds, the countdown will run
+				int32 CountdownTime;
+
+				UTextRenderComponent* CountdownText;
+
+				void UpdateTimerDisplay();
+
+				void AdvanceTimer();
+
+				void CountdownHasFinished();
+
+				FTimerHandle CountdownTimerHandle;
+			};
+
+
+		**Countdown.cpp**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_VTE.h"
+			#include "Countdown.h"
+
+			// Sets default values
+			ACountdown::ACountdown()
+			{
+ 				// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
+				PrimaryActorTick.bCanEverTick = false;
+	
+				CountdownText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("CountdownNumber"));
+				CountdownText->SetHorizontalAlignment(EHTA_Center);
+				CountdownText->SetWorldSize(150.0f);
+				RootComponent = CountdownText;
+
+				CountdownTime = 3;
+			}
+
+			// Called when the game starts or when spawned
+			void ACountdown::BeginPlay()
+			{
+				Super::BeginPlay();
+	
+				UpdateTimerDisplay();
+				GetWorldTimerManager().SetTimer(CountdownTimerHandle, this, &ACountdown::AdvanceTimer, 1.0f, true);
+			}
+
+			// Called every frame
+			void ACountdown::Tick( float DeltaTime )
+			{
+				Super::Tick( DeltaTime );
+
+			}
+
+			void ACountdown::UpdateTimerDisplay()
+			{
+				CountdownText->SetText(FString::FromInt(FMath::Max(CountdownTime, 0)));
+			}
+
+			void ACountdown::AdvanceTimer()
+			{
+				--CountdownTime;
+				UpdateTimerDisplay();
+				if (CountdownTime < 1)
+				{
+					// We're done counting down, so stop running the timer.
+					GetWorldTimerManager().ClearTimer(CountdownTimerHandle);
+					//Perform any special actions we want to do when the timer ends.
+					CountdownHasFinished();
+				}
+			}
+
+			void ACountdown::CountdownHasFinished()
+			{
+				//Change to a special readout
+				CountdownText->SetText(TEXT("GO!"));
+			}
+
+
+    [/PARAM]
+[/OBJECT]
+
+%Steps%

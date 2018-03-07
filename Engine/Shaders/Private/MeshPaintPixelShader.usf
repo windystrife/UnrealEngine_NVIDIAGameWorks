@@ -1,0 +1,111 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*================================================================================
+	MeshPaintPixelShader.usf: Mesh texture paint pixel shader
+================================================================================*/
+
+#include "Common.ush"
+
+/** Texture containing a clone of the texture we're currently rendering to. */
+Texture2D s_CloneTexture;
+SamplerState s_CloneTextureSampler;
+
+float4x4 c_WorldToBrushMatrix;
+
+/** Brush metrics: x = radius, y = falloff range, z = depth, w = depth falloff range */
+float4 c_BrushMetrics;
+
+float c_BrushStrength;
+float4 c_BrushColor;
+float4 c_ChannelFlags;
+
+// @todo MeshPaint: Remove this?
+float c_Gamma;
+
+
+
+void Main( float4 InPosition : SV_POSITION,
+		   float2 InCloneTextureCoordinates : TEXCOORD0,
+		   float3 InWorldSpaceVertexPosition : TEXCOORD1,
+		   out float4 OutColor : SV_Target0)
+{
+	// First sample the source values from the clone texture
+	float4 OldColor = Texture2DSample(s_CloneTexture, s_CloneTextureSampler, InCloneTextureCoordinates );
+
+
+	// Brush metrics: x = radius, y = falloff range, z = depth, w = depth falloff range
+	float BrushRadius = c_BrushMetrics.x;
+	float BrushRadialFalloffRange = c_BrushMetrics.y;
+	float BrushDepth = c_BrushMetrics.z;
+	float BrushDepthFalloffRange = c_BrushMetrics.w;
+
+
+
+	float4x4 WorldToBrushMatrix = c_WorldToBrushMatrix;
+
+	// Project the pixel into the plane of the brush
+	float3 WorldSpaceVertexPosition = InWorldSpaceVertexPosition;
+	float3 BrushSpaceVertexPosition = mul(float4( WorldSpaceVertexPosition, 1.0f ), WorldToBrushMatrix).xyz;
+	float2 BrushSpaceVertexPosition2D = BrushSpaceVertexPosition.xy;
+
+
+	// Start by using the old color
+	float4 NewColor = OldColor;
+
+
+	// Is the brush close enough to the vertex to paint?
+ 	float DistanceToVertex2D = length( BrushSpaceVertexPosition2D );
+ 	if( DistanceToVertex2D <= BrushRadius )
+	{
+		// OK the vertex is overlapping the brush in 2D space, but is it too close or
+		// two far (depth wise) to be influenced?
+ 		float VertexDepthToBrush = abs( BrushSpaceVertexPosition.z );
+ 		if( VertexDepthToBrush <= BrushDepth )
+		{
+			// Compute amount of paint to apply
+			float PaintAmount = 1.0f;
+
+			// Apply radial-based falloff
+			{
+				// Compute the actual distance
+				float InnerBrushRadius = BrushRadius - BrushRadialFalloffRange;
+				if( DistanceToVertex2D > InnerBrushRadius )
+				{
+					float RadialBasedFalloff = ( DistanceToVertex2D - InnerBrushRadius ) / BrushRadialFalloffRange;
+					PaintAmount *= 1.0f - RadialBasedFalloff;
+				}
+			}
+
+			// Apply depth-based falloff
+			{
+				float InnerBrushDepth = BrushDepth - BrushDepthFalloffRange;
+				if( VertexDepthToBrush > InnerBrushDepth )
+				{
+					float DepthBasedFalloff = ( VertexDepthToBrush - InnerBrushDepth ) / BrushDepthFalloffRange;
+					PaintAmount *= 1.0f - DepthBasedFalloff;
+				}
+			}
+
+			PaintAmount *= c_BrushStrength;
+
+			float4 BrushColor = c_BrushColor;
+
+			NewColor.a = lerp(OldColor.a, BrushColor.a, PaintAmount * c_ChannelFlags.a);
+			NewColor.r = lerp(OldColor.r * OldColor.a, BrushColor.r * BrushColor.a, PaintAmount * c_ChannelFlags.r);
+			NewColor.g = lerp(OldColor.g * OldColor.a, BrushColor.g * BrushColor.a, PaintAmount * c_ChannelFlags.g);
+			NewColor.b = lerp(OldColor.b * OldColor.a, BrushColor.b * BrushColor.a, PaintAmount * c_ChannelFlags.b);
+			if (NewColor.a > 0.0f)
+			{
+				NewColor.rgb /= NewColor.a;
+			}
+		}
+	}
+
+	OutColor = NewColor;
+
+	// Gamma correct the output color.
+	if( c_Gamma != 1.0 )
+	{
+		OutColor.rgb = pow( saturate( OutColor.rgb ), c_Gamma );	
+	}
+}

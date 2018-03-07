@@ -1,0 +1,59 @@
+Availability:Public
+Title: Client-Server Model
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking
+Description:An overview of the role of the server in multiplayer.
+Related: Gameplay/Networking/Actors
+Related: Gameplay/Networking/Actors/Properties
+Related: Gameplay/Networking/Actors/RPCs
+Related: Gameplay/Framework
+version: 4.9
+
+[TOC (start:2 end:3)]
+
+
+UE4 multiplayer is based around the client-server model. This means that there will be a single server that will be authoritative over game state, while connected clients will maintain a close approximation.
+
+The server is an important part of UE4 multiplayer. It makes all of the important decisions, contains all of the authoritative state, handles client connections, travelling to new maps and handles the overall gameplay flow of starting a match, ending it, etc.
+
+## Starting a Server
+
+Basic command lines (these commands use the editor and therefore don't require cooked data):
+
+| Type | Command |
+| ---- | ----- |
+| Listen Server | `UE4Editor.exe ProjectName MapName?Listen -game` |
+| Dedicated Server | `UE4Editor.exe ProjectName MapName -server -game -log` |
+| Client | `UE4Editor.exe ProjectName ServerIP -game` |
+
+[region:note]
+Dedicated servers are headless by default. If you don't use -log, you won't see any window to represent the dedicated server.
+[/region]
+
+
+## Server Gameplay Flow
+
+The server is in charge of driving the flow of gameplay. It is the server's job to notify clients that it is time to travel to a new map, when gameplay starts and ends, along with actor replication updates, etc.
+
+The [major framework portions](Gameplay/Framework) are mostly out of the scope of this document, but we can talk about some of the additional multiplayer nuances introduced when dealing working with certain classes.
+
+Gameplay state and flow are generally driven through the GameMode actor. Only the server contains a valid copy of this actor (the client doesn't contain a copy at all). To communicate this state to the client, there is a GameState actor, that will shadow important state of the GameMode actor. This GameState actor is marked to be replicated to each client. Clients will contain an approximate copy of this `GameState` actor, and can use this actor as a reference to know the general state of the game.
+
+For a more details explanation of GameMode, please see [the GameMode documentation](Gameplay/Framework/GameMode).
+
+## Connection Process
+
+For a server to have anything interesting to do from a networking perspective, it needs to have clients connected!
+
+When a new client connects for the first time, a few things happen. First, the client will send a request to the server to connect. The server will process this request, and if the server doesn't deny the connection, will send a response back to the client, with proper information to proceed.
+
+The major steps are:
+1. Client sends a connect request.
+2. If the server accepts, it will send the current map.
+3. The server will wait for the client to load this map.
+4. Once loaded, the server will then locally call AGameModeBase::PreLogin.
+	* This will give the GameMode a chance to reject the connection
+5. If accepted, the server will then call AGameModeBase::Login
+	* The role of this function is to create a PlayerController, which will then be replicated to the newly connected client. Once received, this PlayerController will replace the clients temporary PlayerController that was used as a placeholder during the connection process.
+	* Note that APlayerController::BeginPlay will be called here. It should be noted that it is NOT yet safe to call RPC functions on this actor. You should wait until AGameModeBase::PostLogin is called.
+6. Assuming everything went well, AGameModeBase::PostLogin is called.
+	* At this point, it is safe for the server to start calling RPC functions on this PlayerController.

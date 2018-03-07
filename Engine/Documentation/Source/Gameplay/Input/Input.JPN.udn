@@ -1,0 +1,152 @@
+﻿INTSourceChangelist:3413921
+Availability:Public
+Title:入力値
+Crumbs:%ROOT%
+Description:プレイヤーからの入力値をアクタが使用できるデータ形式へ変換する入力オブジェクト。
+version:4.15
+skilllevel:Beginner
+Parent:Engine/Gameplay
+order:
+type:overview
+tags:Input
+
+[TOC (start:2 end:4)]
+
+**PlayerInput** オブジェクトは、プレイヤーからの入力をアクタ ( PlayerController や Pawn など) が認識可能で、 
+利用可能なデータ形式へ変換します。これは入力処理フローの一部で、プレイヤーからのハードウェア入力をゲームイベント、 PlayerInput マッピングや InputComponent を使用した動作へ変換します。
+
+[REGION:note]
+入力値の設定例は、 [](Gameplay\HowTo\SetUpInput) のドキュメントを参照してください。
+[/REGION]
+
+## ハードウェアへの入力
+プレイヤーからのハードウェアへの入力は非常に単純です。キー入力、マウスクリックやマウス動作、そしてコントローラーボタン入力かジョイスティックによる入力が最も一般的です。標準的な軸やボタンのインデックスに従わない特殊な入力デバイスや、通常の入力範囲を超えたものを持つ場合は、[](Gameplay\Input\RawInput) を使って手動で設定することができます。
+
+
+## PlayerInput (プレイヤー入力)
+[EXCERPT:PlayerInput]
+PlayerInput (プレイヤー入力) はプレイヤー入力を管理する PlayerController クラス内の UObject です。PlayerInput はクライアント側でのみスポーンされます。2 つの構造体が PlayerInput 内に
+定義されます。まず、**FInputActionKeyMapping** が「ActionMapping」を定義します。次に **FInputAxisKeyMapping** が「AxisMapping」を定義します。 
+「ActionMappings」と「AxisMappings」の両方で使用するハードウェアの入力定義は InputCoreTypes で設定します。
+
+[EXCERPT:ActionMapping]
+$ ActionMappings :後にイベント駆動の動作と結合する「フレンドリーネーム」へ、ディスクリート ボタンかキー入力をマッピングします。最終的な効果は、キー、マウスボタン、またはキーパッドボタンを押す (解放する) と、特定のゲーム動作が直接トリガーされます。　   
+[/EXCERPT:ActionMapping]
+
+[EXCERPT:AxisMapping]
+$ AxisMappings :ゲーム内の移動など、後に継続的なゲーム動作と結合する「フレンドリーネーム」へ、キーボード、コントローラーまたはマウスの入力をマッピングします。AxisMapping でマッピングされた入力値は、単に入力値が現在 0 である旨の報告の場合でも、 
+継続的にポーリングされます。ActionMapping への入力でトリガーされる別個のゲームイベントではなく、移動や他のゲーム動作のスムーズな遷移を有効にします。  
+
+	[REGION:tip]
+	ゲーム用コントローラーのジョイスティックなどのハードウェア軸は、「discrete 1 (ボタンを押した状態) 」または「0 (ボタンを押していない状態) 」入力ではなく、入力の度合いを感知します。つまり、わずかな入力や力強い入力でキャラクターを動かすことが可能で、その度合いによって 
+	キャラクターはさまざまな動作をします。このような手法は、スケーラブルな量で動作入力を行うのに理想的である一方、 AxisMapping も一般的な操作キー、例えば WASD キーや上、下、左、右矢印などで、ゲーム動作を継続的にポーリングすることができます。 
+	[/REGION:tip]
+[/EXCERPT:AxisMapping]
+
+### 入力マッピングの設定
+
+入力マッピングはコンフィギュレーション ファイルに格納されていますが、[Project Settings] の [Input] セクションで簡単に設定できます。
+
+1. レベルエディタで、 **Edit > Project Settings** の順に選択します。
+
+	![](ProjectSettingsMenu.png)
+
+1. 表示される **[Project Settings]** タブで **[Input]** をクリックします。
+
+
+このウィンドウで、以下の設定を行うことができます。 
+
+**(ハードウェア) 軸入力のプロパティの変更:**
+![](AxisConfig.png)
+
+**ActionMapping の追加または編集：**
+![](ActionMappings.png)
+
+**AxisMapping の追加または編集：**
+![](AxisMappings.png)
+[/EXCERPT:PlayerInput]
+
+## InputComponent
+**InputComponent** は通常ポーンやコントローラに作成されますが、必要に応じて別のアクタやレベル スクリプトに設定することも出来ます。InputComponent は、ユーザープロジェクトの AxisMapping と ActionMapping をゲームアクションとリンクさせます。
+通常は関数として、C++ コードかブループリントグラフに設定します。  
+InputComponent による入力処理のプライオリティ スタックは、以下の通りです (優先順位の高い順から)
+
+1. 「Accepts input」が有効となったアクタは、直前に有効となったものから最も長時間有効となっている順番で処理されます。
+	[REGION:tip]
+	入力処理で特定のアクタを常に優先したい場合、そのアクタの「Accepts input」を再び有効にして、スタックのトップに移動させることができます。 
+	[/REGION:tip]
+1. コントローラ
+1. レベルスクリプト
+1. ポーン
+
+ある InputComponent が入力を受け取ると、そのコンポーネントはその後スタックでは利用できません。
+
+## 入力処理の手順
+
+[REGION:raw]
+![](InputFlow.png)
+[/REGION]
+
+###例 - 前進
+
+この例は、UE4 に同梱される First Person テンプレートからのものです。  
+
+1. **ハードウェアへの入力:** プレイヤーが W を押します。
+1. **PlayerInput Mapping:** AxisMappingは W を値 1 のスケーリングで「MoveForward」へ変換します。
+
+	![](AxisMappingW.png)
+
+1. **InputComponent Priority Stack:** InputComponent のプライオリティ スタックを通過した「MoveForward」入力が最初に結合するものは、AFirstPersonBaseCodeCharacter クラス内にあります。このクラスは現在のプレイヤーのポーンであるため、その InputComponent は最後にチェックされます。 
+
+		void AFirstPersonBaseCodeCharacter::SetupPlayerInputComponent(class UInputComponent* InputComponent)
+			{
+				// set up gameplay key bindings (ゲームプレイのキーバインド設定)
+				check(InputComponent);
+				...
+				InputComponent->BindAxis("MoveForward", this, &AFirstPersonBaseCodeCharacter::MoveForward);
+				...
+			} 
+
+	この手順はキャラクターのイベントグラフに InputAxis MoveForward ノードを設定することで、ブループリントで実現することも出来ます。このノードと接続されている値が、 W キーがクリックされると実行されます。
+
+	![](InputMappingMoveForward.png)
+
+1. 	**Game Logic:** AFirstPersonBaseCodeCharacter の MoveForward 関数を実行します。
+
+		void AFirstPersonBaseCodeCharacter::MoveForward(float Value)
+			{
+				if ( (Controller != NULL) && (Value != 0.0f) )
+				{
+					// find out which way is forward (前進方向の確認)
+					FRotator Rotation = Controller->GetControlRotation();
+					// Limit pitch when walking or falling (歩行または落下時のピッチ (上下動) の制限) 
+					if ( CharacterMovement->IsMovingOnGround() || CharacterMovement->IsFalling() )
+					{
+						Rotation.Pitch = 0.0f;
+					}
+					// add movement in that direction (その方向へ動きを追加)
+					const FVector Direction = FRotationMatrix(Rotation).GetScaledAxis(EAxis::X);
+					AddMovementInput(Direction, Value);
+				}
+			}
+
+	ブループリントの実装： 
+
+	[REGION:fullwidth]
+	![](MoveForward_Blueprint.png)
+	[/REGION:fullwidth]
+
+## タッチ インターフェース
+
+タッチ デバイス上で動作するゲームには、デフォルトで 2 つのバーチャル ジョイスティックがあります (例えばコンソール コントローラー)。この設定は、 **[Project Settings]** の **[Input]** セクションから、 **[Default Touch Interface]** プロパティを 
+選択して変更できます。これは Touch Interface Setup アセットを示します。デフォルトのインターフェース、 **DefaultVirtualJoysticks** は、共有エンジン コンテンツ(`/Engine/MobileResources/HUD/DefaultVirtualJoysticks.DefaultVirtualJoysticks`)に格納されています。 
+またカメラの回転を必要としないゲームのために、 Left Stick 専用バージョンの **LeftVirtualJoystickOnly** もあります。
+
+![](VirtualJoysticksSettings.png)(w:800)
+
+これらを見るには、オブジェクト ピッカーの **[View Options (表示オプション)]** 設定で、 **[Show Engine Content (エンジンのコンテンツを表示)]** チェックボックスをオンにしなくてはいけません。
+
+![](showenginecontent.png)
+
+バーチャル ジョイスティックを使用しない場合、 [Default Touch Interface] プロパティの値をクリアします。また [Always Show Touch Interface] にチェックを入れると、動作しているプラットフォームとは関係なくゲームでタッチ インターフェースを強制的に使用することも出来ます (または、「-faketouches」で PC ゲームを実行)。
+　

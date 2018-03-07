@@ -1,0 +1,210 @@
+Availability: Public
+Title: 2.7 - Changing the Camera View
+Crumbs: %ROOT%, Programming, Programming/Tutorials/FirstPersonShooter, Programming/Tutorials/FirstPersonShooter/2
+Description: Learn how to change the camera view for your First Person Shooter character.
+SkillLevel: Beginner
+Version: 4.15
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[Previous Step](Programming/Tutorials/FirstPersonShooter/2/6)
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[Section Home](Programming/Tutorials/FirstPersonShooter/2)
+	[/PARAM]
+	[PARAM:next]
+		[Next Step](Programming/Tutorials/FirstPersonShooter/2/8)
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+At the end of the previous step, the default camera was positioned inside the mesh's neck. During this step, we're going to set-up an FPS camera that we can use to adjust the camera's properties (such as location and field of view).
+
+## Attaching a Camera Component
+
+1.	Switch back to Visual Studio and open `FPSCharacter.h` to add the following code:
+
+		// FPS camera.
+		UPROPERTY(VisibleAnywhere)
+		UCameraComponent* FPSCameraComponent;
+
+1.	`FPSCharacter.h` should now look like the following:
+
+		// Fill out your copyright notice in the Description page of Project Settings.
+		
+		#pragma once
+		
+		#include "GameFramework/Character.h"
+		#include "FPSCharacter.generated.h"
+		
+		UCLASS()
+		class FPSPROJECT_API AFPSCharacter : public ACharacter
+		{
+			GENERATED_BODY()
+		
+		public:
+			// Sets default values for this character's properties
+			AFPSCharacter();
+		
+		protected:
+			// Called when the game starts or when spawned
+			virtual void BeginPlay() override;
+			
+		public:		
+			// Called every frame
+			virtual void Tick( float DeltaSeconds ) override;
+		
+			// Called to bind functionality to input
+			virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+		
+			// Handles input for moving forward and backward.
+			UFUNCTION()
+			void MoveForward(float Value);
+		
+			// Handles input for moving right and left.
+			UFUNCTION()
+			void MoveRight(float Value);
+		
+			// Sets jump flag when key is pressed.
+			UFUNCTION()
+			void StartJump();
+		
+			// Clears jump flag when key is released.
+			UFUNCTION()
+			void StopJump();
+		
+			// FPS camera.
+			UPROPERTY(VisibleAnywhere)
+			UCameraComponent* FPSCameraComponent;
+		};
+
+1.	Open `FPSCharacter.cpp` and add the following code to the constructor:
+
+		// Create a first person camera component.
+		FPSCameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("FirstPersonCamera"));
+		// Attach the camera component to our capsule component.
+		FPSCameraComponent->SetupAttachment(GetCapsuleComponent());
+
+	This code creates a `UCameraComponent` and attaches it to the character's `CapsuleComponent`.
+
+1.	Now, add the following code underneath the block that you just wrote in the constructor:
+
+		// Position the camera slightly above the eyes.
+		FPSCameraComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 50.0f + BaseEyeHeight));
+		// Allow the pawn to control camera rotation.
+		FPSCameraComponent->bUsePawnControlRotation = true;
+
+	This code adjusts the camera's position to be slightly above the character's eye position while allowing the pawn to control the camera's rotation.
+
+1.	`FPSCharacter.cpp` should now look like the following:
+
+		// Fill out your copyright notice in the Description page of Project Settings.
+		
+		#include "FPSProject.h"
+		#include "FPSCharacter.h"
+		
+		// Sets default values
+		AFPSCharacter::AFPSCharacter()
+		{
+		 	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
+			PrimaryActorTick.bCanEverTick = true;
+		
+			// Create a first person camera component.
+			FPSCameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("FirstPersonCamera"));
+			// Attach the camera component to our capsule component.
+			FPSCameraComponent->SetupAttachment(GetCapsuleComponent());
+			// Position the camera slightly above the eyes.
+			FPSCameraComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 50.0f + BaseEyeHeight));
+			// Allow the pawn to control camera rotation.
+			FPSCameraComponent->bUsePawnControlRotation = true;
+		}
+		
+		// Called when the game starts or when spawned
+		void AFPSCharacter::BeginPlay()
+		{
+			Super::BeginPlay();
+			
+			if (GEngine)
+			{
+				// Put up a debug message for five seconds. The -1 "Key" value (first argument) indicates that we will never need to update or refresh this message.
+				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("We are using FPSCharacter."));
+			}
+		}
+		
+		// Called every frame
+		void AFPSCharacter::Tick( float DeltaTime )
+		{
+			Super::Tick( DeltaTime );
+		
+		}
+		
+		// Called to bind functionality to input
+		void AFPSCharacter::SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent)
+		{
+			Super::SetupPlayerInputComponent(PlayerInputComponent);
+		
+			// Set up "movement" bindings.
+			PlayerInputComponent->BindAxis("MoveForward", this, &AFPSCharacter::MoveForward);
+			PlayerInputComponent->BindAxis("MoveRight", this, &AFPSCharacter::MoveRight);
+		
+			// Set up "look" bindings.
+			PlayerInputComponent->BindAxis("Turn", this, &AFPSCharacter::AddControllerYawInput);
+			PlayerInputComponent->BindAxis("LookUp", this, &AFPSCharacter::AddControllerPitchInput);
+		
+			// Set up "action" bindings.
+			PlayerInputComponent->BindAction("Jump", IE_Pressed, this, &AFPSCharacter::StartJump);
+			PlayerInputComponent->BindAction("Jump", IE_Released, this, &AFPSCharacter::StopJump);
+		}
+		
+		void AFPSCharacter::MoveForward(float Value)
+		{
+			// Find out which way is "forward" and record that the player wants to move that way.
+			FVector Direction = FRotationMatrix(Controller->GetControlRotation()).GetScaledAxis(EAxis::X);
+			AddMovementInput(Direction, Value);
+		}
+		
+		void AFPSCharacter::MoveRight(float Value)
+		{
+			// Find out which way is "right" and record that the player wants to move that way.
+			FVector Direction = FRotationMatrix(Controller->GetControlRotation()).GetScaledAxis(EAxis::Y);
+			AddMovementInput(Direction, Value);
+		}
+		
+		void AFPSCharacter::StartJump()
+		{
+			bPressedJump = true;
+		}
+		
+		void AFPSCharacter::StopJump()
+		{
+			bPressedJump = false;
+		}
+
+## Testing the New Camera
+
+It's now time to compile and test your newly implemented camera code.
+
+1.	Save the `FPSCharacter` header (\*.h) and CPP (\*.cpp) files in Visual Studio.
+
+1.	Locate **FPSProject** in the **Solution Explorer**.
+
+1.	Right-click on **FPSProject** and select **Build** to compile your project.
+
+	![](BuildProject.png)
+
+1.	After the build finishes, open your **FPSProject** in Unreal Editor.
+
+1.	Click the **Play** button in the Level Editor Toolbar.
+
+	![](NewCameraComponent.png)
+
+	The camera should now be slightly above your character's head.
+
+1.	Press the Escape key or click the **Stop** button in the Level Editor to exit Play in Editor (PIE) mode.
+
+%Steps%

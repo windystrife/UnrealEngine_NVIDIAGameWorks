@@ -1,0 +1,158 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	DeferredLightPixelShaders.usf: 
+=============================================================================*/
+
+#define SUPPORT_CONTACT_SHADOWS 1
+
+#include "Common.ush"
+#include "DeferredShadingCommon.ush"
+#include "DeferredLightingCommon.ush"
+// @third party code - BEGIN HairWorks
+#if SM5_PROFILE
+#include "HairWorks/HairWorksLighting.ush"
+#endif
+// @third party code - END HairWorks
+
+FDeferredLightData SetupLightDataForStandardDeferred()
+{
+	// Build the light data struct using the DeferredLightUniforms and light defines
+	// We are heavily relying on the shader compiler to optimize out constant subexpressions in GetDynamicLighting()
+	FDeferredLightData LightData;
+	LightData.LightPositionAndInvRadius = float4(DeferredLightUniforms.LightPosition, DeferredLightUniforms.LightInvRadius);
+	LightData.LightColorAndFalloffExponent = float4(DeferredLightUniforms.LightColor, DeferredLightUniforms.LightFalloffExponent);
+	LightData.LightDirection = DeferredLightUniforms.NormalizedLightDirection;
+	LightData.LightTangent = DeferredLightUniforms.NormalizedLightTangent;
+	LightData.SpotAnglesAndSourceRadius = float4(DeferredLightUniforms.SpotAngles, DeferredLightUniforms.SourceRadius, DeferredLightUniforms.SourceLength);
+    LightData.SoftSourceRadius = DeferredLightUniforms.SoftSourceRadius;
+	LightData.MinRoughness = DeferredLightUniforms.MinRoughness;
+	LightData.ContactShadowLength = DeferredLightUniforms.ContactShadowLength;
+	LightData.DistanceFadeMAD = DeferredLightUniforms.DistanceFadeMAD;
+	LightData.ShadowMapChannelMask = DeferredLightUniforms.ShadowMapChannelMask;
+	LightData.ShadowedBits = DeferredLightUniforms.ShadowedBits;
+
+	LightData.bInverseSquared = INVERSE_SQUARED_FALLOFF;
+	LightData.bRadialLight = RADIAL_ATTENUATION;
+	//@todo - permutation opportunity
+	LightData.bSpotLight = RADIAL_ATTENUATION;
+
+	return LightData;
+}
+
+Texture2D<uint> LightingChannelsTexture;
+
+uint GetLightingChannelMask(float2 UV)
+{
+	uint2 IntegerUV = UV * View.BufferSizeAndInvSize.xy;
+	return LightingChannelsTexture.Load(uint3(IntegerUV, 0)).x;
+}
+
+/** 
+ * Pixel shader for rendering a directional light using a full screen quad. 
+ */
+void DirectionalPixelMain(
+	float2 InUV : TEXCOORD0,
+	float3 ScreenVector : TEXCOORD1,
+	float4 SVPos : SV_POSITION,
+	out float4 OutColor : SV_Target0
+	// @third party code - BEGIN HairWorks
+#if SM5_PROFILE
+	, out float3 OutHairColor : SV_Target1
+#endif
+	// @third party code - END HairWorks
+	)
+{
+	// @third party code - BEGIN HairWorks
+#if SM5_PROFILE
+	// Lighten hair
+	OutHairColor = 0;
+	if(bHairDeferredRendering)
+	{
+		OutHairColor = GetHairWorksDynamicLighting(ScreenVector, InUV * View.BufferSizeAndInvSize.xy, SetupLightDataForStandardDeferred());
+	}
+#endif
+	// @third party code - END HairWorks
+
+	OutColor = 0;
+	float3 CameraVector = normalize(ScreenVector);
+
+	FScreenSpaceData ScreenSpaceData = GetScreenSpaceData(InUV);
+
+	// Only light pixels marked as using deferred shading
+	BRANCH if( ScreenSpaceData.GBuffer.ShadingModelID > 0 
+#if USE_LIGHTING_CHANNELS
+		&& (GetLightingChannelMask(InUV) & DeferredLightUniforms.LightingChannelMask) 
+#endif
+		)
+	{
+		float SceneDepth = CalcSceneDepth(InUV);
+		float3 WorldPosition = ScreenVector * SceneDepth + View.WorldCameraOrigin;
+
+		FDeferredLightData LightData = SetupLightDataForStandardDeferred();
+		
+		uint2 Random = Rand3DPCG16( uint3( SVPos.xy, View.Random ) ).xy;
+		float Dither = InterleavedGradientNoise( SVPos.xy, View.StateFrameIndexMod8 );
+
+		OutColor = GetDynamicLighting(WorldPosition, CameraVector, ScreenSpaceData.GBuffer, ScreenSpaceData.AmbientOcclusion, ScreenSpaceData.GBuffer.ShadingModelID, LightData, GetPerPixelLightAttenuation(InUV), Dither, Random);
+	}
+}
+
+/** 
+ * Pixel shader for rendering a point or spot light using approximate bounding geometry. 
+ */
+void RadialPixelMain(
+	float4 InScreenPosition : TEXCOORD0,
+	float4 SVPos : SV_POSITION,
+	out float4 OutColor : SV_Target0
+	// @third party code - BEGIN HairWorks
+#if SM5_PROFILE
+	, out float3 OutHairColor : SV_Target1
+#endif
+	// @third party code - END HairWorks
+	)
+{
+	OutColor = 0;
+	float2 ScreenUV = InScreenPosition.xy / InScreenPosition.w * View.ScreenPositionScaleBias.xy + View.ScreenPositionScaleBias.wz;
+	
+	// @third party code - BEGIN HairWorks
+#if SM5_PROFILE
+	// Lighten only hair
+	OutHairColor = 0;
+	if(bHairDeferredRendering)
+	{
+		float3 ScreenVector = mul(float4(InScreenPosition.xy / InScreenPosition.w, 1, 0), View.ScreenToTranslatedWorld).xyz;
+
+		OutHairColor = GetHairWorksDynamicLighting(ScreenVector, ScreenUV * View.BufferSizeAndInvSize.xy, SetupLightDataForStandardDeferred());
+
+		return;
+	}
+#endif
+	// @third party code - END HairWorks
+
+	FScreenSpaceData ScreenSpaceData = GetScreenSpaceData(ScreenUV);
+
+	// Only light pixels marked as using deferred shading
+	BRANCH if( ScreenSpaceData.GBuffer.ShadingModelID > 0 
+#if USE_LIGHTING_CHANNELS
+		&& (GetLightingChannelMask(ScreenUV) & DeferredLightUniforms.LightingChannelMask)
+#endif
+		)
+	{
+		float SceneDepth = CalcSceneDepth(ScreenUV);
+		// With a perspective projection, the clip space position is NDC * Clip.w
+		// With an orthographic projection, clip space is the same as NDC
+		float2 ClipPosition = InScreenPosition.xy / InScreenPosition.w * (View.ViewToClip[3][3] < 1.0f ? SceneDepth : 1.0f);
+		float4 HomogeneousWorldPosition = mul(float4(ClipPosition, SceneDepth, 1), View.ScreenToWorld);
+		float3 WorldPosition = HomogeneousWorldPosition.xyz / HomogeneousWorldPosition.w;
+		float3 CameraVector = normalize(WorldPosition - View.WorldCameraOrigin);
+
+		FDeferredLightData LightData = SetupLightDataForStandardDeferred();
+
+		uint2 Random = Rand3DPCG16( uint3( SVPos.xy, View.Random ) ).xy;
+		float Dither = InterleavedGradientNoise( SVPos.xy, View.StateFrameIndexMod8 );
+
+		OutColor = GetDynamicLighting(WorldPosition, CameraVector, ScreenSpaceData.GBuffer, ScreenSpaceData.AmbientOcclusion, ScreenSpaceData.GBuffer.ShadingModelID, LightData, GetPerPixelLightAttenuation(ScreenUV), Dither, Random);
+		OutColor *= ComputeLightProfileMultiplier(WorldPosition, DeferredLightUniforms.LightPosition, DeferredLightUniforms.NormalizedLightDirection);
+	}
+}

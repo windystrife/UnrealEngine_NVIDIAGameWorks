@@ -1,0 +1,205 @@
+﻿Availability:Public
+Title: Slate概述
+Crumbs:%ROOT%, Programming, Programming/Slate
+Description:跨平台的Slate用户界面架构的概述。
+
+[REGION:fullwidth]
+![Slate UI](editor.png)
+[/REGION]
+
+[TOC(start:2)]
+
+## 概述
+
+[EXCERPT:Intro]
+**Slate** 是一种完全自定义的、平台无关的用户界面架构，其设计目的是使得构建工具及应用程序（比如虚幻编辑器）的用户界面或者游戏中的用户界面变得更加有趣、高效。它结合了一种可以轻松设计、布局及风格化组件的声明式语法，使得可以轻松地创建用户界面并进行迭代开发。
+[/EXCERPT:Intro]
+
+Slate用户界面解决方案使得为工具及应用程序创建图形用户界面变得非常简单，并且可以快速地在界面上进行迭代开发。
+
+## 声明式语法
+
+Slate的 **声明式语法** 使得程序员可以直接构建用户界面，而不需要添加中间层来进行处理。提供了一套完整的宏来简化声明及创建新控件的过程。
+
+	SLATE_BEGIN_ARGS( SSubMenuButton )
+		: _ShouldAppearHovered( false )
+		{}
+		/** The label to display on the button */
+		SLATE_ATTRIBUTE( FString, Label )
+		/** Called when the button is clicked */
+		SLATE_EVENT( FOnClicked, OnClicked )
+		/** Content to put in the button */
+		SLATE_NAMED_SLOT( FArguments, FSimpleSlot, Content )
+		/** Whether or not the button should appear in the hovered state */
+		SLATE_ATTRIBUTE( bool, ShouldAppearHovered )
+	SLATE_END_ARGS()
+
+
+## 构成
+
+Slate的构成架构使得可以轻松地快速排列用户界面元素来进行原型设计和迭代开发。
+
+这里是一个正在构建的用户界面的片段:
+
+	// Add a new section for static meshes
+	ContextualEditingWidget->AddSlot()
+	.Padding( 2.0f )
+	[
+		SNew( SDetailSection )
+		.SectionName("StaticMeshSection")
+		.SectionTitle( LOCTEXT("StaticMeshSection", "Static Mesh").ToString() )
+		.Content()
+		[
+			SNew( SVerticalBox )
+			+ SVerticalBox::Slot()
+			.Padding( 3.0f, 1.0f )
+			[
+				SNew( SHorizontalBox )
+				+ SHorizontalBox::Slot()
+				.Padding( 2.0f )
+				[
+					SNew( SComboButton )
+					.ButtonContent()
+					[
+						SNew( STextBlock )
+						.Text( LOCTEXT("BlockingVolumeMenu", "Create Blocking Volume") ) 
+						.Font( FontInfo )
+					]
+					.MenuContent()
+					[
+						BlockingVolumeBuilder.MakeWidget()
+					]
+				]
+			]
+					
+		]
+	];
+
+上面的语法创建了以下用户界面元素：
+
+![Rendered UI](Slate_composition.png)
+
+## 风格
+
+您可以创建风格，并将其应用到一个控件的各个部分上。这使得在用户界面上迭代处理组件的外观、共享及重用风格变得更加容易。
+
+	// Tool bar
+	{
+		Set( "ToolBar.Background", FSlateBoxBrush( TEXT("Common/GroupBorder"), FMargin(4.0f/16.0f) ) );
+
+		Set( "ToolBarButton.Normal", FSlateNoResource() );		// Note: Intentionally transparent background
+		Set( "ToolBarButton.Pressed", FSlateBoxBrush( TEXT("Old/MenuItemButton_Pressed"), 4.0f/32.0f ) );
+		Set( "ToolBarButton.Hovered", FSlateBoxBrush( TEXT("Old/MenuItemButton_Hovered"), 4.0f/32.0f ) );
+
+		// Tool bar buttons are sometimes toggle buttons, so they need styles for "checked" state
+		Set( "ToolBarButton.Checked", FSlateBoxBrush( TEXT("Old/MenuItemButton_Pressed"),  4.0f/32.0f, FLinearColor( 0.3f, 0.3f, 0.3f ) ) );
+		Set( "ToolBarButton.Checked_Hovered", FSlateBoxBrush( TEXT("Old/MenuItemButton_Hovered"),  4.0f/32.0f ) );
+		Set( "ToolBarButton.Checked_Pressed", FSlateBoxBrush( TEXT("Old/MenuItemButton_Pressed"),  4.0f/32.0f, FLinearColor( 0.5f, 0.5f, 0.5f ) ) );
+
+		// Tool bar button label font
+		Set( "ToolBarButton.LabelFont", FSlateFontInfo( TEXT("Roboto-Regular"), 8 ) );
+	}
+
+构建界面时使用的风格：
+
+	SNew( SBorder )
+	.BorderImage( FEditorStyle::GetBrush( "ToolBar.Background" ) )
+	.Content()
+	[
+		SNew(SHorizontalBox)
+
+		// Compile button (faked to look like a multibox button)
+		+SHorizontalBox::Slot()
+		[
+			SNew(SButton)
+			.Style(TEXT("ToolBarButton"))
+			.OnClicked( InKismet2.ToSharedRef(), &FKismet::Compile_OnClicked )
+			.IsEnabled( InKismet2.ToSharedRef(), &FKismet::InEditingMode )
+			.Content()
+			[
+				SNew(SVerticalBox)
+				+SVerticalBox::Slot()
+				.Padding( 1.0f )
+				.HAlign(HAlign_Center)
+				[
+					SNew(SImage)
+					.Image(this, &SBlueprintEditorToolbar::GetStatusImage)
+					.ToolTipText(this, &SBlueprintEditorToolbar::GetStatusTooltip)
+				]
+				+SVerticalBox::Slot()
+				.Padding( 1.0f )
+				.HAlign(HAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("CompileButton", "Compile"))
+					.Font( FEditorStyle::GetFontStyle( FName( "ToolBarButton.LabelFont" ) ) )
+					.ToolTipText(LOCTEXT("CompileButton_Tooltip", "Recompile the blueprint"))
+				]
+			]
+		]
+	]
+
+## 输入
+
+Slate支持接收鼠标和键盘输入。它提供了一个灵活的按键绑定系统，使得它可以将任何按键组合绑定到任何命令上；且提供了动态修改这些按键绑定的功能。
+
+## 输出
+
+Slate应用目标平台无关的渲染图元，使得它可以在任何平台上运行。它目前针对的平台是 Unreal Engine 4 RHI，所以它可以在任何虚幻引擎4运行的平台上运行。
+
+## 布局图元
+
+布局图元使得它可以轻松地创建静态及动态布局。
+
+	FString DefaultLayout =
+					TEXT( "	{" )
+					TEXT( "		\"type\": \"tabstack\"," )
+					TEXT( "		\"sizecoeff\": 1," )
+					TEXT( "		\"children\":" )
+					TEXT( "		[" )
+					TEXT( "			{" )
+					TEXT( "				\"type\": \"tab\"," )
+					TEXT( "				\"content\": \"Widget Inspector Tab\"" )
+					TEXT( "			}," )
+					TEXT( "			{" )
+					TEXT( "				\"type\": \"tab\"," )
+					TEXT( "				\"content\": \"Plugin Manager Tab\"" )
+					TEXT( "			}," )
+					TEXT( "			{" )
+					TEXT( "				\"type\": \"tab\"," )
+					TEXT( "				\"content\": \"Debug Tools\"" )
+					TEXT( "			}" )
+					TEXT( "		]" )
+					TEXT( "	}" );
+
+上面的布局创建了以下用户界面：
+
+![UI Layout](Slate_layout.png)
+
+## 用户驱动的布局
+
+Slate的 **停靠布局** 功能将布局设置的权利交到了用户的手中，允许用户重新排列选卡面板并停靠到任何可能的布局中。自定义用户工作环境的功能，使得用户可以按他们喜欢的方式来应用工具。
+
+**浮动的选卡**
+
+![Docking](docking_before.png)
+
+**拖拽选卡到停靠目标**
+
+![Drag to Docking Area](docking_place.png)
+
+**停靠后的选卡**
+
+![Docked](docking_after.png)
+
+## 开发者工具
+
+**Slate Widget Inspector（Slate控件检查器）** 提供了调试及分析用户界面和相关代码的方法。这可以辅助跟踪缺陷和不需要的行为，并且可以分析及优化您的用户界面。
+
+[REGION:fullwidth]
+![Widget Inspector](widget_inspector.png)
+[/REGION]
+
+## 引擎访问
+
+Slate用户界面系统为程序员提供了到引擎和编辑器的直接访问权；使得它可以更轻松地实现新功能和工具来适应任何开发团队的工作流程及任何项目的需求。

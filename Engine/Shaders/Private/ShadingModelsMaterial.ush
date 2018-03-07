@@ -1,0 +1,127 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	ShadingModelsMaterial.usf: Pixel shader function for computing a GBuffer from shading model.
+=============================================================================*/
+
+void SetGBufferForShadingModel(
+	in out FGBufferData GBuffer, 
+	in const FMaterialPixelParameters MaterialParameters,
+	const float Opacity,
+	const half3 BaseColor,
+	const half  Metallic,
+	const half  Specular,
+	const float Roughness,
+	const float4 SubsurfaceData)
+{
+	const float3 SubsurfaceColor = SubsurfaceData.rgb;
+	const float SubsurfaceProfile = SubsurfaceData.a;
+
+	GBuffer.WorldNormal = MaterialParameters.WorldNormal;
+	GBuffer.BaseColor = BaseColor;
+	GBuffer.Metallic = Metallic;
+	GBuffer.Specular = Specular;
+	GBuffer.Roughness = Roughness;
+
+#if MATERIAL_SHADINGMODEL_UNLIT
+	GBuffer.ShadingModelID = SHADINGMODELID_UNLIT;
+#elif MATERIAL_SHADINGMODEL_DEFAULT_LIT
+	GBuffer.ShadingModelID = SHADINGMODELID_DEFAULT_LIT;
+#elif MATERIAL_SHADINGMODEL_SUBSURFACE
+	GBuffer.ShadingModelID = SHADINGMODELID_SUBSURFACE;
+	GBuffer.CustomData.rgb = EncodeSubsurfaceColor(SubsurfaceColor);
+	GBuffer.CustomData.a = Opacity;
+#elif MATERIAL_SHADINGMODEL_PREINTEGRATED_SKIN
+	GBuffer.ShadingModelID = SHADINGMODELID_PREINTEGRATED_SKIN;
+	GBuffer.CustomData.rgb = EncodeSubsurfaceColor(SubsurfaceColor);
+	GBuffer.CustomData.a = Opacity;
+#elif MATERIAL_SHADINGMODEL_SUBSURFACE_PROFILE
+	// Optimization: if opacity is 0 then revert to default shading model 
+	#if SUBSURFACE_PROFILE_OPACITY_THRESHOLD
+	if (Opacity > 0.0)
+	#endif
+	{
+		GBuffer.ShadingModelID = SHADINGMODELID_SUBSURFACE_PROFILE;
+		GBuffer.CustomData.rgb = EncodeSubsurfaceProfile(SubsurfaceProfile);
+		GBuffer.CustomData.a = Opacity;
+	}
+	#if SUBSURFACE_PROFILE_OPACITY_THRESHOLD
+	else
+	{
+		GBuffer.ShadingModelID = SHADINGMODELID_DEFAULT_LIT;
+		GBuffer.CustomData = 0;
+	}
+	#endif
+#elif MATERIAL_SHADINGMODEL_CLEAR_COAT
+	GBuffer.ShadingModelID = SHADINGMODELID_CLEAR_COAT;
+
+	float ClearCoat				= saturate( GetMaterialCustomData0(MaterialParameters) );
+	float ClearCoatRoughness	= saturate( GetMaterialCustomData1(MaterialParameters) );
+	float MetalSpec = 0.9;
+
+	float NoV = saturate( dot( MaterialParameters.WorldNormal, MaterialParameters.CameraVector ) );
+
+	// Approximation of refraction's effect on EnvBRDF
+	float RefractionScale = ( (NoV * 0.5 + 0.5) * NoV - 1 ) * saturate( 1.25 - 1.25 * Roughness ) + 1;
+
+	// Approximation of absorption integral, tuned for Roughness=0.4
+	float3 AbsorptionColor = BaseColor * (1 / MetalSpec);
+	float3 Absorption = AbsorptionColor * ( (NoV - 1) * 0.85 * ( 1 - lerp( AbsorptionColor, Square(AbsorptionColor), -0.78 ) ) + 1 );
+
+	float F0 = 0.04;
+	float Fc = Pow5( 1 - NoV );
+	float F = Fc + (1 - Fc) * F0;
+	float LayerAttenuation = lerp( 1, (1 - F), ClearCoat );
+
+	GBuffer.BaseColor = lerp( BaseColor * LayerAttenuation, MetalSpec * Absorption * RefractionScale, Metallic * ClearCoat );
+	GBuffer.Specular *= lerp( 1, RefractionScale, ClearCoat );
+
+	GBuffer.CustomData.x = ClearCoat;
+	GBuffer.CustomData.y = ClearCoatRoughness;
+
+	#if CLEAR_COAT_BOTTOM_NORMAL
+	{
+		float2 oct2 = UnitVectorToOctahedron(GBuffer.WorldNormal);
+
+		#if NUM_MATERIAL_OUTPUTS_CLEARCOATBOTTOMNORMAL > 0
+			#if MATERIAL_TANGENTSPACENORMAL
+				float3 tempnormal = normalize(TransformTangentVectorToWorld( MaterialParameters.TangentToWorld, ClearCoatBottomNormal0(MaterialParameters) ));
+			#else
+				float3 tempnormal =  ClearCoatBottomNormal0(MaterialParameters);
+			#endif
+
+			float2 oct1 = UnitVectorToOctahedron(tempnormal);
+			float2 oct3 = ( (oct1 - oct2) *  0.5 ) + (128.0/255.0);
+			GBuffer.CustomData.a = oct3.x;
+			GBuffer.CustomData.z = oct3.y;
+		#else
+			GBuffer.CustomData.a = 128.0/255.0;
+			GBuffer.CustomData.z = 128.0/255.0;
+		#endif
+	}
+	#endif
+#elif MATERIAL_SHADINGMODEL_TWOSIDED_FOLIAGE
+	GBuffer.ShadingModelID = SHADINGMODELID_TWOSIDED_FOLIAGE;
+	GBuffer.CustomData.rgb = EncodeSubsurfaceColor(SubsurfaceColor);
+	GBuffer.CustomData.a = Opacity;
+#elif MATERIAL_SHADINGMODEL_HAIR
+	GBuffer.ShadingModelID = SHADINGMODELID_HAIR;
+	GBuffer.CustomData.xy = UnitVectorToOctahedron( MaterialParameters.WorldNormal ) * 0.5 + 0.5;
+	GBuffer.CustomData.z = saturate( GetMaterialCustomData0(MaterialParameters) );	// Backlit
+#elif MATERIAL_SHADINGMODEL_CLOTH
+	GBuffer.ShadingModelID = SHADINGMODELID_CLOTH;
+	GBuffer.CustomData.rgb = SubsurfaceColor;
+	GBuffer.CustomData.a = saturate( GetMaterialCustomData0(MaterialParameters) );	// Cloth
+	GBuffer.IndirectIrradiance *= 1 - GBuffer.CustomData.a;
+#elif MATERIAL_SHADINGMODEL_EYE
+	GBuffer.ShadingModelID = SHADINGMODELID_EYE;
+	#if NUM_MATERIAL_OUTPUTS_GETTANGENTOUTPUT > 0
+		float3 Tangent = GetTangentOutput0(MaterialParameters);
+		GBuffer.CustomData.xy = UnitVectorToOctahedron( normalize(Tangent) ) * 0.5 + 0.5;
+	#endif
+	GBuffer.CustomData.z = saturate( GetMaterialCustomData0(MaterialParameters) );	// Iris Mask
+	GBuffer.CustomData.w = saturate( GetMaterialCustomData1(MaterialParameters) );	// Iris Distance
+#else
+	// missing shading model, compiler should report ShadingModelID is not set
+#endif
+}

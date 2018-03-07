@@ -1,0 +1,45 @@
+// NVCHANGE_BEGIN: Add VXGI
+
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/DeferredShadingCommon.ush"
+
+void AddVxgiDiffusePS(in FScreenVertexOutput Input, out float4 SceneColor : SV_TARGET0)
+{
+	FScreenSpaceData ScreenSpaceData = GetScreenSpaceData(Input.UV);
+	FGBufferData GBuffer = ScreenSpaceData.GBuffer;
+	if (GBuffer.ShadingModelID > 0)
+	{
+		// The VxgiDiffuse term is getting multiplied by 1/PI inside the VXGI library
+		SceneColor.rgb = ScreenSpaceData.AmbientOcclusion * GBuffer.DiffuseColor.rgb * ScreenSpaceData.VxgiDiffuse.rgb;
+		SceneColor.a = Luminance(SceneColor.rgb);
+	}
+	else
+	{
+		SceneColor = float4(0,0,0,0);
+	}
+}
+
+void AddVxgiRawDiffusePS(in FScreenVertexOutput Input, out float4 SceneColor : SV_TARGET0)
+{
+	FScreenSpaceData ScreenSpaceData = GetScreenSpaceData(Input.UV);
+	SceneColor = float4(ScreenSpaceData.VxgiDiffuse.rgb, 0);
+}
+
+void ComposeVxgiGBufferPS(in FScreenVertexOutput Input, out float4 ColNormal : SV_TARGET0 )
+{
+	FGBufferData GBuffer = GetGBufferData(Input.UV, false);
+
+	//Diffuse is multipled by AddVxgiDiffusePS
+	if (GBuffer.ShadingModelID > 0)
+	{
+		bool hasSpecular = dot(GBuffer.SpecularColor, GBuffer.SpecularColor) > 0;
+		ColNormal = float4(GBuffer.WorldNormal, hasSpecular ? (GBuffer.Roughness + 1e-5f) : 0);
+	}
+	else
+	{
+		//make tracing early out
+		ColNormal = float4(0,0,0,0);
+	}
+}
+
+// NVCHANGE_END: Add VXGI

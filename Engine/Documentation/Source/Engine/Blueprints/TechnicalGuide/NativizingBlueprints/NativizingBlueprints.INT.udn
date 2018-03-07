@@ -1,0 +1,304 @@
+Availability:Public
+Title:Nativizing Blueprints
+Crumbs:
+Description:Technical guide for programmers exposing gameplay elements to Blueprints.
+Version: 4.15
+Parent: Engine/Blueprints/TechnicalGuide
+type:overview
+tags:Blueprints
+Skilllevel:Intermediate
+Related: Engine/Blueprints/TechnicalGuide/NativizingBlueprints/Advanced
+social-image:social_bp_nativization.png
+topic-image:NativizingBlueprints_topic.png
+
+[TOC(start:1 end:4)]
+
+When teams script gameplay with Blueprints, they're creating new UClasses without having to write or compile native C++ code. As a result, Blueprints work well for game teams 
+that don't have the technical expertise of native C++ programmers. The reason that non-programmers can work strictly with Blueprints, is because Blueprint nodes run in 
+a virtual machine (VM), enabling them to call native C++ functions. Unfortunately, relying on a VM that translates Blueprints into native C++ code comes at a cost; and as you can imagine, 
+translating Blueprint nodes into native C++ functions can potentially slow your game's performance per frame. 
+
+When the cost of running Blueprints in a VM isn't noticeable, the VM overhead can be an acceptable cost to bear; however, there are times when you'll want your game to run as fast as 
+possible (especially, when you're shipping to devices that have limited hardware capabilities). This is where Unreal Engine's Blueprint Nativization tool can help. 
+
+[REGION:note]
+Here at Epic, we've successfully used Blueprint Nativization while developing our newest VR title, [Robo Recall](https://www.epicgames.com/roborecall/en-US/home).
+[/REGION]
+
+##Reducing VM Overhead
+
+The main goal of Blueprint Nativization is to reduce VM overhead in the runtime version of your project by generating native C++ code from your project's Blueprints. In general, all 
+of the Blueprint Classes are replaced by the newly generated native C++ classes that will then be compiled with the project during the [cooking process](Engine/Deployment/Cooking). 
+Although you'll be able to read the translated C++ code from a text editor, you'll notice that the code isn't formatted to be reusable (or generated to be "reader friendly").
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Blueprint](Blueprint.png)(w:1200)
+	[/PARAM]
+	[PARAM:after]
+	![Nativized Blueprint](NativizedBlueprint.png)(w:1200)
+	[/PARAM]
+[/OBJECT]
+
+_Here, we compare a Player Character Blueprint with its nativized code._
+
+This page will get you started with nativizing your project's Blueprints, and for Blueprint-only projects, this should be a straightforward task. To get started, you'll need to know 
+where to find the user interface (UI) that you'll need to disable and enable Blueprint Nativization.
+
+##Enabling Blueprint Nativization
+
+When you first create a project, Blueprint Nativization is disabled by default. To locate the Blueprint Nativization settings, open the **Project Settings** menu from Unreal Editor, and select 
+**Packaging** from the left side bar. You should be able to see the **Blueprints** dropdown menu from inside of the **Project - Packaging** menu.
+
+[REGION:lightbox]
+	[![](BPNativization_DisabledUI.png)(w:600)](BPNativization_DisabledUI.png)
+[/REGION]
+
+[REGION:caption]
+	Click for full image.
+[/REGION]
+
+At any time during development, if you choose to disable Blueprint Nativization, select **Disable** from the **Blueprint Nativization Method** dropdown list. 
+
+![](BPNativization_DisabledUI1.png)(w:900)
+
+As you can see from the dropdown list, there are two additional options that are available to you, namely:
+
+* **Inclusive** Nativization
+* **Exclusive** Nativization
+
+##Inclusive Nativization
+
+When you select **Inclusive** nativization, you're electing to nativize all of the supported Blueprint classes in your project. 
+
+![](BPNativization_InclusiveUI.png)(w:900)
+
+After selecting the **Inclusive** nativization method, it's important to note that during the [packaging process](Engine/Basics/Projects/Packaging), 
+Unreal Automation Tool (UAT) will nativize the following supported Blueprint assets:
+
+* Blueprint Classes
+* Blueprint Function Libraries
+* Blueprint Interfaces
+* Anim Blueprints 
+* Widget Blueprints
+* User Defined Structures
+* User Defined Enums
+
+[REGION:note]
+At this time, Level Blueprints and Blueprint Macros aren't supported by the Blueprint Nativization tool, and won't be converted into native C++ code. 
+[/REGION]
+
+###Excluding Blueprints from Conversion
+
+When the Blueprint Nativization tool converts Blueprint nodes to native C++ code, the resulting executable is compiled with additional machine instructions, 
+dependencies, and embedded metadata to support the conversion. 
+
+[REGION:warning]
+So, it's important to be aware that when you opt into the **Inclusive** Blueprint Nativization Method, 
+your executable size will grow to a size that may be unacceptable for the platform that you're shipping for.
+[/REGION]
+
+You can mitigate the bloating of your executable's size by specifying which Blueprints you want to exclude from the conversion process. To exclude Blueprints from conversion, 
+open your project's `DefaultEditor.ini` file, and create a `[BlueprintNativizationSettings]` heading with the following configuration properties:
+
+* To exclude a certain type of Blueprint asset, set the `ExcludedBlueprintTypes` configuration property.  
+  For example, `+ExcludedBlueprintTypes=/Script/UMGEditor.WidgetBlueprint`, won't convert any Widget Blueprint assets.
+* To exclude a specific Blueprint asset, set the `ExcludedAssets` configuration property.  
+  For example, `+ExcludedAssets=/Engine/Tutorial/SubEditors/TutorialAssets/Character/TutorialCharacter`, won't convert the **Tutorial Character** Blueprint asset.
+
+![](DefaultEngineINI.png)(w:900)
+
+Note that Blueprint assets are nativized during the packaging process only if they're cooked as part of that process. So, if you haven't specified any Blueprint assets or maps for cooking, Unreal Engine 
+will cook everything that's located inside of your **Content** directory. If, after selecting the **Inclusive** method, you notice that unused Blueprints are being nativized, you should probably opt into 
+the **Exclusive** Blueprint Nativization Method.
+
+##Exclusive Nativization
+
+For larger projects being shipped to devices with limited hardware resources, we recommend that you select the **Exclusive** Blueprint Nativization Method.
+
+![](BPNativization_ExclusiveUI.png)(w:900)
+
+While the **Inclusive** method is available for smaller projects that aren't in danger of bloating the executable beyond the target hardware's capacity to host the application, there are several advantages when choosing to 
+use the **Exclusive** Blueprint Nativization method. Some of the advantages include:
+
+* Limiting the final size of the executable.
+* Actively preventing unused Blueprint assets from being converted.
+* Having the ability to explicitly select which Blueprint assets to convert.
+
+In general, it's recommended that you opt into the Exclusive Blueprint Nativization Method when you have Blueprints that are computationally expensive; including (but, not limited to):
+
+* Blueprints with lots of nodes.
+* Blueprints that require optimized loops.
+* Blueprints that perform complex mathematical operations. 
+
+###Selecting Blueprints to Nativize
+
+[REGION:note]
+If you don't have a project containing Blueprint assets, go ahead and create a new project using one of the available project templates. For illustrative purposes, 
+we're using the **Puzzle** Project Template.
+[/REGION]
+
+Perform the following steps to select Blueprint assets that you want to nativize, using the **Exclusive** Blueprint Nativization Method. 
+
+1.	First, open the **Edit** menu and select **Project Settings...**.
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_1.png)(w:900)](BPNativization_ExclusiveStep_1.png)
+	[/REGION]
+	
+	[REGION:caption]
+		Click for full image.
+	[/REGION]
+
+1.	With the **Project Settings** menu open, go ahead and click **Packaging**, opening the **Project Settings - Packaging** menu.
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_2.png)(w:900)](BPNativization_ExclusiveStep_2.png)
+	[/REGION]
+	
+	[REGION:caption]
+		Click for full image.
+	[/REGION]
+
+1.	From the **Blueprints** submenu, click on the **Blueprint Nativization Menu** dropdown list.
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_3.png)(w:900)](BPNativization_ExclusiveStep_3.png)
+	[/REGION]
+	
+	[REGION:caption]
+		Click for full image.
+	[/REGION]
+
+1.	Select the **Exclusive** option to opt into the Exclusive Blueprint Nativization Method.
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_4.png)(w:900)](BPNativization_ExclusiveStep_4.png)
+	[/REGION]
+	
+	[REGION:caption]
+		Click for full image.
+	[/REGION]
+
+1.	Go ahead and select the expansion arrow at the bottom of the submenu, revealing an empty array. 
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_5.png)(w:900)](BPNativization_ExclusiveStep_5.png)
+	[/REGION]
+	
+	[REGION:caption]
+		Click for full image.
+	[/REGION]
+
+	This array will contain the list of Blueprint assets that you'll explicitly select for nativization.
+	![](BPNativization_ExclusiveStep_5Note.png)(w:900)
+
+1.	After exiting the **Project Properties** menu, navigate to the folder containing your Blueprint assets. 
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_6.png)(w:900)](BPNativization_ExclusiveStep_6.png)
+	[/REGION]
+	
+	[REGION:caption]
+		Click for full image.
+	[/REGION]
+
+1.	Now, open the Blueprint asset(s) that you'd like to nativize.
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_7.png)(w:900)](BPNativization_ExclusiveStep_7.png)
+	[/REGION]
+	
+	[REGION:caption]
+		Click for full image.
+	[/REGION]
+
+1.	After the **Blueprint Editor** opens, click the **Class Settings** button.
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_8.png)(w:900)](BPNativization_ExclusiveStep_8.png)
+	[/REGION]
+	
+	[REGION:caption]
+		Click for full image.
+	[/REGION]
+
+1.	To mark this Blueprint asset for nativization, go ahead and click the **Nativize** checkbox located in the **Packaging** submenu in the **Details** panel.
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_9.png)(w:900)](BPNativization_ExclusiveStep_9.png)
+	[/REGION]
+	
+	[REGION:caption]
+		Click for full image.
+	[/REGION]
+
+1.	Make sure to click the **Save** button before closing the **Blueprint Editor** for this asset.
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_10.png)(w:900)](BPNativization_ExclusiveStep_10.png)
+	[/REGION]
+	
+	[REGION:caption]
+		Click for full image.
+	[/REGION]
+
+1.	To verify the Blueprint asset that you've selected for Exclusive nativization, open the **Project Settings** menu to view the array containing the list of Blueprint asset(s) that you've marked for nativization.
+
+	[REGION:lightbox]
+		[![](BPNativization_ExclusiveStep_11.png)(w:900)](BPNativization_ExclusiveStep_11.png)
+	[/REGION]
+	
+	[REGION:caption]
+		Click for full image.
+	[/REGION]
+
+At this point, you're ready to Cook and Package your project using the **Exclusive** Blueprint Nativization Method.
+
+[REGION:note]
+Note that all supported dependencies required to build the Blueprint(s) that you've selected for Nativization, will also be flagged for Nativization. 
+[/REGION]
+
+##Locating Nativized Code
+
+You can find your nativized code in `[ProjectDirectory]\Intermediate\\[Platform That Was Cooked For]\NativizedAssets\Source\NativizedAssets\`
+
+![](NativizedAssetsLocation.png)(w:900)
+
+##Setting the Nativization Flag
+
+If you navigate back to the **Project Settings > Project - Packaging** menu, you'll notice that there is a checkbox next to the **Warn if Packaged Without Nativization Flag** label. 
+
+[REGION:lightbox]
+	[![](NativizationFlag.png)(w:900)](NativizationFlag.png)
+[/REGION]
+
+[REGION:caption]
+	Click for full image.
+[/REGION]
+
+This flag is intended for Advanced users who build/cook their projects from the command line (such as a server-side build engineers). Basically, if you enable this flag while also enabling nativization in 
+the **Project Settings** menu, a warning will be emitted if you don't use the nativization flag from the command line at build/cook time. To learn how to use the nativization switch from the command line, please 
+read the [](Engine/Blueprints/TechnicalGuide/NativizingBlueprints/Advanced) documentation.
+
+##Additional Resource
+
+Additional information covering Blueprint Nativization can be found in the following Feature Highlight video.
+
+[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:videoid]
+	Ut_CRt7o8PA
+	[/PARAMLITERAL]
+	[PARAMLITERAL:width]
+	100
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	56.25
+	[/PARAMLITERAL]
+	[PARAMLITERAL:units]
+	%
+	[/PARAMLITERAL]
+	[PARAMLITERAL:type]
+	simple
+	[/PARAMLITERAL]
+[/OBJECT]

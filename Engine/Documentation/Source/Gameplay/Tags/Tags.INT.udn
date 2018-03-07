@@ -1,0 +1,112 @@
+Availability:Public
+Title:Gameplay Tags
+Crumbs: %ROOT%
+Description: Gameplay Tags can be used to identify, categorize, match, and filter objects.
+version: 4.15
+skilllevel:Intermediate
+Parent:Gameplay
+Order:
+type:overview
+tags:Gameplay
+
+[toc(start:2 end:2)]
+
+**Gameplay Tags** are conceptual, hierarchical labels with user-defined names. These tags can have any number of hierarchical levels, separated by the "." character; for example, a Gameplay Tag with three levels would take the form of "Family.Genus.Species", with "Family" being the broadest identifier in the hierarchy, and "Species" being the most specific. Note that the existence of "Family.Genus.Species" implicitly means that "Family.Genus" and "Family" Gameplay Tags also exist. Individual tags are lightweight, and use the type `FGameplayTag`. Since game objects frequently have multiple tags, **Gameplay Tag Containers** (using the type `FGameplayTagContainer`) are provided, and can handle a variety of additional queries. Gameplay Tags (or Gameplay Tag Containers) can be added to any project, associating objects with conceptual labels that can then be used to identify, match, categorize, or filter them (as needed) for your project.
+
+## Creating Gameplay Tags
+Gameplay Tags must be added to the central tag dictionary for the engine to be aware of them. This can be done in three ways via editor functionality. Tags can be added manually in the **Project Settings** menu, with .ini files, or by creating data table assets. 
+
+All three methods are set up under **Project Settings**, by opening the **Gameplay Tags** tab under the **Project** section.
+![Gameplay Tags menu in Project Settings](ProjectSettings.png)
+
+### Manually Adding Tags
+
+The easiest way to add Gameplay Tags is to enter them manually in the **Project Settings** menu. By checking the **Import Tags From Config** option, `Config/DefaultGameplayTags.ini` will be loaded, as well as all Gameplay Tags in any .ini files found under the `Config/Tags` path. An option labeled **Add New Gameplay Tag** will appear, and this option can be used to add new Gameplay Tags to any existing Gameplay Tag .ini files, including the default file. Tags added in this way will also have an optional field for entering a brief description, which will appear as a tooltip in the editor.
+
+![Manually Adding Tags in Project Settings](AddNewTag.png)
+
+### Editing .ini Files Directly
+To add tags using your own .ini files, the **Import Tags From Config** option must be enabled. Gameplay Tags will then be loaded from each of the .ini files found your project's `Config/Tags/` path, which are easy to hand-edit. If these edits are made while the editor is running, turning the **Import Tags From Config** option off and back on will reload the files. The format within these files looks like this:
+
+	[/Script/GameplayTags.GameplayTagsList]
+	GameplayTagList=(Tag="Vehicle.Air.Helicopter",DevComment="This is a custom tooltip!")
+	GameplayTagList=(Tag="Movement.Flying",DevComment="")
+	GameplayTagList=(Tag="Movement.Hovering",DevComment="")
+	GameplayTagList=(Tag="Movement.Landing",DevComment="")
+
+This method is convenient for your teammates to add their own tags, since .ini files in `Config/Tags` are easily-edited text files that can be named with any file-naming convention you like.
+
+A "Developer Tag" config file can be used by going to the **Gameplay Tags Developer** menu within **Project Settings**, and filling in the **Developer Config Name** with your desired filename. If enabled, this will save all of the tags that were added to the default .ini file (by you), into an .ini file that you specify. Your .ini file will reside in the `Config/Tags` folder, and can be passed to other developers or submitted to your source control system without further modification. This can be useful on large projects with thousands of tags, or as a way to separate tags created by specific developers or for use with specific game features. This is entirely optional, but it can be helpful for some teams and workflows to have certain tags stored in separate files.
+
+### Data Table Assets
+Finally, tags can be added via [DataTable](Gameplay/DataDriven/#datatables) assets with the row type `GameplayTagTableRow`. This is especially useful for importing Gameplay Tags from an external source, such as an Excel spreadsheet file, but you can create your own without a file to import and work with it in-editor. Once your asset is created, add it to the **GameplayTagTableList** in the **Project Settings** menu and all tags contained within it will be added to the **Gameplay Tag Manager**. Note that this system supports multiple assets being listed, so you can separate out your project's tags into different spreadsheets (if this helps your workflow or organization).
+
+![Gameplay Tags in a Data Table Asset](DataAsset.png)
+
+[REGION:caption]Data Table Assets use Unreal Engine assets rather than .ini files, and can be viewed and changed while the editor is running, similar to other game assets.[/REGION]
+
+## Managing Gameplay Tags
+After your Gameplay Tags have been added, you can manage them by searching for references to them, deleting them, or renaming them. All of these actions can be accessed with the caret dropdown next to a tag in the **Project Settings** menu. Tags can only be deleted in this menu if they were added via a .ini file (either hand-edited or added via the **Project Settings** menu), and are not referenced by anything else. Renamed tags will cause additions to be made to the GameplayTagRedirects list, and any renamed tags will be silently fixed on load.
+
+![Editing Individual Gameplay Tags In Project Settings](ProjectSettingsEditTag.png)
+
+[REGION:caption]Gameplay Tags can be edited in Project Settings via a caret dropdown.[/REGION]
+
+### Gameplay Tag Test Operations
+There are a number of test operations, all based on the concept of matching tags to other tags, that can be performed on Gameplay Tags and Gameplay Tag Containers. Each of these functions will be called on a Gameplay Tag or Gameplay Tag Container and will take a single Gameplay Tag or Gameplay Tag Container as a parameter.
+
+The following table details the operations available for tags and tag containers. In this table, the format "A.1" represents a single Gameplay Tag, while "{A.1}" represents that same tag as part of a Gameplay Tag Container. A container with multiple tags will be of the format "{A.1, B.1}".
+
+| Source | Function/Operation | Input Parameter | Return Value |
+| --- | --- | --- | --- |
+| A.1 | MatchesTag | A | true |
+| A.1 | MatchesTagExact (or ==) | A | false |
+| A.1 | MatchesAny | {A, C} | true |
+| A.1 | MatchesAnyExact | {A, C} | false |
+| A.1 | MatchesAll | {A} | true |
+| A.1 | MatchesAllExact | {A} | false |
+| {A.1, B.1} | HasTag | A | true |
+| {A.1, B.1} | HasTagExact | A | false |
+| {A.1, B.1} | HasAny | {A, C} | true |
+| {A.1, B.1} | HasAnyExact | {A, C} | false |
+| {A.1, B.1} | HasAll | {A, B} | true |
+| {A.1, B.1} | HasAllExact | {A, B} | false |
+
+Note that providing empty or default Gameplay Tag Containers as the input parameter will cause all operations to return false, except for `HasAll`, `HasAllExact`, `MatchesAll`, and `MatchesAllExact`. The justification for this, is that there are no tags in the parameter container that are missing from the source set.
+
+As an example, the following Blueprint will use some of the above-named operations to detect whether a Gameplay Tag Container has `TestTag.One` or `TestTag.Three`, but not both tags, and not `TestTag.Two` (when the test Actor is spawned into a game). For this test, we will use literal container values in our Blueprint for our test, but use a Blueprint (or C++) variable for our Actor's container.
+
+![Sample Gameplay Tag Operations In A Blueprint](TagOperationsInBP.png)
+
+## Gameplay Tag Queries
+Certain types of queries for Gameplay Tag Containers can be stored in a **Gameplay Tag Query** variable in order to make them data-driven, perform them in many places without having to edit more than one variable or piece of code, and speed them up. Gameplay Tag Queries are limited to three basic tests:
+
+* **Any Tags Match** succeeds if at least one tag from the query is found in the container.
+
+* **All Tags Match** succeeds if there are no tags in the query that are not also found in the container. _This includes the case that no tags are present in the query._
+
+* **No Tags Match** succeeds if there are no tags in the query that are also found in the container. _This includes the case that no tags are present in the query._
+
+However, those tests can be combined together via three larger expressions, each of which contains an array of additional expressions or tests:
+
+* **Any Expressions Match** succeeds when any of its sub-expressions or tests succeeds.
+
+* **All Expressions Match** succeeds when none of its sub-expressions or tests fail. _This includes the case that no sub-expressions or tests are present in the query._
+
+* **No Expressions Match** succeeds when none of its sub-expressions or tests succeed. _This includes the case that no sub-expressions or tests are present in the query._
+
+[REGION:note]Note that all three test types refer to "exact" matching as per the table of operations above.[/REGION]
+
+We can recreate our earlier test example where we required either `TestTag.One` or `TestTag.Three` (but not both) to be in the source container, having required that `TestTag.Two` not be, using a single Gameplay Tag Query. For this test, we will use Blueprint (or C++) variables exclusively, although literal values are also supported. Here is our test query variable:
+
+![Sample Gameplay Tag Query Variable](TagQuery.png)
+
+With this query set up, we can evaluate our Gameplay Tag Container against it in our test Actor's Blueprint as follows:
+
+![Sample Gameplay Tag Query In A Blueprint](TagQueryInBP.png)
+
+## Using Gameplay Tags In Your Game
+To apply the tags you have created to objects in your game, add Gameplay Tags (C++ type `FGameplayTag`) or Gameplay Tag Containers (C++ type `FGameplayTagContainer`) properties to the objects. You can also add **Gameplay Tag Queries** (C++ type `FGameplayTagQuery`) to your objects as desired, or you can use the tag operations directly in Blueprints or C++ code. Once these properties have been added, you can edit them from the code or editor, like any other variable.
+
+## Quickly Accessing Gameplay Tags in C++
+The `IGameplayTagAssetInterface` can be implemented in C++. Doing so, and overriding the `GetOwnedGameplayTags` function, will create a Blueprint-accessible way to populate a Gameplay Tag Container with the tags associated with that object. In most cases, this just means copying the tags from the base class into a new container, but your implementation of the class could gather tags from multiple containers, or call a Blueprint function to get access to Blueprint-declared tags, or whatever your object requires. The advantage of this interface is that it enables you to interact with a variety of disparate object types in a standardized way, so that you can get an object's tags without explicitly casting the object and then writing custom code for each possible type to get the correct tag variable (or variables). This is especially useful on larger projects, where it can help to avoid (hard-to-reproduce) bugs and make code cleaner, faster, and easier to maintain.

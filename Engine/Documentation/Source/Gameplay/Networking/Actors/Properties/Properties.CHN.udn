@@ -1,0 +1,45 @@
+﻿INTSourceChangelist:2752308
+Availability:Public
+Title:属性复制
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking, Gameplay/Networking/Actors
+Description:关于如何复制 Actor 属性的详细信息。
+Related: Gameplay/Networking/Actors/Properties/ObjectReferences
+Related: Gameplay/Networking/Actors/Properties/Conditions
+Related: Gameplay/Networking/Actors/RPCs
+Version: 4.9
+
+
+## 概述
+
+每个 actor 都保有一份属性列表，而每个属性都可以被标记，以表示复制到客户端。当服务器端的变量值发生改变时，服务器将向客户端发送更新后的值。而客户端的变量值也可能发生变化 - 这时会使用新值去覆盖原有值。属性更新只能来自于服务器，客户端永远不会向服务器发送属性更新。
+
+有些属性是默认复制（方位、旋转、所有者等）。这些属性通常被架构用来完成基本的多人游戏工作。在此基础上，您可以根据需要标记更多的属性进行复制。
+
+Actor 属性复制是一个可靠过程。也就是说，客户端版本的 Actor 属性将最终反映服务器上的值 - 但可能忽略某些单独的属性值变化。
+
+## 设置属性用于复制
+
+要复制一个属性，您需要做一些准备工作：
+在 actor 类标头中的属性定义部分，您需要确保将 `replicated` 关键字作为 UPROPERTY 声明的一个参数：
+
+	class ENGINE_API AActor : public UObject
+	{
+		UPROPERTY( replicated )
+		AActor * Owner;
+	};
+
+在 actor 类的实现中，您需要实现 GetLifetimeReplicatedProps 函数：
+
+	void AActor::GetLifetimeReplicatedProps( TArray< FLifetimeProperty > & OutLifetimeProps ) const
+	{
+		DOREPLIFETIME( AActor, Owner );
+	}
+
+在 actor 的构造函数中，确保将 bReplicates 标志设置为 true：
+
+	AActor::AActor( const class FPostConstructInitializeProperties & PCIP ) :Super( PCIP )
+	{ 
+		bReplicates = true;
+	}
+
+差不多就是这样。现在，成员变量 `Owner` 将同步到所有连接的客户端，并应用于当前实例化的此 actor 类型的所有复本（此时为基本 actor 类）。

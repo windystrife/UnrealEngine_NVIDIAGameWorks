@@ -1,0 +1,124 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title: RPC
+Crumbs:Gameplay, Gameplay/Networking, Gameplay/Networking/Actors
+Description:네트워크를 통한 함수 리플리케이션 지정하기 입니다.
+Related: Gameplay/Networking/Actors/OwningConnections
+Related: Gameplay/Networking/Actors/Components
+
+[TOC (start:2 end:3)]
+
+RPC (Remote Procedure Call) 는 로컬에서 호출되지만 (호출하는 머신과는) 다른 머신에서 원격 실행되는 함수를 말합니다.
+
+RPC 함수는 매우 유용하게 사용될 수 있으며, 네트워크 연결을 통해 클라이언트와 서버 사이에 메시지를 전송할 수 있습니다.
+
+이 기능의 주요 용도는 속성상 장식이나 휘발성인 비신뢰성 게임플레이 이벤트를 위한 것입니다. 이는 사운드 재생, 파티클 스폰, 액터의 핵심적인 기능과는 무관한 일시적 효과와 같은 작업을 하는 이벤트를 포함합니다.
+기존에 이러한 유형의 이벤트는 종종 액터 프로퍼티를 통해 리플리케이트되고는 했습니다.
+
+RPC 사용시 [오너십 작동 방식](Gameplay/Networking/Actors/OwningConnections) 을 이해해 두는 것이 중요합니다. 대부분의 RPC 실행 장소를 결정하기 때문입니다.
+
+## RPC 사용하기
+함수를 RPC 로 선언하려면 `UFUNCTION` 선언에 `Server`, `Client`, `NetMulticast` 키워드를 붙여주기만 하면 됩니다.
+
+예를 들어 함수를 서버에서 호출되지만 클라이언트에서 실행되는 RPC 로 선언하려면, 이렇게 합니다:
+
+	UFUNCTION( Client )
+	void ClientRPCFunction();
+
+함수를 클라이언트에서 호출되지만 서버에서 실행되는 RPC 로 선언하는 것은 `Server` 키워드를 사용한다는 것 빼고는 매우 비슷합니다:
+
+	UFUNCTION( Server )
+	void ServerRPCFunction();
+
+Multicast 라 불리는 특수 유형 RPC 함수가 하나 더 있습니다. Multicast RPC 는 서버에서 호출된 다음 서버는 물론 현재 연결된 모든 클라이언트에서도 실행되도록 고안된 것입니다.
+멀티캐스트 함수를 선언하려면 그냥 `NetMulticast` 키워드를 사용하면 됩니다:
+
+	UFUNCTION( NetMulticast )
+	void MulticastRPCFunction();
+
+멀티캐스트 RPC 는 클라이언트에서도 호출 가능하지만, 이 경우 로컬에서만 실행됩니다.
+
+## 간단 팁
+
+함수 초반에 `Client`, `Server`, `Multicast` 키워드를 앞쪽에 어떻게 붙였는지 보세요. 저희 내부적으로 합의한 규칙으로, 이 함수를 사용하는 프로그래머들에게 이 함수가 각각 
+클라이언트, 서버, 모든 클라이언트에서 호출된다는 것을 알리기 위한 것입니다.
+
+멀티플레이어 세션 도중 이 함수가 어느 머신에서 호출되는지 한 눈에 알아볼 수 있기에 매우 유용합니다.
+
+## 요건 및 주의사항
+RPC 의 정상 작동을 위해 충족시켜야 하는 요건이 몇 가지 있습니다:
+1.	Actor 에서 호출되어야 합니다.
+1.	Actor 는 빈드시 replicated 여야 합니다.
+1.	서버에서 호출되고 클라이언트에서 실행되는 RPC 의 경우, 해당 Actor 를 실제 소유하고 있는 클라이언트에서만 함수가 실행됩니다.
+1.	클라이언트에서 호출되고 서버에서 실행되는 RPC 의 경우, 클라이언트는 RPC 가 호출되는 Actor 를 소유해야 합니다.
+1.	Multicast RPC 는 예외입니다:
+	* 서버에서 호출되는 경우, 서버에서는 로컬에서 실행될 뿐만 아니라 현재 연결된 모든 클라이언트에서도 실행됩니다.
+	* 클라이언트에서 호출되는 경우, 로컬에서만 실행되며, 서버에서는 실행되지 않습니다.
+	* 현재 멀티캐스트 이벤트에 대해 단순한 스로틀 조절 메카니즘이 있습니다. 멀티캐스트 함수는 주어진 액터의 네트워크 업데이트 기간동안 두 번 이상 리플리케이트되지 않습니다. 장기적으로 크로스 채널 트래픽 관리 및 스로틀 조절 지원을 개선시킬 계획입니다.
+
+다음 표는 호출 액터의 소유권(가장 왼쪽 열)에 따라 주어진 유형의 RPC 실행 위치를 나타냅니다.
+
+### 서버에서 호출된 RPC
+
+| 액터 소유권 | 리플리케이트 안됨 | `NetMulticast` | `서버` | `클라이언트` |
+| ---------------------	| -------------- | --------- | --------- | --------------------- |
+| **클라이언트 소유 액터** | 서버에서 실행  | 서버와 모든 클라이언트에서 실행 | 서버에서 실행 | 액터의 소유 클라이언트에서 실행 |
+| **서버 소유 액터**	| 서버에서 실행 | 서버와 클라이언트에서 실행 | 서버에서 실행 | 서버에서 실행 |
+| **미소유 액터** | 서버에서 실행 | 서버와 모든 클라이언트에서 실행 | 서버에서 실행 | 서버에서 실행 |
+
+### 클라이언트에서 호출된 RPC
+
+| 액터 소유권 | 리플리케이트 안됨 | `NetMulticast` | `서버` | `클라이언트` |
+| -------------------------------------	| -------------- | --------- | --------- | ----------------- |
+| **호출하는 클라이언트에 소유** | 호출하는 클라이언트에서 실행 | 호출하는 클라이언트에서 실행 | 서버에서 실행 | 호출하는 클라이언트에서 실행 |
+| **다른 클라이언트에 소유** | 호출하는 클라이언트에서 실행 | 호출하는 클라이언트에서 실행 | 드롭됨 | 호출하는 클라이언트에서 실행 |
+| **서버 소유 액터** | 호출하는 클라이언트에서 실행 | 호출하는 클라이언트에서 실행 | 드롭됨 | 호출하는 클라이언트에서 실행 |
+| **미소유 액터** | 호출하는 클라이언트에서 실행 | 호출하는 클라이언트에서 실행 | 드롭됨 | 호출하는 클라이언트에서 실행 |
+
+
+## 신뢰성
+
+기본적으로 RPC 는 비신뢰성입니다. RPC 호출이 원격 머신에서 확실히 실행되도록 하기 위해서는 `Reliable` 키워드를 붙이면 됩니다:
+
+	UFUNCTION( Client, Reliable )
+	void ClientRPCFunction();
+
+## 블루프린트
+
+RPC 로 마킹된 함수는 블루프린트에서 호출해도 리플리케이트됩니다. 이 경우 마치 C++ 에서 호출된 것과 같은 규칙을 따릅니다. 현재 블루프린트에서 동적으로 함수를 RPC 마킹하는 것은 
+가능하지 않습니다.
+
+하지만 Custom event 는 블루프린트 에디터 안에서 replicated 마킹 가능합니다.
+
+이 기능을 사용하기 위해서는, 이벤트 그래프에서 custom event 를 새로 만듭니다. custom event 에 클릭한 다음 디테일 뷰에서 Replication 세팅을 편집합니다:
+
+![](RPC_BP.png)
+
+## 인증
+
+최근, 악성 데이터/입력 감지를 위한 관문 역할을 위해 RPC 에 인증(validation) 함수를 추가하는 기능이 생겼습니다. 
+RPC 에 대한 인증 함수가 악성 파라미터를 감지한 경우, 해당 RPC 를 호출한 클라이언트/서버 연결을 끊도록 시스템에 알린다는 개념입니다.
+
+RPC 에 대해 인증 함수를 선언하려면, `UFUNCTION` 선언문에 `WithValidation` 키워드를 추가해 주기만 하면 됩니다:
+
+	UFUNCTION( Server, WithValidation )
+	void SomeRPCFunction( int32 AddHealth );
+
+그런 다음 Implementation 함수 옆 어딘가에 Validate 함수를 넣어주면 됩니다.
+
+	bool SomeRPCFunction_Validate( int32 AddHealth )
+	{
+		if ( AddHealth > MAX_ADD_HEALTH )
+		{
+			return false;                       // This will disconnect the caller
+		}
+		return true;                              // This will allow the RPC to be called
+	}
+
+	void SomeRPCFunction_Implementation( int32 AddHealth )
+	{
+		Health += AddHealth;
+	}
+
+좀 더 최근에, 클라이언트->서버 RPC 의 경우 _Validation 함수를 포함하도록 UHT 를 변경했습니다. 서버 RPC 함수의 안전성 확보를 위해, 알려진 모든 입력 제한에 대해 각각의 모든 파라미터의 유효성 검사를 위한 
+코드를 쉽게 추가할 수 있도록 하기 위한 것입니다.

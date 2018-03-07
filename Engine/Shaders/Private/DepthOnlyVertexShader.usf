@@ -1,0 +1,202 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	DepthOnlyVertexShader.hlsl: Depth-only vertex shader.
+=============================================================================*/
+
+#include "Common.ush"
+#include "/Engine/Generated/Material.ush"
+#include "/Engine/Generated/VertexFactory.ush"
+
+#if INSTANCED_STEREO
+bool bIsInstancedStereoEmulated;
+#endif
+
+#define IOSZBIASWORKAROUND (IOS && (ES2_PROFILE || ES3_1_PROFILE))
+
+struct FDepthOnlyVSToPS
+{
+	#if !MATERIALBLENDING_SOLID || OUTPUT_PIXEL_DEPTH_OFFSET
+		FVertexFactoryInterpolantsVSToPS FactoryInterpolants;
+		float4 PixelPosition : TEXCOORD6;
+	#endif
+
+	float4 Position : SV_POSITION;
+};
+
+#if USING_TESSELLATION	
+	struct FDepthOnlyVSToDS
+	{
+		FVertexFactoryInterpolantsVSToDS FactoryInterpolants;
+		float4 Position : VS_To_DS_Position;
+		OPTIONAL_VertexID_VS_To_DS
+	};
+	
+	#define FDepthOnlyVSOutput FDepthOnlyVSToDS
+	#define VertexFactoryGetInterpolants VertexFactoryGetInterpolantsVSToDS
+#else
+	#define FDepthOnlyVSOutput FDepthOnlyVSToPS
+	#define VertexFactoryGetInterpolants VertexFactoryGetInterpolantsVSToPS
+#endif
+
+#if USING_TESSELLATION	
+	#define FPassSpecificVSToDS FDepthOnlyVSToDS
+	#define FPassSpecificVSToPS FDepthOnlyVSToPS
+	
+	FDepthOnlyVSToDS PassInterpolate(FDepthOnlyVSToDS a, float aInterp, FDepthOnlyVSToDS b, float bInterp)
+	{
+		FDepthOnlyVSToDS O;
+		
+		O.FactoryInterpolants = VertexFactoryInterpolate(a.FactoryInterpolants, aInterp, b.FactoryInterpolants, bInterp);
+
+		return O;
+	}
+
+	FDepthOnlyVSToPS PassFinalizeTessellationOutput(FDepthOnlyVSToDS Interpolants, float4 WorldPosition, FMaterialTessellationParameters MaterialParameters)
+	{
+		FDepthOnlyVSToPS O;
+		
+		#if !MATERIALBLENDING_SOLID || OUTPUT_PIXEL_DEPTH_OFFSET
+			O.FactoryInterpolants = VertexFactoryAssignInterpolants(Interpolants.FactoryInterpolants);
+		#endif
+
+		// Finally, transform position to clip-space
+		ISOLATE
+		{
+			O.Position = mul(WorldPosition, ResolvedView.TranslatedWorldToClip);
+		}
+			
+		#if !MATERIALBLENDING_SOLID || OUTPUT_PIXEL_DEPTH_OFFSET
+			O.PixelPosition = WorldPosition;
+		#endif
+		
+		return O;
+	}
+	
+	#include "Tessellation.ush"
+#endif
+
+#if VERTEXSHADER
+
+void Main(
+	FVertexFactoryInput Input,
+	OPTIONAL_VertexID
+	out FDepthOnlyVSOutput Output
+#if USE_GLOBAL_CLIP_PLANE && !USING_TESSELLATION
+	, out float OutGlobalClipPlaneDistance : SV_ClipDistance
+#endif
+#if INSTANCED_STEREO
+	, uint InstanceId : SV_InstanceID
+	#if !MULTI_VIEW
+		, out float OutClipDistance : SV_ClipDistance1
+	#else
+		, out uint ViewportIndex : SV_ViewPortArrayIndex
+	#endif
+#endif
+	)
+{
+#if INSTANCED_STEREO
+	uint EyeIndex;
+	BRANCH
+	if (bIsInstancedStereoEmulated)
+	{
+		EyeIndex = View.StereoPassIndex;
+	}
+	else
+	{
+		EyeIndex = VertexFactoryGetEyeIndex(InstanceId);
+	}
+
+	ResolvedView = ResolveView(EyeIndex);
+	#if !MULTI_VIEW
+		OutClipDistance = 0.0;
+	#else
+		ViewportIndex = EyeIndex;
+	#endif
+#else
+	ResolvedView = ResolveView();
+#endif
+
+	FVertexFactoryIntermediates VFIntermediates = GetVertexFactoryIntermediates(Input);
+	float4 WorldPos = VertexFactoryGetWorldPosition(Input, VFIntermediates);
+
+	float3x3 TangentToLocal = VertexFactoryGetTangentToLocal(Input, VFIntermediates);
+	FMaterialVertexParameters VertexParameters = GetMaterialVertexParameters(Input, VFIntermediates, WorldPos.xyz, TangentToLocal);
+
+	// Isolate instructions used for world position offset
+	// As these cause the optimizer to generate different position calculating instructions in each pass, resulting in self-z-fighting.
+	// This is only necessary for shaders used in passes that have depth testing enabled.
+	ISOLATE
+	{
+		WorldPos.xyz += GetMaterialWorldPositionOffset(VertexParameters);
+	}
+
+#if USING_TESSELLATION
+	// Transformation is done in Domain shader when tessellating
+	Output.Position = WorldPos; 
+#else
+	ISOLATE
+	{
+		float4 RasterizedWorldPosition = VertexFactoryGetRasterizedWorldPosition(Input, VFIntermediates, WorldPos);
+		Output.Position = INVARIANT(mul(RasterizedWorldPosition, ResolvedView.TranslatedWorldToClip));
+	}
+
+	#if INSTANCED_STEREO && !MULTI_VIEW
+	BRANCH 
+	if (bIsInstancedStereo || bIsInstancedStereoEmulated)  
+	{
+		// Clip at the center of the screen
+		OutClipDistance = dot(Output.Position, EyeClipEdge[EyeIndex]);
+
+		// Scale to the width of a single eye viewport
+		Output.Position.x *= 0.5 * ResolvedView.HMDEyePaddingOffset;
+
+		// Shift to the eye viewport
+		Output.Position.x += (EyeOffsetScale[EyeIndex] * Output.Position.w) * (1.0f - 0.5 * ResolvedView.HMDEyePaddingOffset);
+	}
+
+	#elif IOSZBIASWORKAROUND
+		// Z bias is needed here for ios metal (UE-26765) and gles (UE-27530)
+		// the metal compiler we cannot guarantee the order of operations across different shaders.
+		// Use of a fused multiply add intrinsic in all shader code or as the first IR pass in hlslcc *might* solve this.
+		// In the meantime we add a small bias.
+		// This can be done here as the mobile renderer's only use of the depth only shader is for modulated shadows.
+		Output.Position.z += 0.0001 * Output.Position.w;
+	#elif XBOXONE_BIAS_HACK
+		// XB1 needs a bias in the opposite direction to fix FORT-40853
+		// XBOXONE_BIAS_HACK is defined only in a custom node in a particular material
+		// This should be removed with a future shader compiler update
+		Output.Position.z -= 0.0001 * Output.Position.w;
+	#endif
+
+#if USE_GLOBAL_CLIP_PLANE
+	OutGlobalClipPlaneDistance = dot(ResolvedView.GlobalClippingPlane, float4(WorldPos.xyz - ResolvedView.PreViewTranslation.xyz, 1));
+#endif
+#endif
+
+#if !MATERIALBLENDING_SOLID || USING_TESSELLATION || OUTPUT_PIXEL_DEPTH_OFFSET
+	// Masked and transparent materials need texture coords to clip, and tessellated
+	// materials need texture coords to displace
+	Output.FactoryInterpolants = VertexFactoryGetInterpolants(Input, VFIntermediates, VertexParameters);
+
+#if INSTANCED_STEREO
+	#if USING_TESSELLATION	
+		Output.FactoryInterpolants.InterpolantsVSToPS.PackedEyeIndex = PackEyeIndex(EyeIndex, bIsInstancedStereo);
+	#else
+		Output.FactoryInterpolants.PackedEyeIndex = PackEyeIndex(EyeIndex, bIsInstancedStereo);
+	#endif
+#endif
+
+#endif
+
+#if !MATERIALBLENDING_SOLID || OUTPUT_PIXEL_DEPTH_OFFSET
+	#if !USING_TESSELLATION	
+		Output.PixelPosition = WorldPos;
+	#endif
+
+#endif
+
+	OutputVertexID( Output );
+}
+
+#endif // VERTEXSHADER

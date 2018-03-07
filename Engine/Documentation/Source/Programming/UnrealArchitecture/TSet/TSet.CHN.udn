@@ -1,0 +1,254 @@
+﻿INTSourceChangeList:3125294
+Title:TSet
+Crumbs:
+Description:存储项目集合的容器类
+Availability:Public
+Version:4.12
+
+**TSet** 类似于 **TMap** 和 **TMultiMap**，但具有一个重要区别：TSet 不会以单独提供的键来关联元素，而是通过评估元素的可覆盖函数将元素本身作为键使用。TSets 添加、查找和移除元素非常快速（恒时）。默认情况下，TSets 不允许重复的键，但如果需要，也可以支持这一行为。
+
+## TSet
+
+TSets 是一种快速的容器类，（通常）可用于在顺序不相关的环境中存储独特元素。对于大多数情况，只需要一种参数——元素类型。然而 TSet 可以通过设置不同的模板参数来更改其行为，使其更全面。可指定一个基于 `DefaultKeyFuncs` 的派生结构体来提供散列功能，并可允许集合中的多个键拥有相同的值。最后，与其它容器类一样，可指定一个自定义元素分配器。
+
+和 TArray 一样，TSet 是同构容器，因此其所有元素完全为相同类型。TSet 也是值类型，支持常规复制、赋值和析构函数操作，以及其元素较强的所有权。集合被销毁时，其元素也将被销毁。键类型也必须是值类型。
+
+TSet 使用散列，即如果提供了 **KeyFuncs** 模板参数，该参数会告知集合如何从某个元素确定键，如何比较两个键是否相等，如何对键进行散列，以及是否运允许重复的键。它们默认只返回引用到键，使用 `operator==` 对比相等性，使用非成员 `GetTypeHash` 函数进行散列。如您的键类型支持这些函数，它将作为集合键使用，无需提供自定义 KeyFuncs。如需写入自定义 KeyFuncs，扩展 `DefaultKeyFuncs` 结构体。
+
+最后，TSet 还可通过任选分配器控制内存分配行为。标准 UE4 分配器（如 `FHeapAllocator`、`TInlineAllocator`）无法被用作 TSet 的分配器。应使用标准 UE4 分配器进行元素存储，而不使用定义集合使用散列桶数量的集分配器。欲知详情，请查阅 `TSetAllocator`。
+
+与 TArray 不同，内存中 TSet 元素的相对排序不可被依赖，元素上迭代返回的顺序可能与它们的添加顺序不同。元素在内存中不太可能被持续排列。集合的备份数据结构是稀疏阵列，带有洞。将元素从集合中移除时，稀疏阵列中的洞将会出现。这些洞会在将来添加元素后填充。然而，即使 TSet 不移动元素填充洞穴，指向集合元素的指针仍然可能被无效化，因为整体存储为满时添加新元素会重新对整体存储进行分配。
+
+## 创建并填充集合
+
+可如此创建 TSet：
+
+	TSet<FString> FruitSet;
+
+这会创建一个空白的 TSet，存储唯一的字符串。我们未指定 KeyFuncs 或分配器，因此集合会直接比较 FStrings，使用 GetTypeHash 对其散列，然后使用标准的堆分配。此时尚未分配内存。
+
+填入集合的标准方法是使用 **Add** 函数并提供一个键（元素）：
+
+	FruitSet.Add(TEXT("Banana"));
+	FruitSet.Add(TEXT("Grapefruit"));
+	FruitSet.Add(TEXT("Pineapple"));
+	// FruitSet == [ "Banana", "Grapefruit", "Pineapple" ]
+
+此处列出的元素按插入排序，但这些元素的排序不存在绝对保证。对于新集合而言，它们可能以插入排序。但集合受支配的插入和移除越多，新元素不出现在末端的可能性越大。
+
+由于我们使用了默认分配器，可以确保所有的键都是唯一的。如尝试添加复制键，会发生以下情况：
+
+	FruitSet.Add(TEXT("Pear"));
+	FruitSet.Add(TEXT("Banana"));
+	// FruitSet == [ "Banana", "Grapefruit", "Pineapple", "Pear" ]
+	// 注意：只有一次 banana 输入。
+
+该集合现在包含 4 个元素。“Pear”将计数从 3 升至 4，但新的“Banana”未更改集合中的元素数量，因为它替代了旧的“Banana”条目。
+
+和 TArray 一样，我们还可使用 **Emplace** 代替 Add，避免插入集合时创建出临时文件：
+
+	FruitSet.Emplace(TEXT("Orange"));
+	// FruitSet == [ "Banana", "Grapefruit", "Pineapple", "Pear", "Orange" ]
+
+在此，各参数被直接传到键类型的构建函数。这可以避免为该值创建临时 FString。和 TArray 不同，只可通过单一参数构建函数将元素安放到集合中。
+
+使用 Append 函数进行合并即可插入来自另一个集合的所有元素：
+
+	TSet<FString> FruitSet2;
+	FruitSet2.Emplace(TEXT("Kiwi"));
+	FruitSet2.Emplace(TEXT("Melon"));
+	FruitSet2.Emplace(TEXT("Mango"));
+	FruitSet2.Emplace(TEXT("Orange"));
+	FruitSet.Append(FruitSet2);
+	// FruitSet == [ "Banana", "Grapefruit", "Pineapple", "Pear", "Orange", "Kiwi", "Melon", "Mango" ]
+
+此处生成的集合和使用 Add/Emplace 进行单个添加相等，因此来自源映射的复制键会替代目标集合中的键。
+
+## 迭代
+
+TSet 的迭代与 TArray 相似。可使用 C++ 的设置范围功能：
+
+	for (auto& Elem :FruitSet)
+	{
+		FPlatformMisc::LocalPrint(
+			*FString::Printf(
+				TEXT(" \"%s\"\n"),
+				*Elem
+			）
+		);
+	}
+	// Output:
+	// 	"Banana"
+	// 	"Grapefruit"
+	// 	"Pineapple"
+	// 	"Pear"
+	// 	"Orange"
+	// 	"Kiwi"
+	// 	"Melon"
+	// 	"Mango"
+
+集合还提供其自身的迭代器类型，以便对迭代进行更直接的控制。**CreateIterator** 函数提供对元素的读写访问，**CreateConstIterator** 函数提供只读访问。迭代器对象自身的元素类型被指定为 TSet 声明中的首个模板参数。
+
+## 查询
+
+使用 **Num** 函数可询问集合保存的元素数量：
+
+	int32 Count = FruitSet.Num();
+	// Count == 8
+
+我们可以使用 `FSetElementId` 结构体来查找集合中的某个键的索引。这可以让我们通过索引**运算符[]**来查看该元素。在非常量集合上调用运算符 [] 将返回非常量引用，而在常量集合上调用将返回常量引用。
+
+	FSetElementId BananaIndex = FruitSet.Index(TEXT("Banana"));
+	// BananaIndex is a value between 0 and (FruitSet.Num() - 1)
+	FPlatformMisc::LocalPrint(
+		*FString::Printf(
+			TEXT(" \"%s\"\n"),
+			*FruitSet[BananaIndex]
+		）
+	);
+	// Prints "Banana"
+	
+	FSetElementId LemonIndex = FruitSet.Index(TEXT("Lemon"));
+	// LemonIndex is INDEX_NONE (-1)
+	FPlatformMisc::LocalPrint(
+		*FString::Printf(
+			TEXT(" \"%s\"\n"),
+			*FruitSet[LemonIndex]
+		）
+	); // assert
+
+可使用 **Contains** 函数进行检查，确定特定键是否存在于集合中：
+
+	bool bHasBanana = FruitSet.Contains(TEXT("Banana"));
+	bool bHasLemon = FruitSet.Contains(TEXT("Lemon"));
+	// bHasBanana == true
+	// bHasLemon == false
+
+多数情况下，查找元素时都并不知道键是否存在或集合是否真正包含该元素。使用后面带操作符 [] 的 Contains 函数将进行键的双重查找，最好不要进行此操作。使用 **Find** 函数可进行单一查找，返回指向找到元素数值的指针，而非引用；键不存在时，将返回 null。
+
+	FString* PtrBanana = FruitSet.Find(TEXT("Banana"));
+	FString* PtrLemon = FruitSet.Find(TEXT("Lemon"));
+	// *PtrBanana == "Banana"
+	//  PtrLemon == nullptr
+
+如在常量集合上调用，返回的指针也将为常量。
+
+**Array** 函数会返回一个 TArray，其中填充了 TSet 中的所有元素的一份副本。被传递的阵列在填入前会被清空，因此元素的生成数量将始终等于集合中的元素数量：
+
+	TArray<FString> FruitArray = FruitSet.Array();
+	// FruitArray == [ "Banana","Grapefruit","Pineapple","Pear","Orange","Kiwi","Melon","Mango" ] （排序可能不同）
+
+## 移除
+
+可以通过 **RemoveAt** 函数来按索引移除元素，仅建议在通过元素迭代时使用：
+
+	FruitSet.Remove(0);
+	// FruitSet == [ "Grapefruit","Pineapple","Pear","Orange","Kiwi","Melon","Mango" ]
+
+移除元素将在数据结构（在 Visual Studio 的观察窗口中可视化集合时可看到）中留下洞，但为保证清晰性，此处将忽略洞。如果 TSet 支持重复的键，**Remove** 将移除匹配输入参数的所有键。Remove 函数会返回移除的元素的数量，如果提供的键未包含在集合中，则会返回 0。
+
+	int32 RemovedAmountPineapple = FruitSet.Remove(TEXT("Pineapple"));
+	// RemovedAmountPineapple == 1
+	// FruitSet == [ "Grapefruit","Pear","Orange","Kiwi","Melon","Mango" ]
+	FString RemovedAmountLemon = FruitSet.Remove(TEXT("Lemon"));
+	// RemovedAmountLemon == 0
+
+最后，使用 **Empty** 或 **Reset** 函数可将所有元素移除：
+
+	TSet<FString> FruitSetCopy = FruitSet;
+	// FruitSetCopy == [ "Grapefruit","Pear","Orange","Kiwi","Melon","Mango" ]
+	
+	FruitSetCopy.Empty();
+	// FruitSetCopy == []
+
+与 TArray 中的一样，Empty 会使用一个可选的 slack 值（默认值为零），以用于在清空集合后调整内部存储阵列的大小。该值被用作阵列的新最大尺寸。如果阵列当前的最大尺寸与 slack 参数相同，则不会发生重新分配。
+
+## 排序
+
+TSets 可通过 **Sort** 函数临时排序。集合上的下次迭代将以排序顺序展示元素，之后对集合进行的修改可能导致集合重新排序。排序并不稳定，因此相等元素（允许重复键的 TSet 中）可能以各种排列方式出现。
+
+Sort 函数使用指定排序顺序的二进制谓词：
+
+	FruitSet.Sort([](const FString& A, const FString& B) {
+		return A > B; // sort by reverse-alphabetical order
+	});
+	// FruitSet == [ "Pear", "Orange", "Melon", "Mango", "Kiwi", "Grapefruit" ] (order is temporarily guaranteed)
+	
+	FruitSet.Sort([](const FString& A, const FString& B) {
+		return A.Len() < B.Len(); // sort strings by length, shortest to longest
+	});
+	// FruitSet == [ "Pear", "Kiwi", "Melon", "Mango", "Orange", "Grapefruit" ] (order is temporarily guaranteed)
+	
+## 运算符
+
+和 TArray 一样，TSet 是常规值类型，可通过标准复制构建函数或赋值运算符进行复制。因集合严格拥有其元素，集合复制为深，因此新集合将拥有其自身的元素副本：
+
+	TSet<int32, FString> NewSet = FruitSet;
+	NewSet.Add(TEXT("Apple"));
+	NewSet.Remove(TEXT("Pear"));
+	// FruitSet == [ "Pear", "Kiwi", "Melon", "Mango", "Orange", "Grapefruit" ]
+	// NewSet == [ "Kiwi", "Melon", "Mango", "Orange", "Grapefruit", "Apple" ]
+
+
+## Slack
+
+TSet 拥有 **slack** 的概念，可用于优化集合的填入。**Reset** 与 Empty() 调用作用相似，但不会释放元素之前使用的内存。
+
+	FruitSet.Reset();
+	// FruitSet == [ <invalid>, <invalid>, <invalid>, <invalid>, <invalid>, <invalid> ]
+
+此处集合按照 Empty 相同的方式进行清空，但用于储存的内存不会被释放，仍为 slack。如果 slack 值大于阵列当前指定的最大尺寸，会重新分配内存以增大阵列的容量，使其达到该 slack 值。
+
+TSet 不会像 TArray::Max() 一样提供检查预分配元素的数量，但仍然支持预分配 slack。Reserve 函数可用于在添加之前预分配特定数量元素的 slack。
+
+	FruitSet.Reserve(10);
+	for (int32 i = 0; i < 10; ++i)
+	{
+		FruitSet.Add(FString::Printf(TEXT("Fruit%d"), i));
+	}
+	// FruitSet == [ "Fruit9", "Fruit8", "Fruit7" ... "Fruit2", "Fruit1", "Fruit0" ]
+
+注意：Slack 会导致新元素以倒序被添加。这是为什么不可信赖集合中元素排序的原因。
+
+**Shrink** 函数和 TArray 中相等函数的相同之处是 - 它将从容器末端移除被废弃的 slack。然而，因为 TSet 允许其数据结构中存在洞，这只会从遗留在结构末端的洞上移除 slack。
+
+	// 从集合移除所有其它元素
+	for (int32 i = 0; i < 10; i += 2)
+	{
+		FruitSet.Remove(FSetElementId::FromInteger(i));
+	}
+	// FruitSet == ["Fruit8", <invalid>, "Fruit6", <invalid>, "Fruit4", <invalid>, "Fruit2", <invalid>, "Fruit0", <invalid> ]
+
+	FruitSet.Shrink();
+	// FruitSet == ["Fruit8", <invalid>, "Fruit6", <invalid>, "Fruit4", <invalid>, "Fruit2", <invalid>, "Fruit0" ]
+
+注意：只有一个无效元素已被 Shrink 调用移除，因为末端只有一个洞。**Compact** 函数可用于在缩小前移除所有洞。如果保持排序很重要，可使用 **CompactStable** 函数，但请记住其它许多 TSet 运算并不会保证排序的稳定性：
+
+	FruitSet.CompactStable();
+	// FruitSet == ["Fruit8", "Fruit6", "Fruit4", "Fruit2", "Fruit0", <invalid>, <invalid>, <invalid>, <invalid> ]
+	FruitSet.Shrink();
+	// FruitSet == ["Fruit8", "Fruit6", "Fruit4", "Fruit2", "Fruit0" ]
+
+## DefaultKeyFuncs
+
+只要某个类型具有运算符 == 和一个非成员 GetTypeHash 重载，则它就能在不作任何变更的情况下用于 TSet，因为此类型既是元素又是键。然而，不便于重载这些函数时可将类型作为键使用。在这些情况下，您可提供自定义的 **DefaultKeyFuncs**。
+
+KeyFuncs 需要 2 个 typedefs 和 3 个静态函数的定义：
+
+* **KeyInitType** - 用于传递键。通常抽取自 ElementType 模板参数。
+* **ElementInitType** - 用于传递元素。也统称抽取自 ElementType 模板参数，因此与 KeyInitType 相同。
+* **KeyInitType GetSetKey(ElementInitType Element)** - 返回某个元素的键，通常是元素自身。
+* **bool Matches(KeyInitType A, KeyInitType B)** - 返回 A 和 B 是否相等。
+* **uint32 GetKeyHash(KeyInitType Key)** - 返回键的散列值，通常通过调用外部 GetTypeHash 函数实现。
+
+KeyInitType/ElementInitType 是键/元素类型普通传递惯例的 typedefs。它们通常为浅显类型的一个值和非浅显类型的一个常量引用。请记住，集合的元素类型也是件类型，因此 DefaultKeyFuncs 仅使用一种模板参数 ElementType 来定义两者。
+
+提供自己的 DefaultKeyFuncs 时需注意：TSet 假定对比相等的两个项目使用 DefaultKeyFuncs::Matches 从 KeyFuncs::GetKeyHash 返回相同的值。此外，如修改现有元素的键时会改变任意一个这些函数的结果，则会被理解为未定义行为，因为这会无效化 TSet 的内部散列。使用 DefaultKeyFuncs 的默认实现时，这些规则还会应用到运算符 == 和 GetKeyHash 的重载。
+
+## 杂项
+
+**CountBytes** 和 **GetAllocatedSize** 函数用于估计内部阵列当前应用的内存量。CountBytes 接受 FArchive，GetAllocatedSize 可被直接调用。它们常用于统计报告。
+
+**Dump** 函数接受 FOutputDevice 并写出关于集合内容的部分实现信息。另有一个 **DumpHashElements** 函数，其中将列出来自所有散列条目的所有元素。这些通常用于调试。
+
+TSets 可通过 UPROPERTY 来标记，以用于自动序列化、垃圾回收、.ini 文件设置，以及通过 Details 面板编辑，或作为 Blueprint 的默认值。当前，对集合的在线编辑仅限于将集合视作值的列表。例如，int32 的 TSet 可能会呈 **(1,2,3)** 状，而 FName 的  TSet 则可能呈 **("One","Two","Three")** 状。类似于 TMap，TSet 属性当前不能用作复制成员，而且无法被 Blueprint 访问。

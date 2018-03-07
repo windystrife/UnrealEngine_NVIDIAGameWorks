@@ -1,0 +1,99 @@
+//-----------------------------------------------------------------------------
+// File:		LPVClear.usf
+//
+// Summary:		Shader to clear an LPV volume
+//
+// Created:		2013-03-01
+//
+// Author:		mailto:benwood@microsoft.com
+//
+//				Copyright (C) Microsoft. All rights reserved.
+//-----------------------------------------------------------------------------
+
+/*------------------------------------------------------------------------------
+	Compile time parameters:
+------------------------------------------------------------------------------*/
+
+#include "Common.ush"
+#include "LPVWriteCommon.ush" 
+#include "LPVGeometryVolumeCommon.ush"
+
+//------------------------------------------------------------------------------
+
+#define CLEAR_EDGES 0
+
+//------------------------------------------------------------------------------
+
+[numthreads(4,4,4)]
+void CSClear(uint3 DTid : SV_DispatchThreadID) 
+{
+	uint i = GetGridAddress( DTid );
+
+#if REFINE_OVER_TIME
+	int3 idx = DTid;
+	int3 scrollVec = int3(LpvWrite.mOldGridOffset) - int3(LpvWrite.mLpvGridOffset);
+	idx += scrollVec;
+
+
+	float maxExtent = MaxGridExtent( (float3)idx );
+	float mul = PREV_FRAME_MULTIPLIER;
+
+	idx = clamp( idx, int3(0,0,0), int3(31,31,31) );
+	int sourceCell = GetGridAddress( idx );
+
+	LPVCell cell = ReadLpvCell( sourceCell );
+
+	mul *= LpvWrite.ClearMultiplier;
+
+	// corruption detection (workaround for brightlodge lighting corruption)
+	{
+		if ( isnan( cell.AO ) || isinf( cell.AO ) )
+		{
+			mul = 0.0f;
+		}
+		[unroll]
+		for ( int i=0; i<9; i++ )
+		{
+			float df = dot( cell.coeffs[i], float3(1.0f,1.0f,1.0f) );
+			if ( isnan( df ) || isinf( df ) )
+			{
+				mul = 0.0f;
+			}
+		}
+	}
+
+	////@TODO: add a separate shader for this
+	[branch]
+	if ( mul == 0.0f ) // This is needed in order to fix QNANs 
+	{
+		ClearCell( cell ); 
+	}
+	else
+	{
+		MultiplyCellCoeffs( cell, mul );
+	}
+#if CLEAR_EDGES
+	if ( maxExtent > 13.5 && false )
+	{
+		ClearCell( cell );
+		cell.AO = 0.5;
+	}
+#endif
+
+	WriteLpvCell( cell, i );
+
+#else // !REFINE_OVER_TIME
+	LPVCell cell;
+	ClearCell( cell ); 
+	WriteLpvCell( cell, i );
+#endif
+}
+
+//------------------------------------------------------------------------------
+
+[numthreads(4,4,4)]
+void CSClearGeometryVolume(uint3 DTid : SV_DispatchThreadID) 
+{
+	uint i = GetGridAddress( DTid );
+	ClearGvCell( i );
+}

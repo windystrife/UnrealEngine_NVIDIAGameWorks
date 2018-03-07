@@ -1,0 +1,78 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	ClearReplacement.usf: Collection of Shaders for alternative ways to clear a texture/buffer.
+=============================================================================*/
+
+#include "Common.ush"
+
+#ifndef Type
+#define Type float4
+#endif
+
+Type ClearColor;
+
+float4 ClearVS(uint Id : SV_VertexID) : SV_POSITION
+{
+	int x = Id &  1;
+	int y = Id >> 1;
+
+	return float4(x * 2 - 1, y * 2 - 1, 0, 1);
+}
+
+
+float4 ClearPS() : SV_Target0
+{
+	return ClearColor;
+}
+
+#if FEATURE_LEVEL >= FEATURE_LEVEL_SM5
+RWTexture2D<Type> ClearTextureRW;
+uint4 TargetBounds; //xy upperleft, zw lowerright
+
+[numthreads(8,8,1)]
+void ClearTexture2DCS(uint2 Position : SV_DispatchThreadID)
+{
+	ClearTextureRW[Position] = ClearColor;
+}
+
+//clear with emulated scissor rects.
+[numthreads(8, 8, 1)]
+void ClearTexture2DScissorCS(uint2 Position : SV_DispatchThreadID)
+{
+	uint2 FinalPos = Position + TargetBounds.xy;
+	if (all(FinalPos < TargetBounds.zw))
+	{
+		ClearTextureRW[FinalPos] = ClearColor;
+	}
+}
+
+
+// x: clear value, y: number of uint's to clear, z: unused, w: unused
+uint4 ClearBufferCSParams;
+RWBuffer<uint> ClearBufferRW;
+
+[numthreads(64,1,1)]
+void ClearBufferCS(uint Position : SV_DispatchThreadID)
+{
+    if (Position < ClearBufferCSParams.y)
+    {
+        ClearBufferRW[Position] = ClearBufferCSParams.x;
+    }
+}
+
+RWTexture2DArray<Type> ClearTextureArrayRW;
+[numthreads(8, 8, 1)]
+void ClearTexture2DArrayCS(uint3 Position : SV_DispatchThreadID)
+{
+	ClearTextureArrayRW[Position] = ClearColor;
+}
+
+RWTexture3D<Type> ClearVolumeRW;
+[numthreads(4, 4, 4)]
+void ClearVolumeCS(uint3 Position : SV_DispatchThreadID)
+{
+	ClearVolumeRW[Position] = ClearColor;
+}
+
+#endif

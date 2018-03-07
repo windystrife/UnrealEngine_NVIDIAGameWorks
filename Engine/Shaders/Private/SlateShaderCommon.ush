@@ -1,0 +1,131 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+#if USE_MATERIALS
+#include "/Engine/Generated/Material.ush"
+
+	#if NUM_MATERIAL_TEXCOORDS
+		#define NUM_SLATE_TEXCOORDS NUM_MATERIAL_TEXCOORDS
+	#else
+		#define NUM_SLATE_TEXCOORDS 1
+	#endif // NUM_MATERIAL_TEXCOORDS
+
+	#define HAS_MATERIAL_TEXCOORDS NUM_MATERIAL_TEXCOORDS > 0
+#else
+	#define HAS_MATERIAL_TEXCOORDS 0
+	// This is defined automatically based on the number of textures in a material
+	// In the case that this is a basic texture lookup shader, we only need 1 uv set
+	#define NUM_SLATE_TEXCOORDS 1
+#endif
+
+// On mobile renderers we don't convert textures into linear space when slate is rendering.
+// since the final output is a gamma space render target.
+// Metal iOS, Android OpenGL ES 3.1 and Vulkan support sampling from sRGB textures
+#define SOURCE_IN_LINEAR_SPACE  USE_MATERIALS || (FEATURE_LEVEL != FEATURE_LEVEL_ES2) // ES2 does blending in sRGB space
+
+
+/** Shader types (mirrored from ESlateShader::Type in RenderingCommon.h */
+#define ST_Default		0
+#define ST_Border		1
+#define ST_Font			2
+#define ST_LineSegment	3
+#define ST_Custom		4
+
+/** Color Vision Deficiency Types (mirrored in EditorUserSettings.h) */
+#define CVD_NormalVision	0
+#define CVD_Deuteranomly	1
+#define CVD_Deuteranopia	2
+#define CVD_Protanomly		3
+#define CVD_Protanopia		4
+#define CVD_Tritanomaly		5
+#define CVD_Tritanopia		6
+#define CVD_Achromatopsia	7
+
+struct VertexToPixelInterpolants
+{
+	float4 Position : SV_POSITION;
+	half4 Color : COLOR0;
+	float4 OriginalPosition : ORIGINAL_POSITION;
+	float2 MaterialTexCoords : TEXCOORD0;
+	float4 TextureCoordinates[NUM_SLATE_TEXCOORDS] : TEXCOORD1;
+};
+
+float2 GetUV(VertexToPixelInterpolants Interpolants, uint UVIndex)
+{
+	float4 UVVector = Interpolants.TextureCoordinates[UVIndex / 2];
+	return Mod(UVIndex, 2) ? UVVector.zw : UVVector.xy;
+}
+
+half4 ApplyColorVisionDeficiencyFilter(half4 Color)
+{
+	half4 OutColor = Color;
+#if COLOR_VISION_DEFICIENCY_TYPE == CVD_Deuteranomly
+	OutColor.rgb = half3(
+		OutColor.r * 0.80000 + OutColor.g * 0.20000 + OutColor.b * 0.0,
+		OutColor.r * 0.25833 + OutColor.g * 0.74167 + OutColor.b * 0.0,
+		OutColor.r * 0.0     + OutColor.g * 0.14167 + OutColor.b * 0.85833);
+#elif COLOR_VISION_DEFICIENCY_TYPE == CVD_Deuteranopia
+	OutColor.rgb = half3(
+		OutColor.r * 0.625 + OutColor.g * 0.375 + OutColor.b * 0.0,
+		OutColor.r * 0.700 + OutColor.g * 0.300 + OutColor.b * 0.0,
+		OutColor.r * 0.0   + OutColor.g * 0.300 + OutColor.b * 0.700);
+#elif COLOR_VISION_DEFICIENCY_TYPE == CVD_Protanomly
+	OutColor.rgb = half3(
+		OutColor.r * 0.81667 + OutColor.g * 0.18333 + OutColor.b * 0.0,
+		OutColor.r * 0.33333 + OutColor.g * 0.66667 + OutColor.b * 0.0,
+		OutColor.r * 0.0     + OutColor.g * 0.12500 + OutColor.b * 0.87500);
+#elif COLOR_VISION_DEFICIENCY_TYPE == CVD_Protanopia
+	OutColor.rgb = half3(
+		OutColor.r * 0.56667 + OutColor.g * 0.43333 + OutColor.b * 0.0,
+		OutColor.r * 0.55833 + OutColor.g * 0.44167 + OutColor.b * 0.0,
+		OutColor.r * 0.0     + OutColor.g * 0.24167 + OutColor.b * 0.75833);
+#elif COLOR_VISION_DEFICIENCY_TYPE == CVD_Tritanomaly
+	OutColor.rgb = half3(
+		OutColor.r * 0.96667 + OutColor.g * 0.03333 + OutColor.b * 0.0,
+		OutColor.r * 0.0     + OutColor.g * 0.73333 + OutColor.b * 0.26667,
+		OutColor.r * 0.0     + OutColor.g * 0.18333 + OutColor.b * 0.81667);
+#elif COLOR_VISION_DEFICIENCY_TYPE == CVD_Tritanopia
+	OutColor.rgb = half3(
+		OutColor.r * 0.950 + OutColor.g * 0.050 + OutColor.b * 0.0,
+		OutColor.r * 0.0   + OutColor.g * 0.433 + OutColor.b * 0.567,
+		OutColor.r * 0.0   + OutColor.g * 0.475 + OutColor.b * 0.525);
+#elif COLOR_VISION_DEFICIENCY_TYPE == CVD_Achromatopsia
+	OutColor.rgb = half3(
+		OutColor.r * 0.299 + OutColor.g * 0.587 + OutColor.b * 0.114,
+		OutColor.r * 0.299 + OutColor.g * 0.587 + OutColor.b * 0.114,
+		OutColor.r * 0.299 + OutColor.g * 0.587 + OutColor.b * 0.114);
+#endif
+	return OutColor;
+}
+
+float cross(float2 a, float2 b)
+{
+	return a.x*b.y - a.y*b.x;
+}
+
+/**
+ * Given a point p and a parallelogram defined by point a and vectors b and c, determines in p is inside the parallelogram. 
+ * returns a 4-vector that can be used with the clip instruction.
+ */
+float4 PointInParallelogram(float2 p, float2 a, float4 bc)
+{
+	// unoptomized form:
+	//float2 o = p - a;
+	//float2 b = bc.xy;
+	//float2 c = bc.zw;
+	//float d = cross(b, c);
+	//float s = -cross(o, b) / d;
+	//float t = cross(o, c) / d;
+	// test for s and t between 0 and 1
+	//return float4(s, 1 - s, t, 1 - t);
+
+	float2 o = p - a;
+	// precompute 1/d
+	float invD = 1/cross(bc.xy, bc.zw);
+	// Compute an optimized o x b and o x c, leveraging that b and c are in the same vector register already (and free swizzles):
+	//   (o.x * b .y  - o.y * b .x, o.x *  c.y - o.y *  c.x) ==
+	//   (o.x * bc.y  - o.y * bc.x, o.x * bc.w - o.y * bc.z) ==
+	//    o.x * bc.yw - o.y * bc.xz
+	float2 st = (o.x * bc.yw - o.y * bc.xz) * float2(-invD, invD);
+	// test for s and t between 0 and 1
+	return float4(st, float2(1,1) - st);
+}

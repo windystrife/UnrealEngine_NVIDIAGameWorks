@@ -1,0 +1,154 @@
+﻿INTSourceChangelist:3606403
+Availability:Public
+Title: 데이터 주도형 게임플레이 요소
+Crumbs:%ROOT%
+Description:외부 저장 데이터를 사용하여 게임플레이 요소를 구동시키는 법입니다.
+version: 4.9
+type:reference
+tags:Gameplay
+
+[toc(start:2 end:2)]
+
+데이터 주도형 게임플레이는 전형적인 패키지 게임보다 훨씬 수명이 긴 게임이나, 
+플레이어 피드백에 따라 데이터의 지속적인 트윅 및 밸런싱 작업이 필요한 게임에 관련된 
+작업량과 복잡도 감소에 도움이 될 뿐만 아니라, 데이터 생성과 흐름을 시각화 및 파라미터화시켜 
+볼 수도 있습니다. 데이터를 **엑셀** 문서로 내보낼 수 있는 기능을 통해 검증된 툴을 사용하여 
+데이터를 관리하다가 임포트하여 게임에 자동으로 적용되도록 할 수도 있습니다.
+
+엑셀 문서를 통해 UE4 로 데이터를 임포트하는 방식은 두 가지가 새로 생겼습니다:
+
+* 데이터 테이블 (DataTable)
+* 커브 테이블 (CurveTable)
+
+
+이 엑셀 문서는 .xlsm (매크로가 켜진 **엑셀** 문서)로, 여기에는 매크로 기반 익스포트 버튼이 있어 
+손쉽게 중간 데이터 포맷 .csv (comma separated variables, 쉼표 구분 변수) 파일로 익스포트 가능합니다.
+이 엑셀 문서들은 모두 한 곳에 위치해 있어, 데이터를 찾아 수정하기가 쉽습니다.
+
+* [](Example.xlsm) (우클릭 - 다른 이름으로 저장으로 다운로드합니다.)
+
+
+## 데이터 테이블
+
+데이터 테이블은 이름 그대로 자질구레하지만 의미가 있으면서 유용한 방식으로 짝지어진 관련 데이터로 된 
+표를 말하며, 데이터 필드는 애셋 레퍼런스를 포함한 유효 UObject 프로퍼티가 될 수 있습니다. 
+프로그래머가 먼저 행 컨테이너를 만들어 엔진에 데이터 해석 방식을 알려줘야 디자이너가 CSV 파일을 데이터 테이블로 
+임포트할 수 있습니다. 이 테이블은 주어진 코드 기반 UStruct 와 그 변수에 1:1 매핑되는 열 이름으로 구성되며,
+임포터의 인식을 위해서는 FTableRowBase 를 상속해야 합니다. 
+
+첫 열의 이름은 Name 으로 게임내에서 각 행에 접근하는 데 사용되는 이름이 들어갈 것으로 기대합니다. 다음 열에는 
+제목에 대한 변수 이름과, 같은 열의 아래에는 해당 행/열 교차 부분의 데이터가 있습니다.
+이러한 포맷으로 한 행은 FTableRowBase 에서 상속된 구조체에 바로 1:1 매핑됩니다.
+
+### 예제
+
+여기서 예로 들 것은, 주어진 표면 유형에 따라 적용되는 대미지 양을 구동시키는 대미지 비율 정의와, 그 데이터를 게임에 제공해 주는 엑셀 문서입니다:
+
+	/** 레벨 업 표 항목을 정의하는 구조체 */
+	USTRUCT(BlueprintType)
+	struct FLevelUpData : public FTableRowBase
+	{
+		GENERATED_USTRUCT_BODY()
+
+	public:
+
+		FLevelUpData()
+		: XPtoLvl(0)
+		, AdditionalHP(0)
+		{}
+
+		/** 'Name' 열은 XP Level 과 같습니다. */
+
+		/** 예전 레벨에서 해당 레벨로 가기 위해 필요한 XP 입니다. */
+		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=LevelUp)
+		int32 XPtoLvl;
+
+		/** 이 레벨에서 얻은 추가 HP 입니다. */
+		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=LevelUp)
+		int32 AdditionalHP;
+
+		/** 업적에 사용할 아이콘입니다. */
+		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=LevelUp)
+		TSoftObjectPtr<UTexture> AchievementIcon;
+	};
+
+
+**CSV 문서:**
+
+	Name,XPtoLvl,AdditionalHP,AchievementIcon
+	1,0,0,"Texture2d'/Game/Textures/AchievementIcon1'"
+	2,1000,9,"Texture2d'/Game/Textures/AchievementIcon2'"
+	3,1000,10,"Texture2D'/Game/Textures/AchievementIcon3'"
+	4,1500,12,"Texture2D'/Game/Textures/AchievementIcon4'"
+	5,2000,14,"Texture2D'/Game/Textures/AchievementIcon5'"
+
+[REGION:tip]
+애셋 유형을 둘러싼 따옴표는 프로퍼티 임포트 파이프라인에 중요합니다. 없으면 텍스트는 Texture2d' 로 임포트될 것입니다.
+[/REGION]
+
+## 데이터 커브
+
+데이터 커브는 데이터 테이블과 작동 방식은 비슷하지만, 부동 소수점 유형만 지원합니다.
+데이터 테이블과 마찬가지로, 첫 열에는 제목이 없으며, 게임내에서 각 열에 접근하는 데 
+사용되는 이름이 들어갑니다. 첫째 이후 각 열 제목에는 그릴 커브의 X 축 변수를 저장합니다.
+이 제목 아래의 데이터는 주어진 행에 대한 Y 축 값입니다. 
+이러한 포맷으로 한 행은 코드가 접근하여 데이터를 보간해 낼 수 있는 커브에 해당합니다.
+
+### 예제
+
+대미지 진행을 나타내는 표 예제입니다:
+
+[REGION:simpletable]
+|                      | 0   | 1   | 2   | 3   |
+| -------------------- | --- | --- | --- | --- |
+| Melee_Damage         | 15  | 20  | 25  | 30  |
+| Melee_KnockBack      | 1   | 2   | 4   | 8   |
+| Melee_KnockBackAngle | 10  | 45  | 60  | 65  |
+| Melee_StunTime       | 0   | 1   | 5   | 7   |
+[/REGION]
+
+## 임포트 프로세스
+
+엑셀 문서 임포트 프로세스는 간단합니다:
+
+1.	엑셀 등의 스프레드시트 소프트웨어에서 파일에 .csv 확장자를 붙여 저장합니다.
+2.	언리얼 에디터를 열고 콘텐츠 브라우저에서 **임포트** 를 클릭합니다.
+3.	데이터 테이블로 임포트하고자 하는 CSV 파일을 찾아 선택합니다.
+4. 마지막으로, 드롭다운 목록에서 행 표현을 찾습니다. 이 경우 LevelUpData 입니다. 
+
+	![](levelupdata_options.png)
+
+	그러면 **콘텐츠 브라우저** 현재 디렉토리에 '데이터 테이블' 오브젝트가 생성됩니다.
+
+	![](datatableobject.png)
+
+	오브젝트에 더블클릭하면 데이터 테이블 내용을 에디터에서 볼 수 있습니다. 오브젝트에 우클릭한 다음 메뉴에서 **리임포트** 를 선택하여 오브젝트를 업데이트할 수도 있습니다.
+	참고로 오브젝트 리임포트시 원본 파일 경로가 사용됩니다. 임포트 직후 데이터를 본 모습은 이렇습니다:
+	
+	![](datatableview.jpg)
+
+## 데이터 연결
+
+이 테이블에서의 데이터를 걸어주는 것은 꽤나 쉽습니다. 프로그래머의 관점에서 볼때 해줘야 하는 작업이라곤 
+원하는 것이 데이터 테이블이냐 커브 테이블이냐에 따라 각각 블루프린트 노출 변수 FDataTableRowHandle 나 
+FCurveTableRowHandle 를 놓는 것입니다. 콘텐츠 제공자의 관점에서 보면 이는 하위항목이 두개인 
+데이터 필드를 노출시킵니다:
+
+1.	DataTable/CurveTable - 데이터를 담는 표에 대한 콘텐츠 레퍼런스입니다.
+2.	RowName - 데이터를 구하고자 하는 행의 첫 열 이름입니다.
+
+
+## 데이터 사용법 (프로그래머 전용)
+
+데이터를 연결해 주고 나면 데이터 사용은 꽤나 간단합니다. 핸들 구조체는 헬퍼 함수를 제공하는데 
+(FindRow() 와 GetCurve()) 이를 통해 데이터로 채워진 구조체 또는 커브를 구할 수 있습니다.
+FCurveTableRowHandle 의 경우 FRichCurve 포인터가 반환됩니다. 그러나 FDataTableRowHandle 는 
+템플릿 함수 호출에 구조체를 지정할 수 있습니다. 이 구조체는 최종 구조체가 될 수도, 상속 계층구조의 
+**부모 중 어느 것** 이 될 수도 있습니다.
+
+마지막으로 반환되는 모든 구조체와 커브는 함수의 로컬 영역 너머까지 캐시해서는 안됩니다.
+이는 표를 다시 임포트하여 새로고칠 수 있도록, 데이터 변경 내용이 즉시 효과를 발휘하도록, 
+인식 불가능한 포인터 접근이 없도록 하기 위함입니다.
+
+위 데이터 테이블 예제에서, 레퍼런싱된 애셋은 lazy 로드된 애셋입니다 (TSoftObjectPtr 에서 처리합니다).
+애셋 필드 유형이 UTexture 로 설정된 경우, 데이터 테이블이 로드될 때마다 모든 애셋이 로드될 것입니다.

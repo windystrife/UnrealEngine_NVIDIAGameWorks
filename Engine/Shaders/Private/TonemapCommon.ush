@@ -1,0 +1,375 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	TonemapCommon.usf: PostProcessing tone mapping common
+=============================================================================*/
+
+#include "ACES.ush"
+#include "GammaCorrectionCommon.ush"
+
+// usually 1/2.2, the .y is used for inverse gamma when "gamma only" mode is not used
+half3 InverseGamma;
+
+// Film tonal and color control.
+half4 ColorMatrixR_ColorCurveCd1;
+half4 ColorMatrixG_ColorCurveCd3Cm3;
+half4 ColorMatrixB_ColorCurveCm2;
+half4 ColorCurve_Cm0Cd0_Cd2_Ch0Cm1_Ch3;
+half4 ColorCurve_Ch1_Ch2;
+half4 ColorShadow_Luma;
+half4 ColorShadow_Tint1;
+half4 ColorShadow_Tint2;
+
+half3 FilmPostProcess(half3 LinearColor) 
+{
+	// Color and exposure control.
+	half3 MatrixColor;
+	#if USE_COLOR_MATRIX == 1
+		// Apply color matrix (channel mixer, exposure, saturation).
+		MatrixColor.r = dot(LinearColor, ColorMatrixR_ColorCurveCd1.rgb);
+		MatrixColor.g = dot(LinearColor, ColorMatrixG_ColorCurveCd3Cm3.rgb);
+		MatrixColor.b = dot(LinearColor, ColorMatrixB_ColorCurveCm2.rgb);
+		#if USE_SHADOW_TINT == 1
+			MatrixColor *= ColorShadow_Tint1.rgb + ColorShadow_Tint2.rgb * rcp(dot(LinearColor, ColorShadow_Luma.rgb) + 1.0);
+		#endif
+		// Required to insure saturation doesn't create negative colors!
+		MatrixColor = max(half3(0.0, 0.0, 0.0), MatrixColor);
+	#else
+		// Less expensive route when not using saturation and channel mixer.
+		#if USE_SHADOW_TINT == 1
+			MatrixColor = LinearColor * (ColorShadow_Tint1.rgb + ColorShadow_Tint2.rgb * rcp(dot(LinearColor, ColorShadow_Luma.rgb) + 1.0));
+		#else
+			MatrixColor = LinearColor * ColorMatrixB_ColorCurveCm2.rgb;
+		#endif
+	#endif
+	// Apply color curve (includes tonemapping).
+	#if USE_CONTRAST == 1
+		// Full path.
+		half3 MatrixColorD = max(0, ColorCurve_Cm0Cd0_Cd2_Ch0Cm1_Ch3.xxx - MatrixColor);
+		half3 MatrixColorH = max(MatrixColor, ColorCurve_Cm0Cd0_Cd2_Ch0Cm1_Ch3.zzz);
+		half3 MatrixColorM = clamp(MatrixColor, ColorCurve_Cm0Cd0_Cd2_Ch0Cm1_Ch3.xxx, ColorCurve_Cm0Cd0_Cd2_Ch0Cm1_Ch3.zzz);
+		half3 CurveColor = 
+			// Highlights
+			(MatrixColorH*ColorCurve_Ch1_Ch2.xxx + ColorCurve_Ch1_Ch2.yyy) * rcp(MatrixColorH + ColorCurve_Cm0Cd0_Cd2_Ch0Cm1_Ch3.www) + 
+				// Midtones
+				((MatrixColorM*ColorMatrixB_ColorCurveCm2.aaa + 
+					// Darks
+					((MatrixColorD*ColorMatrixR_ColorCurveCd1.aaa) * rcp(MatrixColorD + ColorCurve_Cm0Cd0_Cd2_Ch0Cm1_Ch3.yyy) + ColorMatrixG_ColorCurveCd3Cm3.aaa)));
+	#else
+		// This is for mobile, it assumes color is not negative.
+		// Fast path when contrast=1, can remove the dark part of the curve.
+		half3 MatrixColorH = max(MatrixColor, ColorCurve_Cm0Cd0_Cd2_Ch0Cm1_Ch3.zzz);
+		half3 MatrixColorM = min(MatrixColor, ColorCurve_Cm0Cd0_Cd2_Ch0Cm1_Ch3.zzz);
+		half3 CurveColor = (MatrixColorH*ColorCurve_Ch1_Ch2.xxx + ColorCurve_Ch1_Ch2.yyy) * rcp(MatrixColorH + ColorCurve_Cm0Cd0_Cd2_Ch0Cm1_Ch3.www) + MatrixColorM;
+	#endif
+
+	// Must hit black by log10(-2.474)
+	CurveColor -= 0.002;
+
+	return CurveColor;
+}
+
+half3 TonemapAndGammaCorrect(half3 LinearColor)
+{
+	// Clamp input to be positive
+	// This displays negative colors as black
+	LinearColor = max(LinearColor, 0);
+
+	half3 GammaColor = pow(LinearColor, InverseGamma.x);
+	
+	// in all cases it's good to clamp into the 0..1 range (e.g for LUT color grading)
+	GammaColor = saturate(GammaColor);
+
+	return GammaColor;
+}
+
+
+/*
+============================================
+// Uncharted settings
+Slope = 0.63;
+Toe = 0.55;
+Shoulder = 0.47;
+BlackClip= 0;
+WhiteClip = 0.01;
+
+// HP settings
+Slope = 0.65;
+Toe = 0.63;
+Shoulder = 0.45;
+BlackClip = 0;
+WhiteClip = 0;
+
+// Legacy settings
+Slope = 0.98;
+Toe = 0.3;
+Shoulder = 0.22;
+BlackClip = 0;
+WhiteClip = 0.025;
+
+// ACES settings
+Slope = 0.91;
+Toe = 0.53;
+Shoulder = 0.23;
+BlackClip = 0;
+WhiteClip = 0.035;
+===========================================
+*/
+float FilmSlope = 0.91;
+float FilmToe = 0.53;
+float FilmShoulder = 0.23;
+float FilmBlackClip = 0;
+float FilmWhiteClip = 0.035;
+
+half3 FilmToneMap( half3 LinearColor ) 
+{
+	const float3x3 sRGB_2_AP0 = mul( XYZ_2_AP0_MAT, mul( D65_2_D60_CAT, sRGB_2_XYZ_MAT ) );
+	const float3x3 sRGB_2_AP1 = mul( XYZ_2_AP1_MAT, mul( D65_2_D60_CAT, sRGB_2_XYZ_MAT ) );
+	const float3x3 AP1_2_sRGB = mul( XYZ_2_sRGB_MAT, mul( D60_2_D65_CAT, AP1_2_XYZ_MAT ) );
+	
+#if 0
+	float3 ACESColor = mul( sRGB_2_AP0, float3(LinearColor) );
+
+	// --- Red modifier --- //
+	const float RRT_RED_SCALE = 0.82;
+	const float RRT_RED_PIVOT = 0.03;
+	const float RRT_RED_HUE = 0;
+	const float RRT_RED_WIDTH = 135;
+
+	float saturation = rgb_2_saturation( ACESColor );
+	float hue = rgb_2_hue( ACESColor );
+	float centeredHue = center_hue( hue, RRT_RED_HUE );
+	float hueWeight = Square( smoothstep( 0, 1, 1 - abs( 2 * centeredHue / RRT_RED_WIDTH ) ) );
+		
+	ACESColor.r += hueWeight * saturation * (RRT_RED_PIVOT - ACESColor.r) * (1. - RRT_RED_SCALE);
+
+	// Use ACEScg primaries as working space
+	float3 WorkingColor = mul( AP0_2_AP1_MAT, ACESColor );
+#else
+	// Use ACEScg primaries as working space
+	float3 WorkingColor = mul( sRGB_2_AP1, float3(LinearColor) );
+#endif
+
+	WorkingColor = max( 0, WorkingColor );
+
+	// Pre desaturate
+	WorkingColor = lerp( dot( WorkingColor, AP1_RGB2Y ), WorkingColor, 0.96 );
+	
+	const half ToeScale			= 1 + FilmBlackClip - FilmToe;
+	const half ShoulderScale	= 1 + FilmWhiteClip - FilmShoulder;
+	
+	const float InMatch = 0.18;
+	const float OutMatch = 0.18;
+
+	float ToeMatch;
+	if( FilmToe > 0.8 )
+	{
+		// 0.18 will be on straight segment
+		ToeMatch = ( 1 - FilmToe  - OutMatch ) / FilmSlope + log10( InMatch );
+	}
+	else
+	{
+		// 0.18 will be on toe segment
+
+		// Solve for ToeMatch such that input of InMatch gives output of OutMatch.
+		const float bt = ( OutMatch + FilmBlackClip ) / ToeScale - 1;
+		ToeMatch = log10( InMatch ) - 0.5 * log( (1+bt)/(1-bt) ) * (ToeScale / FilmSlope);
+	}
+
+	float StraightMatch = ( 1 - FilmToe ) / FilmSlope - ToeMatch;
+	float ShoulderMatch = FilmShoulder / FilmSlope - StraightMatch;
+	
+	half3 LogColor = log10( WorkingColor );
+	half3 StraightColor = FilmSlope * ( LogColor + StraightMatch );
+	
+	half3 ToeColor		= (    -FilmBlackClip ) + (2 *      ToeScale) / ( 1 + exp( (-2 * FilmSlope /      ToeScale) * ( LogColor -      ToeMatch ) ) );
+	half3 ShoulderColor	= ( 1 + FilmWhiteClip ) - (2 * ShoulderScale) / ( 1 + exp( ( 2 * FilmSlope / ShoulderScale) * ( LogColor - ShoulderMatch ) ) );
+
+	ToeColor		= LogColor <      ToeMatch ?      ToeColor : StraightColor;
+	ShoulderColor	= LogColor > ShoulderMatch ? ShoulderColor : StraightColor;
+
+	half3 t = saturate( ( LogColor - ToeMatch ) / ( ShoulderMatch - ToeMatch ) );
+	t = ShoulderMatch < ToeMatch ? 1 - t : t;
+	t = (3-2*t)*t*t;
+	half3 ToneColor = lerp( ToeColor, ShoulderColor, t );
+
+	// Post desaturate
+	ToneColor = lerp( dot( float3(ToneColor), AP1_RGB2Y ), ToneColor, 0.93 );
+
+	// Returning positive AP1 values
+	return max( 0, ToneColor );
+
+	//ToneColor = mul( AP1_2_sRGB, ToneColor );
+
+	//return saturate( ToneColor );
+	//return max( 0, ToneColor );
+}
+
+half3 FilmToneMapInverse( half3 ToneColor ) 
+{
+	const float3x3 sRGB_2_AP1 = mul( XYZ_2_AP1_MAT, mul( D65_2_D60_CAT, sRGB_2_XYZ_MAT ) );
+	const float3x3 AP1_2_sRGB = mul( XYZ_2_sRGB_MAT, mul( D60_2_D65_CAT, AP1_2_XYZ_MAT ) );
+	
+	// Use ACEScg primaries as working space
+	half3 WorkingColor = mul( sRGB_2_AP1, saturate( ToneColor ) );
+
+	WorkingColor = max( 0, WorkingColor );
+	
+	// Post desaturate
+	WorkingColor = lerp( dot( WorkingColor, AP1_RGB2Y ), WorkingColor, 1.0 / 0.93 );
+
+	half3 ToeColor		= 0.374816 * pow( 0.9 / min( WorkingColor, 0.8 ) - 1, -0.588729 );
+	half3 ShoulderColor	= 0.227986 * pow( 1.56 / ( 1.04 - WorkingColor ) - 1, 1.02046 );
+
+	half3 t = saturate( ( WorkingColor - 0.35 ) / ( 0.45 - 0.35 ) );
+	t = (3-2*t)*t*t;
+	half3 LinearColor = lerp( ToeColor, ShoulderColor, t );
+
+	// Pre desaturate
+	LinearColor = lerp( dot( LinearColor, AP1_RGB2Y ), LinearColor, 1.0 / 0.96 );
+
+	LinearColor = mul( AP1_2_sRGB, LinearColor );
+
+	// Returning positive sRGB values
+	return max( 0, LinearColor );
+}
+
+//
+// ACES sRGB D65 Output Transform - Forward and Inverse
+//  Input is scene-referred linear values in the sRGB gamut
+//  Output is output-referred linear values in the sRGB gamut
+//
+float3 ACESOutputTransformsRGBD65( float3 SceneReferredLinearsRGBColor )
+{
+	const float3x3 sRGB_2_AP0 = mul( XYZ_2_AP0_MAT, mul( D65_2_D60_CAT, sRGB_2_XYZ_MAT ) );
+
+	float3 aces = mul( sRGB_2_AP0, SceneReferredLinearsRGBColor * 1.5 );
+	float3 oces = RRT( aces );
+	float3 OutputReferredLinearsRGBColor =  ODT_sRGB_D65( oces );
+	return OutputReferredLinearsRGBColor;
+}
+
+float3 InverseACESOutputTransformsRGBD65( float3 OutputReferredLinearsRGBColor )
+{
+	const float3x3 AP0_2_sRGB = mul( XYZ_2_sRGB_MAT, mul( D60_2_D65_CAT, AP0_2_XYZ_MAT ) );
+
+	float3 oces = Inverse_ODT_sRGB_D65( OutputReferredLinearsRGBColor );
+	float3 aces = Inverse_RRT( oces );
+	float3 SceneReferredLinearsRGBColor = mul( AP0_2_sRGB, aces ) * 0.6666;
+
+	return SceneReferredLinearsRGBColor;
+}
+
+//
+// ACES D65 1000 nit Output Transform - Forward
+//  Input is scene-referred linear values in the sRGB gamut
+//  Output is output-referred linear values in the AP1 gamut
+//
+float3 ACESOutputTransforms1000( float3 SceneReferredLinearsRGBColor )
+{
+	const float3x3 sRGB_2_AP0 = mul( XYZ_2_AP0_MAT, mul( D65_2_D60_CAT, sRGB_2_XYZ_MAT ) );
+
+	float3 aces = mul( sRGB_2_AP0, SceneReferredLinearsRGBColor * 1.5 );
+	float3 oces = RRT( aces );
+	float3 OutputReferredLinearAP1Color = ODT_1000nits( oces );
+	return OutputReferredLinearAP1Color;
+}
+
+//
+// ACES D65 2000 nit Output Transform - Forward
+//  Input is scene-referred linear values in the sRGB gamut
+//  Output is output-referred linear values in the AP1 gamut
+//
+float3 ACESOutputTransforms2000( float3 SceneReferredLinearsRGBColor )
+{
+	const float3x3 sRGB_2_AP0 = mul( XYZ_2_AP0_MAT, mul( D65_2_D60_CAT, sRGB_2_XYZ_MAT ) );
+
+	float3 aces = mul( sRGB_2_AP0, SceneReferredLinearsRGBColor * 1.5 );
+	float3 oces = RRT( aces );
+	float3 OutputReferredLinearAP1Color = ODT_2000nits( oces );
+	return OutputReferredLinearAP1Color;
+}
+
+static const float3x3 GamutMappingIdentityMatrix = { 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0 };
+
+//
+// Gamut conversion matrices
+//
+float3x3 OuputGamutMappingMatrix( uint OutputGamut )
+{
+	// Gamut mapping matrices used later
+	const float3x3 AP1_2_sRGB    = mul( XYZ_2_sRGB_MAT, mul( D60_2_D65_CAT, AP1_2_XYZ_MAT ) );
+	const float3x3 AP1_2_DCI_D65 = mul( XYZ_2_P3D65_MAT, mul( D60_2_D65_CAT, AP1_2_XYZ_MAT ) );
+	const float3x3 AP1_2_Rec2020 = mul( XYZ_2_Rec2020_MAT, mul( D60_2_D65_CAT, AP1_2_XYZ_MAT ) );
+
+	// Set gamut mapping matrix 
+	// 0 = sRGB - D65
+	// 1 = P3 - D65
+	// 2 = Rec.2020 - D65
+	// 3 = ACES AP0 - D60
+	// 4 = ACES AP1 - D60
+
+	if( OutputGamut == 1 )
+		return AP1_2_DCI_D65;
+	else if( OutputGamut == 2 )
+		return AP1_2_Rec2020;
+	else if( OutputGamut == 3 )
+		return AP1_2_AP0_MAT;
+	else if( OutputGamut == 4 )
+		return GamutMappingIdentityMatrix;
+	else
+		return AP1_2_sRGB;
+}
+
+float3x3 OuputInverseGamutMappingMatrix( uint OutputGamut )
+{
+	// Gamut mapping matrices used later
+	const float3x3 sRGB_2_AP1    = mul( XYZ_2_AP1_MAT, mul( D65_2_D60_CAT, sRGB_2_XYZ_MAT ) );
+	const float3x3 DCI_D65_2_AP1 = mul( XYZ_2_AP1_MAT, mul( D65_2_D60_CAT, P3D65_2_XYZ_MAT ) );
+	const float3x3 Rec2020_2_AP1 = mul( XYZ_2_AP1_MAT, mul( D65_2_D60_CAT, Rec2020_2_XYZ_MAT ) );
+
+	// Set gamut mapping matrix 
+	// 0 = sRGB - D65
+	// 1 = P3 (DCI) - D65
+	// 2 = Rec.2020 - D65
+	// 3 = ACES AP0 - D60
+	float3x3 GamutMappingMatrix = sRGB_2_AP1;
+	if( OutputGamut == 1 )
+		GamutMappingMatrix = DCI_D65_2_AP1;
+	else if( OutputGamut == 2 )
+		GamutMappingMatrix = Rec2020_2_AP1;
+	else if( OutputGamut == 3 )
+		GamutMappingMatrix = AP0_2_AP1_MAT;
+
+	return GamutMappingMatrix;
+}
+
+float3 ST2084ToScRGB(float3 Color, uint OutputDevice)
+{
+	// Nvidia HDR encoding - Remove PQ, convert to linear scRGB
+	const float3x3 AP1_2_sRGB = mul(XYZ_2_sRGB_MAT, AP1_2_XYZ_MAT);
+	const float WhitePoint = 80.f;
+
+	// 1000.f nit display
+	float MaxODTNits = 1000.0f;
+	float MinODTNits = 0.0001f;
+
+	if (OutputDevice == 4 || OutputDevice == 6)
+	{
+		// 2000 nit display
+		MaxODTNits = 2000.0f;
+		MinODTNits = 0.005f;
+	}
+
+	float3 OutColor = ST2084ToLinear(Color);
+		
+	OutColor = clamp(OutColor, MinODTNits, MaxODTNits);
+	OutColor.x = Y_2_linCV(OutColor.x, MaxODTNits, MinODTNits);
+	OutColor.y = Y_2_linCV(OutColor.y, MaxODTNits, MinODTNits);
+	OutColor.z = Y_2_linCV(OutColor.z, MaxODTNits, MinODTNits);
+
+	float scRGBScale = MaxODTNits / WhitePoint;
+	OutColor = mul(AP1_2_sRGB, OutColor) * scRGBScale;
+
+	return OutColor;
+}

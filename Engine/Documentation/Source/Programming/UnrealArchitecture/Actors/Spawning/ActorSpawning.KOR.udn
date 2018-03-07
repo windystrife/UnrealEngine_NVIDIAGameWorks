@@ -1,0 +1,150 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title:액터 스폰하기
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture
+Description:게임플레이 코드에서 Actor 의 새 인스턴스, AActor 를 생성하는 메소드에 대해 설명합니다.
+Version: 4.9
+
+[TOC (start:2 end:3)]
+
+## SpawnActor 메소드
+
+**Actor** 의 새 인스턴스를 생성하는 과정을 **스폰** (spawn)이라 합니다. **Actor** 의 스폰은 `UWorld::SpawnActor()` 함수를 이용합니다. 
+이 함수는 지정된 클래스의 새 인스턴스를 생성한 다음 새로 생성된 **Actor** 로의 포인터를 반환합니다. `UWorld::SpawnActor()` 는 클래스 계층구조 내 **Actor** 클래스를 상속하는 클래스 인스턴스를 생성할 때만 사용해야 
+합니다.
+
+	AActor* UWorld::SpawnActor
+	(
+		UClass*			Class,
+		FName			InName,
+		FVector const*	Location,
+		FRotator const*	Rotation,
+		AActor*			Template,
+		bool			bNoCollisionFail,
+		bool			bRemoteOwned,
+		AActor*			Owner,
+		APawn*			Instigator,
+		bool			bNoFail,
+		ULevel*			OverrideLevel,
+		bool			bDeferConstruction
+	)
+
+| 파라미터 | 설명 |
+| --- | --- |
+| `Class` | 스폰시킬 **Actor** 의 클래스를 나타내는 `UClass` 입니다. |
+| `InName` | 옵션. 스폰시킬 **Actor** 의 `Name` 으로 할당시킬 `FName` 입니다. 지정된 값이 없으면 스폰되는 **Actor** 의 이름은 *[Class]_[Number]* 형태를 사용하여 자동 생성됩니다. |
+| `Location` | 옵션. **Actor** 를 스폰시킬 초기 위치를 제공하는 `FVector` 입니다. |
+| `Rotation` | 옵션. **Actor** 를 스폰시킬 초기 방향을 제공하는 `FRotator` 입니다. |
+| `Template` | 옵션. 새 **Actor** 를 스폰할 때 템플릿으로 사용할 `AActor` 입니다. 스폰되는 **Actor** 는 템플릿 **Actor** 의 프로퍼티 값을 사용하여 초기화됩니다. 지정된 템플릿 **Actor** 가 없는 경우, 클래스 디폴트 오브젝트(CDO)를 사용하여 스폰되는 **Actor** 를 초기화시킵니다. |
+| `bNoCollisionFail` | 옵션. **Actor** 스폰시 콜리전 테스트를 할 것인지를 결정하는 `bool` 입니다. _True_ 면 **Actor** 스폰시 루트 컴포넌트나 템플릿 **Actor** 의 콜리전 세팅에 관계없이 콜리전 테스트를 하지 않습니다. |
+| `bRemoteOwned` | 옵션. `bool`.  |
+| `Owner` | 옵션. 스폰된 **Actor** 를 소유하는 `AActor` 입니다. |
+| `Instigator` | 옵션. 스폰된 **Actor** 가 입힌 피해를 담당하는 `APawn` 입니다. |
+| `bNoFail` | 옵션. 특정 조건을 충족하지 않을 때 스폰 실패여부를 결정하는 `bool` 입니다. 이 옵션이 _True_ 면 스폰되는 클래스가 `bStatic=true` 라거나, 템플릿 **Actor** 의 클래스가 스폰되는 **Actor** 의 클래스와 같지 않아서라거나 하는 이유로 스폰이 실패하지 않습니다. |
+| `OverrideLevel` | 옵션. **Actor** 를 어느 `ULevel` 안에 스폰시킬지, 예로 **Actor** 의 `Outer` 식입니다. 지정된 레벨이 없으면 `Owner` 의 `Outer` 가 사용됩니다. 지정된 `Outer` 가 없으면 퍼시스턴트 레벨이 사용됩니다. |
+| `bDeferConstruction` | 옵션. construction script 를 실행시킬지 결정하는 `bool` 입니다. _True_ 면 스폰되는 **Actor** 에서 construction script 가 실행되지 않습니다. **Actor** 가 [Blueprint](Engine/Blueprints) 에서 스폰될 때만 적용 가능합니다. |
+|[REGION:tablesection]반환값[/REGION]||
+| `AActor` 포인터 형태로 스폰되는 **Actor** 입니다. 반환값은 `Class` 파라미터로 지정된 파생형으로의 변환을 위해 형변환(cast)시켜줘야 합니다. ||
+
+### 사용법
+
+	AKAsset* SpawnedActor1 = (AKAsset*) GetWorld()->SpawnActor(AKAsset::StaticClass(), NAME_None, &Location);
+
+## 스폰 함수 템플릿
+
+**Actor** 스폰을 보다 쉽게 하기 위해, 가장 흔히 사용되는 패턴에 대해서는 여러가지 함수 템플릿이 제공되어 있습니다. 여기에는 파라미터 일부 부분집합만 필요한 데다 
+반환되는 **Actor** 유형을 지정할 수 있기 때문에 **Actor** 생성이 훨씬 단순해 집니다.
+
+### T 인스턴스 스폰, T 포인터 반환
+
+스폰 작업을 수행하는 **Actor** 의 루트 컴포넌트와 같은 위치 같은 방향에 `T` 템플릿 클래스의 인스턴스를 스폰시키는 함수 템플릿으로, 템플릿 클래스와 같은 유형의 해당 인스턴스 포인터, 
+즉 `T*` 를 반환합니다. 소유하는(owning) **Actor**, 선동하는(instigating) **Pawn**, 스폰되는 **Actor** 가 침입(encroach)할 때 스폰 작업 실패 여부, 
+이미 월드에 존재하는 다른 **Actor** 와의 충돌 여부 등을 지정할 수 있습니다.
+
+	/** 클래스 T 를 스폰하고 반환, 루트 컴포넌트의 기본 방향과 위치를 따릅니다. */
+	template< class T >
+	T* SpawnActor
+	(
+		AActor* Owner=NULL,
+		APawn* Instigator=NULL,
+		bool bNoCollisionFail=false
+	)
+	{
+		return (T*)(GetWorld()->SpawnActor(T::StaticClass(), NAME_None, NULL, NULL, NULL, bNoCollisionFail, false, Owner, Instigator));
+	}
+
+#### 사용법
+
+	MyHUD = SpawnActor<AHUD>(this, Instigator);
+
+### 트랜스폼 정보로 T 인스턴스 스폰, T 포인터 반환
+
+지정된 `Location` 과 지정된 `Rotation` 에 템플릿 클래스 `T` 의 인스턴스를 스폰시키는 함수 템플릿으로, 템플릿 클래스와 같은 유형의 해당 인스턴스로의 포인터, 
+즉 `T*` 를 반환합니다. 위치와 방향에 더해 소유중인 **Actor**, 선동중인 **Pawn**, 스폰되는 **Actor** 침입에 따른 스폰 작업 실패 여부, 
+월드에 이미 존재하는 다른 **Actor** 와의 충돌 여부 등을 지정할 수 있습니다.
+
+	/** 클래스 T 스폰 후 반환, 월드 포지션은 강제 설정합니다. */
+	template< class T >
+	T* SpawnActor
+	(
+		FVector const& Location,
+		FRotator const& Rotation,
+		AActor* Owner=NULL,
+		APawn* Instigator=NULL,
+		bool bNoCollisionFail=false
+	)
+	{
+		return (T*)(GetWorld()->SpawnActor(T::StaticClass(), NAME_None, &Location, &Rotation, NULL, bNoCollisionFail, false, Owner, Instigator));
+	}
+
+#### 사용법
+
+	Controller = SpawnActor<AController>(GetLocation(), GetRotation(), NULL, Instigator, true);
+
+### 클래스 인스턴스 스폰, T 포인터 반환
+
+스폰 작업을 수행하는 **Actor** 의 루트 컴포넌트와 같은 위치 같은 방향에 지정된 `Class` 의 인스턴스를 스폰시키는 함수 템플릿으로, 
+템플릿 클래스 유형으로 형변환된 해당 인스턴스로의 포인터, 즉 `T*` 를 반환합니다. 여기에 지정된 `Class` 는 템플릿 클래스 `T` 의 자손이어야 합니다. 
+클래스에 추가로 소유중인 **Actor**, 선동중인 **Pawn**, 스폰된 **Actor** 의 침범에 따른 스폰 작업 실패 여부, 월드에 이미 존재하는 다른 **Actor** 와의 충돌 여부 등을 
+지정할 수 있습니다.
+
+	/** 주어진 클래스를 스폰하고 클래스 T 포인터를 반환, 루트 컴포넌트의 기본 방향과 위치를 따릅니다. */
+	template< class T >
+	T* SpawnActor
+	(
+		UClass* Class,
+		AActor* Owner=NULL,
+		APawn* Instigator=NULL,
+		bool bNoCollisionFail=false
+	)
+	{
+		return (Class != NULL) ? Cast<T>(GetWorld()->SpawnActor(Class, NAME_None, NULL, NULL, NULL, bNoCollisionFail, false, Owner, Instigator)) : NULL;
+	}
+#### 사용법
+
+	MyHUD = SpawnActor<AHUD>(NewHUDClass, this, Instigator);
+
+### 트랜스폼 정보로 클래스 인스턴스 스폰, T 포인터 반환
+
+지정된 `Location` 과 `Rotation` 에 지정된 `Class` 인스턴스를 스폰시키는 함수 템플릿으로, 템플릿 클래스와 같은 유형의 해당 인스턴스로의 포인터, 즉 `T*` 를 반환합니다. 여기에 지정된 `Class` 는 
+템플릿 클래스 `T` 의 자손이어야 합니다. 클래스, 위치, 방향에 추가로 소유중인 **Actor**, 선동중인 **Pawn**, 스폰되는 **Actor** 침입에 따른 스폰 작업 실패 여부, 월드에 이미 존재하는 다른 **Actor** 와의 충돌 여부 등을 
+지정할 수 있습니다.
+
+	/** 주어진 클래스를 스폰하고 클래스 T 포인터를 반환, 월드 포지션은 강제 설정합니다. */
+	template< class T >
+	T* SpawnActor
+	(
+		UClass* Class,
+		FVector const& Location,
+		FRotator const& Rotation,
+		AActor* Owner=NULL,
+		APawn* Instigator=NULL,
+		bool bNoCollisionFail=false
+	)
+	{
+		return (Class != NULL) ? Cast<T>(GetWorld()->SpawnActor(Class, NAME_None, &Location, &Rotation, NULL, bNoCollisionFail, false, Owner, Instigator)) : NULL;
+	}
+
+#### 사용법
+
+	APawn* ResultPawn = SpawnActor<APawn>(DefaultPawnClass, StartLocation, StartRotation, NULL, Instigator);

@@ -1,0 +1,210 @@
+﻿INTSourceChangelist:2810123
+Availability:Public
+Title:FString
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture/Reference, Programming/UnrealArchitecture/Reference/Properties, Programming/UnrealArchitecture/StringHandling
+Description:
+Version:4.9
+
+[TOC (start:2 end:3)]
+
+
+
+[EXCERPT:Overview]
+FName や FText と違って **FString** は操作可能な唯一の文字列クラスです。大文字小文字の変更、サブ文字列の引用、反転など、 
+様々な種類の文字列操作があります。FStrings は、検索や修正、他の文字列との比較を行うことが可能です。ただし、これらの操作をすると、FStrings の負荷は不変文字列クラスに比べてが大きくなります。    
+[/EXCERPT:Overview]
+
+## FStrings の作成
+
+	FString TestHUDString = FString(TEXT("This is my test FString."));
+
+
+## 変換
+
+### 文字列変数
+
+#### FString からの変換
+
+|変換元 | 変換先 | 例 |
+|---|------|---------|
+%Programming/UnrealArchitecture/StringHandling:fstringtofname%
+%Programming/UnrealArchitecture/StringHandling:fstringtoftext%
+
+#### FString への変換
+
+|変換元 | 変換先 | 例 |
+|---|------|---------|
+%Programming/UnrealArchitecture/StringHandling:fnametofstring%
+%Programming/UnrealArchitecture/StringHandling:ftexttofstring%
+
+### 数値変数およびその他の変数
+
+#### FString への変換
+| 変数の種類 | 文字列からの変換 | 文字列のフォーマット |
+| ------------- | -------------------- | --------------|
+|	float		|  `FString::SanitizeFloat(FloatVariable);`| | 
+|  int          |   `FString::FromInt(IntVariable);` | |
+| bool          |   `InBool ?TEXT("true") :TEXT("false");	` | 'true' または 'false' のいずれか |
+| FVector        |   `VectorVariable.ToString();`  |  'X= Y= Z=' |
+| FVector2D       |   `Vector2DVariable.ToString();`  | 'X= Y=' |
+|  FRotator       |    `RotatorVariable.ToString();`  | 'P= Y= R=' | 
+| FLinearColor    |   `LinearColorVariable.ToString();`  | '(R=,G=,B=,A=)' |
+| UObject         |  `(InObj != NULL) ?InObj->GetName() :FString(TEXT("None"));` | UObject の FName |
+
+その他の数値変換の場合、引数を正しく設定すれば **FString::Printf()** 関数も使用することができます。 
+
+#### FString からの変換
+
+FString から int と float 数値変数に加えて boolean 変数への変換も存在します。 
+
+| 変数の種類 | 文字列からの変換 | 注記 |
+| ------------- | -------------------- | --------------|
+|bool | `TestHUDString.ToBool();` | %doxygen:FString::ToBool%|
+| int | `FCString::Atoi(*TestHUDString);` | |
+| float | `FCString::Atof(*TestHUDString);` | |
+
+## 比較
+
+== 演算子を多重定義すると、2 つの FString や、FString を TCHAR*s の配列と比較することができます。**FString::Equals()** メソッドを使えば、
+テストに FString を使ったり、引数の大文字 / 小文字を区別して比較するかどうかの時には **ESearchCase** enum を使います。大文字 / 小文字の区別なく比較する場合は **ESearchCase::IgnoreCase** を、
+ そうでない場合は **ESearchCase::CaseSensitive** を使います。
+
+	TestHUDString.Equals(TEXT("Test"), ESearchCase::CaseSensitive);
+
+
+## 検索
+
+FString の検索には 2 種類あります。1 つ目は **FString::Contains()** です。サブストリングが見つかると _true_ を、そうでない場合は _false_ を返します。FString::Contains() で 
+ FString または `TCHAR* のサブストリングのいずれかを検索できます。ESearchCase enum と使うと、検索時に大文字 / 小文字を区別するかどうかを指定できます。また、`ESearchDir` enum と使うと、
+検索方向を指定できます。検索のデフォルト設定は、大文字 / 小文字の区別なし、開始は最初からになります。
+
+	TestHUDString.Contains(TEXT("Test"), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+
+2 つ目は `FString::Find()` です。最初に見つけたサブストリングのインスタンスのインデックスを返します。`FString` または `TCHAR* のサブストリングのいずれかを検索できます。`FString::Contains()` とちょうど同じように、 
+大文字 / 小文字の区別、検索方向の指定が可能です。検索のデフォルト設定は、大文字 / 小文字の区別なし、開始はストリングの最初からになります。検索開始地点のストリング内に 
+インデックスを設定することもできます。`FString::Find()` がサブストリングを見つけられない場合、-1 を返します。
+
+	TestHUDString.Find(TEXT("test"), ESearchCase::CaseSensitive, ESearchDir::FromEnd, 10);
+
+
+
+
+## FString のビルド
+
+サブストリングあるいは他の種類の変数からストリングをビルドする方法は 2 通りあります。1 つ目は結合です。 FString のみを引数として受け取ります。他の種類の変数は、
+結合前に FSting へ変換する必要があります。2 つ目は `Printf` です。int や float などの数値入力を受け取り、ストリングへの追加時に入力のフォーマット化を設定することもできます。
+
+
+### 連結
+ストリングの連結をするための演算子は 2 つあります。 
+
+| 演算子 | 説明 | 使用方法 |
+| -------- | ----------- | ----- |
+| `+=` | 渡されたストリングを FString オブジェクトへ追加します | `StringResult += AddedString;` |
+| `+` | FString オブジェクトを新規作成し、渡されたストリングへ追加します。 | | 
+
+
+
+### Printf
+
+**FString::Printf** で作成された FString は FString へ格納するだけでなく [UE_LOG デバッグ メッセージ](#デバッグメッセージ) を使って画面へ表示することもできます。フォーマット引数には、次の例のように C++ の
+ printf 関数と同じ指定子があります。
+
+	FString AShooterHUD::GetTimeString(float TimeSeconds)
+	{
+	// only minutes and seconds are relevant (分と秒のみが該当)
+	const int32 TotalSeconds = FMath::Max(0, FMath::TruncToInt(TimeSeconds) % 3600);
+	const int32 NumMinutes = TotalSeconds / 60;
+	const int32 NumSeconds = TotalSeconds % 60;
+
+	const FString TimeDesc = FString::Printf(TEXT("%02d:%02d"), NumMinutes, NumSeconds);
+	return TimeDesc;
+	}
+
+[REGION:tip]
+% のパラメータを使って FString をインクルードする場合、 *演算子を使って % のパラメータに必要な TCHAR* を返さなければなりません。
+[/REGION]
+
+## FString の操作
+
+ストリング操作をするために、様々な関数があります。ここでは一部を紹介しますが、利用可能な FString の一覧は UnrealString.h または FString の API ドキュメントをご覧ください。
+文字列のサブセクションをコピーする関数は、Left、Right、Mid です。サブストリングを見つけた位置で、文字列を 2 つに分割することができます。 
+`Split` 方法で行います。文字列を分割するもう 1 つの方法は **ParseIntoArray** です。文字列を、指定されたデリミタで区切られた文字列の配列に分割します。 
+大文字小文字変換は **ToUpper** と **ToLower** を使って、文字列を大文字と小文字それぞれに変換します。
+
+## HUD の FString
+
+### Canvas
+
+[Canvas](Gameplay/Framework\UIAndHUD#canvas) を使って HUD に FString を表示するには、**FCanvas::DrawText()** を呼び出す必要があります。
+
+	Canvas->DrawText(BigFont, TestHUDString, 110.0f,110.0f);
+
+[REGION:note] 
+HUD クラスの **DrawHUD()** 関数内、もしくは DrawHUD() で始まる関数チェーン内に **DrawText()** 関数を呼び出す必要があります。
+[/REGION]
+
+## デバッグ メッセージ
+
+FStrings はデバッグの目的で **ビューポート** だけでなく **出力ログ** にも表示することができます。
+
+### ビューポートへの表示
+
+![](DebugToScreen.png)
+
+デバッグ メッセージを **ビューポート** に表示するためには、 **UEngine::AddOnScreenDebugMessage()** を使います。この関数は、以下の 4 つのパラメータを受け取ります (順番に)。
+
+| パラメータ名 | パラメータの種類 | 説明 |
+| -------------- | ---------------| ------------|
+| Key			 | int |	同じメッセージが複数回追加されないようにするユニークなキーです。デバッグ メッセージを一時的なものにするには、-1 をキーとして使います。 |
+|  TimeToDisplay| float | 	メッセージの表示秒数です。 |
+| DisplayColor | FColor |	テキストを表示するカラーです。 |
+| DebugMessage | FString |	表示するメッセージ (FString) です。 |
+
+**例**
+
+	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Blue, TestHUDString);
+
+### 出力ログへの表示
+
+![](DebugToLog.png)
+
+**UE_LOG** は printf マークアップを使ってパラメータ表示します。 
+
+	UE_LOG(LogClass, Log, TEXT("This is a testing statement. %s"), *TestHUDString);
+
+* LogClass はログ カテゴリです。既存のカテゴリ (OutputDevices.h の DECLARE_LOG_CATEGORY_EXTERN で設定) を使う、または独自に使っている DEFINE_LOG_CATEGORY_STATIC を定義することができます。 
+* Log は冗長レベルで使用します。冗長は **ELogVerbosity** enum で定義されます。有効値は、Fatal、Error、Warning、Display、Log、Verbose、VeryVerbose です。
+* 次の引数は、パラメータ用のマークアップも含めて、出力したいテキストです。 
+
+[REGION:tip]
+ここでは、% のパラメータを使うので、% のパラメータに必要な 'TCHAR*' を返す必要があります。
+[/REGION]
+
+UE_LOG で表示されたメッセージは、**[Output Log (出力ログ)]** (アンリアル エディタの **[Window] > [Output Log (出力ログ)]**) に現れます。
+
+## 変換マクロのエンコード
+FString クラスは TCHAR の TArray 上にビルドされます。様々なマクロを使って、アプリケーション文字列 (TCHAR*) を ANSI または UNICODE キャラクター セットのいずれか、またはその逆に変換することができます。 
+マクロ定義は Engine\Source\Runtime\Core\Public\Containers\StringConv.h に含まれています。
+
+文字列が比較的小さければ、コンバーター クラスの一部としてスタック上に割り当てられます。そうでない場合は、ヒープを使って一時的なバッファを割り当てます。ヒープ使用前のサイズはテンプレート パラメータなので、 
+自分のアプリケーションに合わせて調整ができます。クラスのスコープがスタックの割り当てをポップ オフするので、これはループ内で安全です。 
+
+一般的なマクロは以下のとおりです。
+
+* TCHAR_TO_ANSI - エンジンの文字列 (TCHAR*) を ANSI の文字列に変換します。
+
+* TCHAR_TO_ANSI - ANSI の文字列 (TCHAR*) をエンジンの文字列に変換します。
+
+[REGION:note]
+これらのマクロが宣言するオブジェクトの寿命は非常に短いです。用途は、関数へのパラメータです。オブジェクトが領域外となり、文字列が解放されるので、 
+変換された文字列のコンテンツに変数を代入することはできません。
+[/REGION]
+[REGION:warning]
+パラメータはポインタに対して型変換されるので、正しい文字列のパラメータをパスしなければなりません。TCHAR* の代わりに TCHAR をパスすると、コンパイルし、ランタイム時にクラッシュします。
+
+使用方法：**SomeApi(TCHAR_TO_ANSI(SomeUnicodeString));**
+
+[/REGION]
+
+

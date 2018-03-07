@@ -1,0 +1,207 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	MaterialTexCoordScalesPixelShader.usf: Pixel shader to analyse coordinate scale per texture
+=============================================================================*/
+
+#define TEX_COORD_SCALE_ANALYSIS 1
+#define DEBUG_MATERIAL_PARAMETERS 1
+
+// Don't allow scene texture as we use ESceneRenderTargetsMode::DontSet in FMaterialTexCoordScalePS::SetParameters
+// to avoid crashes in command let mode.
+#undef SCENE_TEXTURES_DISABLED
+#define SCENE_TEXTURES_DISABLED 1
+
+#include "Common.ush"
+#include "SHCommon.ush"
+
+ // If -1, output everything to the RW texture.
+float4 AccuracyColors[5];
+int2 AnalysisParams; // (TextureAnalysisIndex, bOutputScales)
+float PrimitiveAlpha;
+
+// Analysis index will be in [0, 31] if analysing a single texture, otherwise -1
+#define TextureAnalysisIndex AnalysisParams.x
+#define bOutputScales AnalysisParams.y
+
+
+float4 OneOverCPUTexCoordScales[MAX_NUM_TEXTURE_REGISTER / 4];
+int4 TexCoordIndices[MAX_NUM_TEXTURE_REGISTER / 4];
+
+float GetComponent(float4 V, int Index)
+{
+	FLATTEN
+	if (Index == 0) return V.x;
+	FLATTEN
+	if (Index == 1) return V.y;
+	FLATTEN
+	if (Index == 2) return V.z;
+	return V.w;
+}
+
+struct FTexCoordScalesParams
+{
+	// Global var used to reduce the number of param passed to the shaders.
+	int2 PixelPosition;
+
+	// ddU, ddV for each coord index (up to 4 currently)
+	float4 OneOverDDU;
+	float4 OneOverDDV;
+
+	// Used when inspecting single elements.
+	float MinScale;
+	float MaxScale;
+
+	float TexSample;
+
+	// When computing the texture scales, this holds 4 scales for consecutive texture register indices.
+	float4 ScalesPerIndex;
+};
+
+MaterialFloat StoreTexCoordScale(in out FTexCoordScalesParams Params, float2 UV, int TextureReferenceIndex)
+{
+	// Take the minimum scale since high scale requires less resolution.
+	float GPUScaleX = length(ddx(UV));
+	float GPUScaleY = length(ddy(UV));
+
+	if (TextureReferenceIndex >= 0 && TextureReferenceIndex < MAX_NUM_TEXTURE_REGISTER)
+	{
+		float OneOverCPUScale = OneOverCPUTexCoordScales[TextureReferenceIndex / 4][TextureReferenceIndex % 4];
+
+		int TexCoordIndex = TexCoordIndices[TextureReferenceIndex / 4][TextureReferenceIndex % 4];
+		
+		float GPUScale = min(GPUScaleX * GetComponent(Params.OneOverDDU, TexCoordIndex), GPUScaleY * GetComponent(Params.OneOverDDV, TexCoordIndex));
+
+		// Code path when searching the worst scales. MinScale and MaxScale are only used when rendering for accuracies (!bOutputScales)
+		const bool bUpdateMinMax = (OneOverCPUScale > 0 && (TextureAnalysisIndex == -1 || TextureAnalysisIndex == TextureReferenceIndex));
+		Params.MinScale = bUpdateMinMax ? min(Params.MinScale, GPUScale * OneOverCPUScale) : Params.MinScale;
+		Params.MaxScale = bUpdateMinMax ? max(Params.MaxScale, GPUScale * OneOverCPUScale) : Params.MaxScale;
+
+		// Code path when rendering the material in a render target. Each TILE_RESOLUTION X TILE_RESOLUTION maps to different texture.
+		const bool bUpdateScale = (bOutputScales && Params.PixelPosition.x / TILE_RESOLUTION == TextureReferenceIndex / 4) ;
+		Params.ScalesPerIndex[TextureReferenceIndex % 4] = bUpdateScale ? min(Params.ScalesPerIndex[TextureReferenceIndex % 4], GPUScale) : Params.ScalesPerIndex[TextureReferenceIndex % 4];
+	}
+	return 1.f;
+}
+
+
+MaterialFloat StoreTexSample(in out FTexCoordScalesParams Params, float4 C, int TextureReferenceIndex)
+{
+	// Alpha?
+	Params.TexSample = TextureAnalysisIndex == TextureReferenceIndex ? lerp(.4f, 1.f, saturate(Luminance(C.rgb))) : Params.TexSample;
+
+	return 1.f;
+}
+
+#include "/Engine/Generated/Material.ush"
+#include "DebugViewModeCommon.ush"
+
+void Main(
+	in FDebugPSIn DebugInputs
+	OPTIONAL_IsFrontFace,
+	out float4 OutColor : SV_Target0
+	)
+{
+#if INSTANCED_STEREO
+	ResolvedView = ResolveView(GetEyeIndex(DebugInputs.PackedEyeIndex));
+#else
+	ResolvedView = ResolveView();
+#endif
+
+	// This default value will make it dark grey when nothing updates the texSample.
+	float3 Result = float3(UNDEFINED_ACCURACY, UNDEFINED_ACCURACY, UNDEFINED_ACCURACY);
+
+	FTexCoordScalesParams Params;
+
+	// Set global var used for outputting data
+	Params.PixelPosition = DebugInputs.SvPosition.xy;
+	Params.OneOverDDU = 1 / float4(length(ddx(DebugInputs.TexCoord01.xy)), length(ddx(DebugInputs.TexCoord01.zw)), length(ddx(DebugInputs.TexCoord23.xy)), length(ddx(DebugInputs.TexCoord23.zw)));
+	Params.OneOverDDV = 1 / float4(length(ddy(DebugInputs.TexCoord01.xy)), length(ddy(DebugInputs.TexCoord01.zw)), length(ddy(DebugInputs.TexCoord23.xy)), length(ddy(DebugInputs.TexCoord23.zw)));
+
+	Params.TexSample = 1.f;
+	Params.MinScale = INITIAL_GPU_SCALE;
+	Params.MaxScale = 0;
+	Params.ScalesPerIndex = INITIAL_GPU_SCALE;
+
+	FMaterialPixelParameters MaterialParameters = GetMaterialPixelParameters(DebugInputs, DebugInputs.SvPosition);
+
+	// This is used to patch invalid parameters when computing the scales with FMeshMaterialRenderItem::EnqueueMaterialRender
+	FLATTEN
+	if (bOutputScales)
+	{
+#if NUM_MATERIAL_TEXCOORDS > 0
+		// Set all texcoord but one to 0. This allows the analysis to figure out which texcoord is driving the lookup.
+		int CurrentCoordIndex = (Params.PixelPosition.y / TILE_RESOLUTION) % MAX_NUM_TEX_COORD;
+
+		UNROLL
+		for(int CoordinateIndex = 0; CoordinateIndex < NUM_MATERIAL_TEXCOORDS; ++CoordinateIndex)
+		{
+			// The quad material used only has a valid TexCoord for UV 0
+			MaterialParameters.TexCoords[CoordinateIndex] = CoordinateIndex != CurrentCoordIndex ? 0 : DebugInputs.TexCoord01.xy;
+		}
+
+		// The scale must also be computed to match the actual coord inspected. That would be required when rendering the mesh in world space
+		// Although not required here as using the material quad only use texcoord0.
+		// Params.OneOverDDU = GetComponent(Params.OneOverDDU, CurrentCoordIndex).xxxx;
+		// Params.OneOverDDV = GetComponent(Params.OneOverDDV, CurrentCoordIndex).xxxx;
+#endif
+	}	
+
+	half3 BaseColor;
+	MaterialParameters.TexCoordScalesParams = Params;
+	{
+		FPixelMaterialInputs PixelMaterialInputs;
+		CalcMaterialParameters(MaterialParameters, PixelMaterialInputs, DebugInputs.SvPosition, bIsFrontFace);
+
+		// Sample material properties. The results are not used, but the calls to StoreTexCoordScale are still be made.
+		BaseColor = GetMaterialBaseColorRaw(PixelMaterialInputs);
+		half  Metallic = GetMaterialMetallicRaw(PixelMaterialInputs);
+		half  Specular = GetMaterialSpecularRaw(PixelMaterialInputs);
+		float Roughness = GetMaterialRoughnessRaw(PixelMaterialInputs);
+		half3 Normal = GetMaterialNormalRaw(PixelMaterialInputs);
+		half3 Emissive = GetMaterialEmissiveRaw(PixelMaterialInputs);
+		half Opacity = GetMaterialOpacityRaw(PixelMaterialInputs);
+#if MATERIALBLENDING_MASKED || (DECAL_BLEND_MODE == DECALBLENDMODEID_VOLUMETRIC)
+		half Mask = GetMaterialMask(PixelMaterialInputs);
+#endif
+		half4 SSData = GetMaterialSubsurfaceDataRaw(PixelMaterialInputs);
+		float Custom0 = GetMaterialCustomData0(MaterialParameters);
+		float Custom1 = GetMaterialCustomData1(MaterialParameters);
+		float MaterialAO = GetMaterialAmbientOcclusionRaw(PixelMaterialInputs);
+		float PixelDepthOffset = GetMaterialPixelDepthOffset(PixelMaterialInputs);
+#if CLEAR_COAT_BOTTOM_NORMAL && NUM_MATERIAL_OUTPUTS_CLEARCOATBOTTOMNORMAL > 0
+		float3 BottomNormal =  ClearCoatBottomNormal0(MaterialParameters);
+#endif
+	}
+	Params = MaterialParameters.TexCoordScalesParams;
+
+	Result *= saturate(Luminance(BaseColor));
+
+	if (bOutputScales)
+	{
+		// Output the scales
+		OutColor = Params.ScalesPerIndex;
+	}
+	else
+	{
+		float PixelScale = ((Params.PixelPosition.x & 0x08) == (Params.PixelPosition.y & 0x08) || TextureAnalysisIndex != -1) ? Params.MinScale : Params.MaxScale;
+
+		// Output accuracy. If the GPU Scale is INITIAL_GPU_SCALE, then the texcoord was not updated.
+		if (Params.MinScale != INITIAL_GPU_SCALE)
+		{
+			Params.TexSample = TextureAnalysisIndex == -1 ? lerp(.4f, 1.f, saturate(Luminance(BaseColor))) : Params.TexSample;
+
+			float Accuracy = clamp(log2(PixelScale), -1.99, 1.99);
+			int ColorIndex = floor(Accuracy) + 2;
+			Result = Params.TexSample * lerp(AccuracyColors[ColorIndex].rgb, AccuracyColors[ColorIndex + 1].rgb, frac(Accuracy));
+		}
+
+		OutColor = RETURN_COLOR(float4(Result, PrimitiveAlpha));
+	}
+}
+
+
+
+
+
+

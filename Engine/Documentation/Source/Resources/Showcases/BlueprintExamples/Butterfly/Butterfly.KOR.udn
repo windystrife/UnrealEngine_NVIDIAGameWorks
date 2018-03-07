@@ -1,0 +1,105 @@
+﻿INTSourceChangelist:3108692
+Availability: Public
+Title:나비
+Crumbs:%ROOT%, Resources, Resources/Showcases/BlueprintExamples
+Description:나비 블루프린트 개요입니다.
+Related: Engine/Blueprints/Overview
+Related: Engine/Blueprints/UserGuide/Variables
+Related: Engine/Animation/AnimBlueprints/EventGraph
+Related: Engine/Blueprints/UserGuide/UserConstructionScript
+Related: Engine/Animation/AnimBlueprints/EventGraph
+Related: Gameplay/AI
+Version: 4.9
+
+[REGION:fullwidth]
+![](ButterflyHeader.png)
+[/REGION]
+
+[EXCERPT:Overview]
+레벨 중앙에 있는 두 개의 기계 나비는 블루프린트를 이용해서 기본적인 AI 를 만드는 법을 보여주는 예제입니다. 나비는 지정된 중심점 주변을 날아다니면서, 잠깐동안 방향을 임의로 바꾸다가 중심점으로 돌아와서 쉬려고 합니다. 장애물을 만나면 부드럽게 그쪽으로 날아가 착지한 다음, 일정 기간 이후 다시 날아오릅니다. 나비의 비행 시간이 길 수록 쉬는 시간도 길어집니다.
+[/EXCERPT:Overview]
+
+레벨을 돌아다니는 것은 나비 블루프린트 액터 그 자체가 아니라 그 컴포넌트들입니다. 나비는 하나의 바디 메시를 부모로 갖는 두 개의 날개 메시로 이루어져 있습니다. 각 메시는 타임라인 노드를 통해 애니메이션이 적용, 나비가 위아래로 나부끼며 날갯짓을 하도록 합니다. _이벤트 그래프_ 는 나비 컴포넌트를 앞으로 이동시키되 반경 내 임의의 지점을 향하도록 방향 전환을 하여, 수 초마다 새로운 지점을 향해 날아가도록 합니다.
+
+_Attracter Location_ 이라는 벡터 변수는 _Editable_ (편집가능) 변수로, 사용자에게 노출되는 변수라는 뜻입니다. 이 변수는 3D 위젯으로도 표시되어, 이를 활용하여 나비의 비행 반경 중심지를 결정할 수 있습니다. 어느정도 거리를 비행한 이후 스크립트는 이 지점으로 나비를 되돌려서 너무 멀어지지 않도록 합니다.
+
+나비가 비행중일 때는 지속적으로 전방 선 추적을 통해 장애물 검사를 합니다. 이 선 추적에 표면이 걸리면, 접점의 위치와 노멀(표면각)을 제공해 줍니다. 그 후 이 데이터를 사용하여 나비 착지시의 각도와 위치를 계산합니다. 그러면 타임라인이 재생되고, 선형 보간 노드는 나비의 현재 위치에서 착지 위치로 부드럽게 보간해 줍니다.
+
+또하나 존재하는 타임라인 애니메이션 시스템은, 나비의 날개에 적용된 머티리얼의 파라미터를 구동하는 것으로, 전기성 라이트 이펙트로 물결치도록 만들어 줍니다.
+
+실험적으로 나무 근처 어딘가에 스태틱 메시를 만든 다음에 나비의 행위를 관찰해 보세요. 메시가 나비의 비행 경로에 있고 충돌 표면이 있다면, AI 시스템은 그 곳을 착지 가능 표면으로 감지하여 나비가 그 위에 착지를 시도합니다.
+
+
+![](landingOnPyramid.png)
+
+
+## 블루프린트 셋업
+
+이 블루프린트의 컴포넌트 리스트, 컨스트럭션 스크립트, 이벤트 그래프는 다음과 같은 작업을 합니다:
+
+
+
+|블루프린트 측면|목적|
+|---|---|
+| **컴포넌트 리스트** | [INCLUDE:#ButterflyCL] |
+| **컨스트럭션 스크립트** | [INCLUDE:#ButterflyCS] |
+| **이벤트 그래프** | [INCLUDE:#ButterflyEG] |
+
+
+## 편집가능 변수
+
+
+시스템에 노출된 변수는 Attractor Point 의 중심점과 아울러 날개에 적용되는 머티리얼의 파라미터도 조절합니다.
+
+
+![](Properties_Butterfly.png)
+
+
+
+| 프로퍼티 | 목적 |
+| --- | --- |
+| **Attractor Location** | 어트랙터 위치 - 이 변수는 사용자가 AI 내비게이션의 중심점을 변경할 수 있도록 합니다. 나비는 주기적으로 이 위치로 되돌아갈 것입니다. 이 변수에는 3D 위젯이 켜져 있어, 블루프린트를 선택하면 보이는 뷰포트 내 위젯을 통해 벡터를 설정할 수 있습니다. |
+| **Max Flight Range** | 최대 비행 거리 - Attractor Location 지점에서부터 나비가 최대로 날아갈 수 있는 최대 범위를 Unreal Unit 단위로 나타낸 것입니다. |
+| **Wing Color** | 날개 색 - 나비의 날개 색을 바꿀 수 있는 프로퍼티입니다. 블루프린트의 각 인스턴스는 자체적인 머티리얼 인스턴스 다이내믹(MID)를 받으므로, 레벨에 복수의 나비를, 각자 고유의 색을 지정하여 만들 수 있습니다.|
+
+
+
+
+
+
+<!----------EXCERPTS---------------
+
+[EXCERPT:ButterflyCL]
+_컴포넌트 리스트_ 는 나비를 다음과 같은 식으로 조립합니다 (들여쓰기는 부모관계를 나타냅니다):
+[REGION:raw]![](ButterflyComponentList.png)[/REGION]
+[REGION:note]
+	Body 와 Wing (몸체와 날개) 컴포넌트는 스태틱 메시인 반면, Trail (자취) 컴포넌트는 파티클 시스템입니다.
+[/REGION]
+
+
+[/EXCERPT:ButterflyCL]
+
+[EXCERPT:ButterflyCS]
+_컨스트럭션 스크립트_ 가 하는 일은 다음과 같습니다:
+* Attractor 오브젝트에 대한 초기 위치를 할당합니다.
+* 날개 스태틱 메시에 대해 [머티리얼 인스턴스 다이내믹 (MID)(Engine/Rendering/Materials/MaterialInstances) 를 생성하고 할당합니다.
+* 노출된 디테일 패널 프로퍼티에서 머티리얼에 대한 세팅 데이터를 수집한 다음, 머티리얼에 적용합니다.
+[/EXCERPT:ButterflyCS]
+
+
+[EXCERPT:ButterflyEG]
+_이벤트 그래프_ 가 하는 일은 다음과 같습니다:
+플레이 시작시 - 
+* 날개 머티리얼의 애니메이션을 구성하여 시작시킵니다,
+* 매 프레임(틱)마다 나비를 앞쪽으로 이동시킵니다.
+* 나비의 방향을 업데이트하여 목표 지점으로 부드럽게 회전하도록 합니다.
+* 착지 시퀀스를 시작할 것인지, 충돌 검사를 합니다.
+* 날개와 몸체 애니메이션을 적용합니다.
+* 착지하면 잠깐 쉽니다.
+* 쉰 다음 착지 시퀀스 이전 지난 위치로 다시 날아갑니다.
+* 새 타겟을 잡아 다시 시작합니다.
+[/EXCERPT:ButterflyEG]
+
+
+
+-----------/EXCERPTS------------->

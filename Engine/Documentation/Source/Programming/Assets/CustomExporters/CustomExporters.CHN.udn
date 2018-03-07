@@ -1,0 +1,106 @@
+INTSourceChangelist:2638780
+Availability:Docs
+Title:自定义导出器技术指南
+Crumbs: %ROOT%, Engine, Engine/UI, Programming
+Description:为程序员撰写特殊组件类型导出工具的指南。
+
+[REGION:todo]
+	本页面的内容从虚幻引擎3的文档检查并转化而来，有些信息可能已经过期
+[/REGION]
+
+[TOC(start:2)]
+
+
+
+## 概述
+
+UExporter 类主要在编辑器中用来导出资源，供编辑器复制/粘贴/克隆功能，或者将资源导出到文件中。导出器类可以声明导出器支持的对象的类型和支持的导出格式的列表。导出器可以支持文本或二进制数。
+
+UExporter 的关联类是 UFactory，可以用于导入和粘贴资源，还可以用于新建资源。请参阅[编写自定义导入器](Engine/UI/Programming/Assets/CustomImporters)了解有关如何编写导入器的更多信息。
+
+
+
+## 新增 UExporter 类
+
+UExporter 衍生的类型可以在您的游戏编辑器项目中进行定义。在基础虚幻引擎 3 中定义的 UExporter 类是'固有类'，也就是说它们是由 UObject 衍生而来的，但是没有对应的 .uc 文件。您可能恰好想要按照这种模式创建；参照 UnEdExp.cpp 中的 EditorPrivate.h 及相关函数执行，例如随虚幻引擎 3 发行的 UExporter 衍生类型。
+
+注意： 如果导出器类型是固有的，那么您必须手动将您的新 UExporter 类添加到 AUTO_INITIALIZE_REGISTRANTS_EDITOR 块中自动生成的 C++ 头文件。如果您没有这样做，编辑器将无法找到您的新类，将其作为导入选项。
+
+
+
+## UExporter 成员的注意事项
+
+接下来是 UFactory 成员的列表，通常由 UFactory 衍生类型在其 UFactory::InitializeIntrinsicPropertyValues() 覆盖函数中进行设置。
+
+
+### SupportedClass
+表示导出器导出的对象的类型。
+
+
+### FormatExtension
+该导出器支持的文件类型的文件扩展名列表。例如，在将资源从编辑器导出到文件中时向用户显示的文件对话框中使用。
+
+
+### FormatDescription
+该导出器支持的类型的描述列表。将资源导出到文件中时在编辑器 UI  中显示给用户。
+
+
+### PreferredFormatIndex
+进入首选导出类型的 FormatExtension 数组的索引。在批量导出时可以使用它自动选择输出格式。
+
+
+### bText
+如果为 true，表示该导出器可以通过 ExportText 将资源导出为文本。如果为 false，表示该导出器只能通过 ExportBinary 导出为二进制。
+
+
+
+## 二进制数导出器示例
+
+下面是实现简单的导出器的示例，可以用于将声音对象 (USoundNodeWave) 导出为 .wav。
+
+<pre>
+
+/**
+
+ * 初始化固有类的属性值。根据原始状态初始化类默认对象后立即调用，
+ * 但是要再创建这个类的任何对象之前。
+ */
+
+void USoundExporterWAV::InitializeIntrinsicPropertyValues()
+{
+    SupportedClass = USoundNodeWave::StaticClass();
+    bText = false;
+    PreferredFormatIndex = FormatExtension.AddItem( FString(TEXT("WAV") );
+    new(FormatDescription)FString(TEXT("Sound"));
+}
+
+/**
+
+ * 可以将声音数据导出到指定的存档中，形式为 .wav。
+ */
+
+bool USoundExporterWAV::ExportBinary(UObject* Object,
+                                      const TCHAR* Type,
+                                      FArchive& Ar,
+                                      FFeedbackContext* Warn,
+                                      uint32 PortFlags)
+{
+    USoundNodeWave* Sound = CastChecked<USoundNodeWave>( Object );
+
+    // 导出声音数据，这些数据已经在内部存储/
+    // 为 .wav 格式。
+    void* RawWaveData = Sound->RawData.Lock(LOCK_READ_ONLY);
+    Ar.Serialize( RawWaveData, Sound->RawData.GetBulkDataSize() );
+    Sound->RawData.Unlock();
+    return true;
+}
+
+IMPLEMENT_CLASS(USoundExporterWAV);
+
+</pre>
+
+ 
+
+
+
+

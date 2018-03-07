@@ -1,0 +1,74 @@
+﻿Availability:Public
+Title: 带光照的半透明物体
+Crumbs: %ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description:解释如何对半透明表面进行光照，以及如何投射阴影（包括自投阴影）。
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+	![%Engine/Rendering/LightingAndShadows/LitTranslucency:title%](%ROOT%/Engine/Rendering/LightingAndShadows/LitTranslucency/translucent_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+	![](%ROOT%/ue4_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+	%Engine/Rendering/LightingAndShadows/LitTranslucency:title%
+	[/PARAM]
+	[PARAM:description]
+	%Engine/Rendering/LightingAndShadows/LitTranslucency:description%
+	[/PARAM]
+	[PARAM:path]
+	[RELATIVE:Engine/Rendering/LightingAndShadows/LitTranslucency]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[TOC(start:2)]
+
+
+
+半透明特效一般分为几个分类： 体积类、体积类但足够厚以获得法线信息，以及表面类。  对其中的每一个都需要不同的光照技术，所以材质必须制定应使用的半透明光照模式。
+
+带光照的半透明物体的光照大多数来源于一系列面向视锥体的cascade处理过的体积贴图。  这样在体积内的任意点，光照均为单次，但缺点就是体积贴图的分辨率比较低，而且从观察者角度来说，只涵盖了有限的深度范围。  
+
+半透明光照体积包含所有可移动光源类型的带阴影的直接光照。  同时应考虑光照函数。
+
+[REGION:fullwidth]
+![Lit Translucency](Engine/Rendering/Overview/3LitSnow4.png)
+[/REGION]
+
+半透明材质从[间接光照缓存](Engine/Rendering/LightingAndShadows/IndirectLightingCache)中接受漫反射全局光照。  仅位于物体边界中心的一个光照示例进行了插值。  仅对整个物体采用一个示例，即使其是大型粒子系统。  如果边界中心变化，间接光照会随着时间而进行插值，因此其不会出现。
+
+![](LitTrans_IDLC_spheres.png)
+
+_左侧的球体是使用 *Indirect Lighting Cache（间接光照缓存）* 的光照半透明物体，右侧的球体是使用来自Lightmass的具有烘焙光照的不透明物体。
+
+## 体积特效
+
+### 阴影投射和自投阴影
+
+半透明物体可以将阴影投射于不透明的世界，其本身和其他带光照的半透明Actor。 这是通过傅里叶不透明贴图来实现的，这对斑点体积投射阴影非常重要，但对于更为不透明的半透明表面会有严重的环形失真现象。 半透明自投阴影穿过光源体积以获得点光源和聚光源，这样除非特效非常大且密集，否则由于其低分辨率会经常看不到。 而方向光源逐帧进行半透明自投阴影，而且会得到更高质量。 方向光同时使用次表面着色模型对带光源的材质进行次表面着色。
+
+半透明自投阴影使用基于对象的阴影，这意味着它需要用户指定的固定的粒子系统边界，而且必须要是正确的。 设置的最简单办法就是创建粒子运动，然后 **右击** Cascade工具条上的‘show bounds（显示边界）’按钮，它会弹出对话框让您生成固定边界。  非常大的自投阴影粒子系统会降低阴影贴图分辨率，因为阴影贴图被拉伸以覆盖系统边界。  在Show（显示） -> Advanced（高级）-> Bounds（边界）下启用Show Bounds（显示边界）来确认您设置的边界为合理值。  然后选择编辑器中的发射器，它会描画边界框和球体。
+
+[REGION:imagetable]
+![Translucent Particle Self-Shadowing](Engine/Rendering/Overview/self_shadow_1.png)(w:456) | ![Translucent Particle Self-Shadowing](Engine/Rendering/Overview/self_shadow_2.png)(w:456) |
+| ------ | ------ |
+| | |
+[/REGION]
+
+## 半透明表面
+
+### 反射捕获
+
+TLM_Surface材质从关卡中放置的反射捕获中接受基于图像的反射（高光全局反射）。  和不透明材质不同，只应用一个反射捕获的立方体贴图（非混合），这会使得在物体向另一个反射捕获更近移动时造成弹出。  如果其为无穷远而非附近，也会应用立方体贴图，这会造成大平面上的失真。
+
+![](LitTrans_reflSpheres.png)
+
+_左侧的球体是半透明的，右侧是不透明的，它们都被作为金属来进行设置，这表示100%的光照都来自于高光。_
+
+## 限制
+
+* 带光源的半透明物体目前无法处理静态光源的静态阴影。 但是，支持来自于固定光源的动态阴影。
+* 光照半透明表面缺失直接的高光。
+* 光照半透明表面通过半透明体积光照贴图来获得其所有直接光照，这会让它们比大多数表面材质所需的分辨率更低（如玻璃，水）。

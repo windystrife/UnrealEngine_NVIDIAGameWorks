@@ -1,0 +1,139 @@
+//-----------------------------------------------------------------------------
+// File:		LPVWriteCommmon.usf
+//
+// Summary:		Common functionality for LPV write
+//
+// Created:		2013-03-01
+//
+// Author:		mailto:benwood@microsoft.com
+//
+//				Copyright (C) Microsoft. All rights reserved.
+//-----------------------------------------------------------------------------
+
+#define LPV_WRITE_SHADER	1
+
+//------------------------------------------------------------------------------
+
+#include "LPVCommon.ush"
+
+//------------------------------------------------------------------------------
+
+#define PROPOGATE_26TAP				1
+#define PROPOGATE_USE_LDS			0
+#define COMPRESSED_LDS_PROPOGATE	0
+
+//------------------------------------------------------------------------------
+
+#define PACKED_VPL 1
+
+struct Vpl
+{
+	float3 normal;
+	float3 flux;
+};
+
+struct VplListEntry
+{
+#if PACKED_VPL
+	uint	normalPacked;
+	uint	fluxPacked;
+#else
+	float3	normal;
+	float3  flux;
+#endif
+
+	int		nextIndex;
+};
+
+//-------------------------------------------------------------------------------------------------
+// Functions
+//-------------------------------------------------------------------------------------------------
+
+float3 UnpackVPLNormal( uint normalPacked )
+{
+	float3 n;
+	n.x = float( ( normalPacked & 0x000000ff ) );
+	n.y = float( ( normalPacked & 0x0000ff00 ) >> 8  );
+	n.z = float( ( normalPacked & 0x00ff0000 ) >> 16 );
+	return (n/254.0f)*2.0f-1.0f;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+uint PackVPLNormal( float3 normal )
+{
+	uint3 n = uint3( (normal+1.0f) * 127.0f );
+	return n.x | ( n.y << 8 ) | ( n.z << 16 );
+}
+
+//-------------------------------------------------------------------------------------------------
+
+Vpl UnpackVpl( VplListEntry entry )
+{
+	Vpl vpl;
+#if PACKED_VPL
+	vpl.flux   = UnpackRGY32( entry.fluxPacked );
+	vpl.normal = UnpackVPLNormal( entry.normalPacked );
+#else
+	vpl.flux   = entry.flux;
+	vpl.normal = entry.normal;
+#endif
+	return vpl;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+VplListEntry PackVpl( Vpl vpl )
+{
+	VplListEntry entry;
+
+#if PACKED_VPL
+	entry.normalPacked	= PackVPLNormal( vpl.normal );
+	entry.fluxPacked	= PackRGY32( vpl.flux );
+#else
+	entry.flux			= vpl.flux;
+	entry.normal		= vpl.normal;
+#endif
+	return entry;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+void AccumulateLighting(float3 colour, float3 n, float solidAngle, in out LPVCell cell ) 
+{ 
+	const float ONE_OVER_PI = 1.0f/3.1415927f;
+	const float c0 = 0.282095f;
+	const float c1 = 0.488603f;
+	const float c2 = 1.092548f;
+	const float c3 = 0.315392f;
+	const float c4 = 0.546274f;
+
+	cell.coeffs[0] += colour*c0*solidAngle ;
+
+	cell.coeffs[1] += colour*(c1*n.y)*solidAngle;   
+	cell.coeffs[2] += colour*(c1*n.z)*solidAngle ;   
+	cell.coeffs[3] += colour*(c1*n.x)*solidAngle ;   
+
+	cell.coeffs[4] += colour*(c2*n.x*n.y)*solidAngle ; 
+	cell.coeffs[5] += colour*(c2*n.y*n.z)*solidAngle ; 
+	cell.coeffs[7] += colour*(c2*n.x*n.z)*solidAngle ; 
+	cell.coeffs[6] += colour*(c3*(3.0f*n.z*n.z-1.0f))*solidAngle ; 
+	cell.coeffs[8] += colour*(c4*(n.x*n.x-n.y*n.y))*solidAngle ;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+#if LPV_WRITE_SHADER
+void WriteLpvCell( in LPVCell cell, uint cellIndex )
+{
+	int3 texIndex = IndexToGridPos( cellIndex );
+
+	gLpv3DTextureRW0[ texIndex ] = float4( cell.coeffs[0],     cell.AO ); // tex0.a is reserved for secondary occlusion;
+	gLpv3DTextureRW1[ texIndex ] = float4( cell.coeffs[1].rgb, cell.coeffs[2].r );
+	gLpv3DTextureRW2[ texIndex ] = float4( cell.coeffs[2].gb,  cell.coeffs[3].rg );
+	gLpv3DTextureRW3[ texIndex ] = float4( cell.coeffs[3].b,   cell.coeffs[4].rgb );
+	gLpv3DTextureRW4[ texIndex ] = float4( cell.coeffs[5].rgb, cell.coeffs[6].r );
+	gLpv3DTextureRW5[ texIndex ] = float4( cell.coeffs[6].gb,  cell.coeffs[7].rg );
+	gLpv3DTextureRW6[ texIndex ] = float4( cell.coeffs[7].b,   cell.coeffs[8].rgb );
+}
+#endif

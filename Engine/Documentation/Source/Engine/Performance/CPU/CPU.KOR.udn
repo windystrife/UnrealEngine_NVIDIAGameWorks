@@ -1,0 +1,77 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title: CPU 프로파일링
+Crumbs: %ROOT%, Engine
+Description:게임의 CPU 비용 최적화 방법입니다.
+Navigation:topic
+version: 4.9
+
+
+렌더 스레드에서 CPU 에 묶여있는 경우, 드로 콜이 너무 많아서일 수 있습니다. 흔히 발생하는 문제로, 아티스트가 
+드로 콜을 (예: 다수의 벽을 하나의 메시로) 합쳐 그에 대한 비용을 줄이는 것으로 종종 해결됩니다. 실제 비용은 여러 부분에 걸쳐 있습니다:
+* 렌더 스레드가 각 오브젝트 (컬링, 머티리얼 셋업, 라이팅 셋업, 콜리전, 업데이트 비용 따위)를 처리해야 합니다.
+  좀 더 복잡한 머티리얼은 구성 비용이 높아집니다.
+* 렌더 스레드가 각 드로 콜에 대한 상태 (상수 버퍼, 텍스처, 인스턴스 프로퍼티, 셰이더) 구성을 위해 GPU 명령을 준비하고 실제 API 호출을 해야 합니다.
+  베이스 패스 드로 콜은 보통 뎁스 온리 드로 콜보다 비쌉니다.
+* DirectX 가 일부 데이터를 인증하여 정보를 그래픽 카드 드라이버에 전달합니다.
+* (NVIDIA, AMD, Intel 등의) 드라이버가 추가 인증 후 하드웨어에 대한 커맨드 버퍼를 만듭니다. 가끔 이 부분은 다른 스레드로 나뉩니다.
+
+stat 명령으로 나타나는 **Mesh Draw Calls** 은 3D 메시로 인한 드로 콜을 보여주며, 아티스트가 다음과 같은 방법으로 줄일 수 있는 수치입니다:
+* 오브젝트 수 감소 (스태틱/다이내믹 메시, 메시 파티클)
+* 뷰 거리 감소 (씬 캡처 액터 또는 오브젝트별)
+* 뷰 조정 (뷰 줌 아웃, 오브젝트가 같은 뷰에 있지 않도록 이동)
+* SceneCaptureActor 피하기 (씬을 다시 렌더링해야 하므로, fps 를 낮게 설정하거나 필요할 때만 업데이트)
+* 분할화면 피하기 (단일 뷰일 때보다 항상 CPU 에 묶이며, 커스텀 엔진 퀄리티(scalability) 세팅이나 좀 더 적극적인 콘텐츠 작업 필요)
+* 드로 콜당 엘리먼트 수 감소 (머티리얼을 합쳐 좀 더 복잡한 픽셀 셰이더를 받거나, 단순히 머티리얼을 줄이거나, 머티리얼 수가 줄어드는 경우에만 텍스처를 적은 수의 커다란 텍스처로 합치거나, 엘리먼트가 적은 LOD 모델을 사용하거나)
+* 메시에 커스텀 뎁스나 그림자 드리우기같은 기능 끄기
+* 라이트 소스가 그림자를 드리우지 않도록 하거나 바운딩 볼륨을 타이트하게 잡기 (뷰 원뿔, 감쇠 반경)
+
+어떤 경우에는, 하드웨어 인스턴싱이 옵션이 될 수도 있습니다 (동일한 3d 모델, 동일한 데이터로 파라미터만 약간 변경하는 것인데, 하드웨어에서 지원해야 합니다). 하드웨어 인스턴싱은 드로 콜당 드라이버 부하를 
+크게 줄여주지만 유연성이 제한됩니다. 저희는 InstancedFoliage 에 대한 메시 파티클에 사용합니다.
+
+
+[REGION:imagetable]
+| ![](SceneRendering.png)(w:813) |
+| :----: | 
+| 콘솔: stat SceneRendering |
+[/REGION]
+
+고사양 PC 에서의 경험이 비추어 보면, 프레임당 천 단위의 드로 콜이 가능합니다 (DirectX11, OpenGL). 좀 더 신형 API (AMD Mantle, DirectX12) 에서는 드라이버 부하 문제 해결 시도를 하여, 더욱 많은 수치가 가능합니다.
+모바일에서 (OpenGL ES2, OpenGL ES3) 이 수치는 백 단위로 좀 더 크지만, 드라이버 부하를 크게 줄일 수 있는 것도 있습니다 (Apple Metal).
+
+게임 스레이드에서 CPU 에 묶인 경우, 어떤 게임 코드가 이 문제를 유발하는지 살펴봐야 합니다 (블루프린트, 레이캐스트, 물리, 인공지능, 메모리 할당).
+
+[REGION:imagetable]
+| ![](Game.png)(w:813) |
+| :----: | 
+| 콘솔: stat Game |
+[/REGION]
+
+CPU 프로파일러의 빌드로 문제를 유발하는 함수를 찾을 수 있습니다:
+
+[REGION:imagetable]
+| ![](DumpFrame.png)(w:474) |
+| :----: | 
+| 콘솔: stat DumpFrame -ms=0.1 |
+[/REGION]
+
+여기서 한계치를 0.1 milisecond 로 하여 출력을 재단했습니다. 명령을 실행한 이후, 결과를 로그 또는 콘솔에서 찾을 수 있습니다.
+계층구조에 milisecond 단위 시간과 콜 수가 표시됩니다. 필요하다면 코드에 **QUICK_SCOPE_CYCLE_COUNTER** 를 추가하여 다음 예제와 같이 계층구조를 한층 더 정제시킬 수 있습니다:
+
+	virtual void DrawDynamicElements(FPrimitiveDrawInterface* PDI,const FSceneView* View) override
+	{
+		QUICK_SCOPE_CYCLE_COUNTER( STAT_BoxSceneProxy_DrawDynamicElements );
+
+		const FMatrix& LocalToWorld = GetLocalToWorld();
+		const FColor DrawColor = GetSelectionColor(BoxColor, IsSelected(), IsHovered(), false);
+		DrawOrientedWireBox(PDI, LocalToWorld.GetOrigin(), ... );
+	}
+
+CPU 에 묶이지 않은 경우, [GPU 에 묶인](Engine/Performance\GPU) 것입니다.
+
+
+
+
+
+
+

@@ -1,0 +1,395 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title: 라이트매스 글로벌 일루미네이션
+Crumbs: %ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description:Lightmass, 라이트매스의 모든 기능과 세팅에 대한 일람입니다.
+Version: 4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/Lightmass:title%](%ROOT%/Engine/Rendering/LightingAndShadows/lighting_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/Lightmass:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/Lightmass:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/Lightmass]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:fullwidth raw]
+![](Engine/Rendering/LightingAndShadows/lighting_overview_banner_001.png)(convert:false)
+[/REGION]
+
+[TOC(start:2 end:2)]
+
+
+
+
+[EXCERPT:LightMass_002]
+Lightmass (라이트매스)는, 에리어 섀도잉(area shadowing, 영역 그림자)과 디퓨즈 인터리플렉션(diffuse interreflection, 확산 상호반사)같은 복잡한 빛 상호작용으로 라이트맵을 만들어 냅니다. 모빌리티가 스테이셔너리 및 스태틱인 라이트의 라이팅 기여 부분을 미리계산하는 데 사용됩니다.
+[/EXCERPT:LightMass_002]
+
+에디터와 라이트매스 사이의 통신은 **Swarm Agent** (스웜 에이전트)가 처리하는데, 로컬 라이팅 빌드를 관리하기도 하고, 원격 기계에 라이팅 빌드를 분산시키기도 합니다. 기본적으로 최소화되어 열리는 Swarm Agent (스웜 에이전트)는 라이팅 빌드 진행상황을 추적하여 어떤 기계가 작업중인지, 무슨 작업을 하는지, 각각 스레드는 얼마나 사용하고 있는지 등에 대한 기록을 유지합니다.
+
+**스웜 에이전트** 샘플 이미지는 아래와 같습니다 (하단 근처의 바를 통해 빌드 완료까지 진행상황을 알 수 있습니다).
+
+![](SwarmAgent.png)(w:640)
+
+## 스태틱 및 스테이셔너리 라이트용 기능
+
+### 디퓨즈 인터리플렉션
+
+디퓨즈 인터리플렉션(diffuse interreflection, 확산 상호반사)은 단연코 시각적으로 가장 중요한 글로벌 일루미네이션 라이팅 효과입니다. 라이트매스에는 기본적으로 튕겨지는 빛이 포함되며, 머티리얼의 BaseColor(베이스 컬러) 노드를 통해 모든 방향으로 산란되는 빛(과 색)의 양을 조절합니다. 이 효과는 컬러 블리딩(color bleeding)이라고도 합니다. 디퓨즈 인터리플렉션은 모든 방향에 똑같이 반사되어 들어오는 빛으로, 보는 방향이나 위치에는 영향받지 않는다는 점이 중요합니다.
+
+아래는 디렉셔널 라이트 하나로 라이트매스가 빌드한 씬에서 직사광만 나타낸 모습입니다. 라이트에 직접 보이지 않는 부분은 까맣습니다. 글로벌 일루미네이션이 없으면 이렇게 됩니다.
+
+![3DirectOnly.jpg](3DirectOnly.jpg)(w:720)
+
+처음 튕긴 디퓨즈 글로벌 일루미네이션 모습입니다. 왼편 의자 뒤의 그림자를 주목해 보십시오. 간접광의 그림자이기 때문에 간접 그림자라고 칭합니다. 튕긴 디퓨즈의 밝기와 색은 들어오는 빛과 그 빛이 상호작용하는 머티리얼의 Diffuse(디퓨즈) 노드에 따라 달라집니다. 튕길 때마다 예전보다 어두워지는데, 빛의 일부분은 반사되지 않고 표면에 흡수되기 때문입니다. 기둥 뿌리 부분은 다른 표면보다 간접광을 많이 받는데, 직사광 부분에 더 가깝기 때문이구요.
+
+![3FirstBounceOnly.jpg](3FirstBounceOnly.jpg)(w:720)
+
+두 번째 튕긴 디퓨즈 입니다. 빛이 훨씬 더 감쇠되었고 고르게 분포되었습니다.
+
+![3SecondBounceOnly.jpg](3SecondBounceOnly.jpg)(w:720)
+
+네 번 튕긴 디퓨즈를 합성한 씬은 이렇습니다. 글로벌 일루미네이션의 시뮬레이션을 통해 필 라이트를 수동으로 채워넣는 것보다 라이팅이 훨씬 자세하고 사실적이 되었습니다. 특히 간접 그림자같은 것은, 필 라이트로는 꿈도 못 꿀 일입니다.
+
+![3FourBounces.jpg](3FourBounces.jpg)(w:720)
+
+
+아래에서 보듯이, 튕겨진 빛은 그 아래 놓인 머티리얼의 디퓨즈 컬러를 받습니다. 여기서 '컬러 블리딩', 즉 색번짐이란 용어가 등장합니다. 컬러 블리딩은 채도가 매우 높은 색에서 가장 확연히 드러납니다. 프리미티브, 머티리얼, 레벨의 DiffuseBoost 값을 올려 그 효과를 과장시킬 수도 있습니다.
+
+[REGION:imagetable]
+| ![diffusebounce_T.JPG](diffusebounce_T.JPG)(h:445) | ![diffusebounce_L.JPG](diffusebounce_L.JPG)(h:445) |
+| ------ | ------ |
+| | |
+[/REGION]
+
+
+### 캐릭터 라이팅
+
+라이트매스는 캐릭터의 라이팅을 위해 우선, [LightmassImportanceVolume](#LightmassImportanceVolume) (라이트매스 임포턴스 볼륨)으로 설정된 공간 안에 듬성듬성 샘플 위치를 설정합니다. 그리고 캐릭터가 다니게 될 가능성이 높은 '위를 바라보는 면'들을 찾아, 그 위쪽은 샘플 위치를 좀 더 촘촘히 설정합니다. 각 라이팅 샘플은 간접광 정보만 가지고 있고, 직사광 정보는 가지고 있지 않습니다. 직사광은 실시간으로 처리하는 쪽이 낫기 때문입니다.
+
+첫 이미지는 바닥 위에 놓은 라이팅 샘플의 디버그를 시각화시킨 것이며, 둘째 이미지는 같은 씬을 라이팅포함(Lit) 모드로 본 것입니다. 빨강 태피스트리 위의 샘플이 빨강 바운스 라이트를 받은 것을 보십시오. 샘플은 단일색으로 시각화되지만, 실제로는 모든 방향에서 빛을 받습니다.
+
+[REGION:imagetable]
+| ![02CharacterLighting.jpg](02CharacterLighting.jpg)(w:465) | ![02CharacterLightingLit.jpg](02CharacterLightingLit.jpg)(w:465) |
+| ------ | ------ |
+| | |
+[/REGION]
+
+
+그리고서 Indirect Lighting Cache(간접광 캐시)는 이러한 라이팅 샘플을 사용하여 무버블 오브젝트에 대한 간접광을 보간합니다. 참고로 이 간접광은 라이트 인바이언먼트의 그림자 색에만 영향을 줄 뿐, 방향에는 영향을 주지 않습니다. **Show->Visualize->Volume Lighting Samples** (표시->시각화->볼륨 라이팅 샘플)을 통해 뷰포트에서 이 부분을 미리볼 수 있습니다.
+
+자세한 정보는 [](Engine/Rendering/LightingAndShadows/IndirectLightingCache) 문서를 참고하세요.
+
+#### 한계
+
+   * 볼륨 샘플 배치를 위한 기본 세팅으로는 거다란 맵에 다수의 샘플을 배치하게 됩니다. 그러면 간접광 캐시의 보간 시간이 매우 길어지게 됩니다. **Static Lighting Level Scale** 을 사용하여 커다란 맵의 샘플 수를 줄이세요.
+   * **Lightmass Importance Volume** 밖의 무버블 오브젝트는 간접광이 까맣게 나옵니다.
+
+
+### 앰비언트 오클루전
+
+라이트매스는 간접 그림자 디테일을 자동으로 계산하지만, 심미적인 이유로나 씬에 무언가 임박했다는 느낌을 강조하기 위해 간접 그림자를 과장시키면 좋을 때가 있을 수 있습니다.
+
+앰비언트 오클루전이란 마치 구름낀 하늘처럼, 밝기가 균일한 상반구에서 얻을 수 있는 간접 그림자를 말합니다. 라이트매스는 앰비언트 오클루전 계산을 지원하는데, 직/간접 조명을 적용한 다음 라이트맵에 구워내는 것입니다. 앰비언트 오클루전은 디폴트로 켜져 있는데, **월드 세팅** 아래 **Lightmass** 의 **Lightmass Settings** 에서 **Use Ambient Occlusion** (앰비언트 오클루전 사용) 체크박스를 해제하여 끌 수 있습니다.
+
+첫 이미지는 앰비언트 오클루전이 없는 간접광 씬입니다. 둘째 이미지는 같은 씬의 직/간접광 둘 다에 앰비언트 오클루전을 적용한 것으로, 오브젝트가 맞닿는 곳의 어두운 부분을 주목해 보시기 바랍니다.
+
+[REGION:imagetable]
+![9NoAO.jpg](9NoAO.jpg)(w:465) | ![9WithAO.jpg](9WithAO.jpg)(w:465) |
+| ------ | ------ |
+|앰비언트 오클루전 무| 앰비언트 오클루전 유|
+[/REGION]
+
+#### 앰비언트 오클루전 세팅:
+
+| 프로퍼티 | 설명 |
+| ------- | ------------ |
+| **Visualize Ambient Occlusion** | 앰비언트 오클루전 시각화 - 라이팅을 빌드할 때 오클루전 팩터로만 라이트맵을 덮어씁니다. 정확한 오클루전 팩터를 확인하고자 할 때, 다른 세팅의 효과와 비교하고자 할 때 좋습니다. |
+| **MaxOcclusionDistance** | 최대 오클루전 거리 - 한 오브젝트가 다른 오브젝트를 가릴 수 있는 최대 거리입니다. |
+| **FullyOccludedSamplesFraction** | 완전히 가려지는 샘플 비율 - 풀 오클루전이 되려면 얼마만큼의 샘플 비율이 가려져야 하는가 입니다. 프리미티브별로도 FullyOccludedSamplesFraction 옵션이 있는데, 한 오브젝트가 다른 오브젝트를 얼마나 가릴 것인지를 조절할 수 있습니다. |
+| **OcclusionExponent** | 오클루전 지수 - 높을 수록 대비가 높아집니다. |
+
+[REGION:imagetable]
+| ![92Defaults.jpg](92Defaults.jpg)(w:230) | ![92MaxDist5.jpg](92MaxDist5.jpg)(w:230) | ![92MaxPct80.jpg](92MaxPct80.jpg)(w:230) | ![92Exponent2.jpg](92Exponent2.jpg)(w:230) |
+| ------ | ------ | ------ | ------ |
+| AO 기본값 (MaxOcclusionDistance 200, FullyOccludedSamplesFraction 1.0, OcclusionExponent 1.0) | MaxOcclusionDistance 5. 저빈도 오클루전 제거, 구석의 오클루전만 남았습니다. | FullyOccludedSamplesFraction 0.8. 전반적으로 오클루전이 어두워 졌으며, 80% 이상이 가려진 영역은 검정으로 채워졌습니다. | OcclusionExponent 2. 중간범위에서 어둡게 채워진 부분으로의 오클루전 변환이 훨씬 빠르게 일어나며, 오클루전은 구석으로 밀려났습니다. |
+[/REGION]
+
+
+앰비언트 오클루전은 NumIndirectLightingBounces (간접광 바운스 횟수)가 0 보다 클 때, 라이팅 빌드 타임에 있어서라면 거의 무료에 가깝습니다.
+
+#### 한계
+
+   * 앰비언트 오클루전은 구석에서의 변화가 급격하므로, 꽤나 고해상도의 라이트맵을 요합니다. 
+   * Preview 퀄리티 빌드는 앰비언트 오클루전 미리보기에 그다지 적합하지 않습니다. (간접 그림자와 마찬가지로) 앰비언트 오클루전은 꽤 고밀도의 라이팅 샘플을 필요로 하기 때문입니다.
+
+
+### 마스킹된 그림자
+
+라이트매스는 그림자를 계산할 때 BLEND_Masked 머티리얼의 불투명 마스크를 계산에 넣습니다. 에디터 뷰포트에서 잘려(clip) 보이는 머티리얼(, 즉 마스크) 부분은 그림자도 생기지 않아, 나무나 잎사귀의 그림자 디테일을 훨씬 많이 살릴 수 있습니다.
+
+[REGION:imagetable]
+| ![masked.JPG](masked.JPG)(h:420) | ![masked_L.JPG](masked_L.JPG)(h:420) |
+| ------ | ------ |
+| | |
+[/REGION]
+
+## 스테이셔너리 라이트 전용 기능
+
+### 굽은 노멀 스카이 오클루전
+
+라이트매스는 스테이셔너리 모빌리티의 [스카이 라이트](Engine/Rendering/LightingAndShadows/LightTypes/SkyLight) 가 켜질 때마다 굽은 노멀(bent normal) 형태의 방향성 오클루전 정보를 생성합니다.
+
+### 디스턴스 필드 섀도맵
+
+라이트매스는 [스테이셔너리 라이트](Engine/Rendering/LightingAndShadows/LightMobility/StationaryLights) 에 대해 디스턴스 필드 섀도맵을 계산합니다. 디스턴스 필드 섀도맵은 저해상도에서도 곡선 모양이 아주 잘 유지되나, 에리어 섀도잉 또는 반투명을 지원하지 않습니다.
+
+## 스태틱 라이트 전용 기능
+
+### 에리어 라이트 및 섀도
+
+라이트매스에서, 스태틱 모빌리티의 라이트는 전부 기본적으로 에리어 라이트(area light)입니다. 포인트 및 스포트 라이트 소스에 사용되는 모양은 구체로, 그 반경은 LightmassSettings 아래 LightSourceRadius 를 통해 설정됩니다. 디렉셔널 라이트 소스는 원반(disk)을 사용하며, 씬 가장자리에 위치합니다. 라이트 소스 크기는 그림자의 연한 정도를 조절하는 두 가지 요인 중 하나입니다. 다른 하나의 요인은, 그림자를 드리우는 것에서부터 받는 위치까지의 거리입니다. 에리어 섀도는 현실에서와 마찬가지로 이 거리가 멀어짐에 따라 부드러워 집니다.
+
+첫 그림은 스태틱 라이팅만 있는 스태틱 디렉셔널 라이트로, 반그늘 크기가 전부 똑같습니다. 두 번째 그림에서는, 라이트 소스 크기와 오클루더 거리 양쪽으로 선명도가 제어되는 에리어 섀도를 라이트매스가 계산한 것입니다. 기둥과 바닥이 만나는 부분에서는 기둥의 그림자가 더욱 선명해 지는 것을 볼 수 있습니다.
+
+[REGION:imagetable]
+| ![7OldUE3Shadows.jpg](7OldUE3Shadows.jpg)(h:520) | ![7LightmassShadows.jpg](7LightmassShadows.jpg)(h:520) |
+| ------ | ------ |
+| | |
+[/REGION]
+
+포인트 및 스포트 라이트에 사용되는 라이트 소스 반경은 노랑 와이어프레임으로 그려지는 반면, 영향력 반경은 청록색으로 그려집니다. 대부분의 경우 라이트 소스가 그림자를 드리우는 지오메트리와 교차되지 않도록 하는 것이 좋은데, 그렇게 되면 해당 지오메트리의 양쪽 면에 빛을 뿜기 때문입니다.
+
+![](AreaLight.png)
+
+### 반투명 그림자
+
+정적 그림자를 드리우는 메시에 적용된 반투명 머티리얼을 통과하는 빛은 에너지를 약간 잃어, 반투명 그림자를 드리우게 됩니다.
+
+![translucent_T.JPG](translucent_T.JPG)(h:400)
+
+
+#### 반투명 그림자 색
+
+머티리얼을 통과하는 빛의 양은 _Transmission_ (투과)라 하며, 각 컬러 채널에 대해 0 과 1 사이 값을 갖습니다. 0 은 완전히 불투명함을, 1 은 통과된 입사 광선이 영향받지 않음을 뜻합니다. Transmission(투과)에 대한 머티리얼 입력은 없기에 현재 다른 머티리얼 입력에서 파생되는데, 다음과 같습니다:
+
+* 라이팅된 머티리얼
+	* BLEND_Translucent 및 BLEND_Additive: Transmission = Lerp(White, BaseColor, Opacity)
+	* BLEND_Modulate: Transmission = BaseColor
+* 라이팅되지 않은 머티리얼
+	* BLEND_Translucent 및 BLEND_Additive: Transmission = Lerp(White, Emissive, Opacity)
+	* BLEND_Modulate: Transmission = Emissive
+
+즉 불투명도 0 에서 머티리얼은 입사 광선을 필터링하지 않기에 반투명 그림자가 없다는 뜻입니다. 불투명도 1 에서 입사 광선은 머티리얼의 (라이팅 여부에 따라) 이미시브나 베이스 컬러에 필터링된다는 뜻입니다. 간접광은 가끔 반투명 그림자를 씻어내어 반투명 머티리얼의 이미시브나 디퓨즈보다 채도가 낮아질 수 있다는 점 참고하십시오.
+
+#### 반투명 그림자 선명도
+
+반투명 그림자 선명도를 제어하는 요인은 여럿 있습니다.
+
+첫 이미지에는 거대한 라이트(LightSourceAngle 값이 5 인 디렉셔널 라이트)가 사용되었고, 둘째에는 작은 라이트(LightSourceAngle 값 0)가 사용되었습니다.
+
+[REGION:imagetable]
+| ![5LargeLightSource.jpg](5LargeLightSource.jpg)(h:560) | ![5SmallLightSource.jpg](5SmallLightSource.jpg)(h:560) |
+| ------ | ------ |
+| | |
+[/REGION]
+
+첫 이미지에는 작은 라이트가 사용되었으나, 라이트맵 해상도가 너무 낮아 반투명 그림자가 선명하지 않습니다. 둘째 이미지에는 머티리얼 익스포트시 (머티리얼 에디터에서 _ExportResolutionScale_ (익스포트 해상도 스케일)로 조절하는) 해상도가 너무 낮게 설정되어 그림자가 선명하지 않습니다.
+
+[REGION:imagetable]
+| ![5LowLightmapResolution.jpg](5LowLightmapResolution.jpg)(h:565) | ![5LowExportResolutionScale.jpg](5LowExportResolutionScale.jpg)(h:565) |
+| ------ | ------ |
+| | |
+[/REGION]
+
+간접광 역시 반투명 머티리얼에 영향을 받습니다. 이 이미지의 창문은 그 Transmission(투과)에 따라 들어오는 빛을 걸러내며, 그 빛을 머금은 채 (변경된 색으로) 주변에 튕겨집니다.
+
+![TranslucentShadowIndirectLight.jpg](TranslucentShadowIndirectLight.jpg)
+
+
+#### 한계
+
+   * 반투명 머티리얼은 현재 빛을 산란(scatter)시키지 않으므로, 색이 주변 오브젝트에 번지지 않습니다.
+   * 현재 처음 튕기는 디퓨즈는 반투명 그림자에 영향받지 않습니다. 즉 한 번 튕긴 간접광은 반투명 머티리얼을 통과해도 머티리얼의 Transmission(투과)에 필터링되지 않는다는 뜻입니다.
+   * 투과된 모양의 굴절(refraction, caustics)은 현재 지원되지 않습니다.
+
+## 라이트매스로 최적의 퀄리티 얻기
+
+### 라이팅을 눈에 띄게 만들기
+
+#### 디퓨즈 텍스처
+
+렌더링 도중, 라이팅된 픽셀 컬러는 BaseColor * Lighting 으로 결정되므로, 베이스 컬러는 라이팅이 어때 보이는지에 직접적으로 영향을 끼칩니다. 높은 대비나 어두운 디퓨즈 텍스처는 라이팅을 알아보기 힘들게 만드는 반면, 낮은 대비나 중간범위 디퓨즈 텍스처는 라이팅 디테일을 드러나 보이게 해 줍니다.
+
+중간-범위 디퓨즈 텍스처로 빌드한 첫 이미지 씬과, 마찬가지로 라이트매스를 이용하긴 했으나 노이지하고 어두운 디퓨즈 텍스처로 빌드한 두 번째 이미지 씬의 라이팅 명쾌함을 비교해 보십시오. 둘째 이미지의 씬에서는 그림자 전환처럼 빈도가 가장 높은 변경만이 눈에 띕니다.
+
+[REGION:imagetable]
+![94MidToneDiffuse.jpg](94MidToneDiffuse.jpg)(w:465) | ![94DarkDiffuse.jpg](94DarkDiffuse.jpg)(w:465) |
+| ------ | ------ |
+| | |
+[/REGION]
+
+라이팅제외 뷰 모드는 디퓨즈 노드를 확인하기에 좋습니다. 첫 이미지의 씬을 라이팅제외 뷰 모드로 보면 평이한 모노톤에 가까워 보이는데, 즉 이 모든게 다 라이팅 덕이며 최종 픽셀 컬러의 다변화가 대부분 라이팅 차이에 의한 것이라는 뜻입니다. **좋은 라이팅을 얻기 위해서는, 씬을 라이팅제외 뷰모드로 봤을 때 평이하고 지루해 보여야 합니다.** 디퓨즈 텍스처 속에 라이팅이나 매크로 기능을 구워넣는 것은 라이팅에 해가 되는 일입니다.
+
+[REGION:imagetable]
+![94MidToneDiffuseUnlit.jpg](94MidToneDiffuseUnlit.jpg)(w:465) | ![94DarkDiffuseUnlit.jpg](94DarkDiffuseUnlit.jpg)(w:465) |
+| ------ | ------ |
+| | |
+[/REGION]
+
+
+라이팅제외 이미지의 여러 부분에 에디터의 색 선택기를 사용해 보면, 첫 이미지의 씬의 디퓨즈 값은 0.5 정도인 반면, 둘째 이미지의 씬에는 디퓨즈 값이 0.08 정도임을 알 수 있습니다. 포토샵에서 이 라이팅제외 이미지의 막대그래프를 보면 디퓨즈 텍스처의 분포 정도를 잘 알아볼 수 있습니다.
+
+[REGION:note]
+포토샵은 감마 공간의 색 값으로 나타나기에, 검정과 하양의 중간값은 127 (.5) 가 아닌 186 (.73) 입니다.* 눈에 띄는 라이팅의 막대그래프는 어떤 모습인지, 첫 이미지의 막대그래프가 잘 나타내 주고 있습니다.
+[/REGION]
+
+![hist_Spo.jpg](hist_Spo.jpg)
+![hist_UT.jpg](hist_UT.jpg)
+
+
+#### 라이팅 셋업
+
+   * 앰비언트 라이팅은 피하세요! 앰비언트 큐브맵같은 앰비언트 라이팅은 레벨에 고정적인 배경 요소가 추가되어, 간접광을 받는 영역의 대비를 감소시킵니다.
+   * 직사광 영역과 간접광 영역을 받는 부분의 대비차가 크도록 라이트를 셋업하십시오. 대비야 말로 그림자 전환이 일어나는 곳이 어디인지를 쉽게 찍어주어 레벨의 입체감을 더욱 살려줄 것입니다.
+   * 밝은 영역은 너무 밝지 않게, 어두운 영역은 완전히 까맣지 않게, 그러면서도 디테일은 눈에 띄도록 라이트를 셋업하십시오. 최종 디스플레이로 삼을 곳에서 어두운 부분이 어떻게 보이는 지를 확인하는 것이 중요합니다.
+
+### 라이팅 퀄리티 개선하기
+
+#### 라이트맵 해상도
+
+고해상도 텍스처 라이트맵을 사용하는 것이 디테일한 퀄리티의 라이팅을 얻기에 가장 좋은 방법입니다. 고해상도 라이트맵을 사용하면 텍스처 메모리를 더 잡아먹고 빌드 시간이 늘어난다는 단점이 있는 상충 관계입니다. 이상적으로는, 씬의 라이트맵 해상도 대부분을 시각적 임팩트가 강한 곳이나 고주파 그림자가 있는 곳 주변에 할당해 줘야 할 것입니다.
+
+#### 라이트매스 솔버 퀄리티
+
+라이트매스 솔버(Solver) 세팅은 '라이팅 빌드 옵션' 대화창에 선택된 빌드 퀄리티에 따라 자동으로 설정됩니다. Production 으로는 디퓨즈 텍스처가 적용된 상태로 부작용이 눈에 딱 띄지 않는 수준의 퀄리티가 나올 것입니다.  
+
+## 최적의 라이팅 빌드 시간 구하기
+
+라이트매스 빌드 시간을 향상시키는 방법은 여럿 있습니다:
+
+   * 고-빈도 (급격히 바뀌는) 라이팅이 있는 영역에만 고해상도 라이트맵을 쓰십시오. 직사광을 받지 않거나 선명한 간접 그림자에 영향받지 않는 곳의 브러시 표면이나 스태틱 메시에는 라이트맵 해상도를 낮추십시오. 그러면 가장 눈에 띄는 영역에 고해상도 그림자를 얻을 수 있습니다.
+   * 플레이어가 절대 볼 수 없는 표면은 제일 낮은 라이트맵 해상도로 설정해야 할 것입니다.
+   * [Lightmass Importance Volume](#LightmassImportanceVolume) 으로 가장 중요한 (플레이가능 부분에 딱 맞는) 영역을 정하십시오.
+   * 메시에 대한 빌드 시간이 고를 수 있도록 맵 전반에 걸쳐 라이트맵 해상도를 최적화시키십시오.  몇 대의 기계가 분산 빌드를 활용하든 말든 관계 없이, 라이팅 빌드 시간은 곧 딱 하나라도 가장 느린 오브젝트를 빌드하는 데 걸리는 시간입니다.  **라이트맵 해상도가 높은 레벨의 커다란 부분을 연속된 커다란 메시로 덮지 않도록 하세요.**  이런 부분은 모듈식 조각으로 쪼갤 수록, 특히나 머신에 코어가 여러개일 수록 빌드 시간이 향상됩니다.
+   * 셀프 오클루전이 많은 메시는 빌드 시간이 오래 걸립니다. 예를 들어 평행 레이어가 여럿인 양탄자는 평평한 바닥보다 빌드 시간이 훨씬 오래 걸릴 것입니다.
+
+**라이팅 빌드 정보** 대화창은 라이팅 빌드 시간 향상에 아주 중요한 툴입니다. 먼저 통계를 확인하고자 하는 레벨에서 라이팅을 빌드합니다. 그런 다음 *빌드->라이팅 정보->스태틱 메시 라이팅 정보* 를 통해 대화창을 엽니다. 드롭 다운을 *라이팅 빌드 정보* 로 변경합니다. 그러면 메시가 소팅된 목록과 라이팅 계산에 얼마나 걸렸는지가 표시됩니다.
+
+![](LightingBuildInfo.png)
+
+## 라이트매스 세팅
+
+### Lightmass Importance Volume
+
+[EXCERPT:LightMass_001]
+많은 맵에 에디터의 그리드 가장자리 밖으로 삐져나가는 메시가 있으나, 고품질 라이팅을 필요로 하는 실제 플레이가능 영역은 훨씬 작습니다. 라이트매스는 레벨의 크기에 따라 광자를 방출하기에, 그러한 배경 메시는 방출해야 하는 광자의 수를 크게 늘리게 되어 라이팅 빌드 시간도 늘어날 것입니다. LightmassImportanceVolume 은 라이트매스가 광자를 방출하는 영역을 제한시켜, 디테일한 간접광이 필요한 지역에 집중시킬 수 있습니다. 임포턴스 볼륨 밖 영역은 저품질 간접광이 딱 한 번 바운스됩니다.
+[/EXCERPT:LightMass_001]
+
+첫 이미지는 멀티플레이어 맵에 대한 상단 와이어프레임 뷰입니다. 고퀄리티 라이팅을 필요로 하는 실제 플레이가능 영역은 중앙의 녹색 덩어리입니다.
+
+둘째 이미지는 멑티플레이어 맵의 플레이가능 영역을 확대한 것인데, 올바르게 셋업된 LightmassImportanceVolume 이 선택된 상태입니다. LightmassImportanceVolume 이 라이팅할 반경을 8만 유닛에서 1만 유닛으로 줄였으니, 넓이로 따지면 64배 줄어든 것입니다.
+
+[REGION:imagetable]
+![JacintoImportanceFar.jpg](JacintoImportanceFar.jpg)(w:465) | ![JacintoImportanceNear.jpg](JacintoImportanceNear.jpg)(w:465) |
+| ------ | ------ |
+| | |
+[/REGION]
+
+[EXCERPT:LightMass_003]
+**라이트매스 임포턴스 볼륨** 추가는 **모드** 메뉴의 **볼륨** 탭에서 **Lightmass Importance Volume** 오브젝트를 레벨에 끌어놓은 다음 크기를 조절하면 됩니다:
+
+![](AddingLightMassVolume.png)(w:840)
+
+**브러시** 를 **Lightmass Importance Volume** 으로 변환하는 것도 가능한데, **디테일** 패널의 **Actor** 아래 **Convert Actor** (액터 변환) 드롭다운 박스를 클릭하면 됩니다.
+
+![](ConvertBrush_Actor.png)
+
+드롭다운 박스를 클릭하면 메뉴가 나타나 **브러시** 를 어떠한 **액터** 유형으로 대체할 것인지 선택할 수 있습니다.
+
+![](ConvertBrush_LightMassVol.png)
+
+다수의 Lightmass Importance Volume 을 배치하는 경우, 대부분의 라이팅 작업은 그 전부를 포함한 바운딩 박스에서 이루어집니다. 그러나 Volume Lighting Sample 은 작은 볼륨 안에만 배치됩니다.
+[/EXCERPT:LightMass_003]
+
+### 월드 세팅 
+	
+**월드 세팅** 창에서 **Lightmass** 섹션 아래 **Lightmass** 세팅을 조절할 수 있습니다.
+
+![worldlightmasssettings.png](worldlightmasssettings.png)
+
+메인 **툴바** 에서 ![](WorldSettings_Icon.png) 아이콘을 클릭하여 **월드 세팅** 을 열 수 있습니다.
+
+| 프로퍼티 | 설명 |
+| ------- | ------------ |
+| **Force No Precomputed Lighting** | 미리계산 라이팅 금지 - 사실상 라이트매스의 라이트/섀도맵 생성 기능을 꺼서, 레벨에는 다이내믹 라이팅만 사용됩니다. |
+| **Static Lighting Level Scale** | 스태틱 라이팅 레벨 스케일 - 1 언리얼 유닛 == 1 cm 을 기준으로 하는 엔진 스케일에 상대적인 레벨 스케일입니다. 라이팅 계산시의 디테일 양을 조절하는 데 사용되며, 스케일 값이 작을수록 빌드 시간이 크게 향상됩니다. 거대한 레벨의 경우, 2 나 4 정도의 큰 스케일을 사용하여 빌드 시간을 낮출 수 있습니다. |
+| **Num Indirect Lighting Bounces** | 간접광 바운스 횟수 - 라이트에서 시작해서 빛이 표면을 튕겨나갈 수 있는 횟수입니다. 0 은 직사광만이며, 1 은 한 번 바운스 등입니다. 1 번 바운스 계산에 가장 시간이 오래 걸리며, 2 번째가 뒤를 잇습니다. 그 이후의 바운스는 거의 무료이긴 하지만, 각 바운스마다 빛이 감쇠되기에 추가되는 라이트도 거의 없습니다. |
+| **Indirect Lighting Quality** | 간접광 퀄리티 - 라이트매스 GI 솔버에 사용되는 샘플 수에 대한 스케일입니다. 값이 크면 (노이즈, 얼룩 등의) 솔버 부작용이 줄어들지만 빌드 시간은 훨씬 늘어납니다. 참고로 라이트맵 사용에 따른 (텍스처 이음새, 압축 부작용, 텍셀 모양 등의) 부작용에는 영향을 끼치지 않습니다. |
+| **Indirect Lighting Smoothness** | 간접광 부드러움 - 값이 높을수록 간접광이 부드러워져 솔버 노이즈를 숨길 수 있지만, 간접광 그림자와 앰비언트 오클루전도 잃게 됩니다. *Indirect Lighting Quality* 를 최고 퀄리티로 높일 때는 이 값을 어느정도 (.66 이나 .75 로) 낮추는 것이 좋을 수 있습니다. |
+| **Environment Color** | 환경 색 - 씬을 벗어나는 광선이 취하는 색입니다. 환경은 레벨을 둘러싸는 구체로 시각화시킬 수 있는데, 각 방향으로 이 색의 빛을 내뿜습니다. |
+| **Environment Intensity** | 환경 강도 - Environment Color 스케일을 조절하여 HDR 환경 색을 가능케 합니다. |
+| **Diffuse Boost** | 디퓨즈 증폭 - 씬 내 모든 머티리얼의 디퓨즈 기여도 스케일입니다. DiffuseBoost 를 올리면 씬의 간접광 강도를 효율적으로 올릴 수 있습니다. DiffuseBoost 가 적용된 이후 디퓨즈의 밝기는 1.0으로 제한됩니다. 머티리얼 에너지 보존 법칙을 유지하기(, 즉 바운스될 때마다 빛이 세 지는게 아니라 약해지게 하기) 위해서입니다. DiffuseBoost 를 올려도 간접광이 밝아지지 않는다면 디퓨즈가 제한되었기 때문으로, 간접광을 증폭시키려면 Light 의 IndirectLightingScale (간접광 스케일)을 대신 사용해야 합니다. |
+| **UseAmbientOcclusion** | 앰비언트 오클루전 사용 - 라이트매스에 의한 스태틱 앰비언트 오클루전 계산을 활성화시켜 라이트맵 속으로 빌드하도록 합니다. |
+| **DirectIlluminationOcclusionFraction** | 직접 조명 오클루전 비율 - 직사광에 적용할 앰비언트 오클루전 비율입니다. |
+| **IndirectIlluminationOcclusionFraction** | 간접 조명 오클루전 비율 - 간접광에 적용할 앰비언트 오클루전 비율입니다. |
+| **OcclusionExponent** | 오클루전 지수 - 높을 수록 대비가 높아집니다. |
+| **FullyOccludedSamplesFraction** | 완전히 가려지는 샘플 비율 - 풀 오클루전이 되려면 얼마만큼의 샘플 비율이 가려져야 하는가 입니다. |
+| **MaxOcclusionDistance** | 최대 오클루전 거리 - 한 오브젝트가 다른 오브젝트를 가릴 수 있는 최대 거리입니다. |
+| **VisualizeMaterialDiffuse** | 머티리얼 디퓨즈 시각화 - 노멀 직사/간접광을 라이트매스로 익스포트된 머티리얼 디퓨즈로만 덮어씁니다. 익스포트된 머티리얼 디퓨즈가 실제 디퓨즈와 일치하는지 확인할 때 좋습니다. |
+| **VisualizeAmbientOcclusion** | 앰비언트 오클루전 시각화 - 노멀 직사/간접광을 앰비언트 오클루전으로만 덮어씁니다. 오클루전 부분을 고립시켜 내므로 앰비언트 오클루전 세팅을 미세조정할 때 좋습니다. |
+| **Level Lighting Quality** | 레벨 라이팅 퀄리티 - 현재 레벨 라이팅 빌드 퀄리티 세팅을 반영합니다. |
+
+### 라이트 세팅
+
+라이트의 프로퍼티 중 **Lightmass** 섹션 아래서 조정 가능한 **Lightmass** 세팅입니다.
+
+![LightLightmassSettings.png](LightLightmassSettings.png)
+
+| 프로퍼티 | 설명 |
+| ------- | ------------ |
+| **Indirect Lighting Saturation** | 간접광 채도 - 0 은 간접광의 채도를 완전히 뺀 상태, 1 은 변경되지 않은 상태가 됩니다. |
+| **Shadow Exponent** | 그림자 지수 - 빛과 그림자가 만나는 부분의 감쇠, 즉 완전한 빛에서 완전한 그늘로 얼마나 빨리 바뀌나를 조절합니다. |
+| **Light Source Angle** | 광원 각도 - **디렉셔널 라이트에 대해서만**, 빛을 받는 것을 기준으로 라이트의 발광 표면이 확장되는 각도를 결정하며, 반그늘 크기에 영향을 끼칩니다. |
+
+
+### 프리미티브 컴포넌트 세팅
+
+아래는 **모드** 메뉴의 **지오메트리** 탭에서 추가되는 **브러시** 상에서 조정 가능한 **Lightmass** 세팅입니다. 이 옵션은 **디테일** 패널 **Brush** 섹션에서 찾을 수 있습니다.
+
+![objectlightmasssettings.png](objectlightmasssettings.png)
+
+| 프로퍼티 | 설명 |
+| ------- | ------------ |
+| **DiffuseBoost** | 디퓨즈 증폭 - 이 오브젝트에 적용된 모든 머티리얼의 디퓨즈 기여도 스케일입니다. |
+| **FullyOccludedSamplesFraction** | 완전히 가려지는 샘플 비율 - 이 오브젝트에서 채취한 앰비언트 오클루전 샘플이 이 비율만큼 가려지면 다른 오브젝트를 완전히 가리는 오클루전이 됩니다. 한 오브젝트가 다른 오브젝트를 얼마만큼 가리나 조절할 수 있습니다. |
+| **ShadowIndirectOnly** | 간접에만 섀도잉 - 체크되면 이 오브젝트는 간접광에만 그림자를 드리웁니다. 풀 같은 것에 좋은데, 렌더링되는 지오메트리는 실제 지오메트리의 표상일 뿐, 그림자를 정확한 모양으로 드리울 필요는 없기 때문입니다. 풀에 좋은 또 한가지 이유는, 미리계산된 라이트맵에 저장하기에는 그림자 빈도가 너무 높을 것이기 때문입니다. |
+| **UseTwoSidedLighting** | 양면 라이팅 사용 - 체크하면 이 오브젝트는 폴리곤 양쪽 면에 빛을 받는 것처럼 라이팅됩니다. |
+
+
+### 베이스 머티리얼 세팅
+아래는 **디테일** 패널 아래 **베이스 노드** 에 대한 **머티리얼** 안에서 조정 가능한 **Lightmass** 세팅입니다.
+
+머티리얼 에디터 관련 상세 정보는 [](Engine/Rendering/Materials/Editor) 문서를 참고하세요.
+
+![materialsettings.png](materialsettings.png)
+
+| 프로퍼티 | 설명 |
+| ------- | ------------ |
+| **Cast Shadow as Masked** | 그림자를 마스크드로 드리우기 - 반투명 머티리얼의 경우, 그림자 드리우기 목적으로는 마스크드인 것처럼 취급합니다. |
+| **DiffuseBoost** | 디퓨즈 증폭 - 이 머티리얼의 디퓨즈 기여도를 스태틱 라이팅으로 스케일 조절합니다. |
+| **ExportResolutionScale** | 익스포트 해상도 스케일 - 이 머티리얼의 특성이 익스포트되는 해상도를 스케일 조절합니다. 디테일이 필요할 때 머티리얼 해상도를 늘리기에 좋습니다. |
+

@@ -1,0 +1,185 @@
+﻿INTSourceChangelist:3242329
+Availability: Public
+Title:머티리얼 블렌드 모드
+Crumbs: %ROOT%, Engine, Engine/Rendering/Materials, Engine/Rendering/Materials/IntroductionToMaterials,  Engine/Rendering/Materials/MaterialProperties
+Description:머티리얼 블렌드 모드와 그것이 머티리얼의 렌더링에 어떻게 영향을 끼치는가에 대한 개요입니다.
+Version: 4.9
+tags:Materials
+
+
+[TOC(start:2 end:2)]
+
+
+
+![](BlendModeProperties.png)
+
+[EXCERPT:BlendModes]
+Blend Mode (블렌드 모드)란 현재 배경에 실제로 그려지고 있는 것에 현재 머티리얼의 결과물을 어떻게 블렌딩할 것인지를 나타내는 것입니다. 좀 더 엄밀히 말하면, 이 머티리얼을 다른 픽셀 앞에 렌더링할 때, 엔진이 이 머티리얼 (**원본색**) 과 이미 프레임 버퍼에 있는 것 (**대상색**) 을 합치는 방식을 조절하는 것입니다.
+
+그 데모로 카메라와 오브젝트가 둘 있는 간단한 씬을 구성했습니다. 첫 번째 오브젝트를 (통해) 살펴보면서 블렌드 모드의 변화에 따라 오브젝트가 배경에 끼치는 영향을 살펴보겠습니다.
+
+[REGION:fullwidth]
+![](CameraObjectSetup.png)
+[/REGION]
+
+## 불투명
+
+불투명(Opaque) 블렌드 모드는 가장 단순한 모드로, 아마 가장 자주 사용하게 될 것입니다. 빛이 통과하지도 투과되지도 않는 표면을 정의합니다. 대부분의 플라스틱, 메탈, 돌, 기타 표면 유형의 대부분에 적합합니다.
+
+
+
+[REGION:imagetable]
+| ![](CameraObjectSetup.png)(w:500) | ![](CamerasView.png)(h:189) |
+| --- | --- |
+| 씬 셋업 | 카메라 시야 |
+[/REGION]
+
+
+
+## 마스크
+
+마스크(Masked) 블렌드 모드는 이진 (껐다/켰다) 방식으로 표시여부를 선택적으로 제어할 필요가 있는 오브젝트에 사용됩니다. 쇠사슬 울타리나 상자 흉내를 내는 머티리얼을 예로 들어 봅시다. 어떤 부분은 투명하면서 어떤 부분은 속이 꽉 차있을 수가 있죠. 그런 데는 마스크 블렌드 모드가 이상적입니다.
+
+
+![](MaskedGridMaterial.png)(w:700)
+
+
+_투명한 것_ 과 _렌더링되지 않은 것_ 사이의 차이점을 아는 것이 중요합니다. 유리같은 투명 표면은 여전히 리플렉션 (반사성) 형태로 빛과 상호작용을 합니다. 하지만 마스크 모드에서 컬링된 픽셀은 그냥 _그리지 않습니다._ 그 부분에 리플렉션을 볼 수 없죠. 리플렉션이나 스페큘러 효과를 유지하고자 한다면, 반투명(Translucent) 블렌드 모드를 사용하거나, 레이어드 머티리얼을 고려해야 합니다.
+
+게다가, 이 기능은 마스크가 적용된 지역에는 렌더링되지 않아 전혀 계산되지 않으므로, GPU 퍼포먼스 비용 절약으로 이어집니다.
+
+
+[REGION:imagetable]
+| ![](MaskedSetup.png)(w:500) | ![](MaskedGridCameraView.png)(h:189) |
+| --- | --- |
+| 씬 셋업 | 카메라 시야 |
+[/REGION]
+
+
+마스크 블렌드 모드를 사용할 때는 **Opacity Mask Clip Value** (불투명 마스크 클립 값) 프로퍼티에 특별한 주의를 기울여야 합니다. 이 프로퍼티에 저장되는 0-1 스칼라 값은, 불투명 마스크 텍스처에서 잘라낼 기준값으로 사용되며, 이 값을 넘어서는 **어두운** 픽셀은 렌더링되지 않습니다.
+
+[REGION:imagetable]
+| [INCLUDE:#OpacityMaskClipValue] | ![](OpacityMaskMaterial.png)(w:445 h:465) |
+| --- | --- |
+| 불투명 마스크 클립 값 (슬라이더를 끌어 미리볼 수 있습니다) | 머티리얼 망 |
+[/REGION]
+
+[REGION:note]
+	위 예제의 머티리얼에는 **Two Sided** (양면) 프로퍼티가 _참 (체크)_ 설정되어 있기 때문에, 박스 안에서도 볼 수 있습니다.
+
+	또한 여기 상호작용형 예제에서 보이긴 하지만, **Opacity Mask Clip Value** 프로퍼티는 실행시간에 변경하라고 디자인된 것이 아닙니다.
+[/REGION]
+
+## 반투명
+
+반투명(Translucent) 블렌드 모드는 일정한 형태의 투명도가 필요한 오브젝트에 사용합니다.
+
+![](TranslucentNetwork.png)(w:400)
+
+이 블렌드 모드는 오파시티 값이나 텍스처를 받은 다음 검정 부분은 완전히 투명하고 하양 부분은 완전히 불투명, 그 중간의 다양한 그라데이션 값은 그에 상응하는 투명도 식으로 표면에 적용하는 것입니다. 즉 회색 오파시티 텍스처가 있으면, 배경의 일부만 보이도록 하는 반투명 오브젝트를 만들 수 있다는 뜻입니다.
+
+[REGION:imagetable]
+| ![](TranslucentSetup.png)(w:500) | ![](TranslucentCamera.png)(h:192) |
+| --- | --- |
+| 씬 셋업 | 카메라 시야 |
+[/REGION]
+
+반투명 머티리얼을 사용할 때 중요하게 고려할 점이 있는데, 현재 반사성(specularity)을 지원하지 않는다는 점입니다. 즉 표면에 리플렉션이 보이지 않는다는 뜻입니다. 하지만 [큐브맵](Engine/Content/Types/Textures\Cubemaps) 을 사용해서 리플렉션을 가짜로 만들어 내는 방법이 있으며, 그 망은 이렇습니다:
+
+[REGION:lightbox]
+[![](FakedReflections.png)(w:930)](FakedReflections.png)
+[/REGION]**클릭하면 확대됩니다.**
+
+
+
+## 애디티브
+
+애디티브(Additive) 블렌드 모드는 머티리얼의 픽셀을 취한 다음 배경의 픽셀에 더하는 방식입니다. 포토샵의 _Linear Dodge (Add)_ 블렌드 모드와 매우 비슷합니다. 즉 어두워 지는 법이 뜻인데, 모든 픽셀 값을 _더하기만_ 하기 때문으로, 검정은 그저 투명한 것으로 렌더링될 것입니다. 이 블렌드 모드는 불, 증기, 홀로그램같은 다양한 특수 효과에 좋습니다.
+
+[REGION:fullwidth]
+![](AdditiveNetwork.png)
+[/REGION]
+
+반투명 블렌드 모드와 마찬가지로, 이 블렌드 모드는 반사성 (리플렉션 등)과 호환되지 않습니다. 블렌딩의 더한다는 속성때문에 아마도 사용하지 않을 지도 모르겠지만, 위의 반투명 부분에서 보여드린 바와 같이 큐브맵을 사용하는 방법으로 리플렉션같은 효과의 시뮬레이션이 가능합니다.
+
+
+[REGION:imagetable]
+| ![](AdditiveSetup.png)(w:500) | ![](AdditiveCamera.png)(h:192) |
+| --- | --- |
+| 씬 셋업 | 카메라 시야 |
+[/REGION]
+
+
+
+## 모듈레이트
+
+모듈레이트(Modulate, 변조) 블렌드 모드는 머티리얼의 값에 배경의 픽셀 값을 그냥 곱합니다. 포토샵의 _Multiply_ 블렌드 모드와 매우 유사한 방식입니다.
+
+
+![](ModulateNetwork.png)
+
+위의 그래프에서, 머티리얼의 블렌드 모드는 _모듈레이트_ 로, 셰이딩 모델은 _라이팅제외_ 로 설정되었습니다.
+
+[REGION:imagetable]
+| ![](ModulateScene.png)(w:500) | ![](ModulateCamera.png)(h:192) |
+| --- | --- |
+| 씬 셋업 | 카메라 시야 |
+[/REGION]
+
+
+[REGION:warning]
+모듈레이트 블렌드 모드는 특정 파티클 이펙트에 최적입니다. 라이팅이나 분할 반투명(Separate Translucency)을 지원하지는 않기에 주의가 필요합니다.
+[/REGION]
+
+<!------------------- 
+
+[EXCERPT:OpacityMaskClipValue]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:max]
+	19
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	opacityMaskClipValue
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	 
+	[/PARAM]
+	[PARAM:image_list]
+	![](opacityMaskClipValue_1.png)
+	![](opacityMaskClipValue_2.png)
+	![](opacityMaskClipValue_3.png)
+	![](opacityMaskClipValue_4.png)
+	![](opacityMaskClipValue_5.png)
+	![](opacityMaskClipValue_6.png)
+	![](opacityMaskClipValue_7.png)
+	![](opacityMaskClipValue_8.png)
+	![](opacityMaskClipValue_9.png)
+	![](opacityMaskClipValue_10.png)
+	![](opacityMaskClipValue_11.png)
+	![](opacityMaskClipValue_12.png)
+	![](opacityMaskClipValue_13.png)
+	![](opacityMaskClipValue_14.png)
+	![](opacityMaskClipValue_15.png)
+	![](opacityMaskClipValue_16.png)
+	![](opacityMaskClipValue_17.png)
+	![](opacityMaskClipValue_18.png)
+	![](opacityMaskClipValue_19.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:OpacityMaskClipValue]
+
+
+
+
+| 모드 | 설명 |
+| ---- | ----------- |
+| **_BLEND_Opaque_** 불투명 | 최종색 = 원본색. 머티리얼을 배경 위에 그린다는 뜻입니다. 이 블렌드 모드는 라이팅과 호환됩니다.
+| **_BLEND_Masked_** 마스크 | 최종색 = _오파시티 마스크_ > _오파시티 마스크 클립 값_ 이면 원본색, 아니면 픽셀은 버립니다. 이 블렌드 모드는 라이팅과 호환됩니다.
+| **_BLEND_Translucent_** 반투명 | 최종색 = 원본색 * 불투명도 + 대상색 * (1 - 불투명도). 이 블렌드 모드는 다이내믹 라이팅과 호환되지 **않습니다**.
+| **_BLEND_Additive_** 애디티브 | 최종색 = 원본색 + 대상색. 이 블렌드 모드는 다이내믹 라이팅과 호환되지 **않습니다**.
+| **_BLEND_Modulate_** 모듈레이트 | 최종색 = 원본색 * 대상색. 이 블렌드 모드는 데칼 머티리얼이 아닌 이상 다이내믹 라이팅 또는 포그와 호환되지 **않습니다**.
+[/EXCERPT:BlendModes]
+

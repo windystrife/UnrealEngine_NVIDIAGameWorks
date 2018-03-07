@@ -1,0 +1,118 @@
+﻿INTSourceChangelist:3405846
+Availability:Public
+Title:オブジェクト
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture
+Description:基本的なゲームプレイ要素であるアクタとオブジェクトの説明
+Version:4.11
+
+[TOC (start:2 end:3)]
+
+[EXCERPT:ObjectIntro]
+アンリアル エンジンにはゲーム オブジェクトを処理する堅牢なシステムがあります。アンリアルのオブジェクトの基本クラスは、`UObject` です。UObject の処理システムで認識できるように、UCLASS マクロを使用して `UObject` から派生したクラスに
+タグ付けすることができます。 
+[/EXCERPT:ObjectIntro]
+
+## UCLASS マクロ
+
+**UClass** マクロは、UObject に、アンリアル ベースの型を記述する UClass への参照を与えます。各 UClass は、'Class Default Object' (短縮すると CDO) と呼ばれるひとつのオブジェクトを維持しています。この CDO は、 
+基本的にデフォルトの 'template' オブジェクトで、クラス コンストラクタによって生成され、その後は修正されません。UCLASS と CDO は通常は読み取り専用と見なされますが、 
+任意のオブジェクトのインスタンスに対して読み出すことができます。オブジェクト インスタンスの UCLASS は、GetClass() 関数を使用していつでもアクセスできます。
+
+UCLASS には、クラスを定義するプロパティと関数のセットがあります。これらは、ネイティブ コードで使用可能な通常の C++ 関数および変数ですが、このオブジェクト システム内でどのように振る舞うかを制御する 
+アンリアル固有のメタデータでタグ付けされています。タグ付けのシンタックスの詳細は [プログラミングのリファレンス](Programming\UnrealArchitecture\Reference) を参照してください。 
+
+UObject クラスには、対応する UCLASS 内には存在しないネイティブのみのプロパティも含まれることに注意してください。 
+
+## プロパティと関数の型
+
+UObjects にはメンバー変数 (プロパティ) または任意の型の関数があります。ただし、アンリアル エンジンがこうした変数や関数を認識し、操作するためには、特殊なマクロでマーク付けされて、一定の標準に従わなければなりません。こうした標準の詳細については、[](Programming/UnrealArchitecture/Reference/Properties) と [](Programming/UnrealArchitecture/Reference/Functions) のリファレンス ページをご覧ください。
+
+## オブジェクト作成
+
+新規 `UObject` インスタンスおよび標準の `new` 演算子を作成するために使用可能な関数はいくつかあり、それぞれ独自の用途があります。
+
+| メソッド | 説明 |
+| --- | --- |
+| [`NewObject<class>()`](Programming/UnrealArchitecture/Objects/Creation#NewObject) |自動生成される名前で新規のインスタンスを作成します。単純なケースで使用するベストプラクティスです。 |
+| [`NewNamedObject<class>()`](Programming/UnrealArchitecture/Objects/Creation#NewNamedObject) | 指定された名前といくつかのオプションのパラメータを使って新規インスタンスを作成します。新規インスタンスの Outer 内で名前コンフリクトがあればアサートします。 |
+| [`ConstructObject<class>()`](Programming/UnrealArchitecture/Objects/Creation#ConstructObject) | すべての利用可能な作成オプションを提供して新規インスタンスを作成します。フレキシビリティが必要な場合に限り、使用してください。 |
+| `new` | 一部の低レベルの状況でオブジェクトを構築するために使用します。コンストラクタが引数を必要とする場合などです。 |
+
+ゲームプレイ用に `UObject` クラスのインスタンスを作成する様々な方法の詳細情報については、[](Programming/UnrealArchitecture/Objects/Creation) をご覧ください。
+
+## UObjects が提供する機能
+
+このシステムをすべてのケースで使用することは必須でもないし、必ずしも適切でもありませんが、使用すると多くのメリットがあります。例えば、以下がその例です。
+
+*	ガーベジ コレクション
+* 	参照の更新
+*	リフレクション
+*	シリアライズ
+*	デフォルトのプロパティ変更の自動更新
+*	プロパティの自動初期化
+*	エディタの自動統合
+*	ランタイムに利用可能な型情報
+*	ネットワーク レプリケーション
+
+こうした各システムの詳しい情報については、[](Programming\UnrealArchitecture\Objects\Optimizations) のドキュメントをご覧ください。
+
+## アンリアル ヘッダー ツール
+UObject 派生型が提供する機能を利用するには、必要な情報を照合するためにヘッダー ファイルでこうした型に対してプリプロセシング ステップを実行する必要があります。このプリプロセシング ステップは UnrealHeaderTool (UHT) によって行われます。
+
+UObject 派生型には、守るべき特定の構造があります。これについて以下で説明します。
+
+## ヘッダー ファイル形式
+
+ソース (.cpp) ファイルでの UObject の実装は他の C++ クラスと同様ですが、アンリアル エンジン 4 で適切に機能するためにヘッダー (.h) ファイルでの定義は特定の基本構造に従わなければなりません。エディタの "New C++ Class" コマンドを使用すると、適切にフォーマットされたヘッダー ファイルを非常に簡単にセットアップすることができます。UObject 派生クラスの基本的なヘッダー ファイルは以下のようになります。この UObject の派生が UMyObject であり、それが作成されたプロジェクトが MyProject であることを前提にしています。
+
+	#pragma once
+
+	#include 'Object.h'
+	#include 'MyObject.generated.h'
+
+	/**
+	 * 
+	 */
+	UCLASS()
+	class MYPROJECT_API UMyObject : public UObject
+	{
+		GENERATED_BODY()
+
+	};
+
+この中で Unreal 特有の部分は、以下の通りです。
+
+
+	#include "MyObject.generated.h"
+
+
+この行は、ファイルの最後の #include ディレクティブになります。このヘッダー ファイルが他のクラスについて認識する必要があれば、ファイル内の任意の場所で前方宣言するか、または MyObject.generated.h の上にインクルードします。
+
+
+	UCLASS()
+
+
+UCLASS マクロは UMyObject をアンリアルエンジンに認識させます。このマクロは、クラスに対してどの機能をオンにするか、オフにするかを決める様々な [](Programming/UnrealArchitecture/Reference/Classes/Specifiers/) をサポートします。
+
+
+	class MYPROJECT_API UMyObject : public UObject
+
+
+MyProject が UMyObject クラスを他のモジュールにエクスポーズしたい場合は MYPROJECT_API の指定は必須です。これはゲーム プロジェクトが含むモジュールやプラグインで非常に役立ちます。また、これは移植性があり、独立した機能を複数のプロジェクト間に提供するためにクラスを意図的にエクスポーズします。
+
+
+	GENERATED_BODY()
+
+
+GENERATED_BODY() マクロは引数を取りませんが、エンジンが必要とする基礎構造をサポートするクラスをセットアップします。これはすべての UCLASS で必要です。GENERATED_BODY マクロはメンバーのアクセス レベルを、アンリアル エンジンの現行バージョンでこの言語のデフォルトである "private" ではなく "public" に設定します。
+
+## オブジェクトの更新
+
+ティックは、アンリアル エンジンでオブジェクトがどのようにアップデートされたかを表します。すべてのオブジェクトには、各フレームでティックする機能があり、必要な更新の計算やアクションを行うことができます。
+
+オブジェクトには、ビルトインの更新機能はありません。しかし、必要があれば、`inherits` クラス指定子を使用して `FTickableGameObject` クラスから継承してこの機能を追加することができます。 
+これで、`Tick()` 関数を実装できるようになります。この関数は、エンジンによって各フレームで呼び出されます。ほとんどのインゲームのオブジェクトは、[](Programming/UnrealArchitecture/Actors) であり、フレーム毎に 1 回ではなくユーザー設定の最小限の間隔でティックすることができます。
+
+## オブジェクトのデストラクション
+
+オブジェクトがエンジンによって参照されなくなると、オブジェクトのデストラクションは、ガーベジ コレクション システムによって自動的に処理されます。つまり UPROPERTY ポインタ、またはエンジン コンテナやスマート ポインタのクラス インスタンス (例 `TArray<UObject*>` や `TWeakPtr<UObject*>`) はポインタを持ちません。ガーベジ コレクタが実行し、参照されていないオブジェクトが見つかると削除されます。さらに、オブジェクト上で関数 `MarkPendingKill()` を直接呼出しできるようになります。この関数はこのオブジェクトへのすべてのポインタを NULL に設定し、グローバル検索からこのオブジェクトを取り除きます。繰り返しになりますが、このオブジェクトは次のガーベジ コレクション パスでは完全に削除されます。

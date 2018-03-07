@@ -1,0 +1,224 @@
+﻿INTSourceChangelist:2735504
+Availability:Public
+Title:光线传播体积
+Crumbs:%ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description:动态生成全局照明系统。
+Version:4.9
+SkillLevel:Advanced
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![](lpv_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/LightPropagationVolumes:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/LightPropagationVolumes:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/LightPropagationVolumes]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![](lpv_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/LightPropagationVolumes:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/LightPropagationVolumes:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/LightPropagationVolumes]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:todo]
+光线传播体积（Light Propagation Volumes）功能仍在开发中，不适用于生产。
+[/REGION]
+
+[TOC]
+
+
+
+[REGION:fullwidth]
+![](lpv_scene.png)
+[/REGION]
+
+## 启用光线传播体积
+
+将此放入 `ConsoleVariables.ini` 并启动/重启引擎即可启用此功能。
+
+	r.LightPropagationVolume = 1
+
+此时，该控制台变量在运行时无法进行更改。
+
+## 基础场景设置
+
+* 添加一个 **Mobility** 设为 **Movable** 的定向光源。
+* 添加/调整几何体和光线方向，使一些部分被阴影遮蔽，一些部分接受光照（明亮色彩的材质为佳）。
+* 不要将启用的全局光照 GI 与动态 GI 混淆（两种技术的组合将形成过于明亮的间接光照）。
+* 在定向光源上启用 **Affect Dynamic Indirect Lighting**。
+* 在显示标识中启用 Light Propagation Mode 查看模式，将光线传播体积覆盖的区域进行可视化 [（查看下方）](#viewingglobalillumination)。
+* 添加/改变后期处理体积（应为未束缚），在 LightPropagationVolume 设置中调整“尺寸”，以所需的细节和距离覆盖区域（权衡）。
+* 使用全局照明显示标识启用/禁用 GI。
+                
+
+## 光线传播体积设置
+
+部分全局设置在后期处理设置中（添加后期处理体积、 
+设为未束缚并设置适当的优先级）：
+
+![](LPV_settings.png)
+
+可在提示文本（鼠标悬停显示）获取设置的更多详情。
+
+<!-- 添加设置描述 -->
+
+将这些设置放置在一个体积中后，可根据摄像机位置使其进行柔和混合 
+（如在室内环境或树下形成更小的 GI 反射）。
+
+应启用次要遮挡，同样应启用次要反射，因其消耗极低。 
+
+### 调整外观和性能
+
+此技术在低分辨率的体积网格中保存数据。为避免从比体积小的几何体 
+发生泄漏，需要对注入设置偏差。可在后期处理设置中进行调整：
+
+[REGION:imagetable]
+| [REGION:lightbox][![](LPV_injection_bias_1.png)(w:290)](LPV_injection_bias_1.png)[/REGION] | [REGION:lightbox][![](LPV_injection_bias_2.png)(w:290)](LPV_injection_bias_2.png)[/REGION] | [REGION:lightbox][![](LPV_injection_bias_3.png)(w:290)](LPV_injection_bias_3.png)[/REGION] |
+| --- | --- | --- |
+| 1.0 | 1.3 | 2.0 |
+[/REGION]
+
+可通过“LPV Bias Multiplier”调整每个网格体的偏差。
+
+![](LPV_bias_multiplier.png)
+
+为获得更佳的性能，（更少的绘制调用不产生 CPU 消耗， GPU 消耗较低）可在材质中禁用此功能：
+
+![](LPV_disable_material.png)
+
+## 定向光源设置
+
+出于性能原因，光线传播体积只使用定向光源作为射入光线。此法 
+在摄像机附近计算出一个所谓的 _反射阴影贴图_。它和普通的阴影贴图相似 
+（不透明深度来自灯光透视的 2D 纹理），但拥有额外的材质属性（材质颜色、法线）。对每个点光源 
+执行此操作的消耗极高。必须在定向光源上拥有正确的设置：
+
+![](LPV_light_settings.png)
+
+启用“Affect Dynamic Indirect Lighting”和“Cast Shadows”， 
+并将间接光照强度设为 1.0 左右。
+
+(#viewingglobalillumination)
+## 查看全局照明
+
+可在显示标识中禁用 LPV（需注意：此操作将同时禁用 Lightmass 计算的 
+烘焙全局照明）：
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Global Illumination Disabled](LPV_show_flag.png)(w:460)
+	[/PARAM]
+	[PARAM:after]
+	![Global Illumination Enabled](LPV_show_flag_enabled.png)(w:460)
+	[/PARAM]
+[/OBJECT]
+
+## 显示光线传播体积
+
+可通过显示标识在视口中显示实际光线传播体积：
+ 
+[INCLUDE:#visualizeslider]
+
+## GI 替换材质切换
+[EXCERPT:GIReplaceExample]
+
+观察下图中的两个红色方块 - 其中一个反射为绿色（而非红色）。
+ 
+![](LPV_bounce_color_override.png)(convert:false)
+
+使用新材质表现可获得此效果。
+
+![](LPV_gi_replace.png)
+ 
+通常而言不需要设置完全不同的颜色，使用较深、较亮、或 
+细微的颜色调节即可。
+
+[/EXCERPT:GIReplaceExample]
+
+## 其他注意事项
+
+当前应用 LPV 的属性：
+
+* 每帧计算可生成动态材质/灯光/几何体。
+* 弥散和近似镜面材质交互。
+* 有限的距离（更大的体积（如 2 倍）容易实现，但内存要求和计算可能增加 8 倍）。
+* 世界空间中的固定细节（近景细节较多，远景细节较少为佳）。
+* 不影响半透明度。
+* 光线反射不受贴图影响。
+* 贴图着色功能正常（与应用贴图前在底部应用灯光的烘焙灯光不同）。
+* 需计算着色器（DirectX 11）支持。
+* 为灯光反射支持一个或多个定向光源。
+* 在运行时改变尺寸会出现轻微的穿帮，可随时间消失。
+* 为次要区域设置自发光灯光（当前未加入）。
+* 遮挡（当前未加入）。
+* 遮挡估算的点光源阴影（当前未加入）。
+* 通过几何体体素化形成的次要遮挡，将消耗一定性能换取极佳的精度（当前未加入）。
+
+
+<!--
+[EXCERPT:VisualizeSlider]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:id]
+	LPV_visualize
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:max]
+	17
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	**拖动滑条查看光线传播体积的展示。** 
+	[/PARAM]
+	[PARAM:image_list]
+	![](LPV_visualize_1.png)
+	![](LPV_visualize_2.png)
+	![](LPV_visualize_3.png)
+	![](LPV_visualize_4.png)
+	![](LPV_visualize_5.png)
+	![](LPV_visualize_6.png)
+	![](LPV_visualize_7.png)
+	![](LPV_visualize_8.png)
+	![](LPV_visualize_9.png)
+	![](LPV_visualize_10.png)
+	![](LPV_visualize_11.png)
+	![](LPV_visualize_12.png)
+	![](LPV_visualize_13.png)
+	![](LPV_visualize_14.png)
+	![](LPV_visualize_15.png)
+	![](LPV_visualize_16.png)
+	![](LPV_visualize_17.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:VisualizeSlider]
+-->
+
+
+
+

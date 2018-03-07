@@ -1,0 +1,158 @@
+Availability:Public
+Title: Cross-Compiling for Linux (Legacy)
+Crumbs:%ROOT%
+Description:For engine versions older than 4.14, this page shows users how to set up cross-compilation for the Linux Platform.
+Version: 4.14
+SkillLevel: Advanced
+type:reference
+parent:Platforms/Linux
+tags:Linux
+related:Programming/Development/CompilingProjects
+related:Programming/Development/BuildConfigurations
+related:Engine/Basics/Projects/Packaging
+related:Platforms/Linux/GettingStarted
+topic-image:LegacyRef_Topic.png
+
+<!--- %Globals:BinarySourceSelectVar% --->
+
+[TOC(start:2 end:3)]
+
+This reference is an archive for users who need to set up their cross-compilation toolchains in Unreal Engine 4 (UE4) versions that were released prior to 4.14. 
+
+[REGION:note]
+If you're developing your project with Unreal Engine, version 4.14 (or newer), you'll want to refer to our [](Platforms/Linux/GettingStarted) documentation.
+[/REGION]
+
+[EXCERPT:Why_XC]
+## Why Cross-Compilation
+
+**Cross-compilation** makes it possible for game developers, working in a Windows-centric workflow, to target Linux. At this time, cross-compilation is only supported for Windows. 
+Mac users currently have to resort to [native compilation](https://wiki.unrealengine.com/Building_On_Linux). We support, test, and provide the libraries and toolchains for the Linux-x86_64 platform. 
+
+## Getting the Toolchain
+
+Please use the following table to download the appropriate toolchain: 
+
+| Toolchain                                                                                                                       | UE4 Version    | 
+| ------------------------------------------------------------------------------------------------------------------------------- | -------------- | 
+| **-v4** [clang-3.5.0-based](http://cdn.unrealengine.com/qfe/v4_clang-3.5.0_ld-2.24_glibc-2.12.2.zip)                            | 4.8 and earlier| 
+| **-v6** [clang-3.6.0-based](https://s3.amazonaws.com/unrealengine/qfe/v6_clang-3.6.0_ld-2.24_glibc-2.12.2.zip)                  | 4.9 and 4.10   | 
+| **-v7** [clang-3.7.0-based](https://s3.amazonaws.com/unrealengine/CrossToolchain_Linux/v7_clang-3.7.0_ld-2.24_glibc-2.12.2.zip) | 4.11 thru 4.13 | 
+| **-v8** [clang-3.9.0-based](http://cdn.unrealengine.com/qfe/v8_clang-3.9.0-centos7.zip)                                         | 4.14 and 4.15  |
+| **-v9** [clang-4.0.0-based](http://cdn.unrealengine.com/CrossToolchain_Linux/v9_clang-4.0.0-centos7.zip)                        | 4.16           |
+
+[REGION:note]
+The Setup and UnSetup Windows Batch Files (\*.bat) are not included in **-v9** because you only need these files if you're setting up AutoSDKs for UE4. 
+`Setup.bat` and `Unsetup.bat` were included in previous versions of the toolchain because they're part of the AutoSDKs system (which is currently not documented).
+[/REGION]  
+
+We also provide the libraries and toolchains that allow you to compile for [Linux ARM](https://s3.amazonaws.com/unrealengine/qfe/arm-unknown-linux-gnueabihf_v5_clang-3.5.0-ld-2.23.1-glibc-2.13.zip) as well (original Raspberry Pi and up). 
+Although, this will require you to make a (minor) code change in [Unreal Build Tool](Programming/UnrealBuildSystem) (UBT).
+[/EXCERPT:Why_XC]
+
+From this point on, we assume that you are targeting x86_64 Linux, though most of the following information will apply to compiling for ARM as well (except for the different toolchain). 
+Note that you can [build your own toolchain](https://wiki.unrealengine.com/Building_Linux_cross-toolchain) if you want different versions of the tools, or if you want to target a different architecture.
+
+## Setting up the Toolchain 
+
+Add an environment variable (`Control Panel->System->Advanced system settings->Advanced->Environment variables`) named `LINUX_ROOT`, the value of which, is the absolute path to your toolchain (without a trailing backslash):
+
+[REGION:raw]
+![](EnvironmentVar.png)
+[/REGION]
+
+After you make sure that the environment variable is set, regenerate UE4 project files (using `GenerateProjectFiles.bat`) and restart Visual Studio. After this, you should have "Linux" available for 
+Win32/Win64 configurations (you should now be able to cross-compile for it).
+
+## Setting up Packaging for Linux
+
+[OBJECT:ToggleButtonContent]
+	[PARAMLITERAL:category]
+	BinarySourceSelect
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	binaryinstall
+	[/PARAMLITERAL]
+	[PARAMLITERAL:active]
+	active_button_content
+	[/PARAMLITERAL]
+	[PARAM:content]
+	%binary%
+	[/PARAM]
+[/OBJECT]
+[OBJECT:ToggleButtonContent]
+	[PARAMLITERAL:category]
+	BinarySourceSelect
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	sourceinstall
+	[/PARAMLITERAL]
+	[PARAMLITERAL:active]
+	[/PARAMLITERAL]
+	[PARAM:content]
+	%source%
+	[/PARAM]
+[/OBJECT]
+
+[VAR:source]
+To package for the Linux platform, you will need to build the following targets:
+
+For Linux:
+
+* CrashReportClient
+* UE4Game (if you project is content-only, otherwise just build your project)
+
+For Windows:
+
+* The editor itself (this is needed to get Linux target modules built, so that Unreal Editor and Unreal Frontend know how to cook/package games for Linux).
+* UnrealPak and ShaderCompileWorker (you probably have those built anyway, but we're still mentioning it for completeness).
+
+[/VAR]
+
+[VAR:binary]
+Note that binary release can only package content-only projects. If you want to package a code-based project for Linux (or a project that has non-default third party plugins), you will have to set up a source build. 
+Otherwise, if you are fine with content-only, there's no need to build anything because Linux binaries of UE4Game and CrashReportClient are bundled.
+[/VAR]
+
+## Packaging for Linux
+
+The easiest way to package a project is to open it in the editor and then using `File->Package To->Linux` (assuming that you have a cross-toolchain installed in the previous step and Linux target modules are built for 
+the editor in question - if you don't see Linux in the list, then it's likely that one of the former is not true - see above). After some time (which depends on the project in question and is rather short for a sample project) you 
+will have game assets and binaries in the directory you chose to package to.
+
+The details of the packaging process can be seen by clicking the **Show Output Log** link. If this process fails with the error message, "unable to find UnrealPak or ShaderCompileWorker" see above about building them for the host (Windows) platform.
+
+Secure copy (`scp`) or otherwise copy it to a target machine (mounting a Samba share - if you know how to do that - may be better if the target machine is low on disk space, which also reduces iteration times), change mode (`chmod +x`) the target executable, 
+(which will be located in the `LinuxNoEditor/<ProjectName>/Binaries/Linux/` directory) and run it.
+
+### Changes for Linux-ARM Platforms
+
+[REGION:note]
+With the release of Unreal Engine, version 4.14, there is a new (and easy to follow) way of packaging projects for the ARM platform. 
+Check out our recently updated [](Platforms/Linux/GettingStarted) documentation to learn more.
+[/REGION]
+
+If you are using the Linux-ARM cross compile toolchain before running GenerateProjectFiles.bat below, edit the following file in the UE4 source code: 
+
+	.../UnrealEngine/Engine/Source/Programs/UnrealBuildTool/Linux/UEBuildLinux.cs 
+
+by commenting out the following line: 
+
+	static private string DefaultArchitecture = "x86_64-unknown-linux-gnu"; 
+
+and un-commenting the linux-arm architecture line just below it: 
+
+	//static private string DefaultArchitecture = "arm-unknown-linux-gnueabihf";
+
+An additional step is required for the packaged project to be runnable on Linux-ARM platforms. Assuming the packaged project is located at `\foo\bar\SunTemple_Linux`, open the following location:
+
+`\foo\bar\SunTemple_Linux\LinuxNoEditor\Engine\Binaries\Linux`
+
+and replace `libopenal.so.1` with the version from: 
+
+`...\UnrealEngine\Engine\Source\ThirdParty\OpenAL\1.15.1\lib\Linux\arm-unknown-linux-gnueabihf\libopenal.so`
+
+where `...\UnrealEngine` is the location of the UE4 source code. Please be sure to rename `libopenal.so` to `libopenal.so.1`.
+
+Now the project can be copied over to the target machine, `chmod+x` the target executable and run it as instructed above.
+

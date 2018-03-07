@@ -1,0 +1,113 @@
+
+/*=============================================================================
+CompositeUIPixelShader.usf: Filter pixel shader source.
+=============================================================================*/
+
+#include "Common.ush"
+#include "TonemapCommon.ush"
+
+#define LUT_SCALING	1.05f
+#define LUT_SIZE	32.f
+
+///////////////////////////////////////////////////////////////////////////////////////
+uint OutputDevice;
+uint OutputGamut;
+
+void GenerateLUTPS(
+	FWriteToSliceGeometryOutput Input,
+	out float4 OutColor : SV_Target0
+	)
+{
+	// Construct the neutral color from a 3D position volume texture
+	float2 UV = Input.Vertex.UV - float2(0.5f / LUT_SIZE, 0.5f / LUT_SIZE);
+	float3 Neutral = float3(UV * LUT_SIZE / (LUT_SIZE - 1), Input.LayerIndex / (LUT_SIZE - 1));
+
+	const float3x3 AP1_2_Output = OuputGamutMappingMatrix(OutputGamut);
+
+	float3 LinearColor = ST2084ToLinear(Neutral);
+
+	if( OutputDevice == 3 || OutputDevice == 5 )
+	{		
+		// ACES 1000nit transform with PQ/2084 encoding, user specified gamut 
+		float3 ODTColor = ACESOutputTransforms1000(LinearColor);
+		ODTColor = mul(AP1_2_Output, ODTColor);
+		OutColor.rgb = LinearToST2084(ODTColor);
+	}	
+	else if( OutputDevice == 4 || OutputDevice == 6 )
+	{		
+		// ACES 2000nit transform with PQ/2084 encoding, user specified gamut 
+		float3 ODTColor = ACESOutputTransforms2000(LinearColor);
+		ODTColor = mul(AP1_2_Output, ODTColor);
+		OutColor.rgb = LinearToST2084(ODTColor);
+	}
+	else
+	{
+		OutColor.rgb = Neutral;
+	}
+
+	OutColor.rgb = OutColor.rgb / LUT_SCALING;
+	OutColor.a = 0;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////
+Texture2D UITexture;
+SamplerState UISampler;
+
+Texture2D SceneTexture;
+SamplerState SceneSampler;
+
+Texture3D ColorSpaceLUT;
+SamplerState ColorSpaceLUTSampler;
+
+float UILevel;
+
+float3 ColorLookupTable(float3 LinearColor)
+{
+	float3 LUTEncodedColor = LinearToST2084(LinearColor);
+	float3 UVW = LUTEncodedColor * ((LUT_SIZE - 1) / LUT_SIZE) + (0.5f / LUT_SIZE);
+	return ColorSpaceLUT.SampleLevel(ColorSpaceLUTSampler, UVW, 0).rgb * LUT_SCALING;
+}
+
+void Main(
+	FScreenVertexOutput Input,
+	out float4 OutColor : SV_Target0
+	)
+{
+	float4 UIColor = Texture2DSample(UITexture, UISampler, Input.UV);
+	float3 SceneColor = Texture2DSample(SceneTexture, SceneSampler, Input.UV).xyz;
+
+	// sRGB -> RRT -> ODT
+	UIColor.xyz = ColorLookupTable(UIColor.xyz);
+
+	// PQ -> Linear
+#if !SCRGB_ENCODING
+	SceneColor = ST2084ToLinear(SceneColor);
+	UIColor.xyz = ST2084ToLinear(UIColor.xyz);
+#else
+	UIColor.xyz = ST2084ToScRGB(UIColor.xyz, OutputDevice);
+#endif
+
+	BRANCH
+	if (UIColor.w > 0.f && UIColor.w < 1.f)
+	{
+		// Clamp gamut to sRGB as extended gamut colors bleeding into the UI can look funny
+		SceneColor = max(SceneColor, 0.f);
+
+		// Tonemap HDR under transparent UI with a simple Rienhard to the max luminance of the UI
+		// This prevents HDR bleed through destroying UI legibility
+		float Luminance = dot(SceneColor, half3(0.299f, 0.587f, 0.114f)) / UILevel;
+		float OutL = 1.f / (Luminance + 1.f);
+
+		// Ease out remapping to avoid hard transitions where UI is near zero opacity
+		SceneColor *= lerp(1.f, OutL * UILevel, UIColor.w);
+	}
+
+	// Composite, assuming pre-multiplied alpha
+	OutColor.xyz = SceneColor * (1.f - UIColor.w) + UIColor.xyz * UILevel;
+	OutColor.w = 1.f;
+
+#if !SCRGB_ENCODING
+	// Linear -> PQ
+	OutColor.xyz = LinearToST2084(OutColor.xyz);
+#endif
+}

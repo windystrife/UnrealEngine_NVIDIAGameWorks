@@ -1,0 +1,78 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+#include "Common.ush"
+
+float MipLevel2D( float2 UV, inout float2 dUVdx, inout float2 dUVdy )
+{
+	dUVdx = ddx( dUVdy );
+	dUVdy = ddy( dUVdy );
+	
+	float px = dot( dUVdx, dUVdx );
+	float py = dot( dUVdy, dUVdy );
+
+	float MinLevel = 0.5 * log2( min( px, py ) );
+	float MaxLevel = 0.5 * log2( max( px, py ) );
+	
+	float Level = MaxLevel;
+	return Level;
+}
+
+float MipLevelAniso2D( float2 UV, inout float2 dUVdx, inout float2 dUVdy, const float MaxAnisoLog2 )
+{
+	dUVdx = ddx( UV );
+	dUVdy = ddy( UV );
+	
+	float px = dot( dUVdx, dUVdx );
+	float py = dot( dUVdy, dUVdy );
+
+	float MinLevel = 0.5 * log2( min( px, py ) );
+	float MaxLevel = 0.5 * log2( max( px, py ) );
+	
+	float AnisoBias = min( MaxLevel - MinLevel, MaxAnisoLog2 );
+	float Level = MaxLevel - AnisoBias;
+	
+	return Level;
+}
+
+// Pack 16bit 6:6:4
+// 64 x 64 physical pages
+// 16 mip levels
+void PageTable2DTranslation16( Texture2D<uint> PageTable, uint PageTableSize, uint2 vPage, uint vLevel, out uint2 pPage, out uint vPagesWideInLevel )
+{
+	uint PageTableEntry = PageTable.Load( int3( vPage >> vLevel, vLevel ) );
+
+	pPage.x = ( PageTableEntry >>  0 ) & 0x3F;
+	pPage.y = ( PageTableEntry >>  6 ) & 0x3F;
+	vLevel  = ( PageTableEntry >> 12 ) & 0xF;
+
+	vPagesWideInLevel = PageTableSize >> vLevel;
+}
+
+// 8:8:8:8 page table format
+// [van Waveren 2012, "Software Virtual Textures"]
+// 256 x 256 physical pages
+void PageTable2DTranslation32( Texture2D PageTable, SamplerState PageTableSampler, float2 vUV, float vLevel, out float2 pPage, out float vPagesWideInLevel )
+{
+	float4 PageTableEntry = PageTable.SampleLevel( PageTableSampler, vUV, vLevel );
+	
+	pPage = PageTableEntry.xy * 255.0;
+	vPagesWideInLevel = dot( PageTableEntry.zw, float2( 1.0 / 16.0, 256.0 / 16.0 ) * 255.0 );
+}
+
+float2 VirtualToPhysical2D(	const float2 pTextureSize, const float vPageSize, const float pPageSize,
+							float2 pPage, float vPagesWideInLevel,
+							float2 vUV, inout float2 dUVdx, inout float2 dUVdy )
+{
+	const float2 pPageScale = pPageSize / pTextureSize;
+	const float2 vPageScale = vPageSize / pTextureSize;
+	const float2 vPageBias = ( 0.5 * ( pPageSize - vPageSize ) ) / pTextureSize;
+
+	float2 vPageFrac = frac( vUV * vPagesWideInLevel );
+	float2 pUV = vPageFrac * vPageScale + vPageBias + pPage.xy * pPageScale;
+	
+	float2 ddxyScale = vPageScale * vPagesWideInLevel;
+	dUVdx *= ddxyScale;
+	dUVdy *= ddxyScale;
+	
+	return pUV;
+}

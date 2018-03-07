@@ -1,0 +1,141 @@
+﻿INTSourceChangelist:2256171
+Availability: Public
+Title:平台游戏实例
+Crumbs:%ROOT%, Resources
+Description:平台实例游戏概述。
+
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Resources/SampleGames/PlatformerGame:title%](Platformer_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%\anim_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/PlatformerGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/PlatformerGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/PlatformerGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Resources/SampleGames/PlatformerGame:title%](Platformer_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%\anim_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/PlatformerGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/PlatformerGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/PlatformerGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+[REGION:fullwidth]
+![](platformer_game.png)
+[/REGION]
+
+[TOC(start:2)]
+
+## 概述
+
+平台游戏示例是在PC/移动平台上的横向卷轴游戏实例。 它包括了不同移动类型的基础应用，以及简单的前端菜单系统。
+
+特性的完整列表如下：
+
+* 强制移动
+* 自定义移动： 滑行(PlatformerPlayerMovementComp)
+* 根骨骼运动动画（爬过车辆）
+* 对特定点（可供攀爬的突出部分）处的位置调整以供播放动画
+
+
+## 强制移动
+
+玩家的移动是通过`CharacterMovementComponent`来实现的，它使用`ScaleInputAcceleration()`在每次移动更新前启用对加速度的修改。 此函数在`UPlatformerPlayerMovementComp`中被覆盖以强制游戏进行时沿X轴加速。 另外，所有的轴绑定-查看和移动-都在`APlatformerCharacter::SetupPlayerInputComponent()`中进行了移除以防止玩家自己移动。
+
+![](forced_movement.png)
+
+## 自定义移动
+
+_滑行_ 自定义移动让玩家可以类似于常规蹲伏的方式在障碍下穿过。 
+
+![](slide_move.png)
+
+滑行在`PhysWalking()`函数中作为`UPlatformerPlayerMovementComp`的行走模式的一部分来进行应用。 
+当玩家在`UPlatformerPlayerMovementComp::StartSlide()`中开始滑行时，它们的碰撞胶囊体的高度通过`SetSlideCollisionHeight()`函数被降低了。 
+
+[REGION:imagetable]
+| ![](collision_full.png) | ![](collision_slide.png) |
+| --- | --- |
+| 行走时的高度 | 滑行时的高度 |
+[/REGION]
+
+当玩家在`CalcCurrentSlideVelocityReduction()`和`CalcSlideVelocity()`中滑行时，他的速度在更次更新时都进行降低，但可以通过滑下斜坡而增加速度。 玩家的速度不会被降低到`MinSlideSpeed`的阀值以下以防止其被障碍物卡住。
+
+玩家可以通过跳跃强制退出滑行状态，或者在玩家速度过低时也会自动退出。 不过，碰撞胶囊体降低的高度意味着他们不能直接退出滑行状态，除非他们到达了一个具有足够间隙的点，在该点处可适应碰撞胶囊体的默认高度。 `TryToEndSlide()`函数调用`RestoreCollisionHeightAfterSlide()`函数，它会查看重新恢复碰撞胶囊体的默认高度是否会导致玩家与世界几何体的一部分产生重叠。 如果不发生重叠，则玩家可退出滑行状态。
+
+## 根骨骼运动动画
+
+当角色无法跳跃并跑向障碍物时，它会自动尝试攀爬，或 _跨越_ 它。 此移动使用 **root motion** （根骨骼运动）动画，在其中动画序列本身修改骨架的根骨骼运动位置，并且该运动随后被转移到Actor上，导致玩家的位置变更为与仅影响骨架的子骨骼的普通动画序列所相反的方向。 
+
+当移动组件探测到玩家撞上了墙后，会调用`APlatformerCharacter::MoveBlockedBy()`。 此函数的应用会停止玩家的强制移动，播放 _HitWallMontage_ 的'bump reaction' 动画蒙太奇。 在该动画完成后，会执行`APlatformerCharacter::ClimbOverObstacle()`来进行实际的攀爬。
+
+针对多种高度的不同障碍，有三种不同的攀爬动画蒙太奇，并且关卡中的所有障碍都必须匹配这些高度之一，以使得攀爬可以正常运作。 每个动画蒙太奇的动画序列都会应用动画到根骨骼中。 为传送动画蒙太奇的根骨骼运动到玩家的角色，`APlateformerCharacter::Tick()`在每帧计算根骨骼的位置变更并将其应用到Actor的位置。
+
+在完成前，调用动画`ResumeMovement()`，恢复默认的强制移动机制。 任何剩余动画都会随着角色的向前移动而混出。
+
+## 位置调整的动画
+
+因为取决于玩家撞击突出部分时的不同跳跃位置，每次玩家相对于突出部分的垂直位置都不同，所以来自地面上障碍的可攀爬突出部分也不同。 
+
+为使动画同步更为方便，攀爬仅与单个专用Actor类`PlatformerClimbMarker`共同发挥作用。 对攀爬移动来说，当玩家跑向突出部分并且`APlatformerCharacter::MoveBlockedBy()`被调用时，流程开始。 此函数会查看玩家是否正在下落（与行走相反）以及玩家碰撞的对象是否属于特殊`PlatformerClimbMarker`Actors之一。 如果是这种情况，将禁用强制移动并且执行`APlatformerCharacter::ClimbToLedge()`，将其传递到标记的左上角位置-例如，可攀附的突出位置。 
+
+由于突出位置攀爬动画总是需要在相对于突出位置的同一位置处开始，并且玩家可在附近的任意位置处，角色的位置将从与对突出位置处产生冲击的初始位置到动画所期望的位置间进行插值。 `ClimbToLedge()`存储了作为`AnimPositionAdjustment`的初始位置，并随后立即传送角色到攀爬动画结束并开始播放攀爬蒙太奇的位置。 同时，`APlateformerCharacter::Tick()`快速对角色的`SkeletalMeshComponent`的相对位置进行为0的插值，使得网格物体平滑地与动画同步。
+
+## 菜单系统
+
+我们使用[Slate用户界面框架](Programming/Slate)来创建菜单系统。 它包含 **菜单**, **菜单控件**, 以及 **菜单项目** 。 每个菜单都包含负责所有菜单项目的布局，内部事件处理以及动画的单个菜单控件(`SPlatformerMenuWidget`)。 菜单项目(`SPlatformerMenuItem`)是可以执行操作并包含任意数量的其它菜单项目的复合对象。 它们可以是标签或按钮或包含由其它菜单项目组成的完整子菜单的“选项卡”。 这个菜单可以用键盘或控制器来操作，但本次仅限于有限的鼠标操作。
+
+每个菜单都通过`Construct()`函数来 _构建_ ，这个函数添加了所有的必要菜单项目，包括子项目，并在需要时在函数上附加代理。 这是通过辅助方式来完成的 - `AddMenuItem()`, `AddMenuItemSP()`等- 它们在`SPlatformerMenuWidget.h`文件的`MenuHelper`命名空间中进行定义。
+
+浏览到上一菜单是通过菜单的共享指针的数组来完成的，并且被存储在菜单控件的`MenuHistory`变量中。 `MenuHistory`类似于存储先前输入菜单的堆栈，并且可以让返回操作更为方便。 通过这种方式，在菜单间不创建直接联系，并且如有需要，可以把同一菜单重复用于不同的位置。
+
+动画通过在`SPlatformerMenuWidget::SetupAnimations()`中定义的插值曲线执行。 每条曲线都有其起始时间，持续时间以及插值方式。 动画可以被正反向播放，并且其属性可以使用`GetLerp()`在特定时间进行动画处理，而这个函数会返回从0.0f到1.0f的值。 在`SlateAnimation.h`的`ECurveEaseFunction::Type`中定义了几个不同的可用插值方式。
+
+### 主菜单
+
+![](main_menu.png)
+
+通过指定 _PlatformerMenu_ 贴图为默认值，主菜单在游戏开始时自动打开。 它会载入特殊的游戏模式`APlatformerGameMode`，这个模式使用`APlatformerPlayerController_Menu`类，它会通过创建`PostInitializeComponents()`函数中的`FPlatformerMainMenu`类的新实例来打开主菜单。
+
+### 游戏中菜单
+
+![](ingame_menu.png)
+
+这个游戏中菜单在`APlatformerPlayerController`类的`PostInitializeComponents()`函数中进行创建，并且通过`OnToggleInGameMenu()`函数来打开或关闭。
+
+### 选项菜单
+
+选项菜单作为主菜单和游戏中菜单的子菜单来使用。 唯一的区别是应用变更的方式：
+
+* 对主菜单的变更，在玩家开始游戏时进行应用。 
+* 对游戏中菜单的变更，在菜单被关闭时马上进行应用。
+
+
+选项菜单中的设置被保存到`GameUserSettings.ini`，并且在启动时被自动载入。

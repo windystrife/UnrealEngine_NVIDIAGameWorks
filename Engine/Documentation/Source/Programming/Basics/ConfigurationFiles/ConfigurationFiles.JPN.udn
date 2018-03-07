@@ -1,0 +1,157 @@
+﻿INTSourceChangelist:2721632
+Availability:Public
+Title:コンフィギュレーション ファイル 
+Crumbs: %ROOT%, Engine, Programming, Programming/Basics
+Description:ゲームプレイやエンジンの動作を設定するためのプロパティ設定を格納したテキストファイル
+Version:4.9
+
+
+[TOC (start:2 end:3)]
+
+コンフィギュレーション ファイルを使用して、プロジェクトのロード時に初期化されるプロパティの値を設定します。コンフィギュレーションは、セクション内に配置されたキー値ペアで決まります。 
+任意のキーに対して、1 つ以上の値を関連付けることができます。
+
+エンジンのコンフィギュレーション ファイルは、オブジェクトや変数のデフォルト値のために使用します。ユーザー入力によるコンフィギュレーションは、キーバインドとして利用できます。**[Project Wizard]** で新規ブランク プロジェクトを作成すると、 
+デフォルトで、`DefaultEngine.ini` と `DefaultGame.ini` が作成されます。テンプレートで始まる新規プロジェクトは、必要に応じて
+`DefaultEditor.ini` と `DefaultInput.ini` のコンフィギュレーション ファイルを生成する場合もあります。  
+
+`SaveConfig()`関数は [](Programming\UnrealArchitecture\Reference\Classes\Specifiers\Config) クラス指定子を用いてクラスで呼び出すことができます。これにより、**Config** プロパティ指定子でマークされているプロパティがあれば 
+適切なコンフィギュレーション ファイルに保存します。一般的に `SaveConfig()` によって保存された変数は、
+[(package).(classname)] のフォーマットに従ったセクションのタイトルに入っています。例えばDefaultEngine.ini の [/Script/Engine.Engine] セクションは、Engine パッケージ内に格納された Engine クラスを指します。
+ハード コーディングされたセクション名には、いくつかの例外があります。
+
+コンフィギュレーション ファイルを編集することでのみこれまで利用可能であった数多くの設定が [](Engine\UI\ProjectSettings) エディタ内にあるアンリアル エディタで利用可能になっています。
+
+## 設定可能な変数を指定する
+
+コンフィギュレーション ファイルからどの変数を読みだすかを指定するために、こうした変数を含むクラスはその UCLASS マクロで Config 指定子を最初に与えられなければなりません。
+
+	UCLASS(Config=Game)
+	class AExampleClass : public AActor
+
+[REGION:note]
+	カテゴリ (すなわち、Game) を Config 指定子に入れなれければなりません。これにより、どのコンフィギュレーション ファイルからクラス変数を読み出し、保存するかを決めます。カテゴリは 
+	FConfigCacheIni で定義されています。すべてのコンフィギュレーション ファイルのカテゴリについては、[コンフィギュレーションのカテゴリ](#コンフィギュレーションのカテゴリ) をご覧ください。
+[/REGION]
+
+クラスに Config 指定子を付けると、そのクラスがコンフィギュレーション ファイルから読み出された変数を持っていることを表し、コンフィギュレーションがどのファイルから読み出されるかを指定します。特定の変数を
+コンフィギュレーション ファイルから読み出す、コンフィギュレーション ファイルに格納するものとして指定するには、`Config` 指定子も `UPROPERTY()` マクロに入れる必要があります。
+
+	UCLASS(Config=Game)
+	class AExampleClass : public AActor
+	{
+	GENERATED_UCLASS_BODY()
+
+	UPROPERTY(Config)
+	float ExampleVariable;
+
+	};
+
+プロパティの Config 指定子にはカテゴリが何もありません。これで、ExampleVariable プロパティは、情報が以下の構文で指定されている限りは、
+[コンフィギュレーション ファイルの階層](#ファイルの階層) にあるどの Game コンフィギュレーション ファイルからも読みだすことができます。
+
+	[/Script/ModuleName.ExampleClass]
+	ExampleVariable=0.0f
+
+### コンフィギュレーションファイルと継承
+
+`Config` `UCLASS` と `UPROPERTY` の指定子は継承されます。つまり、子クラスは親クラスで `Config` として指定されているすべての変数を読み込む、または保存することが可能であり、
+これらは、同じコンフィギュレーション ファイル カテゴリになります。変数はすべて子クラスの名前を持つセクションの配下にあります。例えば、上の ExampleClass から継承した ChildExampleClass のコンフィギュレーション ファイル情報は、
+以下の行のようになり、同じ Game コンフィギュレーション ファイルに保存されます。
+
+	[/Script/ModuleName.ChildExampleClass]
+	ExampleVariable=0.0f
+
+
+###インスタンス毎のコンフィギュレーション
+
+UE4 には、オブジェクトの設定を必要なコンフィギュレーション ファイルへ保存する機能があります。`UCLASS` マクロで `PerObjectConfig` 指定子が使用されている場合、 
+このクラスのコンフィギュレーション情報は、インスタンス毎に保存されます。この場合、各インスタンスは [ObjectName ClassName] の形式でオブジェクトにちなんで名付けられた `.ini` ファイルのセクションを持ちます。 
+このキーワードは子クラスに継承されます。
+
+
+## コンフィギュレーションファイルの構造
+
+各コンフィギュレーションのカテゴリには、独自のファイルの階層があり、エンジン固有、プロジェクト固有、およびプラットフォーム固有のコンフィギュレーションを指定します。 
+
+### コンフィギュレーションのカテゴリ
+
+* Compat
+* DeviceProfiles
+* Editor
+* EditorGameAgnostic
+* EditorKeyBindings
+* EditorUserSettings
+* Engine
+* Game
+* Input
+* Lightmass
+* Scalability
+
+### ファイルの階層
+
+コンフィギュレーション ファイルの階層は、`Base.ini` で始まり、階層にある後のファイルには前の値をオーバーライドする値が付けられます。`Engine` フォルダにあるすべてのファイルは、すべてのプロジェクトに割り当てられますが、
+プロジェクト固有の設定はプロジェクト ディレクトリにあるファイルに入れられます。最後に、すべてのプロジェクト固有およびプラットフォーム固有の差分は、`[ProjectDirectory]/Saved/Config/[Platform]/[Category].ini` に保存されます。
+
+以下のファイル階層例は、コンフィギュレーション ファイルの `Engine` カテゴリのためのものです。
+
+1. Engine/Config/Base.ini
+	[REGION:note]
+	`Base.ini` は通常、空です。
+	[/REGION]
+1. Engine/Config/BaseEngine.ini
+1. Engine/Config/[Platform]/[Platform]Engine.ini
+1. [ProjectDirectory]/Config/DefaultEngine.ini
+1. [ProjectDirectory]/Config/[Platform]/[Platform]Engine.ini
+1. [ProjectDirectory]/Saved/Config/[Platform]/Engine.ini
+	[REGION:note]
+	Saved ディレクトリにあるコンフィギュレーション ファイルは、プロジェクト固有およびプラットフォーム固有の差分だけをコンフィギュレーション ファイルのスタックに保存します。
+	[/REGION]
+	## コンフィギュレーションファイルでの作業
+
+
+
+
+
+### ファイル形式
+
+
+#### セクションとキー値ペア
+
+典型的なコンフィギュレーション ファイルは、キー値ペアのセクションで構成され、以下のように配置されます。
+    
+    [Section]
+    Key=Value
+
+#### 特殊文字
+
+* *+* - プロパティがまだ存在しない場合に行を追加（以前のコンフィギュレーション ファイルまたは同じコンフィギュレーション ファイルの前のバージョン）。
+* *-* - 行を削除（完全に一致しなくてはいけません）。
+* *.* - 新規プロパティを追加。
+* *!* - プロパティを削除。プロパティ名が一致すれば完全一致する必要はありません。
+
+[REGION:note]
+重複する行を追加する以外は、[.] は [+] と同じです。バインディングに便利です (「DefaultInput.ini」で触れたような)。例えば一番下のバイディングが有効になるので、以下のように追加します。
+    
+    [/Script/Engine.PlayerInput]
+    Bindings=(Name="Q",Command="Foo")
+    .Bindings=(Name="Q",Command="Bar")
+    .Bindings=(Name="Q",Command="Foo")
+
+これで適切に機能するはずです。「*+*」 を使用すると最終行の追加に失敗し、不正確なバインディングになります。コンフィギュレーション ファイルの結合により、上記で示す用途パターンが発生します。
+[/REGION]
+
+####コメント
+
+多くの人は、セミコロンはコンフィギュレーション ファイルのコメントと考えがちですが、実際はそうではありません (`FConfigFile::ProcessInputFileContents` はコメントのデリミタとしてコメントまたはその他の文字列をそのように扱いません)。この挙動は意図的に行われています。理論上では、あらゆる文字で異なるキー値ペアを示すことが可能です。一般的にセミコロンは新しい行の最初に配置されます。コメントのような機能をしますが、実際はそうではありません。
+     
+    ; This is a Comment
+	; So is this!
+
+
+
+
+
+
+
+ 

@@ -1,0 +1,42 @@
+Availability:Public
+Title: Replay System
+Crumbs: %ROOT%, Engine
+Description:Overview of the Replay system for recording and playback of gameplay
+Version: 4.13
+parent:Engine
+order:18
+topic-image:replay_topic.png
+tags:Replays
+
+
+[REGION:banner]
+![](replay_banner.png)(convert:false)
+[/REGION]
+
+[TOC (start:2 end:2)]
+
+## Replay System Overview
+Unreal Engine 4 features a Replay system which can record gameplay for later viewing. At a high level, the Replay system works by using a `DemoNetDriver` to read data drawn from the built-in replication system, similar to how a `NetDriver` operates in a live, networked gameplay environment. Any project that is set up to replicate data like a multiplayer game does, even if the project doesn't actually have a multiplayer mode, will be compatible with the Replay system without further modification. The way this works involves the `DemoNetDriver` passing network data to a Replay Streamer, which handles the process of filtering and storing the data. When viewing a replay, a `DemoNetDriver` will have access to all of the replicated information that was available during live play, as well as special data fields designated as relevant only to replays, and can reconstruct the events of the game from this data.
+
+## Replay System Functionality
+The basic functions of the replay system are to start or stop recording a demo, or play back a previously-recorded demo. While in playback mode, the Replay system supports commands to pause, change the playback speed, or jump to a specific point in time. More advanced usage of the system can include adding text tags (usually meta tags or the names of players involved in the game) to a replay, or querying existing replays based on text tags or version information present. The Replay system can be used from C++ code, mainly via the `UGameInstance` and `UWorld` classes, or with console commands or command-line arguments. A unified C++/Blueprint API is under construction and will be released with a future engine version.
+
+| Function Or Variable Name | Equivalent Console Command | Effect |
+| --- | --- | --- |
+| `UGameInstance::StartRecordingReplay` | "demorec (ReplayName)" | Begins recording a replay. If the (ReplayName) parameter is not supplied, the replay system can generate a name on its own. |
+| `UGameInstance::StopRecordingReplay` | "demostop" | Stops a replay currently being recorded. |
+| `UGameInstance::PlayReplay` | "demoplay (ReplayName)" | Plays the named replay. |
+| `UDemoNetDriver::GotoTimeInSeconds` | "demoscrub (ReplayTime)" | Jumps to the provided time (in seconds) in the replay. |
+| `UWorld::Pauser` (variable) | "demopause" | Setting this variable to the PlayerController held by the World's `DemoNetDriver->ServerConnection->OwningActor` variable will pause the replay. Setting it back to `NULL` will resume the replay. The "demopause" console command will automatically set or clear that variable. |
+| `WorldSettings->DemoPlayTimeDilation` (variable) | "demospeed (ReplaySpeed)" | Speeds up or slows down playback by setting the time-scaling factor. A value of 1.0 is normal speed. |
+| `AGameMode::bHandleDedicatedServerReplays` (variable) | N/A | This variable can be set to `true` to cause dedicated servers to record games automatically. |
+
+## DemoNetDriver and Streamers
+
+The `DemoNetDriver` uses **Streamers** to perform the actual extraction and recording of the information needed to create the replay. Depending on how the replay data is intended to be viewed, different Streamers can be attached to the `DemoNetDriver`. There are three different Streamers included with the engine, each suited to different use cases. The **NULL Streamer**, which is the default, records events from the host machine directly to disk, making it best suited for single-player games and games that keep replays locally, on the host player's own machine. The **Memory Streamer** runs on a client machine and stores data in memory, making it ideal for "instant replay" features in sports titles or "kill cams" in shooters. Finally, the **HTTP Streamer** is used to send replay data to a second machine over LAN or the internet, which makes it a great choice for dedicated-server games and for games that may need to be streamed live to a large number of viewers while still remaining responsive to players.
+
+For further details on the features of the `DemoNetDriver` and its Streamers, please see the [](Engine/Replay/Streamers) page.
+
+## Backward Compatibility
+
+Backward compatibility is supported by the Replay system, starting in version 4.13. This means you can make modifications to a build, i.e. adding or removing replicated properties, and still load and view replays that were recorded with the original build. In most cases, this is handled automatically, as the Replay system will skip over old replicated fields that have been removed, or use defaults for new replicated fields that have been added. Note that structures with `NetSerialize` overridden will require these differences in data format to be handled manually. To this end, `FArchive` now provides the `EngineNetVer` and `GameNetVer` functions, which identify the engine and game version, respectively, enabling you to adjust replay data as it comes in so that it fits with your current build. The delegate `GetLocalNetworkVersionOverride` in `FNetworkVersion` can be bound to a function that returns a `uint32` version number of your choosing. In case exact matches are not required for compatibility, `FNetworkVersion` has a delegate called `IsNetworkCompatibleOverride` that can be overridden to perform the comparison between two version numbers and decide if they are compatible.

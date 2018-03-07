@@ -1,0 +1,91 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title:공유 포인터
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture/SmartPointerLibrary
+Description:공유 소유권, 실효성 자동검증, 약 레퍼런스 등을 지원하는 스마트 포인터 입니다.
+Version: 4.9
+
+[TOC(start:2)]
+
+**공유 포인터** (shared pointer) 는 비침범형(non-intrusive), 레퍼런스가 카운팅되는 편리한 유형의 스마트 포인터로, 강/약 레퍼런스 모두 지원합니다. 공유 포인터는 메모리 누수나 초기화되지 않은 메모리 등을 방지한다는 점에서 기본적인 스마트 포인터의 모든 장점을 선천적으로 포함하고 있는 데다, 다음과 같은 추가 기능을 갖고도 있습니다:
+
+* 공유 소유권 (shared ownership) - 레퍼런스 카운팅
+* 실효성 자동검증 (automatic invalidation) - 변화가 심한 오브젝트를 안전하게 레퍼런싱 가능
+* 약 레퍼런스 (weak references) - [](Programming/UnrealArchitecture/SmartPointerLibrary/WeakPointer) 를 통한 사이클 회피 가능
+* 프로그래머의 의도 표현 개선 - 소유자(owner)와 관람자(observer) 구분 및 null 가능하지 않은 레퍼런스 제공 ( [](Programming/UnrealArchitecture/SmartPointerLibrary/SharedReference) )
+
+
+공유 포인터의 또다른 기본적인 특징:
+
+* 매우 탄탄한 문법
+* 비침범형 (non-intrusive)  (그러나 리플렉션은 가능)
+* 스레드 안전 (thread-safe)  (조건에 따라)
+* 괜찮은 퍼포먼스, 가벼운 메모리
+
+
+## 선언과 초기화
+
+공유 레퍼런스는 항상 유효한 오브젝트로 초기화(initialize)되며, 초기화되지 않고서는 선언(declare)될 수도 없습니다.
+
+새 공유 포인터 생성 예제:
+
+	// Create an empty shared pointer  빈 공유 포인터 생성
+	TSharedPtr<FTreeNode> EmptyNode;
+
+	// Create a shared pointer to a new object  새 오브젝트로의 공유 포인터 생성
+	TSharedPtr<FTreeNode> Node( new FTreeNode() );
+
+두 번째 예제에서 새로운 FTreeNode 오브젝트는 사실상 그것을 가리키는 공유 포인터에 소유되어 있습니다. 공유 포인터가 영역을 벗어나면, 그 오브젝트는 소멸됩니다.
+
+공유 포인터를 복사할 때, 가리키고 있는 오브젝트로의 레퍼런스가 추가됩니다.
+
+	TSharedPtr<FTreeNode> OtherNodeRef = Node;
+
+이 오브젝트는 더이상 가리키는 공유 포인터가 없을 때까지 지속됩니다.
+
+공유 포인터는 `Reset()` 메소드를 사용하거나 null 을 할당시켜 리셋시킬 수 있습니다.
+
+	Node.Reset();
+	Node = null;
+
+## 레퍼런스 해제와 접근
+
+레퍼런스 해제(dereferencing), 메소드 호출, 멤버 접근은 보통의 C++ 포인터와 같은 방식으로 이루어집니다.
+
+	Node->ListChildren();
+	Node.Get()->ListChildren();
+	( *Node ).ListChildren();
+
+## 비교
+
+공유 포인터는 동일성, 즉 같은 오브젝트를 가리키는지만 검사 가능합니다.
+
+	TSharedPtr<FTreeNode NodeA, NodeB;
+
+	if( NodeA == NodeB )
+	{
+		...
+	}
+
+공유 포인터는 `IsValid()` 메소드를 사용하거나 raw 포인터에 접근한 다음 비교를 하여 null 테스트 가능합니다.
+
+	if( Node.IsValid() )
+	{
+		...
+	}
+
+	if( Node.Get() != null )
+	{
+		...
+	}
+
+## 변환
+
+묵시적 변환은 매우 위험하므로 허용되지 않습니다. 예를 들어 다음은 컴파일되지 않습니다:
+
+	TSharedPtr<float> Height = 45.0f;
+
+그러나 `MakeShareable()` 메소드를 사용하여 명시적으로 만들 수 있습니다.
+
+	TSharedPtr<float> Height = MakeShareable( new float( 45.0f ) );
+

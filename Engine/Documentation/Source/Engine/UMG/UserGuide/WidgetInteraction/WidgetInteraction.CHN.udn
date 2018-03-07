@@ -1,0 +1,79 @@
+﻿INTSourceChangelist:3102822
+Availability:Public
+Title:控件交互组件
+Crumbs:%ROOT%, Engine, Engine/UMG, Engine/UMG/UserGuide
+Description:说明如何使用控件交互组件和 3D 控件互动。
+Version:4.13
+Related:Engine/UMG/UserGuide
+Related:Engine/Blueprints
+Related:Engine/Components/Widget
+
+[REGION:warning]
+此功能仍在实验阶段，一些部分可能无法正常工作，在未来更新中也可能被修改。 
+[/REGION]
+
+[REGION:banner]
+![](WidgetInteractionBanner.png)
+[/REGION]
+
+如您使用 [控件组件](Engine/Components/Widget) 显示以 3D 形式存在于游戏世界中的 UI，还需要玩家与此控件进行交互，可通过 **控件交互（Widget Interaction）** 组件来实现交互。 
+
+控件交互组件执行 [光线投射](Gameplay/HowTo/UseRaycasts/)，确定它是否命中世界场景中的控件组件。如命中，可设置规则确定与其交互的方式。交互通过模拟定义的按键来执行。例如一个按钮可通过鼠标左键点击，即可告知其他形式的输入模拟一次鼠标左键点击（控制器按钮按下、运动控制器扳机键按下等）。
+
+[REGION:note]
+如要了解详细范例，请查阅 [](Engine\UMG\HowTo\InWorldWidgetInteraction\) 和 [](Engine\UMG\HowTo\VirtualKeyboards)。 
+[/REGION]
+
+## 添加控件交互组件
+
+通常需要将控件交互组件添加到玩家 [](Gameplay/Framework/Pawn) 或来自 [](Engine/Blueprints/UserGuide/Components/) 的 [](Gameplay/Framework/Pawn/Character) 类。 
+
+![](WidgetInteractionComponent.png)
+
+我们将其添加并附加到角色手持的一把枪上，因此枪指向的方向就是控件交互组件的朝向。 
+
+
+## 控件交互属性参考
+
+添加控件交互组件后，可调整 **Details** 面板中的数个属性来定义其功能。除常见的组件属性外（如 **Transform**、**Rendering**，或 **Sockets**），以下属性为控件交互组件专用。 
+
+| 选项 | 描述 |
+| --- | ----------- |
+| [REGION:tablesection]**交互**[/REGION] ||
+| **Virtual User Index** | 代表虚拟用户索引。控件交互组件通过虚拟用户索引产生作用，此索引将单独捕捉并处理聚焦状态。每个虚拟用户应由一个不同的索引所代表，确保它们保持单独的捕捉和聚焦状态。每个控件交互组件上线后，它将告知虚拟用户索引的 Slate 它已被指定、可作为真实 Slate 用户发送时间。|
+| **Pointer Index** | 每个用户的模拟虚拟控制器或虚拟指端应使用不同的指针索引。|
+| **Interaction Distance** | 组件能够和控件组件形成交互的距离（以游戏单位计）。|
+| **Interaction Source** | 确定从何处开始投射并开始追踪（世界场景、鼠标、屏幕中心或自定义）。如将此设为自定义，则需要调用 `SetCustomHitResult()` 并提供自定义命中测试（在需要的任意位置执行）的结果。|
+| **Enable Hit Testing** | 确定交互组件是否应该执行命中测试（自动或自定义）并尝试模拟悬停。如需要模拟键盘而虚拟键盘和虚拟指针设备为分离状态，应将此选项关闭并将另一个交互组件用于指针设备。|
+| [REGION:tablesection]**调试**[/REGION] ||
+| **Show Debug** | 显示调试线和命中球体，以便调试交互。|
+| **Debug Color** | 确定 **Show Debug** 启用时调试线的颜色。|
+| [REGION:tablesection]**事件**[/REGION] ||
+| **On Hovered Widget Changed** | 悬停控件组件改变时调用。Slate 层的交互组件函数 — 因此它无法针对命中结果下的控件进行报告。|
+
+
+## 控件交互蓝图节点参考
+
+控件交互组件可模拟不同类型的输入方法（如按下、松开，或按下 + 松开），在蓝图快捷菜单的 **Interaction** 部分可找到这部分内容。还可获得其他信息，如控件交互组件注册的“命中”位置，或世界场景中的控件组件当前是否被悬停。 
+
+![](WidgetInteractionBlueprint.png)
+
+| 节点 | 描述 |
+| --- | ----------- |
+| **Get Hovered Widget Component** | 获取当前悬停的控件组件。|
+| **Get Last Hit Result** | 获取组件生成的上一个命中结果。设置后将返回自定义命中结果。|
+| **Is Over Focusable Widget** | 如命中结果下的控件为可聚焦，则返回 true。为 `SupportsKeyboardFocus()` 返回 true 的 Slate 控件。|
+| **Is Over Hit Test Visible Widget** | 如命中结果下的控件的可视性设置使命中测试为可见状态，则返回 true。为 `GetVisibility().IsHitTestVisible()` 返回 true 的 Slate 控件。|
+| **Is Over Interactable Widget** | 如命中结果下的控件为交互式，则返回 true。为 `IsInteractble()` 返回 true 的 Slate 控件。|
+| **Press and Release Key** | 按下和松开虚拟键盘键。| 
+| **Press Key** | 按下虚拟键盘键。不要将此项用于 `a-z|A-Z`，因为 Slate 中的可编辑文本框之类的资源将在 **OnKeyChar** 被调用后发出通知，说明特定字符正发送到控件。在这些情况下使用 **SendKeyChar** 代替。|
+| **Press Pointer Key** | 模拟在鼠标/指针上按下键。多数情况下应用的键是鼠标按键，但也可以使用任意键。支持高级的使用情况，如发送其他键通知控件执行特殊操作。|
+| **Release Key** | 松开键盘上已松开的键。|
+| **Release Pointer Key** | 模拟在鼠标/指针上松开键，与 Press Pointer Key 相似。多数情况下应用的键是鼠标按键，但也可以使用任意键。|
+| **Scroll Wheel** | 对上一个命中结果下的控件发送一个滚轮事件。|
+| **Send Key Char** | 为字符串中列出的每个键模拟一个 OnKeyChar 事件，将列表中的字符传输到控件。|
+| **Set Custom Hit Result** | 设置自定义命中结果。如交互源设为自定义，这是唯一需要考虑的一点。|
+
+控件交互组件的属性也能以 getter 形式被获取，或通过 setter 节点进行设置。 
+
+![](WidgetInteractionVariables.png)

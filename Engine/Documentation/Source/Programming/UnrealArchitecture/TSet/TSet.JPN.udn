@@ -1,0 +1,266 @@
+﻿INTSourceChangelist:3180166
+Title:TSet
+Crumbs:
+Description:TSets は、順序が重要ではないユニークなエレメントを格納する高速のコンテナ クラスです。 
+Availability:Public
+Version:4.14
+Related:Engine/UI/LevelEditor/Details/Properties/Set
+
+[TOC]
+
+**TSet** は **TMap** および **TMultiMap** と似ています。ただし、重要な相違点があります。エレメントを別々に与えられたキーに関連づけるのではなく、TSet はエレメントを評価するオーバーライド可能な関数でエレメントそのものをキーとして使います。TSet は、非常に速くエレメントの追加、検索、削除を行います (定数時間)。デフォルトで、TSet はキーの複製は許可していませんが、サポートされているので、必要であれば可能です。
+
+## TSet
+
+TSet は、順序が重要ではないユニークなエレメントを格納する高速のコンテナ クラスです。ほとんどのユースケースで、必要とされるパラメータはエレメントの型だけです。ただし、TSet は様々なテンプレート パラメータを使ってビヘイビアの変更や多目的への設定が可能です。`DefaultKeyFuncs` から派生した構造体は、セット内で複数のキーが同じ値を持ったり、ハッシング機能を付けるように指定が可能です。最後に、他のコンテナ クラスと同様、エレメントへのカスタム アロケータを指定することができます。
+
+TSet は TArray と同じ、均一なコンテナです。つまり、すべてのエレメントが完全に同じ型です。TSet は value 型でもあり、通常のコピー、割り当て、デストラクタ操作をサポートします。エレメントの強力なオーナーシップを持つのでセットが破棄されると破棄されます。Value 型にするためには key 型も必要になります。
+
+TSet はハッシュを使います。つまり、**KeyFuncs** テンプレート パラメータが与えられている場合、エレメントからキーを判断する方法、2 つのキーの等価の比較方法、キーのハッシュ方法、キーの複製を許可するかどうかを指示します。デフォルトで、等価比較には`operator==`、ハッシングには非メンバ関数 `GetTypeHash` を使って、リファレンスをそのキーに戻します。Key 型がこれらの関数をサポートしている場合、カスタム仕様の KeyFuncs を与えなくてもセット キーとして使用できます。カスタム仕様の KeyFuncs を書くには、`DefaultKeyFuncs` 構造体を拡張します。
+
+最後に、TSet は、メモリの割り当て動作を制御するオプションのアロケータを受け取ります。標準の UE4 のアロケータ (`FHeapAllocator`、`TInlineAllocator` など) は TSet のアロケータとしては使用できません。代わりに、セットが使用すべきハッシュ バケット数や、エレメント格納に使う標準 UE4 アロケータを定義します。詳細は `TSetAllocator` をご覧ください。
+
+TArray とは異なり、メモリ内の TSet エレメントの相対順序を信頼することはできず、エレメントをイタレートすると追加時とは異なる順序で返される可能性が高くなります。エレメントもメモリ内にぴったり連続して並ばなくなります。セットの補助データ構造は疎配列、つまり配列に穴があります。セットからエレメントが削除されると、疎配列内に穴があき、その穴は後から追加されたエレメントによって埋められます。TSet は穴を埋めるためにエレメントをシャッフルすることはありませんが、一杯になったストレージに新たにエレメントが追加されると、ストレージ全体を再割り当てすることができるため、セット エレメントへのポインタは無効にされます。
+
+## セットの作成と追加
+
+TSet の作成は以下の手順で行います。
+
+	TSet<FString> FruitSet;
+
+ユニークな文字列を格納するための空の TSet が作成されます。KeyFuncs あるいはアロケータを指定していないので、セットは直接 FStrings を比較し、GetTypeHash を使ってそれらをハッシュし、標準のヒープ割り当てを使用します。この時点ではメモリはアロケートされていません。
+
+セットをエントリするには、**Add** 関数でキーを与えるのが標準的な方法です。
+
+	FruitSet.Add(TEXT("Banana"));
+	FruitSet.Add(TEXT("Grapefruit"));
+	FruitSet.Add(TEXT("Pineapple"));
+	// FruitSet == [ "Banana", "Grapefruit", "Pineapple" ]
+
+ここには挿入された順序でエレメントがリスト化されていますが、これらのエレメントの順序は保証されません。新規セットの場合は挿入順序が維持される可能性が高いですが、挿入と削除を繰り返すうちに、新規エレメントが末尾に現れなくなってきます。
+
+デフォルトのアロケータを使用したので、キーがユニークであることが保証されます。複製キーを追加しようとすると何が起こるか分かります。
+
+	FruitSet.Add(TEXT("Pear"));
+	FruitSet.Add(TEXT("Banana"));
+	// FruitSet == [ "Banana", "Grapefruit", "Pineapple", "Pear" ]
+	// Note:Only one banana entry.
+
+今、セットにはエレメントが 4 つ含まれています。"Pear" によって数が 3 から 4 になりましたが、新規の "Banana" は前に入力された "Banana" に置き換えられたのでエレメント数は変わりません。
+
+TArray と同様に、セットへの挿入時にエレメントが一時作成されてしまわないように Add ではなく **Emplace** を使うこともできます。
+
+	FruitSet.Emplace(TEXT("Orange"));
+	// FruitSet == [ "Banana", "Grapefruit", "Pineapple", "Pear", "Orange" ]
+
+ここでは引数が key 型のコンストラクタに直接渡されています。一時的な Fstring が作成されないようにするためです。TArray とは異なり、単一の引数付きコンストラクタでのみエレメントのセットへの配置が可能です。
+
+Append 関数を使って、別のセットからすべてのエレメントを挿入してマージすることも可能です。
+
+	TSet<FString> FruitSet2;
+	FruitSet2.Emplace(TEXT("Kiwi"));
+	FruitSet2.Emplace(TEXT("Melon"));
+	FruitSet2.Emplace(TEXT("Mango"));
+	FruitSet2.Emplace(TEXT("Orange"));
+	FruitSet.Append(FruitSet2);
+	// FruitSet == [ "Banana", "Grapefruit", "Pineapple", "Pear", "Orange", "Kiwi", "Melon", "Mango" ]
+
+セットは、個々に追加するために Add/Emplace を使う場合と同等となり、ソースセットから複製したキーはターゲット内のものに置き換わります。
+
+### UPROPERTY TSets の編集
+
+TSet を `UPROPERTY()` マクロと編集可能なキーワード (`EditAnywhere`、`EditDefaultsOnly`、`EditInstanceOnly`) のいずれかでマークすると、 [アンリアル エディタでエレメントの追加および編集](Engine/UI/LevelEditor/Details/Properties/Map) が可能になります。
+
+	UPROPERTY(Category = SetExample, EditAnywhere)
+	TSet<FString> FruitSet;
+
+
+
+## イタレーション
+
+TSets のイタレーションは TArrays と似ています。C++ の ranged-for 機能を使うことができます。
+
+	for (auto& Elem :FruitSet)
+	{
+		FPlatformMisc::LocalPrint(
+			*FString::Printf(
+				TEXT(" \"%s\"\n"),
+				*Elem
+			)
+		);
+	}
+	// Output:
+	// 	"Banana"
+	// 	"Grapefruit"
+	// 	"Pineapple"
+	// 	"Pear"
+	// 	"Orange"
+	// 	"Kiwi"
+	// 	"Melon"
+	// 	"Mango"
+
+セットには、イタレーションの制御を強化する独自の iterator 型も含まれます。**CreateIterator** 関数は読み書きが可能ですが、**CreateConstIterator** 関数は読み取り専用です。イタレータ オブジェクト自体は、TSet の宣言の中で最初のテンプレート引数として指定した element 型です。
+
+## クエリ
+
+**Num** 関数を使って、維持しているエレメント数をセットに問い合わせることができます。
+
+	int32 Count = FruitSet.Num();
+	// Count == 8
+
+`FSetElementId` 構造体を使って、セット内でキーのインデックスの検索ができます。**演算子[]** のインデックス化によって、そのエレメントを表示できます。non-const セットで演算子[] を呼び出すと non-const リファレンスが返され、const セット上で呼び出すと const リファレンスを返します。
+
+	FSetElementId BananaIndex = FruitSet.Index(TEXT("Banana"));
+	// BananaIndex is a value between 0 and (FruitSet.Num() - 1)
+	FPlatformMisc::LocalPrint(
+		*FString::Printf(
+			TEXT(" \"%s\"\n"),
+			*FruitSet[BananaIndex]
+		)
+	);
+	// Prints "Banana"
+	FSetElementId LemonIndex = FruitSet.Index(TEXT("Lemon"));
+
+	// LemonIndex is INDEX_NONE (-1)
+	FPlatformMisc::LocalPrint(
+		*FString::Printf(
+			TEXT(" \"%s\"\n"),
+			*FruitSet[LemonIndex]
+		)
+	); // assert
+
+特定のキーがセット内に存在するかどうかを **Contains** 関数で確認することができます。
+
+	bool bHasBanana = FruitSet.Contains(TEXT("Banana"));
+	bool bHasLemon = FruitSet.Contains(TEXT("Lemon"));
+	// bHasBanana == true
+	// bHasLemon == false
+
+たいていの場合、セットがエレメントに実際含まれているかどうかは分からないけれども、エレメントを参照しようとします。演算子[] の後に Contains を使用するとキーのダブル参照ができますが、これはやらないようにしてください。**Find** 関数で 1 回の検索ができます。リファレンスではなく見つかったエレメントの値へのポインタを返し、キーが存在しなければ null を返します。
+
+	FString* PtrBanana = FruitSet.Find(TEXT("Banana"));
+	FString* PtrLemon = FruitSet.Find(TEXT("Lemon"));
+	// *PtrBanana == "Banana"
+	//  PtrLemon == nullptr
+
+Const セット上で呼ばれると、返されるポインタも const になります。
+
+**Array** 関数は TSet のすべてのエレメントのコピーがエントリされた TArray を返します。渡された配列は設定前は空の状態なので、エレメント数は常にセット内のエレメント数と等しい結果になります。
+
+	TArray<FString> FruitArray = FruitSet.Array();
+	// FruitArray == [ "Banana","Grapefruit","Pineapple","Pear","Orange","Kiwi","Melon","Mango" ] (順序は変更する場合があります)
+
+## Removal
+
+エレメントは **Remove** 関数を使ってインデックスで削除することができます。ただしこれは、エレメントをイタレーション中以外は望ましくありません。
+
+	FruitSet.Remove(0);
+	// FruitSet == [ "Grapefruit","Pineapple","Pear","Orange","Kiwi","Melon","Mango" ]
+
+Visual Studio の [Watch] ウィンドウでセットを視覚化すると分かりますが、エレメントを削除するとデータ構造中に「穴」があいたままになってしまいます。今ここでは分かりやすいように穴をなくしています。TSet がキーの複製をサポートしている場合、**Remove** は入力パラメータと一致するすべてのキーを削除します。Remove 関数は削除したエレメント数を返します。与えられたキーがセットに含まれていないと 0 になります。
+
+	int32 RemovedAmountPineapple = FruitSet.Remove(TEXT("Pineapple"));
+	// RemovedAmountPineapple == 1
+	// FruitSet == [ "Grapefruit","Pear","Orange","Kiwi","Melon","Mango" ]
+	FString RemovedAmountLemon = FruitSet.Remove(TEXT("Lemon"));
+	// RemovedAmountLemon == 0
+
+最後に、**Empty** 関数または **Reset** 関数でエレメントをすべて削除することができます。
+
+	TSet<FString> FruitSetCopy = FruitSet;
+	// FruitSetCopy == [ "Grapefruit","Pear","Orange","Kiwi","Melon","Mango" ]
+	FruitSetCopy.Empty();
+
+	// FruitSetCopy == []
+
+TArray と同様に、Empty は任意のスラック値 (デフォルト値はゼロ) を受け取り、それを使って、セットを空にした後で内部の格納配列のサイズを変更します。この値が、配列の新しい最大サイズとして使われます。配列の現在の最大値がスラック引数と同じ場合は、再割り当ては行われません。
+
+## Sorting
+
+TSets は **Sort** 関数で一時的にソートすることができます。やがてソート順ではなくなりますが、次回セットをイタレーションする時にセットがソート順序でエレメントを表示します。ソートは不安定なので、同等のエレメント (キーの複製を許可する TSet) はどんな順序でも表示される可能性があります。
+
+Sort 関数は、ソート順序を指定するバイナリ述語を受け取ります。
+
+	FruitSet.Sort([](const FString& A, const FString& B) {
+		return A > B; // sort by reverse-alphabetical order
+	});
+	// FruitSet == [ "Pear", "Orange", "Melon", "Mango", "Kiwi", "Grapefruit" ] (順序は一時的に保証されます)
+	FruitSet.Sort([](const FString& A, const FString& B) {
+
+		return A.Len() < B.Len(); // sort strings by length, shortest to longest
+	});
+	// FruitSet == [ "Pear", "Kiwi", "Melon", "Mango", "Orange", "Grapefruit" ] (順序は一時的に保証されます)
+	## 演算子
+
+
+TArray と同様に、TSet は一般的な value 型です。標準のコピー コンストラクタもしくは代入演算子でコピーすることができます。セットは必ずエレメントを所有しているため、セットは「深いコピー」が行われ、新規のセットにはそのエレメントの個々のコピーが作られます。
+
+	TSet<int32, FString> NewSet = FruitSet;
+	NewSet.Add(TEXT("Apple"));
+	NewSet.Remove(TEXT("Pear"));
+	// FruitSet == [ "Pear", "Kiwi", "Melon", "Mango", "Orange", "Grapefruit" ]
+	// NewSet == [ "Kiwi", "Melon", "Mango", "Orange", "Grapefruit", "Apple" ]
+
+
+## Slack
+
+TSet にも **スラック** の概念があり、セットの入力の最適化に使用できます。**Reset** 関数は Empty() の呼び出しと似ていますが、エレメントによって既に使用されたメモリは解放しません。
+
+	FruitSet.Reset();
+	// FruitSet == [ <invalid>, <invalid>, <invalid>, <invalid>, <invalid>, <invalid> ]
+
+Empty と同じ方法でセットが空にされますが、ストレージに使用しているメモリは解放されずスラックのままです。配列の現在の最大値よりもスラック値が大きい場合、メモリを再割り当てして、そのスラック値まで配列の容量を増加させます。
+
+TSet は TArray::Max() のように事前割り当てされているエレメント数を確認する方法は提供していませんが、スラックの事前割り当てはサポートしています。Reserve 関数は、追加前に指定したエレメント数に対してスラックを事前割り当てします。
+
+	FruitSet.Reserve(10);
+	for (int32 i = 0; i < 10; ++i)
+	{
+		FruitSet.Add(FString::Printf(TEXT("Fruit%d"), i));
+	}
+	// FruitSet == [ "Fruit9", "Fruit8", "Fruit7" ... "Fruit2", "Fruit1", "Fruit0" ]
+
+スラックは、新規エレメントを逆の順序で追加してしまうことがあることに注意してください。セットにおけるエレメントの順序を信用すべきでない例です。
+
+**Shrink** 関数は、コンテナの終わりから必要のないスラックを削除する点で TArray と同じです。ただし、TSet はデータ構造に穴を持つことができるので、構造体の終わりに残された穴からスラックのみを削除します。
+
+	// Remove every other element from the set. (セットからすべてのエレメントを取り除きます)
+	for (int32 i = 0; i < 10; i += 2)
+	{
+		FruitSet.Remove(FSetElementId::FromInteger(i));
+	}
+	// FruitSet == ["Fruit8", <invalid>, "Fruit6", <invalid>, "Fruit4", <invalid>, "Fruit2", <invalid>, "Fruit0", <invalid> ]
+
+	FruitSet.Shrink();
+	// FruitSet == ["Fruit8", <invalid>, "Fruit6", <invalid>, "Fruit4", <invalid>, "Fruit2", <invalid>, "Fruit0" ]
+
+終わりには穴が 1 つしかないので、Shrink の呼び出しにより削除されるのは、有効なエレメントが 1 つだけであることに注意してください。**Compact** 関数は Shrink の前にすべての穴を削除します。順序の維持が重要な場合は **CompactStable** 関数を使用できますが、他の多くの TSet 演算では順序の安定性は保証されません。
+
+	FruitSet.CompactStable();
+	// FruitSet == ["Fruit8", "Fruit6", "Fruit4", "Fruit2", "Fruit0", <invalid>, <invalid>, <invalid>, <invalid> ]
+	FruitSet.Shrink();
+	// FruitSet == ["Fruit8", "Fruit6", "Fruit4", "Fruit2", "Fruit0" ]
+
+## DefaultKeyFuncs
+
+型に演算子 == があって非メンバ GetTypeHash がオーバーロードする限り、型がelement と key なので、何も変更せずに TSet として使用できます。ただし、これらの関数をオーバーロードしたくない場合は型を key として使うと便利かもしれません。このようなケースでは、**DefaultKeyFuncs** を自分でカスタム化することができます。
+
+KeyFuncs には、2 つの typedef と 3 つの静的関数が必要です。
+
+* **KeyInitType** - キーを渡すために使います。通常は、ElementType テンプレート パラメータから渡されます。
+* **ElementInitType** - エレメントを渡すために使います。こちらも通常は ElementType テンプレート パラメータから渡されるので、KeyInitType と同じになります。
+* **KeyInitType GetSetKey(ElementInitType Element)** - 一般的にエレメントそのもののエレメントのキーを返します。
+* **bool Matches(KeyInitType A, KeyInitType B)** - A と B が等しい場合に返します。
+* **uint32 GetKeyHash(KeyInitType Key)** - 通常は外部の GetTypeHash 関数を呼び出して、キーのハッシュ値を返します。
+
+KeyInitType / ElementInitType は key 型 / element 型の通常の渡し方の規則に対する typedef です。通常これらは、trivial 型の値と non-trivial 型の const 参照になります。セットの element 型は key 型でもあるので、DefaultKeyFuncs は、テンプレート パラメータ ElementType を 1 つだけ使って両方を指定することを覚えておいてください。
+
+DefaultKeyFuncs: を自分で設定する際に注意する点は、TSet は、DefaultKeyFuncs::Matches を使って等価を比較する 2 つのアイテムが KeyFuncs::GetKeyHash から同じ値を返すことを前提としていることです。さらに、これにより Tset の内部ハッシュが無効になるので、これらの関数のいずれかの結果が変更されるように既存エレメントのキーを修正すると未定義の動作とみなされます。これらの規則は、デフォルトのDefaultKeyFuncs を使うと、演算子 == と GetKeyHash のオーバーロードにも適用されます。
+
+## その他
+
+**CountBytes** 関数と **GetAllocatedSize** 関数は、内部配列の使用メモリを概算します。CountBytes は FArchive を受け取り、GetAllocatedSize を直接呼び出すことが可能です。これらは一般的には統計情報の報告に使用されます。
+
+**Dump** 関数は、FOutputDevice を受け取り、セットのコンテンツに関するインプリメンテーションの情報を書き出します。すべてのハッシュ エントリからエレメントをリスト表示する **DumpHashElements** という関数もあります。通常はデバッグ作業に使用します。
+
+TSets が自動シリアル化、ガーベジコレクション、.ini ファイル設定、詳細パネルでの編集目的や、ブループリントのデフォルトとして、UPROPERTY にタグ付けして使用できます。現在、セットのインライン編集は、セットを値リストとして扱う場合に限定されます。int32s の TSet は **(1,2,3)**、FNames の TSet は **("One","Two","Three")** と表示されます。TMap と同様に、TSet プロパティはレプリケート メンバーとしては使えませんし、ブループリント内でも使用できません。

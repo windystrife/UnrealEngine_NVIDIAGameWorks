@@ -1,0 +1,101 @@
+﻿Availability:Public
+Title:Formatting User-Facing Text
+Crumbs:%ROOT%, Gameplay, Gameplay/Localization
+Description:Using the Format function to present localized text to your users
+Parent:Gameplay/Localization
+Order:3
+version: 4.13
+Related:Programming/UnrealArchitecture/StringHandling/FText
+
+FText is used to create user-facing text, which is often localized. This means that user interface text that changes dynamically over the course of gameplay can also be subject to grammar rules from a number of different languages. Using `FText::Format` and the corresponding 
+**Format Text** Blueprint node enables you to construct reusable format patterns to make the localization process easier and less prone to edge-case errors. Both functions support ordered arguments, named arguments, and specialized arguments based on plural forms, gender forms, 
+and Hangul post-positions.
+
+In C++, you can pre-compile your `FText` format pattern into an `FTextFormat` to reuse the compiled format pattern. This is useful if you're reusing a format pattern frequently, and it also automatically recompiles if the source format pattern changes due to a culture change.
+
+You can also format FText in Blueprints using the **Format Text** node. The **Format** text can be a literal or connected to a pin. When used as a literal, it will auto-generate arguments for formatting. So by entering the literal "There are {number} days until {day}.", a **Number** pin and a **Day** pin will be 
+automatically added to the node. These pins can be filled in as a literal or from a variable and the output **Text** will replace the arguments with whatever values are hooked to the pins.
+
+When the **Format** pin is connected to a variable, the **Format** can not be deciphered because it can possibly change over the course of gameplay. In this case, you can add pins yourself and name them after the possible arguments. In this way, you can set up the **Format Text** node to be ready for multiple possibilities. Whenever an argument 
+matches an argument in the Format variable, it will utilize the provided information.
+
+Pin names can be changed, added, and removed from the **Details** panel.
+
+[REGION:imagetable]
+|![](FormatNode.png)(h:400) | ![](FormatNodeDetails.png)(h:400)|
+|--- |---- |
+|**Format Text** node | **Details** panel | 
+[/REGION]
+
+
+[REGION:tip]
+For those using a source build of Unreal Engine, `TextTest.cpp` can show you examples of how to perform valid culture aware formatting, comparison, and sorting.
+[/REGION]
+
+## Ordered Arguments
+ 
+ When building a format argument with ordered arguments, curly braces denote the beginning and end of the format argument and the number indicates the parameter passed.
+ Arguments start at {0} and proceed sequentially ( {0}, {1}, {2}, etc.). The `Format` function and **Format Text** node slot variables into the format argument in the order 
+ they are provided. 
+
+ The following C++ and Blueprint snippets show an ordered format argument to display the player's current health and maximum health.
+
+### C++ Example
+
+	FText::Format( LOCTEXT( "HealthFormatStr",  "{0} / {1}" ), FText::AsNumber( CurrentHealth ), FText::AsNumber( MaxHealth )  ) 
+		
+### Blueprint Example
+
+![](OrderedArgs.png)
+
+## Named Arguments 
+
+When building a format argument with named arguments, curly braces denote the beginning and end of the format argument and the text in the braces is the name of the argument to be found in the arguments passed in.
+Common argument examples are {Name}, {ID}, {Health}, etc.
+
+The following C++ and Blueprint snippets show a named format argument to display the player's current health.
+
+### C++ Example
+
+	FFormatNamedArguments Arguments;
+	Arguments.Add(TEXT("CurrentHealth"), FText::AsNumber( CurrentHealth ));
+	EditorErrors.Error(FText::Format(LOCTEXT("ExampleFText", "You currently have {CurrentHealth} health left."), Arguments ) );
+
+### Blueprint Example
+			
+![](CurrentHealth.png)
+
+## Specialized Arguments
+
+To allow you to pass in the numeric/gender values needed for plural/gender form support, all of the `FText::Format(...)` family of functions now take their values as FFormatArgumentValue rather than FText. This can be implicitly constructed from any numeric type, ETextGender, or FText. 
+
+The ability to set these value types in Blueprints has been exposed using wildcard pins on the **Format Text** node.
+
+Following from the examples above, these format patterns can be supplied as arguments to `FText::Format` or to **Format Text**. 
+
+### Plural Forms
+
+Plural forms allow you to use different text based upon a numeric variable given to your text format. Plural forms may be cardinal, such as "There is 1 cat" or "There are 4 cats", or ordinal, such as "You came 1st!" or "You came 2nd!".
+
+Plural forms are specified as key->value pairs, and support any of the following keywords (as defined for your culture by the [CLDR data](http://www.unicode.org/cldr/charts/29/supplemental/language_plural_rules.html)): zero, one, two, few, many, other. Values are an optionally quoted string 
+that may also contain format markers.
+
+Cardinal Format Example: `"There {NumCats}|plural(one=is,other=are) {NumCats} {NumCats}|plural(one=cat,other=cats)"`
+
+Ordinal Format Example: `"You came {Place}{Place}|ordinal(one=st,two=nd,few=rd,other=th)!"`
+
+
+### Gender Forms
+
+Gender forms allow you to use different text based upon an ETextGender value given to your text format, such as "Le guerrier est fort" or "La guerrière est forte".
+Gender forms are specified as a list of values in the order of [masculine, feminine, neuter], where neuter is optional. Values are an optionally quoted string that may also contain format markers.
+
+Format Example: `"{Gender}|gender(Le,La) {Gender}|gender(guerrier,guerrière) est {Gender}|gender(fort,forte)"`
+
+### Hangul Post-Positions
+
+Hangul post-positions help you deal with the grammar rules present in Korean, and will insert the correct glyph(s) based upon whether the value being inserted ends in a consonant or a verb, such as "사람은" or "사자는".
+Hangul post-positions are specified as a list of values in the order of [consonant, verb]. Values are an optionally quoted string.
+
+Format Example: `"{Arg}|hpp(은,는)"`
+

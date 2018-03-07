@@ -1,0 +1,82 @@
+﻿INTSourceChangelist:3151855
+Availability:Public
+Title:FShaderCache
+Crumbs:%ROOT%, Programming, Programming/Rendering
+Description:FShaderCache によりインゲームでのシェーダーの処理落ちを減らすメカニズムができます。
+Version:4.9
+tags:Rendering
+
+
+## 概要
+FShaderCache は、インゲームでのシェーダーの処理落ちを減らすメカニズムを提供します。OpenGLDrv および MetalRHI RHI をサポートし、Mac、Linux、Windows プラットフォームで利用できます。
+
+いろいろなコンソール コマンドで FShaderCache 機能の有効 / 無効の切り替えができます。
+
+| コンソール コマンド | 説明 |
+| --------------- | ------------|
+| `r.UseShaderCaching [0/1]` | [INCLUDE:#UseShaderCaching] |
+| `r.UseShaderDrawLog [0/1]`| それぞれの結合シェーダー ステートの描画前処理ができるように RHI ドロー ステートを追跡します。| 
+| `r.UseShaderPredraw [0/1]`| 追跡した RHI ドロー ステートを描画前処理して、初回使用時の処理落ち回数を減らします。|
+| `r.PredrawBatchTime [Time in (ms)]` | 必要に応じて、フレーム毎の描画前処理時間を制御して多くのフレームを配布します。すべてのフレームに -1 を使用します。| 
+| `r.UseShaderBinaryCache 0/1` | すべてのシェーダー バイト コードを 1 つのキャッシュ ファイルに集積します。 |
+| `r.UseAsyncShaderPrecompilation 0/1` | ゲームプレイ中にシェーダー コードを非同期プリコンパイルします。 |
+| `r.TargetPrecompileFrameTime [Time in (ms)]` | r.UseAsyncShaderPrecompilation が有効な場合に維持する目標最大フレーム時間です。すべてのシェーダーを一度にプリコンパイルするには、-1 を使います。|
+| `r.AccelPredrawBatchTime [Time in (ms)]` | ロード画面などのインタラクティブでないモードの時に、一時的に描画前処理を加速させるオプションです。`r.PredrawBatchTime` を使用するには 0 を使います。. |
+| `r.AccelTargetPrecompileFrameTime [Time in (ms)]` | ロード画面などのインタラクティブでないモードの時に、一時的に非同期プリコンパイル処理を加速させるオプションです。r.TargetPrecompileFrameTime を使用するには 0 を使います。. |
+| `r.InitialShaderLoadTime [Time in (ms)]`| 非同期プリコンパイル処理を開始する前に、起動時にシェーダー取り込み最大時間です。同時にロードするには -1 を使います。 |
+
+<!--
+[EXCERPT:UseShaderCaching]
+[REGION:plainlist]
+* 必要に応じてではなく、シェーダーのデシリアライズ中の早期サブミット
+* 早期サブミット中に事前に結合されるように結合シェーダー ステートを追跡
+[/REGION]
+[/EXCERPT]
+-->
+
+
+## 使用方法
+開発マシン上で `r.UseShaderCaching` と `r.UseShaderDrawLog` を有効にするとキャッシュがエントリされます。 
+その後で、ユーザー / プレイヤーは `r.UseShaderCaching` と `r.UseShaderPredraw`を有効にして、キャッシュを消費します。 
+Draw logging (`r.UseShaderDrawLog`) は、明らかに修正されているオーバーヘッドを必要に応じて追加して、出荷された製品でそれが有効にされないようにします。 
+バイナリ シェーダー キャッシュは、シェーダー プラットフォームを Engine.ini. の /Script/MacTargetPlatform.MacTargetSettings 設定グループ内の CachedShaderFormats 配列にキャッシュするように指定すれば、プレイ中、もしくはクック処理中のいずれかに蓄積することができます (現時点では Mac ターゲットのみ)。 
+OpenGL の場合、バイナリ キャッシュに含まれているシェーダー パイプラインの情報は、完全にリンクした GL プログラムまたは GL プログラム パイプライン (GL_ARB_separate_shader_objects が使用可能かどうかによる) の構築には十分ですが、他の RHI 上にパイプラインを構築するには不十分です。 
+この方法は、ゲームをプレイせずに OpenGL での処理落ち回数の削減に役立つので、最大効果を得るにはお勧めです。
+キャッシュはシェーダー ハッシュによって実行されるので、ほとんど完成しているコンテンツに対しては最適化の仕上げとして、シェーダー ハッシュのみの使用をお勧めします。 
+理由は、シェーダー ハッシュに対する変更は、キャッシュ中に累積された未使用のエントリとなり、処理落ちを減らすどころかキャッシュ サイズを増やしてしまうからです。
+
+ コードは、まず書き込み可能なキャッシュのロードを試み、その後で必要に応じて配布にフォール バックします。
+
+| キャッシュ タイプ | キャッシュの保存場所 |
+| --------- |  --------- |
+| Writable | `<Game>/Saved/DrawCache.ushadercache, <Game>/Saved/ByteCodeCache.ushadercode` |
+| Distribution | `<Game>/Content/DrawCache.ushadercache, <Game>/Content/ByteCodeCache.ushadercode` |
+
+
+### 統合のステップ
+
+プロジェクトの処理落ちを減らすためのコンソール コマンドはいろいろありますが、プロジェクトでの作業を増やすのではなく、パフォーマンスを最大にするオプションを有効にする方法を推奨します。 
+
+1. プロジェクト コンフィギュレーションですべてのユーザーに対して `r.UseShaderCaching` と `r.UseShaderPredraw` を有効にします。
+1. 可能であれば内部ビルドに対してのみ `r.UseShaderDrawLog` を有効にして、QA 中にシェーダー ドロー ステートが各リリースごとに記録されるようにしてください。これが実現不可能な場合 (ゲームが膨大あるいはストリーミング中の場合など) は、すべてのユーザーに対して有効にします。
+
+最適化を後付けすると作業が多くなり、その影響は膨大なので、この設定で処理落ちを許容範囲内にすることができるかテストします。
+
+1. 不十分であれば、`r.UseShaderBinaryCache` を有効にしてバイナリ キャッシュが確実に入力されるように CachedShaderFormats を設定します (現時点では Mac のみ)。
+1. すべてのシェーダー コードが起動時にロードされ、すべての描画前処理は最初のフレームで実施されるようになるので、ロード時間が長すぎる場合は、各フレームの描画前処理時間を0 ms より大きい値になるように `r.PredrawBatchTime` を設定します。
+1. `r.AccelPredrawBatchTime` は、ロード画面やインタラクティブでないコンテンツの表示に適用されるので、高い値を指定した方がよいかもしれません。 
+1. ゲーム フレームレートが原因で、描画前処理が速くなる可能性があることをシェーダー キャッシュに伝えるためには、`FShaderCache::BeginAcceleratedBatching` を呼び出します。低負荷の描画前処理バッチに戻る必要がある場合は、`FShaderCache::EndAcceleratedBatching` を呼び出します。
+1. `FShaderCache::FlushOutstandingBatches` を呼び出すと、残りのシェーダーはすべて次のフレームで処理されることになります。
+1. プロジェクトの初回ロード時間がまだ長すぎる場合は、`r.UseAsyncShaderPrecompilation` を有効にして、`r.InitialShaderLoadTime` を 0 より大きく設定します。初回のシェーダー ロード時間が増加すると、ゲーム実行中に行うべき作業が減少します。
+1. `r.TargetPrecompileFrameTime` の値を変更してシェーダーを非同期にプリコンパイルしながら、ターゲット フレーム時間を調節することができます。
+1. 描画前のバッチ処理と同様に、`r.AccelTargetPrecompileFrameTime` を大きな値に設定し `FShaderCache::BeginAcceleratedBatching` (その後で `FShaderCache::EndAcceleratedBatching`) を呼び出すことで、より高い値をプリコンパイル処理に指定することができます。
+1. `r.UseAsyncShaderPrecompilation` を有効にすると、`FShaderCache::FlushOutstandingBatches` 呼び出しで未処理のコンパイル要求をフラッシュします。
+
+
+## 更新 / 無効化処理
+キャッシュの更新が必要となり、書き込み可能なキャッシュが無効になると、ゲームは新しい GameVersion を指定します。
+RHI を初期化する前に `FShaderCache::SetGameVersion` を呼び出します。これにより、前のバージョンで生成されたキャッシュのコンテンツが無視されます。現在、前のバージョンのキャッシュ エントリの持ち越しはできません。
+
+## リージョン / ストリーミングのバッチ処理
+ゲームのストリーミングの際、もしくはキャッシュが非常に大きくなると、その時に関連しているゲームのリージョン / ストリーミング レベルに対するユニークな値で `FShaderCache::SetStreamingKey` が追加で呼び出されます (必要に応じて)。記録された描画ステートは、アクティブなストリーミング キーにリンクされます。このため、描画前処理は、この後の実行でアクティブなストリーミング キーで要求されるこれらの描画ステートに制限されます。
+

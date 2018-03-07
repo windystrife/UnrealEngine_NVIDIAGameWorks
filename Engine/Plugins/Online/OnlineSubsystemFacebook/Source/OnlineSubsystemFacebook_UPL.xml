@@ -1,0 +1,304 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--OnlineSubsystemFacebook plugin additions-->
+<root xmlns:android="http://schemas.android.com/apk/res/android">
+	<!-- init section is always evaluated once per architecture -->
+	<init>
+		<log text="Facebook SDK Android init"/>
+
+		<!-- check if using Gradle -->
+		<setBoolFromProperty result="bGradle" ini="Engine" section="/Script/AndroidRuntimeSettings.AndroidRuntimeSettings" property="bEnableGradle" default="false"/>
+		<if condition="bGradle">
+			<true>
+				<log text="Facebook requires minimum SDK of 15"/>
+			</true>
+		</if>
+		
+		<!-- get packaging for Facebook from ini and reset it if architecture not supported -->
+		<setBoolFromProperty result="bEnabled" ini="Engine" section="OnlineSubsystemFacebook" property="bEnabled" default="false"/>
+		<setStringFromProperty result="ClientId" ini="Engine" section="OnlineSubsystemFacebook" property="ClientId" default="0"/>
+		<dumpvars/>
+	</init>
+	
+	<!-- optional files or directories to copy to Intermediate/Android/APK -->
+	<resourceCopies>
+	</resourceCopies>
+	
+	<!-- Files to copy before the build so they can be used in the build -->
+	<prebuildCopies>
+		<if condition="bEnabled">
+			<true>
+				<log text="Copying Facebook buildtime files to staging"/>
+				<copyDir src="$S(PluginDir)/ThirdParty/Android/Java"
+					dst = "$S(BuildDir)/src/com/epicgames/ue4" /> 	
+			</true>
+		</if>
+	</prebuildCopies>
+	
+	<!-- AAR dependencies -->
+	<AARImports>
+		<if condition="bEnabled">
+			<true>
+				<if condition="bGradle">
+					<false>
+						<insertValue value="repository $S(PluginDir)/ThirdParty/Android/NotForLicensees"/>
+						<insertNewline/>
+						<insertValue value="FacebookSDK,facebook-android-sdk,4.19.0" />
+						<insertNewline/>
+					</false>
+				</if>
+			</true>
+		</if>
+	</AARImports>
+
+	<buildGradleAdditions>
+		<insert>
+dependencies {
+	compile('com.facebook.android:facebook-android-sdk:4.19.0')
+}
+		</insert>
+	</buildGradleAdditions>
+	
+	<!-- optional updates applied to AndroidManifest.xml -->
+	<androidManifestUpdates>
+		<if condition="bEnabled">
+			<true>
+				<setStringFromAttribute result="PackageName" tag="manifest" name="package"/>
+			
+				<setElement result="FBAppId" value="meta-data" />
+				<addAttribute tag="$FBAppId" name="android:name" value="com.facebook.sdk.ApplicationId" />
+				<addAttribute tag="$FBAppId" name="android:value" value="fb$S(ClientId)" />
+				<addElement tag="application" name="FBAppId" />
+				
+				<setElement result="FBActivity" value="activity" />
+				<addAttribute tag="$FBActivity" name="android:name" value="com.facebook.FacebookActivity" />
+				<addAttribute tag="$FBActivity" name="android:configChanges" value="keyboard|keyboardHidden|screenLayout|screenSize|orientation" />
+				<addAttribute tag="$FBActivity" name="android:theme" value="@style/com_facebook_activity_theme" />
+				<addElement tag="application" name="FBActivity" />
+				
+				<!-- <addAttribute tag="activity" name="android:name" value="com.facebook.CustomTabMainActivity"/> -->
+				<setElement result="FBCustomActivity" value="activity" />
+				<addAttribute tag="$FBCustomActivity" name="android:name" value="com.facebook.CustomTabMainActivity" />
+				<addElement tag="application" name="FBCustomActivity" />
+
+				<setElement result="FBProvider" value="provider" />
+				<addAttribute tag="$FBProvider" name="android:name" value="com.facebook.internal.FacebookInitProvider" />
+				<addAttribute tag="$FBProvider" name="android:authorities" value="$S(PackageName).FacebookInitProvider" />
+				<addAttribute tag="$FBProvider" name="android:exported" value="false" />
+				<addElement tag="application" name="FBProvider" />
+				
+				<!-- Add permissions -->
+				<addPermission android:name="android.permission.INTERNET" />
+			</true>
+		</if>
+	</androidManifestUpdates>
+
+	<!-- optional additions to proguard -->
+	<proguardAdditions>
+		<if condition="bEnabled">
+			<true>
+				<insert>
+-keep class epicgames.ue4.FacebookLogin.** {
+	public *;
+}  
+				</insert>
+			</true>
+		</if>
+	</proguardAdditions>
+
+	<!-- optional files or directories to copy or delete from Intermediate/Android/APK before ndk-build 
+	<prebuildCopies>
+	</prebuildCopies> -->
+
+	<!-- optional additions to the GameActivity imports in GameActivity.java -->
+	<gameActivityImportAdditions>
+		<if condition="bEnabled">
+			<true>
+				<insert>
+// Facebook imports
+// import com.facebook.FacebookSdk;
+				</insert>
+			</true>
+		</if>
+	</gameActivityImportAdditions>
+
+	<!-- optional additions to the GameActivity class in GameActivity.java -->
+	<gameActivityClassAdditions>
+		<if condition="bEnabled">
+			<true>
+				<insert>
+	// Begin Facebook gameActivityClassAdditions
+	private FacebookLogin facebookLogin;
+	public FacebookLogin getFacebookLogin() { return facebookLogin; }
+
+	public void AndroidThunkJava_Facebook_Login(String[] ScopeFields)
+	{
+		if (facebookLogin != null)
+		{
+			facebookLogin.login(ScopeFields);
+		}
+	}
+
+	public void AndroidThunkJava_Facebook_Logout()
+	{
+		if (facebookLogin != null)
+		{
+			facebookLogin.logout();
+		}
+	}
+
+	public String AndroidThunkJava_Facebook_GetAccessToken()
+	{
+		if (facebookLogin != null)
+		{
+			return facebookLogin.getAccessToken();
+		}
+		return "";
+	}
+	
+	public void AndroidThunkJava_Facebook_RequestReadPermissions(String[] NewPermissions)
+	{
+		if (facebookLogin != null)
+		{
+			facebookLogin.requestReadPermissions(NewPermissions);
+		}
+	}
+	
+	public void AndroidThunkJava_Facebook_RequestPublishPermissions(String[] NewPermissions)
+	{
+		if (facebookLogin != null)
+		{
+			facebookLogin.requestPublishPermissions(NewPermissions);
+		}
+	}
+
+	// End Facebook gameActivityClassAdditions
+				</insert>
+			</true>
+		</if>
+	</gameActivityClassAdditions>
+	
+	<!-- optional additions to GameActivity onCreate metadata reading in GameActivity.java -->
+	<gameActivityReadMetadataAdditions>
+		<if condition="bEnabled">
+			<true>
+				<insert>
+					// Facebook gameActivityReadMetadataAdditions
+				</insert>
+			</true>
+		</if>
+	</gameActivityReadMetadataAdditions>
+	
+	<!-- optional additions to GameActivity onCreate in GameActivity.java -->
+	<gameActivityOnCreateAdditions>
+		<if condition="bEnabled">
+			<true>
+				<insert>
+	// Begin Facebook onCreate
+	facebookLogin = new FacebookLogin(this, Log);
+	if (!facebookLogin.init(BuildConfiguration))
+	{
+		facebookLogin = null;
+		Log.error("Facebook SDK failed to initialize!");
+	}
+	else
+	{
+		Log.debug("Facebook SDK success!");
+	}
+	// End Facebook onCreate
+				</insert>
+			</true>
+		</if>
+	</gameActivityOnCreateAdditions>
+
+	<!-- optional additions to GameActivity onDestroy in GameActivity.java-->
+	<gameActivityOnDestroyAdditions>
+		<if condition="bEnabled">
+			<true>
+				<insert>                    
+	// Begin Facebook onDestroy
+	if (facebookLogin != null)
+	{
+		facebookLogin.deactivate();
+	}
+	// End Facebook onDestroy
+				</insert>
+			</true>
+		</if>
+	</gameActivityOnDestroyAdditions>
+	
+	<!-- optional additions to GameActivity onStart in GameActivity.java -->
+	<gameActivityOnStartAdditions>
+		<if condition="bEnabled">
+			<true>
+				<insert>
+	// Begin Facebook onStart
+	// End Facebook onStart
+				</insert>
+			</true>
+		</if>
+	</gameActivityOnStartAdditions>
+
+	<!-- optional additions to GameActivity onStop in GameActivity.java -->
+	<gameActivityOnStopAdditions>
+		<if condition="bEnabled">
+			<true>
+				<insert>
+	// Begin Facebook onStop
+	// End Facebook onStop
+				</insert>
+			</true>
+		</if>
+	</gameActivityOnStopAdditions>
+
+	<!-- optional additions to GameActivity onPause in GameActivity.java -->
+	<gameActivityOnPauseAdditions>
+		<if condition="bEnabled">
+			<true>
+				<insert>
+	// Begin Facebook onPause
+	if (facebookLogin != null)
+	{
+		facebookLogin.deactivate();
+	}
+	// End Facebook onPause
+				</insert>
+			</true>
+		</if>
+	</gameActivityOnPauseAdditions>
+
+	<!-- optional additions to GameActivity onResume in GameActivity.java -->
+	<gameActivityOnResumeAdditions>
+		<if condition="bEnabled">
+			<true>
+				<insert>
+	// Begin Facebook onResume
+	if (facebookLogin != null)
+	{
+		facebookLogin.activate();
+	}
+	// End Facebook onResume
+				</insert>
+			</true>
+		</if>
+	</gameActivityOnResumeAdditions>
+
+	<!-- optional additions to GameActivity onActivityResult in GameActivity.java -->
+	<gameActivityOnActivityResultAdditions>
+		<if condition="bEnabled">
+			<true>
+				<insert>
+	// Begin Facebook onActivityResult
+	if (facebookLogin != null)
+	{
+		facebookLogin.getCallbackManager().onActivityResult(requestCode, resultCode, data);
+	}
+	// End Facebook onActivityResult
+				</insert>
+			</true>
+		</if>
+	</gameActivityOnActivityResultAdditions>
+
+	<!-- optional libraries to load in GameActivity.java before libUE4.so -->
+	<soLoadLibrary>
+	</soLoadLibrary>
+</root>

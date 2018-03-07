@@ -1,0 +1,667 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	DistanceFieldShadowing.usf
+=============================================================================*/
+
+#include "Common.ush"
+#include "DeferredShadingCommon.ush"
+#include "DistanceFieldLightingShared.ush"
+#include "DistanceFieldShadowingShared.ush"
+
+uint ObjectBoundingGeometryIndexCount;
+
+float4 FetchObjectDataFloat4(uint SourceIndex)
+{
+	return float4(ObjectData[4 * SourceIndex + 0], ObjectData[4 * SourceIndex + 1], ObjectData[4 * SourceIndex + 2], ObjectData[4 * SourceIndex + 3]);
+}
+
+void CopyCulledObjectData(uint DestIndex, uint SourceIndex)
+{
+	RWCulledObjectBounds[DestIndex] = float4(ObjectBounds[4 * SourceIndex + 0], ObjectBounds[4 * SourceIndex + 1], ObjectBounds[4 * SourceIndex + 2], ObjectBounds[4 * SourceIndex + 3]);
+
+	UNROLL
+	for (uint VectorIndex = 0; VectorIndex < CULLED_OBJECT_DATA_STRIDE; VectorIndex++)
+	{
+		// Note: only copying the first CULLED_OBJECT_DATA_STRIDE of the original object data
+		RWCulledObjectData[DestIndex * CULLED_OBJECT_DATA_STRIDE + VectorIndex] = FetchObjectDataFloat4(SourceIndex * OBJECT_DATA_STRIDE + VectorIndex);
+	}
+
+	float3 LocalVolumeBoundsMin;
+	float3 LocalVolumeBoundsMax;
+	LoadGlobalObjectLocalVolumeBoundsMinMax(SourceIndex, LocalVolumeBoundsMin, LocalVolumeBoundsMax);
+
+	float3 LocalBoundsVertices[8];
+	LocalBoundsVertices[0] = float3(LocalVolumeBoundsMin.x, LocalVolumeBoundsMin.y, LocalVolumeBoundsMin.z);
+	LocalBoundsVertices[1] = float3(LocalVolumeBoundsMax.x, LocalVolumeBoundsMin.y, LocalVolumeBoundsMin.z);
+	LocalBoundsVertices[2] = float3(LocalVolumeBoundsMin.x, LocalVolumeBoundsMax.y, LocalVolumeBoundsMin.z);
+	LocalBoundsVertices[3] = float3(LocalVolumeBoundsMax.x, LocalVolumeBoundsMax.y, LocalVolumeBoundsMin.z);
+	LocalBoundsVertices[4] = float3(LocalVolumeBoundsMin.x, LocalVolumeBoundsMin.y, LocalVolumeBoundsMax.z);
+	LocalBoundsVertices[5] = float3(LocalVolumeBoundsMax.x, LocalVolumeBoundsMin.y, LocalVolumeBoundsMax.z);
+	LocalBoundsVertices[6] = float3(LocalVolumeBoundsMin.x, LocalVolumeBoundsMax.y, LocalVolumeBoundsMax.z);
+	LocalBoundsVertices[7] = float3(LocalVolumeBoundsMax.x, LocalVolumeBoundsMax.y, LocalVolumeBoundsMax.z);
+
+	float3 MinViewSpacePosition = float3(2000000, 2000000, 2000000);
+	float3 MaxViewSpacePosition = float3(-2000000, -2000000, -2000000);
+
+	float4 M0 = FetchObjectDataFloat4(SourceIndex * OBJECT_DATA_STRIDE + 11);
+	float4 M1 = FetchObjectDataFloat4(SourceIndex * OBJECT_DATA_STRIDE + 12);
+	float4 M2 = FetchObjectDataFloat4(SourceIndex * OBJECT_DATA_STRIDE + 13);
+	float4 M3 = FetchObjectDataFloat4(SourceIndex * OBJECT_DATA_STRIDE + 14);
+
+	float4x4 LocalToWorld = float4x4(M0, M1, M2, M3);
+
+	float3 ViewSpaceBoundsVertices[8];
+
+	for (uint i = 0; i < 8; i++)
+	{
+		float3 WorldBoundsPosition = mul(float4(LocalBoundsVertices[i], 1), LocalToWorld).xyz;
+		float3 ViewSpacePosition = mul(float4(WorldBoundsPosition, 1), WorldToShadow).xyz;
+		MinViewSpacePosition = min(MinViewSpacePosition, ViewSpacePosition);
+		MaxViewSpacePosition = max(MaxViewSpacePosition, ViewSpacePosition);
+		ViewSpaceBoundsVertices[i] = ViewSpacePosition;
+	}
+
+	float3 ObjectXAxis = (ViewSpaceBoundsVertices[1] - ViewSpaceBoundsVertices[0]) / 2.0f;
+	float3 ObjectYAxis = (ViewSpaceBoundsVertices[2] - ViewSpaceBoundsVertices[0]) / 2.0f;
+	float3 ObjectZAxis = (ViewSpaceBoundsVertices[4] - ViewSpaceBoundsVertices[0]) / 2.0f;
+
+	RWCulledObjectBoxBounds[DestIndex * CULLED_OBJECT_BOX_BOUNDS_STRIDE + 0] = float4(MinViewSpacePosition, 0);
+	RWCulledObjectBoxBounds[DestIndex * CULLED_OBJECT_BOX_BOUNDS_STRIDE + 1] = float4(MaxViewSpacePosition, 0);
+	RWCulledObjectBoxBounds[DestIndex * CULLED_OBJECT_BOX_BOUNDS_STRIDE + 2] = float4(ObjectXAxis / max(dot(ObjectXAxis, ObjectXAxis), .0001f), 0);
+	RWCulledObjectBoxBounds[DestIndex * CULLED_OBJECT_BOX_BOUNDS_STRIDE + 3] = float4(ObjectYAxis / max(dot(ObjectYAxis, ObjectYAxis), .0001f), 0);
+	RWCulledObjectBoxBounds[DestIndex * CULLED_OBJECT_BOX_BOUNDS_STRIDE + 4] = float4(ObjectZAxis / max(dot(ObjectZAxis, ObjectZAxis), .0001f), 0);
+}
+
+float4 ShadowConvexHull[12];
+float4 ShadowBoundingSphere;
+uint NumShadowHullPlanes;
+
+bool ShadowConvexHullIntersectSphere(float3 SphereOrigin, float SphereRadius)
+{
+	float3 TranslatedSphereOrigin = SphereOrigin + ShadowBoundingSphere.xyz;
+
+	for (uint PlaneIndex = 0; PlaneIndex < NumShadowHullPlanes; PlaneIndex++)
+	{
+		float4 PlaneData = ShadowConvexHull[PlaneIndex];
+		float PlaneDistance = dot(PlaneData.xyz, TranslatedSphereOrigin) - PlaneData.w;
+
+		if (PlaneDistance > SphereRadius)
+		{
+			return false;
+		}
+	}
+	
+	return true;
+}
+
+[numthreads(UPDATEOBJECTS_THREADGROUP_SIZE, 1, 1)]
+void CullObjectsForShadowCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint ObjectIndex = DispatchThreadId.x;
+
+#define USE_FRUSTUM_CULLING 1
+#if USE_FRUSTUM_CULLING
+
+	if (DispatchThreadId.x == 0)
+	{
+		// RWObjectIndirectArguments is zeroed by a clear before this shader, only need to set things that are non-zero (and are not read by this shader as that would be a race condition)
+		// IndexCount, NumInstances, StartIndex, BaseVertexIndex, FirstInstance
+		RWObjectIndirectArguments[0] = ObjectBoundingGeometryIndexCount;
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
+	uint SourceIndex = ObjectIndex;
+
+	if (ObjectIndex < NumSceneObjects)
+	{
+		float4 ObjectBoundingSphere = float4(ObjectBounds[4 * SourceIndex + 0], ObjectBounds[4 * SourceIndex + 1], ObjectBounds[4 * SourceIndex + 2], ObjectBounds[4 * SourceIndex + 3]);
+	
+		if (ShadowBoundingSphere.w == 0 && ShadowConvexHullIntersectSphere(ObjectBoundingSphere.xyz, ObjectBoundingSphere.w)
+			|| ShadowBoundingSphere.w > 0 && dot(ShadowBoundingSphere.xyz - ObjectBoundingSphere.xyz, ShadowBoundingSphere.xyz - ObjectBoundingSphere.xyz) < Square(ShadowBoundingSphere.w + ObjectBoundingSphere.w))
+		{
+			uint DestIndex;
+			InterlockedAdd(RWObjectIndirectArguments[1], 1U, DestIndex);
+			CopyCulledObjectData(DestIndex, SourceIndex);
+		}
+	}
+
+#else
+
+	if (DispatchThreadId.x == 0)
+	{
+		// IndexCount, NumInstances, StartIndex, BaseVertexIndex, FirstInstance
+		RWObjectIndirectArguments[0] = ObjectBoundingGeometryIndexCount;
+		RWObjectIndirectArguments[1] = NumSceneObjects;
+	}
+
+	uint SourceIndex = ObjectIndex;
+	uint DestIndex = ObjectIndex;
+
+	if (ObjectIndex < NumSceneObjects)
+	{
+		CopyCulledObjectData(DestIndex, SourceIndex);
+	}
+#endif
+}
+
+RWBuffer<uint> RWShadowTileHeadDataUnpacked;
+RWBuffer<uint> RWShadowTileArrayData;
+
+[numthreads(THREADGROUP_SIZEX, THREADGROUP_SIZEY, 1)]
+void ClearTilesCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+    uint TileIndex = DispatchThreadId.y * ShadowTileListGroupSize.x + DispatchThreadId.x;
+	
+	RWShadowTileHeadDataUnpacked[TileIndex * 2 + 0] = TileIndex;
+	RWShadowTileHeadDataUnpacked[TileIndex * 2 + 1] = 0;
+}
+
+struct FShadowObjectCullVertexOutput
+{
+	nointerpolation float4 PositionAndRadius : TEXCOORD0;
+	nointerpolation uint ObjectIndex : TEXCOORD1;
+};
+
+float ConservativeRadiusScale;
+float MinRadius;
+
+/** Used when culling objects into screenspace tile lists */
+void ShadowObjectCullVS(
+	float4 InPosition : ATTRIBUTE0,
+	uint ObjectIndex : SV_InstanceID,
+	out FShadowObjectCullVertexOutput Output,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	float4 ObjectPositionAndRadius = LoadObjectPositionAndRadius(ObjectIndex);
+	// ConservativeRadiusScale pushes the sphere vertices out so the triangles between them lie completely outside the sphere
+	// MinRadius is for conservative rasterization
+	float EffectiveRadius = (ObjectPositionAndRadius.w + MinRadius) * ConservativeRadiusScale;
+	float3 WorldPosition = InPosition.xyz * EffectiveRadius + ObjectPositionAndRadius.xyz;
+	OutPosition = mul(float4(WorldPosition, 1), WorldToShadow);
+
+	// Clamp the vertex to the near plane if it is in front of the near plane
+	if (OutPosition.z < 0)
+	{
+		OutPosition.z = 0.000001f;
+		OutPosition.w = 1.0f;
+	}
+
+	Output.PositionAndRadius = ObjectPositionAndRadius;
+	Output.ObjectIndex = ObjectIndex;
+} 
+
+/** Intersects a single object with the tile and adds to the intersection list if needed. */
+void ShadowObjectCullPS(
+	FShadowObjectCullVertexOutput Input, 
+	in float4 SVPos : SV_POSITION,
+	out float4 OutColor : SV_Target0)
+{
+	OutColor = 0;
+	
+	uint2 TilePosition = (uint2)SVPos.xy;
+	uint TileIndex = TilePosition.y * ShadowTileListGroupSize.x + TilePosition.x;
+
+#define OBJECT_OBB_INTERSECTION 1
+#if OBJECT_OBB_INTERSECTION
+	
+	float3 ShadowTileMin;
+	float3 ShadowTileMax;
+
+	float2 TilePositionForCulling = float2(TilePosition.x, ShadowTileListGroupSize.y - TilePosition.y);
+	//@todo - why is this expand needed
+	float TileExpand = 1;
+	ShadowTileMin.xy = (TilePositionForCulling - TileExpand) / (float2)ShadowTileListGroupSize * 2 - 1;
+	ShadowTileMax.xy = (TilePositionForCulling + 1) / (float2)ShadowTileListGroupSize * 2 - 1;
+	// Extrude toward light to avoid culling objects between the light and the shadow frustum
+	ShadowTileMin.z = -1000;
+	ShadowTileMax.z = 1;
+
+	float3 ObjectViewSpaceMin;
+	float3 ObjectViewSpaceMax;
+	LoadObjectViewSpaceBox(Input.ObjectIndex, ObjectViewSpaceMin, ObjectViewSpaceMax);
+
+	BRANCH
+	// Separating axis test on the AABB
+	// Note: don't clip by near plane, objects closer to the light can still cast into the frustum
+	if (all(ObjectViewSpaceMax.xy > ShadowTileMin.xy) && all(ObjectViewSpaceMin < ShadowTileMax))
+	{
+		float3 ObjectCenter = .5f * (ObjectViewSpaceMin + ObjectViewSpaceMax);
+		float3 MinProjections = 500000;
+		float3 MaxProjections = -500000;
+
+		{
+			float3 Corners[8];
+			Corners[0] = float3(ShadowTileMin.x, ShadowTileMin.y, ShadowTileMin.z);
+			Corners[1] = float3(ShadowTileMax.x, ShadowTileMin.y, ShadowTileMin.z);
+			Corners[2] = float3(ShadowTileMin.x, ShadowTileMax.y, ShadowTileMin.z);
+			Corners[3] = float3(ShadowTileMax.x, ShadowTileMax.y, ShadowTileMin.z);
+			Corners[4] = float3(ShadowTileMin.x, ShadowTileMin.y, ShadowTileMax.z);
+			Corners[5] = float3(ShadowTileMax.x, ShadowTileMin.y, ShadowTileMax.z);
+			Corners[6] = float3(ShadowTileMin.x, ShadowTileMax.y, ShadowTileMax.z);
+			Corners[7] = float3(ShadowTileMax.x, ShadowTileMax.y, ShadowTileMax.z);
+
+			float3 ObjectAxisX;
+			float3 ObjectAxisY; 
+			float3 ObjectAxisZ;
+			LoadObjectAxes(Input.ObjectIndex, ObjectAxisX, ObjectAxisY, ObjectAxisZ);
+
+			UNROLL
+			for (int i = 0; i < 8; i++)
+			{
+				float3 CenterToVertex = Corners[i] - ObjectCenter;
+				float3 Projections = float3(dot(CenterToVertex, ObjectAxisX), dot(CenterToVertex, ObjectAxisY), dot(CenterToVertex, ObjectAxisZ));
+				MinProjections = min(MinProjections, Projections);
+				MaxProjections = max(MaxProjections, Projections);
+			}
+		}
+
+		BRANCH
+		// Separating axis test on the OBB
+		if (all(MinProjections < 1) && all(MaxProjections > -1))
+		{
+			uint ArrayIndex;
+			InterlockedAdd(RWShadowTileHeadDataUnpacked[TileIndex * 2 + 1], 1U, ArrayIndex);
+
+			if (ArrayIndex < ShadowMaxObjectsPerTile)
+			{
+				uint DataIndex = (ArrayIndex * (uint)(ShadowTileListGroupSize.x * ShadowTileListGroupSize.y + .5f) + TileIndex);
+				RWShadowTileArrayData[DataIndex * SHADOW_TILE_ARRAY_DATA_STRIDE] = Input.ObjectIndex;
+			}
+		}
+	}
+	
+#else
+	{
+		uint ArrayIndex;
+		InterlockedAdd(RWShadowTileHeadDataUnpacked[TileIndex * 2 + 1], 1U, ArrayIndex);
+
+		if (ArrayIndex < ShadowMaxObjectsPerTile)
+		{
+			uint DataIndex = (ArrayIndex * (uint)(ShadowTileListGroupSize.x * ShadowTileListGroupSize.y + .5f) + TileIndex);
+			RWShadowTileArrayData[DataIndex * SHADOW_TILE_ARRAY_DATA_STRIDE] = Input.ObjectIndex;
+		}
+	}
+#endif
+}
+
+RWTexture2D<float2> RWShadowFactors;
+float2 NumGroups;
+
+/** From point being shaded toward light, for directional lights. */
+float3 LightDirection;
+float4 LightPositionAndInvRadius;
+float LightSourceRadius;
+float RayStartOffsetDepthScale;
+float3 TanLightAngleAndNormalThreshold;
+int4 ScissorRectMinAndSize;
+
+/** Min and Max depth for this tile. */
+groupshared uint IntegerTileMinZ;
+groupshared uint IntegerTileMaxZ;
+
+/** Inner Min and Max depth for this tile. */
+groupshared uint IntegerTileMinZ2;
+groupshared uint IntegerTileMaxZ2;
+
+/** Number of objects affecting the tile, after culling. */
+groupshared uint TileNumObjects0;
+groupshared uint TileNumObjects1;
+
+void CullObjectsToTileWithGather(
+	float SceneDepth, 
+	uint ThreadIndex, 
+	uint2 GroupId, 
+	float TraceDistance, 
+	float MinDepth, 
+	out uint NumIntersectingObjects, 
+	out bool bTileShouldComputeShadowing,
+	out uint GroupIndex)
+{
+	// Initialize per-tile variables
+    if (ThreadIndex == 0) 
+	{
+        IntegerTileMinZ = 0x7F7FFFFF;     
+        IntegerTileMaxZ = 0;
+		IntegerTileMinZ2 = 0x7F7FFFFF;  
+		IntegerTileMaxZ2 = 0;
+		TileNumObjects0 = 0;
+		TileNumObjects1 = 0;
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+    
+	if (SceneDepth > MinDepth)
+	{
+		// Use shared memory atomics to build the depth bounds for this tile
+		// Each thread is assigned to a pixel at this point
+		//@todo - move depth range computation to a central point where it can be reused by all the frame's tiled deferred passes!
+		InterlockedMin(IntegerTileMinZ, asuint(SceneDepth));
+		InterlockedMax(IntegerTileMaxZ, asuint(SceneDepth));
+	}
+
+    GroupMemoryBarrierWithGroupSync();
+
+    float MinTileZ = asfloat(IntegerTileMinZ);
+    float MaxTileZ = asfloat(IntegerTileMaxZ);
+
+	float HalfZ = .5f * (MinTileZ + MaxTileZ);
+
+	// Compute a second min and max Z, clipped by HalfZ, so that we get two depth bounds per tile
+	// This results in more conservative tile depth bounds and fewer intersections
+	if (SceneDepth >= HalfZ && SceneDepth > MinDepth)
+	{
+		InterlockedMin(IntegerTileMinZ2, asuint(SceneDepth));
+	}
+
+	if (SceneDepth <= HalfZ && SceneDepth > MinDepth)
+	{
+		InterlockedMax(IntegerTileMaxZ2, asuint(SceneDepth));
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+	
+	float MinTileZ2 = asfloat(IntegerTileMinZ2);
+	float MaxTileZ2 = asfloat(IntegerTileMaxZ2);
+
+	float3 ViewTileMin;
+	float3 ViewTileMax;
+
+	float3 ViewTileMin2;
+	float3 ViewTileMax2;
+
+	float ExpandRadius = 0;
+
+	// Note: this code is assuming a centered projection, aka no translation present in ViewToClip
+	// Stereo rendering uses an off center projection
+	float2 TanViewFOV = GetTanHalfFieldOfView();
+	// tan(FOV) = HalfUnitPlaneWidth / 1, so TanViewFOV * 2 is the size of the whole unit view plane
+	// We are operating on a subset of that defined by ScissorRectMinAndSize
+	float2 TileSize = TanViewFOV * 2 * ScissorRectMinAndSize.zw / ((float2)View.ViewSizeAndInvSize.xy * NumGroups);
+	float2 UnitPlaneMin = -TanViewFOV + TanViewFOV * 2 * (ScissorRectMinAndSize.xy - View.ViewRectMin.xy) * View.ViewSizeAndInvSize.zw;
+	float2 UnitPlaneTileMin = (GroupId.xy * TileSize + UnitPlaneMin) * float2(1, -1);
+	float2 UnitPlaneTileMax = ((GroupId.xy + 1) * TileSize + UnitPlaneMin) * float2(1, -1);
+
+	ViewTileMin.xy = min(MinTileZ * UnitPlaneTileMin, MaxTileZ2 * UnitPlaneTileMin) - ExpandRadius;
+	ViewTileMax.xy = max(MinTileZ * UnitPlaneTileMax, MaxTileZ2 * UnitPlaneTileMax) + ExpandRadius;
+	ViewTileMin.z = MinTileZ - ExpandRadius;
+	ViewTileMax.z = MaxTileZ2 + ExpandRadius;
+	ViewTileMin2.xy = min(MinTileZ2 * UnitPlaneTileMin, MaxTileZ * UnitPlaneTileMin) - ExpandRadius;
+	ViewTileMax2.xy = max(MinTileZ2 * UnitPlaneTileMax, MaxTileZ * UnitPlaneTileMax) + ExpandRadius;
+	ViewTileMin2.z = MinTileZ2 - ExpandRadius;
+	ViewTileMax2.z = MaxTileZ + ExpandRadius;
+
+	float3 ViewGroup0Center = (ViewTileMax + ViewTileMin) / 2;
+	float3 WorldGroup0Center = mul(float4(ViewGroup0Center, 1), View.ViewToTranslatedWorld).xyz - View.PreViewTranslation;
+	float Group0BoundingRadius = length(ViewGroup0Center - ViewTileMax);
+
+	float3 ViewGroup1Center = (ViewTileMax2 + ViewTileMin2) / 2;
+	float3 WorldGroup1Center = mul(float4(ViewGroup1Center, 1), View.ViewToTranslatedWorld).xyz - View.PreViewTranslation;
+	float Group1BoundingRadius = length(ViewGroup1Center - ViewTileMax2);
+
+#if POINT_LIGHT
+	float3 LightVector0 = LightPositionAndInvRadius.xyz - WorldGroup0Center;
+	float LightVector0Length = length(LightVector0);
+	float3 LightVector1 = LightPositionAndInvRadius.xyz - WorldGroup1Center;
+	float LightVector1Length = length(LightVector1);
+	float3 LightDirection0 = LightVector0 / LightVector0Length;
+	float3 LightDirection1 = LightVector1 / LightVector1Length;;
+	float RayLength0 = LightVector0Length;
+	float RayLength1 = LightVector1Length;
+
+	// Don't operate on tiles completely outside of the light's influence
+	bTileShouldComputeShadowing = LightVector0Length < 1.0f / LightPositionAndInvRadius.w + Group0BoundingRadius
+		|| LightVector1Length < 1.0f / LightPositionAndInvRadius.w + Group1BoundingRadius;
+
+#else
+	float3 LightDirection0 = LightDirection;
+	float3 LightDirection1 = LightDirection;
+	float RayLength0 = TraceDistance;
+	float RayLength1 = TraceDistance;
+
+	bTileShouldComputeShadowing = SceneDepth > MinDepth;
+
+#endif
+
+	BRANCH
+	if (bTileShouldComputeShadowing)
+	{
+		uint NumCulledObjects = GetCulledNumObjects();
+
+		// Compute per-tile lists of affecting objects through bounds culling
+		// Each thread now operates on a sample instead of a pixel
+		LOOP
+		for (uint ObjectIndex = ThreadIndex; ObjectIndex < NumCulledObjects; ObjectIndex += THREADGROUP_TOTALSIZE)
+		{
+			float4 SphereCenterAndRadius = LoadObjectPositionAndRadius(ObjectIndex);
+
+			BRANCH
+			if (RaySegmentHitSphere(WorldGroup0Center, LightDirection0, RayLength0, SphereCenterAndRadius.xyz, SphereCenterAndRadius.w + Group0BoundingRadius))
+			{
+				uint ListIndex;
+				InterlockedAdd(TileNumObjects0, 1U, ListIndex);
+				// Don't overwrite on overflow
+				ListIndex = min(ListIndex, (uint)(MAX_INTERSECTING_OBJECTS - 1));
+				IntersectingObjectIndices[MAX_INTERSECTING_OBJECTS * 0 + ListIndex] = ObjectIndex; 
+			}
+
+			BRANCH
+			if (RaySegmentHitSphere(WorldGroup1Center, LightDirection1, RayLength1, SphereCenterAndRadius.xyz, SphereCenterAndRadius.w + Group1BoundingRadius))
+			{
+				uint ListIndex;
+				InterlockedAdd(TileNumObjects1, 1U, ListIndex);
+				// Don't write out of bounds on overflow
+				ListIndex = min(ListIndex, (uint)(MAX_INTERSECTING_OBJECTS - 1));
+				IntersectingObjectIndices[MAX_INTERSECTING_OBJECTS * 1 + ListIndex] = ObjectIndex; 
+			}
+		}
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
+	GroupIndex = SceneDepth > MaxTileZ2 ? 1 : 0;
+	NumIntersectingObjects = min(GroupIndex == 0 ? TileNumObjects0 : TileNumObjects1, (uint)MAX_INTERSECTING_OBJECTS);
+}
+
+float MinDepth;
+float MaxDepth;
+uint DownsampleFactor;
+
+[numthreads(THREADGROUP_SIZEX, THREADGROUP_SIZEY, 1)]
+void DistanceFieldShadowingCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint ThreadIndex = GroupThreadId.y * THREADGROUP_SIZEX + GroupThreadId.x;
+
+	float2 ScreenUV = float2((DispatchThreadId.xy * DownsampleFactor + ScissorRectMinAndSize.xy + .5f) * View.BufferSizeAndInvSize.zw);
+	float2 ScreenPosition = (ScreenUV.xy - View.ScreenPositionScaleBias.wz) / View.ScreenPositionScaleBias.xy;
+
+	float SceneDepth = CalcSceneDepth(ScreenUV);
+	float4 HomogeneousWorldPosition = mul(float4(ScreenPosition * SceneDepth, SceneDepth, 1), View.ScreenToWorld);
+	float3 OpaqueWorldPosition = HomogeneousWorldPosition.xyz / HomogeneousWorldPosition.w;
+
+	// Distance for directional lights to trace
+	float TraceDistance = TanLightAngleAndNormalThreshold.z;
+
+	uint NumIntersectingObjects = GetCulledNumObjects();
+	uint CulledDataParameter = 0;
+	bool bTileShouldComputeShadowing = SceneDepth > MinDepth && SceneDepth < MaxDepth;
+
+#define USE_CULLING 1
+#if USE_CULLING
+
+#if SCATTER_TILE_CULLING
+
+	if (bTileShouldComputeShadowing)
+	{
+		GetShadowTileCulledData(OpaqueWorldPosition, CulledDataParameter, NumIntersectingObjects);
+	}
+
+#else
+
+	//@todo - support MinDepth for tile culling
+	float MinDepthForTileCulling = 0;
+	CullObjectsToTileWithGather(SceneDepth, ThreadIndex, GroupId.xy, TraceDistance, MinDepthForTileCulling, NumIntersectingObjects, bTileShouldComputeShadowing, CulledDataParameter);
+
+#endif
+#endif // USE_CULLING
+
+	float Result = 0;
+
+#define COMPUTE_SHADOWING 1
+#if COMPUTE_SHADOWING
+	BRANCH
+	if (bTileShouldComputeShadowing)
+	{
+		{
+			// World space offset along the start of the ray to avoid incorrect self-shadowing
+			float RayStartOffset = 2 + RayStartOffsetDepthScale * SceneDepth;
+			// Keeps result from going all the way sharp
+			float MinSphereRadius = .4f;
+			// Maintain reasonable culling bounds
+			float MaxSphereRadius = 100;
+
+			#if POINT_LIGHT
+
+				float3 LightVector = LightPositionAndInvRadius.xyz - OpaqueWorldPosition;
+				float LightVectorLength = length(LightVector);
+				float3 WorldRayStart = OpaqueWorldPosition + LightVector / LightVectorLength * RayStartOffset;
+				float3 WorldRayEnd = LightPositionAndInvRadius.xyz;
+				float MaxRayTime = LightVectorLength;
+				float MaxAngle = tan(10 * PI / 180.0f);
+				// Comparing tangents instead of angles, but tangent is always increasing in this range
+				float TanLightAngle = min(LightSourceRadius / LightVectorLength, MaxAngle);
+
+			#else
+
+				float3 WorldRayStart = OpaqueWorldPosition + LightDirection * RayStartOffset;
+				float3 WorldRayEnd = OpaqueWorldPosition + LightDirection * TraceDistance;
+				float MaxRayTime = TraceDistance;
+				float TanLightAngle = TanLightAngleAndNormalThreshold.x;
+
+			#endif
+
+			#if SCATTER_TILE_CULLING
+				bool bUseScatterTileCulling = true;
+			#else
+				bool bUseScatterTileCulling = false;
+			#endif
+		
+			#if USE_CULLING
+				bool bUseCulling = true;
+			#else
+				bool bUseCulling = false;
+			#endif
+
+			float SubsurfaceDensity = 0;
+			bool bUseSubsurfaceTransmission = false;
+
+#if !FORWARD_SHADING
+			FGBufferData GBufferData = GetGBufferData(ScreenUV);
+
+			BRANCH
+			if (IsSubsurfaceModel(GBufferData.ShadingModelID))
+			{
+				// Note: this has to match shadowmap logic
+				// Derive density from a heuristic using opacity, tweaked for useful falloff ranges and to give a linear depth falloff with opacity
+				SubsurfaceDensity = -.05f * log(1 - min(GBufferData.CustomData.a, .999f));
+				bUseSubsurfaceTransmission = true;
+			}
+#endif
+
+			Result = ShadowRayTraceThroughCulledObjects(
+				WorldRayStart, 
+				WorldRayEnd, 
+				MaxRayTime, 
+				TanLightAngle, 
+				MinSphereRadius, 
+				MaxSphereRadius, 
+				SubsurfaceDensity,
+				CulledDataParameter, 
+				NumIntersectingObjects,
+				bUseCulling,
+				bUseScatterTileCulling,
+				bUseSubsurfaceTransmission);
+		}
+	}
+
+#else
+	//Result = bTileShouldComputeShadowing;
+	Result = NumIntersectingObjects / 5000.0f;
+#endif
+
+	RWShadowFactors[DispatchThreadId.xy] = float2(Result, SceneDepth);
+}
+
+Texture2D ShadowFactorsTexture;
+SamplerState ShadowFactorsSampler;
+
+float FadePlaneOffset;
+float InvFadePlaneLength;
+float NearFadePlaneOffset;
+float InvNearFadePlaneLength;
+
+void DistanceFieldShadowingUpsamplePS(
+	in float4 UVAndScreenPos : TEXCOORD0,
+	in float4 SVPos : SV_POSITION,
+	out float4 OutColor : SV_Target0)
+{
+	// Distance field shadowing was computed at 0,0 regardless of viewrect min
+	float2 DistanceFieldUVs = UVAndScreenPos.xy - ScissorRectMinAndSize.xy * View.BufferSizeAndInvSize.zw;
+	float SceneDepth = CalcSceneDepth(UVAndScreenPos.xy);
+
+#define BILATERAL_UPSAMPLE 1
+#if BILATERAL_UPSAMPLE && UPSAMPLE_REQUIRED
+	float2 LowResBufferSize = floor(View.BufferSizeAndInvSize.xy / DOWNSAMPLE_FACTOR);
+	float2 LowResTexelSize = 1.0f / LowResBufferSize;
+	float2 Corner00UV = floor(DistanceFieldUVs * LowResBufferSize - .5f) / LowResBufferSize + .5f * LowResTexelSize;
+	float2 BilinearWeights = (DistanceFieldUVs - Corner00UV) * LowResBufferSize;
+
+	float2 TextureValues00 = Texture2DSampleLevel(ShadowFactorsTexture, ShadowFactorsSampler, Corner00UV, 0).xy;
+	float2 TextureValues10 = Texture2DSampleLevel(ShadowFactorsTexture, ShadowFactorsSampler, Corner00UV + float2(LowResTexelSize.x, 0), 0).xy;
+	float2 TextureValues01 = Texture2DSampleLevel(ShadowFactorsTexture, ShadowFactorsSampler, Corner00UV + float2(0, LowResTexelSize.y), 0).xy;
+	float2 TextureValues11 = Texture2DSampleLevel(ShadowFactorsTexture, ShadowFactorsSampler, Corner00UV + LowResTexelSize, 0).xy;
+
+	float4 CornerWeights = float4(
+		(1 - BilinearWeights.y) * (1 - BilinearWeights.x), 
+		(1 - BilinearWeights.y) * BilinearWeights.x,
+		BilinearWeights.y * (1 - BilinearWeights.x),
+		BilinearWeights.y * BilinearWeights.x);
+
+	float Epsilon = .0001f;
+
+	float4 CornerDepths = abs(float4(TextureValues00.y, TextureValues10.y, TextureValues01.y, TextureValues11.y));
+	float4 DepthWeights = 1.0f / (abs(CornerDepths - SceneDepth.xxxx) + Epsilon);
+	float4 FinalWeights = CornerWeights * DepthWeights;
+
+	float InterpolatedResult = 
+		(FinalWeights.x * TextureValues00.x 
+		+ FinalWeights.y * TextureValues10.x
+		+ FinalWeights.z * TextureValues01.x 
+		+ FinalWeights.w * TextureValues11.x)
+		/ dot(FinalWeights, 1);
+
+	float Output = InterpolatedResult;
+
+#else
+	float Output = Texture2DSampleLevel(ShadowFactorsTexture, ShadowFactorsSampler, DistanceFieldUVs, 0).x;
+#endif
+
+	float FarBlendFactor = 1.0f - saturate((SceneDepth - FadePlaneOffset) * InvFadePlaneLength);
+	Output = lerp(1, Output, FarBlendFactor);
+
+	float NearBlendFactor = saturate((SceneDepth - NearFadePlaneOffset) * InvNearFadePlaneLength);
+	Output = lerp(1, Output, NearBlendFactor);
+
+	OutColor = EncodeLightAttenuation(half4(Output, Output, Output, Output));
+}

@@ -1,0 +1,211 @@
+Availability: Public
+Title: 3.4 - Getting Projectiles to Interact with the World
+Crumbs: %ROOT%, Programming, Programming/Tutorials/FirstPersonShooter, Programming/Tutorials/FirstPersonShooter/3
+Description: Learn how to get projectiles to interact with the world for your First Person Shooter project.
+SkillLevel: Beginner
+Version: 4.15
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[Previous Step](Programming/Tutorials/FirstPersonShooter/3/3)
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[Section Home](Programming/Tutorials/FirstPersonShooter/3)
+	[/PARAM]
+	[PARAM:next]
+		[Next Step](Programming/Tutorials/FirstPersonShooter/3/5)
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+Now that we can detect the projectile's collision interactions, we can determine how to respond to those collisions. During this step, we'll add an `OnHit` function to `FPSProjectile` that'll respond to collision events.
+
+## Getting Projectiles to React to Collisions
+
+1.	Locate the `FPSProjectile` class header file in the **Solution Explorer** and open `FPSProjectile.h`.
+
+1.	Add the following code to the `FPSProjectile` class declaration:
+
+		// Function that is called when the projectile hits something.
+		UFUNCTION()
+		void OnHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, FVector NormalImpulse, const FHitResult& Hit);
+
+1.	`FPSProjectile.h` should now look like the following:
+
+		// Fill out your copyright notice in the Description page of Project Settings.
+		
+		#pragma once
+		
+		#include "GameFramework/Actor.h"
+		#include "FPSProjectile.generated.h"
+		
+		UCLASS()
+		class FPSPROJECT_API AFPSProjectile : public AActor
+		{
+			GENERATED_BODY()
+			
+		public:	
+			// Sets default values for this actor's properties
+			AFPSProjectile();
+		
+		protected:
+			// Called when the game starts or when spawned
+			virtual void BeginPlay() override;
+			
+		public:
+			// Called every frame
+			virtual void Tick( float DeltaSeconds ) override;
+		
+			// Sphere collision component.
+			UPROPERTY(VisibleDefaultsOnly, Category = Projectile)
+			USphereComponent* CollisionComponent;
+		
+			// Projectile movement component.
+			UPROPERTY(VisibleAnywhere, Category = Movement)
+			UProjectileMovementComponent* ProjectileMovementComponent;
+		
+			// Function that initializes the projectile's velocity in the shoot direction.
+			void FireInDirection(const FVector& ShootDirection);
+		
+			// Function that is called when the projectile hits something.
+			void OnHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, FVector NormalImpulse, const FHitResult& Hit);
+		};
+
+1.	Locate the `FPSProjectile` class CPP file in the **Solution Explorer** and open `FPSProjectile.cpp` to add the following code:
+
+		// Function that is called when the projectile hits something.
+		void AFPSProjectile::OnHit(AActor* OtherActor, UPrimitiveComponent* OtherComponent, FVector NormalImpulse, const FHitResult& Hit)
+		{
+			if (OtherActor != this && OtherComponent->IsSimulatingPhysics())
+			{
+				OtherComponent->AddImpulseAtLocation(ProjectileMovementComponent->Velocity * 100.0f, Hit.ImpactPoint);
+			}
+		}
+
+1.	In the `FPSProjectile` constructor, add the following line after the creation of `CollisionComp`:
+
+		CollisionComponent->OnComponentHit.AddDynamic(this, &AFPSProjectile::OnHit);
+
+1.	`FPSProjectile.cpp` should now look like the following:
+
+		// Fill out your copyright notice in the Description page of Project Settings.
+		
+		#include "FPSProject.h"
+		#include "FPSProjectile.h"
+		
+		// Sets default values
+		AFPSProjectile::AFPSProjectile()
+		{
+		 	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
+			PrimaryActorTick.bCanEverTick = true;
+		
+			// Use a sphere as a simple collision representation.
+			CollisionComponent = CreateDefaultSubobject<USphereComponent>(TEXT("SphereComponent"));
+			CollisionComponent->BodyInstance.SetCollisionProfileName(TEXT("Projectile"));
+			CollisionComponent->OnComponentHit.AddDynamic(this, &AFPSProjectile::OnHit);
+		
+			// Set the sphere's collision radius.
+			CollisionComponent->InitSphereRadius(15.0f);
+			// Set the root component to be the collision component.
+			RootComponent = CollisionComponent;
+		
+			// Use this component to drive this projectile's movement.
+			ProjectileMovementComponent = CreateDefaultSubobject<UProjectileMovementComponent>(TEXT("ProjectileMovementComponent"));
+			ProjectileMovementComponent->SetUpdatedComponent(CollisionComponent);
+			ProjectileMovementComponent->InitialSpeed = 3000.0f;
+			ProjectileMovementComponent->MaxSpeed = 3000.0f;
+			ProjectileMovementComponent->bRotationFollowsVelocity = true;
+			ProjectileMovementComponent->bShouldBounce = true;
+			ProjectileMovementComponent->Bounciness = 0.3f;
+		
+			// Die after 3 seconds.
+			InitialLifeSpan = 3.0f;
+		}
+		
+		// Called when the game starts or when spawned
+		void AFPSProjectile::BeginPlay()
+		{
+			Super::BeginPlay();
+			
+		}
+		
+		// Called every frame
+		void AFPSProjectile::Tick( float DeltaTime )
+		{
+			Super::Tick( DeltaTime );
+		
+		}
+		
+		// Function that initializes the projectile's velocity in the shoot direction.
+		void AFPSProjectile::FireInDirection(const FVector& ShootDirection)
+		{
+			ProjectileMovementComponent->Velocity = ShootDirection * ProjectileMovementComponent->InitialSpeed;
+		}
+		
+		// Function that is called when the projectile hits something.
+		void AFPSProjectile::OnHit(AActor* OtherActor, UPrimitiveComponent* OtherComponent, FVector NormalImpulse, const FHitResult& Hit)
+		{
+			if (OtherActor != this && OtherComponent->IsSimulatingPhysics())
+			{
+				OtherComponent->AddImpulseAtLocation(ProjectileMovementComponent->Velocity * 100.0f, Hit.ImpactPoint);
+			}
+		}
+
+1.	Save `FPSProjectile.h` and `FPSProjectile.cpp` in Visual Studio.
+
+1.	Locate **FPSProject** in the **Solution Explorer**.
+
+1.	Right-click on **FPSProject** and select **Build** to compile your project.
+
+	![](BuildFPSProject.png)
+
+## Testing Projectile Collision
+
+1.	After the build finishes, go back to **Unreal Editor** and open **FPSProject**.
+
+1.	Select the **Floor** `StaticMesh`.
+
+1.	Copy-and-paste the floor mesh.
+
+1.	Making sure that the ratio lock is unlocked, scale the floor mesh copy (named "Floor2") to {0.2, 0.2, 3.0}.
+
+1.	Position the floor mesh copy at {320, 0, 170}.
+
+	[REGION:lightbox]
+		[![](Floor2_CubeTransform.png)(w:750)](Floor2_CubeTransform.png)
+	[/REGION]
+	_Click on the image to zoom in._
+
+1.	Scroll down to the **Physics** section and check the **Simulate Physics** box.
+
+	[REGION:lightbox]
+		[![](Floor2_CubePhysics.png)(w:750)](Floor2_CubePhysics.png)
+	[/REGION]
+	_Click on the image to zoom in._
+
+1.	Save your map and double-click on **BP_FPSProjectile** to open the projectile blueprint for editing.
+
+1.	Open **Class Defaults Mode** and click on **ProjectileMeshComponent** in the **Components** tab.
+
+1.	Locate the **Collision Presets** property under **Collision** and set it to **Projectile**.
+
+	![](SetCollisionPresets.png)
+
+1.	**Compile** and **Save** your Blueprint before closing the **Blueprint Editor**.
+
+1.	Click the **Play In** button in the **Level Editor Toolbar**.
+
+1.	Left-click your mouse button to fire projectiles and move the cube around your level.
+
+	![](ProjectileComplete.png)
+
+	 Congratulations, your projectiles are complete!
+
+1.	Press the Escape key or click the **Stop** button in the Level Editor to exit Play in Editor (PIE) mode.
+
+%Steps%

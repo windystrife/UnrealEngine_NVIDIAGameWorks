@@ -1,0 +1,114 @@
+﻿INTSourceChangelist:2914106
+Availability:Public
+Title:对象
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture
+Description:基本游戏性元素、Actor 和对象的解释。
+Version:4.11
+
+[TOC (start:2 end:3)]
+
+[EXCERPT:ObjectIntro]
+虚幻引擎拥有处理游戏对象的强大系统。虚幻引擎中的对象基础类为 `UObject`。UCLASS 宏可用于标记从 `UObject` 派生的类，使 UObject 处理系统识别到它们。 
+[/EXCERPT:ObjectIntro]
+
+## UCLASS 宏
+
+**UCLASS** 宏为 UObject 提供一个对 UCLASS 的引用，描述其基于虚幻引擎的类型。每个 UCLASS 保留一个称作“类默认对象（Class Default Object）”的对象，简称 CDO。CDO 本质上是一个默认“模板”对象，由类构建函数生成，之后并未进行修改。UCLASS 和 CDO 均可为特定对象实例恢复，但它们通常为只读。使用 GetClass() 函数即可随时访问对象实例的 UCLASS。
+
+UCLASS 包含定义类的一套属性和函数。这些是本地代码可用的普通 C++ 函数和变量，但被虚幻引擎特有的元数据所标记，它们在对象系统中的行为也因此受到控制。如需了解标记语法的更多细节，请查阅 [编程参考](Programming\UnrealArchitecture\Reference)。 
+
+需要注意 UObject 类还可包括仅限本地的属性，这些属性不存在于相应的 UCLASS 中。 
+
+## 属性和函数类型
+
+UObjects 可拥有成员变量（称作属性）或任意类型的函数。然而，为便于虚幻引擎识别并操控这些变量或函数，它们必须以特殊的宏进行标记，并符合一定类型的标准。如需了解这些标准的细节，请查阅 [](Programming/UnrealArchitecture/Reference/Properties) 和 [](Programming/UnrealArchitecture/Reference/Functions) 参考页面。
+
+## 对象创建
+
+有多个函数可用于新建 `UObject` 实例以及标准 `new` 运算符；每个皆有其自身的使用案例：
+
+| 方法 | 描述 |
+| --- | --- |
+| [`NewObject<class>()`](Programming/UnrealArchitecture/Objects/Creation#NewObject) | 创建一个自动生成命名的新实例。在简单情况下使用最佳。|
+| [`NewNamedObject<class>()`](Programming/UnrealArchitecture/Objects/Creation#NewNamedObject) | 使用特定命名以及其他几项任选参数创建一个新实例。将判断新实例的 Outer 中是否存在命名冲突。|
+| [`ConstructObject<class>()`](Programming/UnrealArchitecture/Objects/Creation#ConstructObject) | 创建一个提供所有可用创建选项的新实例。仅限需要灵活性时使用。|
+| `new` | 用于在特定低层情况下构建对象，如构建函数需要参数时。|
+
+在 [](Programming/UnrealArchitecture/Objects/Creation) 中可查阅游戏性 `UObject` 类实例诸多创建方法的详细信息。
+
+## UObjects 提供的功能
+
+此系统的使用不为强制要求，甚至有时不适合使用，但却存在以下益处：
+
+*	垃圾回收
+*	引用更新
+*	映象
+*	序列化
+*	默认属性变化自动更新
+*	自动属性初始化
+*	自动编辑器整合
+*	运行时类型信息可用
+*	网络复制
+
+如需了解每个系统的更多细节内容，请查阅 [](Programming\UnrealArchitecture\Objects\Optimizations) 文档。
+
+## 虚幻标头工具
+为利用 UObject 派生类型所提供的功能，需要在头文件上为这些类型执行一个预处理步骤，以核对需要的信息。该预处理步骤由 UnrealHeaderTool（简称 UHT）执行。
+
+UObject 派生的类型需要遵守特定的结构，我们也将在此谈到这点。
+
+## 头文件格式
+
+UObject 在源（.cpp）文件中的实现与其他 C++ 类相似，其在头（.h）文件中的定义必须遵守特定的基础结构，以便在虚幻引擎 4 中正常使用。使用编辑器的“New C++ Class”命令是设置格式正确头文件的最简单方法。UObject 派生类的基础头文件可能看起来与此相似，假定 UObject 派生物被称为 UMyObject，其创建时所在的项目被称为 MyProject：
+
+	#pragma once
+
+	#include 'Object.h'
+	#include 'MyObject.generated.h'
+
+	/**
+	 * 
+	 */
+	UCLASS()
+	class MYPROJECT_API UMyObject : public UObject
+	{
+		GENERATED_BODY()
+
+	};
+
+虚幻引擎特定的部分如下：
+
+
+	#include "MyObject.generated.h"
+
+
+此行预计为此文件中最后一个 #include 指令。如此头文件需要了解其他类，可将它们在文件中的任意位置提前声明，或包括在 MyObject.generated.h 上。
+
+
+	UCLASS()
+
+
+UCLASS 宏使虚幻引擎 4 能识别 UMyObject。此宏支持大量参数，参数决定类功能的开或关。（UCLASS 参数页面的链接）
+
+
+	class MYPROJECT_API UMyObject : public UObject
+
+
+如 MyProject 希望将 UMyObject 类公开到其他模块，则需要指定 MYPROJECT_API。这对游戏项目将包括的模块或插件十分实用。这些模块和插件将故意使类公开，在多个项目间提供可携的自含式功能。
+
+
+	GENERATED_BODY()
+
+
+GENERATED_BODY 宏不获取参数，但会对类进行设置，以支持引擎要求的基础结构。所有 UCLASS 均有此要求。注意：在引擎的当前版本中，GENERATED_BODY 宏将成员访问等级设为“public”，而非设置“private”的缺省语言。
+
+## 更新对象
+
+Ticking 代表虚幻引擎中对象的更新方式。所有对象均可在每帧被 tick，便于您执行必要的更新计算或操作。
+
+对象不具有嵌入的更新能力；然而必要时使用 `inherits` 类说明符从 `FTickableGameObject` 继承即可添加此能力。 
+之后即可实现 `Tick()` 函数，引擎每帧都将调用此函数。注意：多数游戏内对象均为 [](Programming/UnrealArchitecture/Actors)，可按用户设置的最低间隔进行 tick（而不按照每帧一次的频率进行）。
+
+## 销毁对象
+
+对象不被引擎引用后，垃圾回收系统将自动进行对象销毁。这意味着 UPROPERTY 指针、引擎容器或智能指针类实例（如 `TArray<UObject*>` 或 `TWeakPtr<UObject*>`）不会指向它。垃圾回收器运行时，寻找到的未引用对象将被删除。此外，函数 `MarkPendingKill()` 可在对象上直接调用，此函数将把指向对象的所有指针设为 NULL，并从全局搜索中移除对象。对象将在下一次垃圾回收过程中被完全删除。

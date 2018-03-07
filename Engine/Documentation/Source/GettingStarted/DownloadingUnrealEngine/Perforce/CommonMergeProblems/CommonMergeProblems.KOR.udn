@@ -1,0 +1,162 @@
+﻿INTSourceChangelist:3108692
+Availability: Licensee
+Title:병합시 흔히 발생하는 문제
+Crumbs:%ROOT%, Engine, Programming, Programming/Basics, GettingStarted/DownloadingUnrealEngine/Perforce
+Description:엔진 새 빌드를 병합할 때 흔히 겪게 되는 여러가지 문제에 대한 설명입니다.
+version: 4.9
+
+[TOC(start:2)]
+
+
+
+## 툴
+
+다음은 Unreal Engine 4 품질 보증 승인 빌드의 병합 및 통합을 위해 추천하는 도구들입니다:
+
+
+* Araxis Merge: http://www.araxis.com/merge/
+* Perforce: http://www.perforce.com/
+
+
+
+
+## 병합
+
+Araxis Merge 같은 도구는 병합을 다루는 데 아주 유용합니다. 이는 Perforce 같은 버전 관리 시스템에 통합될 수 있어서, 여러분은 내장되어 있는 도구 대신 Araxis로 비교/병합을 처리할 수 있습니다.
+
+코드 드롭을 병합할 때, Araxis Merge 에서의 폴더 비교(두 방향과 세 방향 모두)는 현재의 프로젝트를 최근의 품질보증 승인 빌드와, 경우에 따라서는 이전의 품질보증 승인 빌드와, 비교하는 데 도움이 됩니다. 이 방법은 여러분의 현재 프로젝트는 물론 품질보증 승인 빌드에서 무엇이 발전됐는지를 볼 수 있도록 합니다.
+
+병합을 할 때 Perforce 같은 버전 관리 시스템에 브랜치를 갖는 것도 도움이 됩니다. 병합과 관련된 모든 변경사항을 별도의 브랜치에 두고 작업하는 것은 여러분이 완전히 병합한 것들을 통합할 준비가 될 때까지 - 대개 약간의 회귀 테스트 및 모든 문제가 해결 된 후- 바탕 브랜치를 깨끗하게 유지해 줍니다.
+
+물론 모든 것을 바탕에 집어넣는 것 보다는 모듈식 접근방식을 사용하는 것을 원칙으로 하는 것이 언제나 최선의 방법입니다. 바탕을 될 수 있는 한 깔끔하게 유지하면 병합 관련 오류들을 훨씬 줄일 수 있습니다.
+
+병합 코드를 관리하는 또 다른 방법은 바탕 빌드 코드에 분명한 코멘트를 붙이는 것입니다. 그럼으로써 그 변경된 섹션을 쉽게 식별할 수 있습니다:
+
+
+    
+    //myproject - 바탕 코드를 변경함 ...
+    
+
+
+
+여러분의 프로젝트에 #define 을 추가하는 것도 유용합니다:
+
+
+    
+    #define YOURGAME 1
+    
+
+
+
+그 다음에는 엔진의 바탕 코드에 있는 여러분의 커스텀 코드를 덮어 씌울 수 있습니다:
+
+
+    
+    #ifdef YOURGAME
+       //myproject - 내 일들을 하는 중...
+    #endif // YOURGAME
+    
+
+
+
+이상적으로, 여러분은 모든 정의 내린 것들을 풀고 범용 빌드를 하고 싶을 것입니다; 그렇지만 그것이 항상 가능하지는 않습니다.
+
+그러나, 이러한 기법들이 병합의 안전성을 보다 높여줄 것입니다.
+
+
+
+## 통합
+
+각각의 품질보증 빌드에는 커다란 변화가 많이 있습니다. 그중 일부에는 병합을 좀 고통스럽게 만들 파일들이 많습니다.
+
+이러한 문제들을 다루는 한 가지 좋은 방법은 Perforce의 통합 기능을 이용하는 것입니다.
+
+    0. depot에 QA 빌드를 위한 자리를 만드십시오(예: //depot/UE4Builds/... )
+
+
+  1. 새로운 품질보증 빌드가 나오면 다운로드 받아서 여러분의 depot로 보내십시오. 
+
+파일을 추가/삭제/편집 하는 모든 작업을 디포에 보내는 좋은 방법은 다음과 같은 명령어를 사용하는 것입니다.
+	
+		REM 목적: 기본 clientspec에 있는 기본 Changelist 가 비어있는지 확인한다.
+		
+		REM 2개의 변수를 취한다.
+		REM %1 == 새 버전 디렉토리로의 하드 드라이브 경로(depot의 루트 아래) (예: c:/foo/bar/baz)
+		REM %2 == 빌드로의 depot 경로(예: //depot_foo/bar/baz/...
+		
+		REM 사용법: p4ModifiedFiles.bat c:/foo/bar/baz //depot_foo/bar/baz/...
+		
+		REM 상태를 저장하기
+		set MODFILES_FIND_ORIG=%MODFILES_FIND%
+		set MODFILES_FIND=C:\bin\cygwin\bin\find.exe
+		
+		REM 새 파일들을 모두 찾아서 추가하기
+		%MODFILES_FIND% %1 -type f | p4 -x - add
+		
+		REM 변경된 파일들을 편집을 위해 모두 열기
+		p4 diff -se %2 | p4 -x - edit
+		
+		REM 제거된 파일들을 삭제를 위해 모두 열기
+		p4 diff -sd %2 | p4 -x - delete
+		
+		REM 상태 복구하기
+		set MODFILES_FIND=%MODFILES_FIND_ORIG%
+	
+1. Perforce의 통합 (`p4 integ`)을 사용하여  //depot/UE4Builds/... 로부터 Perforce 내에 있는 여러분의 엔진 (예: //depot/MyEngine/...)으로 통합하십시오.
+
+  3. 로컬에서 여러분이 변경하지 않은 파일들을 자동으로 해결하는 데 Perforce의 Safe Automatic Resolve 기능을 사용하십시오(예: 기본적으로 모든 파일에 판권을 업데이트합니다. 파일들 가운데 대부분은 여러분이 로컬에서 변경하지 않은 것들입니다).
+
+
+참고: [http://www.perforce.com/perforce/doc.062/manuals/p4wsad/topics/resolving.html](http://www.perforce.com/perforce/doc.062/manuals/p4wsad/topics/resolving.html)
+
+Safe Automatic Resolve: 클라이언트 파일이나 디포 파일이(둘 중의 하나가) 바탕 파일과 다른 경우, 그 다른 버전의 파일을 첫 수정판으로 삼으십시오. 두 파일이 모두 바탕 파일과 다른 경우에는 이 파일을 resolve하지 마십시오. 
+
+
+
+## 브랜칭 
+
+전형적인 브랜치 정책은, 코드와 콘텐츠 양면에서 브랜치 사이의 변경을 최소화하기 위해 최대한 늦게 브랜치하는 것입니다.
+
+일단 브랜치하고 나면, 각 브랜치내의 변경내용을 쉽게 파악할 수 있습니다. 흔히 어느 특정 브랜치에서의 변경 담당자에게 적절한 관련 변경 내용을 통합 및 병합할 것이 요구됩니다. 
+
+
+
+## 오류 및 문제 해결
+
+
+### "Not a class or namespace name(클래스 또는 네임스페이스 이름이 아닙니다)" 오류
+
+**증상:**
+FooClass.h파일의 DECLARE_NATIVE_TYPE() 매크로상의 "Not a class or namespace name(클래스 또는 네임스페이스 이름이 아닙니다)" 오류. 이 클래스가 FooClasses.h 파일에서 선언되었지만, 아마 이 파일이 포함되었을 당시 #defines가 활성화되어 있어서 클래스 선언을 보지 않기 때문일 것입니다.
+
+**원인:**
+LaunchEngineLoop.cpp(NAMES_ONLY로 정의된)에 포함되어 있는 자동 생성 헤더가, 사전 컴파일 된 헤더에(NAMES_ONLY 를 정의하지 않은) 포함되지 않아 컴파일 오류를 일으킵니다.
+
+**수정/우회책:**
+NAMES_ONLY 로 정의된 사전 컴파일된 헤더에 자동 생성 헤더를 포함시킵니다.
+
+
+참고: [https://udn.epicgames.com/lists/showpost.php?list=unprog3&id=10516](https://udn.epicgames.com/lists/showpost.php?list=unprog3&id=10516)
+
+
+### Enum 크래시
+
+**증상:**
+라이센스 소지자와 Epic이 같은 값의 enum을 추가.
+
+**원인:**
+Enum은 이름이 아니라 그 값의 순서로 시리얼라이즈 됨.
+
+**수정/예방책:**
+한가지 예방책은 콘텐츠를 패치하는 커맨드렛을 만드는 것입니다. 그러나 이는 매우 오류가 발생하기 쉽고 시간이 많이 걸리는 일입니다. 더 나은 단기 대책은 라이센스 소지자들이 enum을 덧붙이는 것입니다. 이는 C++ 에서 enum의 오프셋을 지정하면 쉽습니다. 그러나 블루프린트에서는 덧붙이는 항목을 수동으로 추가해 줘야 합니다.
+
+이 문제의 해결 방법은 모든 enum들을 그 값보다는 FName으로 시리얼라이즈하는, 엔진 수준에서의 변경입니다. 이는 미해결 태스크 41337 입니다. 이렇게 변경하면 enum의 이름변경이 어려워질 수 있습니다만, 흔한 경우는 아닙니다.
+
+
+참고: [https://udn.epicgames.com/lists/showpost.php?list=unprog3&id=21598](https://udn.epicgames.com/lists/showpost.php?list=unprog3&id=21598)
+
+ 
+
+
+
+

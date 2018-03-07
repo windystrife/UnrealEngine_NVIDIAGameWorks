@@ -1,0 +1,538 @@
+﻿INTSourceChangelist:2801620
+Title:TMap
+Crumbs:
+Description:
+Availability:Public
+Version:4.9
+
+在 TArray 之后，**虚幻引擎 4**（UE4）中最常用的容器是 **TMap**。此容器是一个关联式容器，意味着每个键均拥有一个关联值，可通过键高效地查找值对象。
+
+存在两种映射类型：TMap 和 **TMultiMap**。TMap 的键为唯一。键已存在时插入一个新的键值对将导致现有的对被替代。TMultiMap 的键不为唯一，因此新添加的对不会替代现有的对。
+
+## TMap
+
+TMap 主要由两个类型定义 - 键类型和值类型 - 作为关联对存储在映射中。将这些对作为映射的元素类型参考十分便利，就像是个体对象一样。在此文档中，元素为一个键值对，而个体元素会作为元素的键或元素的值被参考。元素类型实际上是一个 **TPair**< KeyType, ElementType >，但它很少需要直接参考 TPair 类型。
+
+和 TArray 一样，TMap 是同构容器，因此其所有元素完全为相同类型。TMap 也是值类型，支持常规复制、赋值和析构函数操作，以及其元素较强的所有权。映射被销毁时，其元素也将被销毁。键类型和值类型也必须为值类型。
+
+TMap 是散列容器，意味着键类型必须支持 **GetTypeHash** 函数并提供一个运算符 ==，对键的相等性进行对比。稍后将详细讨论散列。
+
+TMap 还可通过任选分配器控制内存分配行为。标准 UE4 分配器（如 FHeapAllocator、TInlineAllocator）无法被用作 TMap 的分配器。应使用标准 UE4 分配器进行散列和元素存储，而不使用定义映射使用散列桶数量的集分配器。欲知详情，请查阅 TSetAllocator。
+
+最终的 TMap 模板参数为 **KeyFuncs**，它将告知映射如何从元素类获得键、如何对比两个键的相等性、如何散列键。它们默认只返回引用到键，使用运算符 == 对比相等性，使用非成员 GetTypeHash 函数进行散列。如您的键类型支持这些函数，它将作为映射键使用，无需提供自定义 KeyFuncs。
+
+与 TArray 不同，内存中 TMap 元素的相对排序不可被依赖，元素上迭代返回的顺序可能与它们的添加顺序不同。元素在内存中不太可能被持续排列。映射的备份数据结构是稀疏阵列，带有洞。元素从映射移除后，稀疏阵列中将出现洞。之后添加的元素将填充这些洞。然而，即使 TMap 不移动元素填充洞穴，指向映射元素的指针仍然可能被无效化，因为整体存储为满时添加新元素会重新对整体存储进行分配。
+
+## 创建并填充映射
+
+可如此创建 TMap：
+
+	TMap<int32, FString> FruitMap;
+
+这会创建一个空白的 TMap，把整数映射到字符串。我们指定的并非是分配器或 KeyFuncs，因此映射将执行标准堆分配；使用 == 对键（int32）进行对比，并使用 GetTypeHash 进行散列。此时尚未分配内存。
+
+填入映射的标准方法是使用 **Add** 函数并提供一个键和值：
+
+	FruitMap.Add(5, TEXT("Banana"));
+	FruitMap.Add(2, TEXT("Grapefruit"));
+	FruitMap.Add(7, TEXT("Pineapple"));
+	// FruitMap == [
+	// 	{ Key:5, Value:"Banana"     },
+	// 	{ Key:2, Value:"Grapefruit" },
+	// 	{ Key:7, Value:"Pineapple"  }
+	// ]
+
+此处列出的元素按插入排序，但这些元素的排序不存在绝对保证。对于新映射而言，它们可能以插入排序。但映射受支配的插入和移除越多，新元素不出现在末端的可能性越大。
+
+这不是 TMultiMap，因此键不保证为唯一。如尝试添加复制键，会发生以下情况：
+
+	FruitMap.Add(2, TEXT("Pear"));
+	// FruitMap == [
+	// 	{ Key:5, Value:"Banana"    },
+	// 	{ Key:2, Value:"Pear"      },
+	// 	{ Key:7, Value:"Pineapple" }
+	// ]
+
+映射仍然包含 3 个元素，但之前键值为 2 的“Grapefruit”已被“Pear”替代。
+
+Add 函数被重载，以接受不带值的键。如只提供了一个键，数值将被默认构建：
+
+	FruitMap.Add(4);
+	// FruitMap == [
+	// 	{ Key:5, Value:"Banana"    },
+	// 	{ Key:2, Value:"Pear"      },
+	// 	{ Key:7, Value:"Pineapple" },
+	// 	{ Key:4, Value:""          }
+	// ]
+
+和 TArray 一样，我们还可使用 **Emplace** 代替 Add，避免插入映射时创建出临时文件：
+
+	FruitMap.Emplace(3, TEXT("Orange"));
+	// FruitMap == [
+	// 	{ Key:5, Value:"Banana"    },
+	// 	{ Key:2, Value:"Pear"      },
+	// 	{ Key:7, Value:"Pineapple" },
+	// 	{ Key:4, Value:""          },
+	// 	{ Key:3, Value:"Orange"    }
+	// ]
+
+在此，两个参数分别被直接传到键类型和值类型的构建函数。这对此处的 int32 并无真正效果，但它能避免创建值的临时 FString。和 TArray 不同，只可通过单一参数构建函数将元素安放到映射中。
+
+使用 Append 函数进行合并即可插入来自另一个映射的所有元素：
+
+	TMap<int32, FString> FruitMap2;
+	FruitMap2.Emplace(4, TEXT("Kiwi"));
+	FruitMap2.Emplace(9, TEXT("Melon"));
+	FruitMap2.Emplace(5, TEXT("Mango"));
+	FruitMap.Append(FruitMap2);
+	// FruitMap == [
+	// 	{ Key:5, Value:"Mango"     },
+	// 	{ Key:2, Value:"Pear"      },
+	// 	{ Key:7, Value:"Pineapple" },
+	// 	{ Key:4, Value:"Kiwi"      },
+	// 	{ Key:3, Value:"Orange"    },
+	// 	{ Key:9, Value:"Melon"     }
+	// ]
+
+此处生成的映射和使用 Add/Emplace 进行单个添加相等，因此来自源映射的复制键会替代目标映射中的键。
+
+## 迭代
+
+TMap 的迭代与 TArray 相似。可使用 C++ 的 ranged-for 功能，注意元素类型是 TPair：
+
+	for (auto& Elem :FruitMap)
+	{
+		FPlatformMisc::LocalPrint(
+			*FString::Printf(
+				TEXT("(%d, \"%s\")\n"),
+				Elem.Key,
+				*Elem.Value
+			）
+		);
+	}
+	// Output:
+	// (5, "Mango")
+	// (2, "Pear")
+	// (7, "Pineapple")
+	// (4, "Kiwi")
+	// (3, "Orange")
+	// (9, "Melon")
+
+映射还提供其自身的迭代器类型，以便对迭代进行更直接的控制。**CreateIterator** 函数提供对元素的读写访问，**CreateConstIterator** 函数提供只读访问。迭代器对象自身提供 **Key()** 和 **Value()** 函数进行键和值访问。代码中可使用任意形式：
+
+	for (auto It = FruitMap.CreateConstIterator(); It; ++It)
+	{
+		FPlatformMisc::LocalPrint(
+			*FString::Printf(
+				TEXT("(%d, \"%s\")\n"),
+				It.Key(),   // same as It->Key
+				*It.Value() // same as *It->Value
+			）
+		);
+	}
+
+## 查询
+
+使用 **Num** 函数可询问映射保存的元素数量：
+
+	int32 Count = FruitMap.Num();
+	// Count == 6
+
+可结合键使用索引运算符 []，获得给定键相关数值的引用。在非常量映射上调用运算符 [] 将返回非常量引用，而在常量映射上调用将返回常量引用。如键不存在，将出现断言：
+
+	FString Val7 = FruitMap[7];
+	// Val7 == "Pineapple"
+	FString Val8 = FruitMap[8]; // assert!
+
+可使用 **Contains** 函数进行检查，确定特定键是否存在于映射中：
+
+	bool bHas7 = FruitMap.Contains(7);
+	bool bHas8 = FruitMap.Contains(8);
+	// bHas7 == true
+	// bHas8 == false
+
+多数情况下，查找元素无需知晓键是否存在。使用后面带操作符 [] 的 Contains 函数将进行键的双重查找，最好不要进行此操作。使用 **Find** 函数可进行单一查找，返回指向找到元素数值的指针，而非引用；键不存在时，将返回 null。
+
+	FString* Ptr7 = FruitMap.Find(7);
+	FString* Ptr8 = FruitMap.Find(8);
+	// *Ptr7 == "Pineapple"
+	//  Ptr8 == nullptr
+
+如在常量映射上调用，返回的指针也将为常量。
+
+**FindOrAdd** 函数将搜索给定键并返回引用到关联值；如键不存在，则在返回引用前将添加默认构建的值。因可能需要添加，此函数无法在常量映射上被调用：
+
+	FString& Ref7 = FruitMap.FindOrAdd(7);
+	// Ref7     == "Pineapple"
+	// FruitMap == [
+	// 	{ Key:5, Value:"Mango"     },
+	// 	{ Key:2, Value:"Pear"      },
+	// 	{ Key:7, Value:"Pineapple" },
+	// 	{ Key:4, Value:"Kiwi"      },
+	// 	{ Key:3, Value:"Orange"    },
+	// 	{ Key:9, Value:"Melon"     }
+	// ]
+	FString& Ref8 = FruitMap.FindOrAdd(8);
+	// Ref8     == ""
+	// FruitMap == [
+	// 	{ Key:5, Value:"Mango"     },
+	// 	{ Key:2, Value:"Pear"      },
+	// 	{ Key:7, Value:"Pineapple" },
+	// 	{ Key:4, Value:"Kiwi"      },
+	// 	{ Key:3, Value:"Orange"    },
+	// 	{ Key:9, Value:"Melon"     },
+	// 	{ Key:8, Value:""          }
+	// ]
+
+注意：如已发生重新分配，此处的 Ref7 引用可能已被 FruitMap.FindOrAdd(8) 的调用无效化。
+
+无视 **FindRef** 函数的名称，因为它搜索键返回的是值，而非引用。如找到键，则返回关联值的副本；如未找到，则返回默认构建值类型。这会导致和 FindOrAdd 相似的行为，但因 FindRef 函数返回的是值而非引用，映射将不会被修改，因此可在常量对象上被调用：
+
+	FString Val7 = FruitMap.FindRef(7);
+	FString Val6 = FruitMap.FindRef(6);
+	// Val7     == "Pineapple"
+	// Val6     == ""
+	// FruitMap == [
+	// 	{ Key:5, Value:"Mango"     },
+	// 	{ Key:2, Value:"Pear"      },
+	// 	{ Key:7, Value:"Pineapple" },
+	// 	{ Key:4, Value:"Kiwi"      },
+	// 	{ Key:3, Value:"Orange"    },
+	// 	{ Key:9, Value:"Melon"     },
+	// 	{ Key:8, Value:""          }
+	// ]
+
+**FindKey** 函数允许执行逆向查找（找到键给定值）。使用该函数时需注意，因为值和键不同，不会被散列。因此键查找是线性操作。此外，数值不保证为唯一。因此，如映射包含重复值，键返回的特定值为任意的。
+
+	const int32* KeyMangoPtr   = FruitMap.FindKey(TEXT("Mango"));
+	const int32* KeyKumquatPtr = FruitMap.FindKey(TEXT("Kumquat"));
+	// *KeyMangoPtr   == 5
+	//  KeyKumquatPtr == nullptr
+
+**GenerateKeyArray** 和 **GenerateValueArray** 函数分别允许以全部键和值的副本对阵列进行填入。在两种情况下，被传递的阵列在填入前会被清空，因此元素的生成数量将始终等于映射中的元素数量。
+
+	TArray<int32>   FruitKeys;
+	TArray<FString> FruitValues;
+	FruitKeys.Add(999);
+	FruitKeys.Add(123);
+	FruitMap.GenerateKeyArray  (FruitKeys);
+	FruitMap.GenerateValueArray(FruitValues);
+	// FruitKeys   == [ 5,2,7,4,3,9,8 ]
+	// FruitValues == [ "Mango","Pear","Pineapple","Kiwi","Orange",
+	//                  "Melon","" ]
+
+## 移除
+
+使用 **Remove** 函数并提供要删除的元素键即可将元素从映射移除：
+
+	FruitMap.Remove(8);
+	// FruitMap == [
+	// 	{ Key:5, Value:"Mango"     },
+	// 	{ Key:2, Value:"Pear"      },
+	// 	{ Key:7, Value:"Pineapple" },
+	// 	{ Key:4, Value:"Kiwi"      },
+	// 	{ Key:3, Value:"Orange"    },
+	// 	{ Key:9, Value:"Melon"     }
+	// ]
+
+移除元素将在数据结构（在 Visual Studio 的观察窗口中可视化映射时可看到）中留下洞，但为保证清晰性，此处将忽略洞。
+
+**FindAndRemoveChecked** 函数可用于移除元素，并返回关联值。名称中的 checked 部分意味着将检查键是否存在。如不存在，则断言：
+
+	FString Removed7 = FruitMap.FindAndRemoveChecked(7);
+	// Removed7 == "Pineapple"
+	// FruitMap == [
+	// 	{ Key:5, Value:"Mango"  },
+	// 	{ Key:2, Value:"Pear"   },
+	// 	{ Key:4, Value:"Kiwi"   },
+	// 	{ Key:3, Value:"Orange" },
+	// 	{ Key:9, Value:"Melon"  }
+	// ]
+
+	FString Removed8 = FruitMap.FindAndRemoveChecked(8); // assert!
+
+**RemoveAndCopyValue** 函数作用相似，但会引用将被传出的值类型，并返布尔型说明键是否已找到。它可结合缺失键使用，不会出现运行时错误。如未找到键，调用将返回 false，传递对象和映射保持不变：
+
+	FString Removed;
+	bool bFound2 = FruitMap.RemoveAndCopyValue(2, Removed);
+	// bFound2  == true
+	// Removed  == "Pear"
+	// FruitMap == [
+	// 	{ Key:5, Value:"Mango"  },
+	// 	{ Key:4, Value:"Kiwi"   },
+	// 	{ Key:3, Value:"Orange" },
+	// 	{ Key:9, Value:"Melon"  }
+	// ]
+	bool bFound8 = FruitMap.RemoveAndCopyValue(8, Removed);
+	// bFound8  == false
+	// Removed  == "Pear", i.e. unchanged
+	// FruitMap == [
+	// 	{ Key:5, Value:"Mango"  },
+	// 	{ Key:4, Value:"Kiwi"   },
+	// 	{ Key:3, Value:"Orange" },
+	// 	{ Key:9, Value:"Melon"  }
+	// ]
+
+最后，使用 **Empty** 函数可将所有元素移除：
+
+	TMap<int32, FString> FruitMapCopy = FruitMap;
+	// FruitMapCopy == [
+	// 	{ Key:5, Value:"Mango"  },
+	// 	{ Key:4, Value:"Kiwi"   },
+	// 	{ Key:3, Value:"Orange" },
+	// 	{ Key:9, Value:"Melon"  }
+	// ]
+	
+	FruitMapCopy.Empty();
+	// FruitMapCopy == []
+
+和 TArray 一样，Empty 接受任选的 slack 值。以给定数量的元素重新填入映射时，此值可用于优化。
+
+## 排序
+
+可对 TMap 进行临时排序。映射上的下次迭代将以排序顺序展示元素，之后对映射进行的修改可能导致映射重新排序。排序并不稳定，因此相等元素可能以各种排列方式出现。
+
+使用 **KeySort** 和 **ValueSort** 函数可分别按键和值进行排序，两个函数均接受二元谓词指定排序顺序：
+
+	FruitMap.KeySort([](int32 A, int32 B) {
+		return A > B; // sort keys in reverse
+	});
+	// FruitMap == [
+	// 	{ Key:9, Value:"Melon"  },
+	// 	{ Key:5, Value:"Mango"  },
+	// 	{ Key:4, Value:"Kiwi"   },
+	// 	{ Key:3, Value:"Orange" }
+	// ]
+	
+	FruitMap.ValueSort([](const FString& A, const FString& B) {
+		return A.Len() < B.Len(); // sort strings by length
+	});
+	// FruitMap == [
+	// 	{ Key:4, Value:"Kiwi"   },
+	// 	{ Key:5, Value:"Mango"  },
+	// 	{ Key:9, Value:"Melon"  },
+	// 	{ Key:3, Value:"Orange" }
+	// ]
+
+## 运算符
+
+和 TArray 一样，TMap 是常规值类型，可通过标准复制构建函数或赋值运算符进行复制。因映射严格拥有其元素，映射复制为深，因此新映射将拥有其自身的元素副本：
+
+	TMap<int32, FString> NewMap = FruitMap;
+	NewMap[5] = "Apple";
+	NewMap.Remove(3);
+	// FruitMap == [
+	// 	{ Key:4, Value:"Kiwi"   },
+	// 	{ Key:5, Value:"Mango"  },
+	// 	{ Key:9, Value:"Melon"  },
+	// 	{ Key:3, Value:"Orange" }
+	// ]
+	// NewMap == [
+	// 	{ Key:4, Value:"Kiwi"  },
+	// 	{ Key:5, Value:"Apple" },
+	// 	{ Key:9, Value:"Melon" }
+	// ]
+
+TMap 还支持移动语意。使用 **MoveTemp** 函数可调用此语意。在移动后，源映射将保证为空：
+
+	FruitMap = MoveTemp(NewMap);
+	// FruitMap == [
+	// 	{ Key:4, Value:"Kiwi"  },
+	// 	{ Key:5, Value:"Apple" },
+	// 	{ Key:9, Value:"Melon" }
+	// ]
+	// NewMap == []
+
+## Slack
+
+TMap 也拥有 **slack** 的概念，可用于优化映射的填入。**Reset** 与 Empty() 调用作用相似，但不会释放元素之前使用的内存。
+
+	FruitMap.Reset();
+	// FruitMap == [<invalid>, <invalid>, <invalid>]
+
+此处映射按照 Empty 相同的方式进行清空，但用于储存的内存不会被释放，仍为 slack。
+
+TMap 不会像 TArray::Max() 一样提供检查预分配元素的数量，但仍然支持预分配 slack。Reserve 函数可用于在添加之前预分配特定数量元素的 slack。
+
+	FruitMap.Reserve(10);
+	for (int32 i = 0; i != 10; ++i)
+	{
+		FruitMap.Add(i, FString::Printf(TEXT("Fruit%d"), i));
+	}
+	// FruitMap == [
+	// 	{ Key:9, Value:"Fruit9" },
+	// 	{ Key:8, Value:"Fruit8" },
+	// 	...
+	// 	{ Key:1, Value:"Fruit1" },
+	// 	{ Key:0, Value:"Fruit0" }
+	// ]
+
+注意：Slack 会导致新元素以倒序被添加。这是为什么不可信赖映射中元素排序的原因。
+
+**Shrink** 函数和 TArray 中相等函数的相同之处是 - 它将从容器末端移除被废弃的 slack。然而，因为 TMap 允许其数据结构中存在洞，这只会从遗留在结构末端的洞上移除 slack。
+
+	for (int32 i = 0; i != 10; i += 2)
+	{
+		FruitMap.Remove(i);
+	}
+	// FruitMap == [
+	// 	{ Key:9, Value:"Fruit9" },
+	// 	<invalid>,
+	// 	{ Key:7, Value:"Fruit7" },
+	// 	<invalid>,
+	// 	{ Key:5, Value:"Fruit5" },
+	// 	<invalid>,
+	// 	{ Key:3, Value:"Fruit3" },
+	// 	<invalid>,
+	// 	{ Key:1, Value:"Fruit1" },
+	// 	<invalid>
+	// ]
+	FruitMap.Shrink();
+	// FruitMap == [
+	// 	{ Key:9, Value:"Fruit9" },
+	// 	<invalid>,
+	// 	{ Key:7, Value:"Fruit7" },
+	// 	<invalid>,
+	// 	{ Key:5, Value:"Fruit5" },
+	// 	<invalid>,
+	// 	{ Key:3, Value:"Fruit3" },
+	// 	<invalid>,
+	// 	{ Key:1, Value:"Fruit1" }
+	// ]
+
+注意：只有一个无效元素已从 Shrink 调用移除，因为末端只有一个洞。**Compact** 函数可用于在缩小前移除所有洞。
+
+	FruitMap.Compact();
+	// FruitMap == [
+	// 	{ Key:9, Value:"Fruit9" },
+	// 	{ Key:7, Value:"Fruit7" },
+	// 	{ Key:5, Value:"Fruit5" },
+	// 	{ Key:3, Value:"Fruit3" },
+	// 	{ Key:1, Value:"Fruit1" },
+	// 	<invalid>,
+	// 	<invalid>,
+	// 	<invalid>,
+	// 	<invalid>
+	// ]
+	FruitMap.Shrink();
+	// FruitMap == [
+	// 	{ Key:9, Value:"Fruit9" },
+	// 	{ Key:7, Value:"Fruit7" },
+	// 	{ Key:5, Value:"Fruit5" },
+	// 	{ Key:3, Value:"Fruit3" },
+	// 	{ Key:1, Value:"Fruit1" }
+	// ]
+
+## KeyFuncs
+
+只要类型拥有一个运算符 == 和一个非成员 GetTypeHash 重载，则可被用作 TMap 的一个 KeyType，无需进行任何修改。然而，不便于重载这些函数时可将类型作为键使用。在这些情况下，您可提供自定义的 **KeyFuncs**。
+
+KeyFuncs 需要 2 个 typedefs 和 3 个静态函数的定义：
+
+* **KeyInitType** - 用于传递键
+* **ElementInitType** - 用于传递元素
+* **KeyInitType GetSetKey(ElementInitType Element)** - 返回元素的键。
+* **bool Matches(KeyInitType A, KeyInitType B)** - 返回 A 和 B 是否相等。
+* **uint32 GetKeyHash(KeyInitType Key)** - 返回键的散列值。
+
+KeyInitType 和 ElementInitType 是键类型和元素类型普通传递惯例的 typedefs。它们通常为浅显类型的一个值和非浅显类型的一个常量引用。需牢记：映射的元素类型为 TPair。
+
+自定义 KeyFuncs 的实例如下：
+
+	struct FMyStruct
+	{
+		// String which identifies our key
+		FString UniqueID;
+	
+		// Some state which doesn't affect struct identity
+		float SomeFloat;
+	
+		explicit FMyStruct(float InFloat)
+			:UniqueID (FGuid::NewGuid().ToString())
+			, SomeFloat(InFloat)
+		{
+		}
+	};
+	template <typename ValueType>
+	struct TMyStructMapKeyFuncs :
+		BaseKeyFuncs<
+			TPair<FMyStruct, ValueType>,
+			FString
+		>
+	{
+	private:
+		typedef BaseKeyFuncs<
+			TPair<FMyStruct, ValueType>,
+			FString
+		> Super;
+	
+	public:
+		typedef typename Super::ElementInitType ElementInitType;
+		typedef typename Super::KeyInitType     KeyInitType;
+
+		static KeyInitType GetSetKey(ElementInitType Element)
+		{
+			return Element.Key.UniqueID;
+		}
+	
+		static bool Matches(KeyInitType A, KeyInitType B)
+		{
+			return A.Compare(B, ESearchCase::CaseSensitive) == 0;
+		}
+	
+		static uint32 GetKeyHash(KeyInitType Key)
+		{
+			return FCrc::StrCrc32(*Key);
+		}
+	};
+
+此处类型拥有一个唯一辨识符将作为其状态的部分，但还存在一些对辨识其身份没有帮助的其他状态。GetTypeHash 和运算符 == 不适合在此使用。因为它会使运算符 == 忽略部分状态，而且 GetTypeHash 需要和运算符 == 相匹配；如运算符 == 已被正确定义，则无法进行。然而，出于在映射中识别此类型的目的，我们可只使用状态的 UniqueID。
+
+最后，我们将继承 **BaseKeyFuncs**，因为它有助于为我们进行一些内容的定义，包括 KeyInitType 和 ElementInitType。直接将它们从 Super 拉到派生类中，以便在实现的剩余部分中使用。
+
+BaseKeyFuncs 接受两个模板参数：映射的元素类和键的类型（从 GetSetKey 返回的对象）。和所有的映射一样，元素类型是 TPair，接受 FMyStruct 作为其 KeyType、接受 TMyStructMapKeyFuncs 的模板参数作为其 ValueType。我们使替代 KeyFuncs 成为模板，使 ValueType 以每个函数为基础进行指定；每次创建 FMyStruct 上有键的 TMap 时，均无需对新的 KeyFuncs 进行定义。第二个 BaseKeyFuncs 参数是键类型，不要将其与 TPair 的“KeyType”混淆。此 KeyType 存储在元素的键区中。需要将 FMyStruct::UniqueID 作为键使用，因此我们需要在此处指定 FString。
+
+然后对所需要的 3 个 KeyFuncs 静态函数进行指定。第一个是 GetSetKey，被给定一个元素类型，将返回键。我们的元素类型是 TPair，key 是 UniqueID，因此我们将直接返回。
+
+第二个静态函数是 Matches，它接受两个元素的键（已使用 GetSetKey 从元素类型中提取），然后将它们进行比较，确定是否为相等。FString 的运算符 == 不区分大小写，但我们需要执行区分大小写的搜索，因此应结合适当的选项使用 FString::Compare 函数。
+
+最后，GetKeyHash 静态函数接受提取键，并返回一个它的散列值。再次提醒，FString 的 GetTypeHash 行为会忽略大小写，因此我们调用一个区分大小写的 FCrc 函数进行散列的计算。
+
+现在我们可使用新 KeyFuncs 创建一个 TMap。我们还需要提供一个分配器，因为 KeyFuncs 参数在最后，但我们可对默认进行替代：
+
+	TMap<
+		FMyStruct,
+		int32,
+		FDefaultSetAllocator,
+		TMyStructMapKeyFuncs<int32>
+	> MyMapToInt32;
+	
+	// Add some elements
+	MyMapToInt32.Add(FMyStruct(3.14f), 5);
+	MyMapToInt32.Add(FMyStruct(1.23f), 2);
+	
+	// MyMapToInt32 == [
+	// 	{
+	// 		Key:{
+	// 			UniqueID:"D06AABBA466CAA4EB62D2F97936274E4",
+	// 			SomeFloat:3.14f
+	// 		},
+	// 		Value:5
+	//	},
+	// 	{
+	// 		Key:{
+	// 			UniqueID:"0661218447650259FD4E33AD6C9C5DCB",
+	// 			SomeFloat:1.23f
+	// 		},
+	// 		Value:5
+	//	}
+	// ]
+
+提供自己的 KeyFuncs 时需注意：TMap 假定对比相等的两个项目使用 KeyFuncs::Matches 从 KeyFuncs::GetKeyHash 返回相同的值。此外，如修改现有映射元素的键时会改变任意一个这些函数的结果，则会被理解为未定义行为，因为这会无效化 TMap 的内部散列。使用默认 KeyFuncs 时，这些规则还会应用到运算符 == 和 GetKeyHash 的重载。
+
+## 杂项
+
+**CountBytes** 和 **GetAllocatedSize** 函数用于估计阵列当前应用的内存量。CountBytes 接受 FArchive，GetAllocatedSize 可被直接调用。它们常用于统计报告。
+
+**Dump** 函数接受 FOutputDevice 并写出关于映射内容的部分实现信息。它通常用于调试。
+

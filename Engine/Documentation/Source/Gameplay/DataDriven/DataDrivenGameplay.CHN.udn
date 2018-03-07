@@ -1,0 +1,152 @@
+﻿INTSourceChangelist:2711570
+Availability:Public
+Title: 数据驱动游戏性元素
+Crumbs:%ROOT%, Gameplay
+Description:使用外部存储数据驱动游戏性元素
+
+[TOC(start:2)]
+
+对于延长寿命远远超出典型盒装游戏并 
+要求根据玩家反馈不断调整和平衡数据的游戏而言， 
+数据驱动游戏性有助于减轻所涉及的工作量和复杂性， 
+并能可视化和参数化数据创建与调度。此外，还能够将数据导出到 **Excel** 或其他可使用可靠工具进行维护的电子表格文档，然后再导入， 
+以便在游戏中自动生效。
+
+通过 Excel 文档将数据导入 UE4 的新方法有两种：
+
+* 数据表
+* 曲线表
+
+
+这些 Excel 文档以“.xlsm”为扩展名（启用宏的 **Excel** 文档），并具有基于宏的导出按钮， 
+可轻松导出至中间数据格式，即逗号分隔的变量（“.csv”）。 
+这些文档都处于一个位置，有助于查找和修改数据。
+
+* [](Example.xlsm) （**right-click**和**Save as...**以下载）
+
+(#DataTables)
+## 数据表
+
+顾名思义，数据表就是以有意义且有用的方式将各种相关的数据归类的表格， 
+其中，数据字段可以是任何有效的 UObject 属性，包括资产引用。在设计师将 
+CSV 文件导入数据表前，程序员必须创建行容器以指示引擎如何解释数据。 
+这些数据表包含了列名，这些列名和基于代码的UStruct结构以及它的（子）变量一一对应， 
+这个UStruct的结构必须继承自FTableRowBase才可以被导入器辨识。 
+
+首列应命名为“Name”，并包含用于访问每行以供游戏使用的名称。随后的列 
+具有标题的变量名，而且同一列的下方为行/列交叉点的数据。鉴于此格式， 
+每一行将与继承自 FTableRowBase 的结构一一对应。
+
+### 示例
+
+例如，以下显示了升级经验数据的定义和向游戏提供数据的 CSV 文档：
+
+	/** Structure that defines a level up table entry */
+	USTRUCT(BlueprintType)
+	struct FLevelUpData : public FTableRowBase
+	{
+		GENERATED_USTRUCT_BODY()
+
+	public:
+
+		FLevelUpData()
+		: XPtoLvl(0)
+		, AdditionalHP(0)
+		{}
+
+		/** The 'Name' column is the same as the XP Level */
+
+		/** XP to get to the given level from the previous level */
+		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=LevelUp)
+		int32 XPtoLvl;
+
+		/** Extra HitPoints gained at this level */
+		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=LevelUp)
+		int32 AdditionalHP;
+
+		/** Icon to use for Achivement */
+		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=LevelUp)
+		TAssetPtr<UTexture> AchievementIcon;
+	};
+
+**CSV Document:**
+
+
+	Name,XPtoLvl,AdditionalHP,AchievementIcon
+	1,0,0,"Texture2d'/Game/Textures/AchievementIcon1'"
+	2,1000,9,"Texture2d'/Game/Textures/AchievementIcon2'"
+	3,1000,10,"Texture2D'/Game/Textures/AchievementIcon3'"
+	4,1500,12,"Texture2D'/Game/Textures/AchievementIcon4'"
+	5,2000,14,"Texture2D'/Game/Textures/AchievementIcon5'"
+
+
+[REGION:tip]
+资产类型前后的双引号对属性导入途径十分重要。若没有双引号，则文本将导入为 Texture2d'。 
+[/REGION]
+
+## 数据曲线
+
+数据曲线的工作方式与数据表相似， 
+但数据曲线仅支持浮点型数据。和数据表一样，首列命名为“Name”，并包含用于访问每行 
+以供游戏使用的名称。首列后的每个列标题存储 
+用于绘制曲线的 X 轴变量。该标题下的数据为给定行的 Y 轴值。鉴于此格式， 
+每一行将与一个代码可访问并沿其插入数据的曲线相应。
+
+### 示例
+
+以下为伤害进程的示例表格：
+
+[REGION:simpletable]
+|                      | 0   | 1   | 2   | 3   |
+| -------------------- | --- | --- | --- | --- |
+| Melee_Damage         | 15  | 20  | 25  | 30  |
+| Melee_KnockBack      | 0   | 0   | 0   | 0   |
+| Melee_KnockBackAngle | 0   | 0   | 0   | 0   |
+| Melee_StunTime       | 0   | 0   | 0   | 0   |
+[/REGION]
+
+## 导入过程
+
+导入 CSV 文件的过程非常简单：
+
+1.	从 Excel 或其他电子表格软件以“.csv”为扩展名保存文件。
+2.	打开虚幻编辑器，然后在**Content Browser**中点击**Import**。
+3.浏览并选择您要导入为数据表的 CSV 文件。
+4.最后，从下拉列表中选择行表示法，此例中即 LevelUpData。
+
+	![](levelupdata_options.png)
+
+	该操作将在**Content Browser**的当前目录中创建数据表对象。
+
+	![](datatableobject.png)
+
+	您可以通过**double-clicking**对象在编辑器中查看数据表的内容。您可以通过**right-clicking**对象并选择从菜单**Reimport**更新对象。 
+	请注意，重新导入对象时将使用原始文件路径。以下为完成导入后的数据视图：
+	
+	![](datatableview.jpg)
+
+## 数据连接
+
+通过这些表格连接数据非常简单。从程序员的角度来看，必须执行的操作是 
+放置“FDataTableRowHandle”或“FCurveTableRowHandle”的蓝图公开变量， 
+具体取决于您想要数据表还是曲线表。从内容服务商的角度来看， 
+该操作将显示包含两个子字段的数据字段：
+
+1.	数据表/曲线表 - 这是对包含数据的表格的内容引用。
+2.	行名称 - 这是您要从中获取数据的行的首列名称。
+
+
+## 数据使用（仅限程序员）
+
+连接数据后，使用数据十分简单。句柄结构将提供 
+辅助函数（“FindRow()”和“GetCurve()”），以允许您检索填充了数据的结构或曲线。 
+针对“FCurveTableRowHandle”，返回值为一个“FRichCurve”指针。“FDataTableRowHandle”则 
+允许您在模板函数调用中指定结构。该结构可以是继承性分层中的 
+最终结构或任何父结构。
+
+最后请注意，所有返回的结构和曲线不得在 
+超出函数的本地范围外缓存。其目的是确保若通过重新导入刷新表格， 
+数据更改将立即生效且无法访问无效的指针。
+
+在上述数据表示例中，引用的资产为延迟加载资产（TAssetPtr 处理此事项）。 
+如果资产字段类型设置为 UTexture，则将在加载数据表时加载所有资产。

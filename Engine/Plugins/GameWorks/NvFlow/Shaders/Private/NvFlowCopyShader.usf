@@ -1,0 +1,36 @@
+// NvFlow begin
+
+#include "/Engine/Public/Platform.ush"
+#include "/Engine/Generated/GeneratedUniformBuffers.ush" 
+
+Buffer<uint> BlockList;
+Texture3D<uint> BlockTable;
+
+Texture3D<float4> DataIn;
+RWTexture3D<float4> DataOut;
+
+
+int3 TableValToCoord(uint val)
+{
+	uint valInv = ~val;
+	return int3(
+		(valInv >> 0) & 0x3FF,
+		(valInv >> 10) & 0x3FF,
+		(valInv >> 20) & 0x3FF);
+}
+
+[numthreads(THREAD_COUNT_X, THREAD_COUNT_Y, THREAD_COUNT_Z)]
+void CopyGridData(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	if (all(DispatchThreadId < NvFlowCopyGridData.ThreadDim.xyz))
+	{
+		uint BlockListIdx = DispatchThreadId.x >> NvFlowCopyGridData.BlockDimBits.x;
+		int3 VBlockIdx = TableValToCoord(BlockList[BlockListIdx]);
+		int3 BlockIdx = NvFlowCopyGridData.IsVTR ? VBlockIdx : TableValToCoord(BlockTable[VBlockIdx]);
+		int3 Index = (BlockIdx << NvFlowCopyGridData.BlockDimBits.xyz) | (DispatchThreadId & (NvFlowCopyGridData.BlockDim.xyz - int3(1, 1, 1)));
+
+		DataOut[Index] = DataIn[Index];
+	}
+}
+
+// NvFlow end

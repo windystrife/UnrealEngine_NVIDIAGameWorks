@@ -1,0 +1,282 @@
+﻿INTSourceChangelist:3375296
+Availability:Public
+Title:Cable コンポーネント
+Crumbs:%ROOT%
+Description:Cable コンポーネントの説明
+version:4.15
+parent:Engine/Components/Rendering
+order:
+type:overview
+tags:Components
+tags:Rendering
+SkillLevel:Advanced
+
+![](CC_InGame.png)
+
+[TOC(start:1 end:2)]
+
+低負荷でそっと風に吹かれて揺れるケーブル、ロープ、チェーンを追加する機能を使うと、UE4 プロジェクトが生き生きとしたものになります。以下では、**Cable コンポーネント** プラグインを使って、ケーブルの外観を作成、セットアップ、制御し、レベル内のオブジェクトに反応し、衝突させる方法について説明します。
+
+
+## シミュレーションとレンダリング
+
+実際のケーブルのシミュレーションには、ゲーム制作で知られている **Verlet Integration (ベレの方法)** という技術を使います。これはケーブルを **距離のコンストレイント** を間に持つ一連のパーティクルとして表す考え方です。最後のパーティクルは **固定** され、アタッチされている任意のものと一緒に動きます。間にあるものは **自由** であり、重力で落ちていきます。各ステップで、各パーティクルのベロシティと位置を更新し、コンストレイントに従い移動します。ケーブルの **剛性** は、コンストレイント (各ステップ) を強化するためのイタレーションの回数でコントロールします。
+
+[REGION:lightbox]
+[![](CC_ParticleRope.png)(w:600)](CC_ParticleRope.png)
+[/REGION]
+
+[REGION:caption]
+クリックしてフルサイズで表示
+[/REGION]
+
+チェーン状になった一連のパーティクルがバウンスします。これをレンダリングする必要があります。ケーブルをレンダリングするために、**FCableSceneProxy** というクラスが作成されて、ケーブルのレンダリングをします。Sim パーティクルの位置の各端は (TickComponent 内のメイン スレッドで行われる)、**SendRenderDynamicData_Concurrent** 関数経由でこのプロキシに渡されます。次に、更新はレンダリング スレッドで自動追跡され、次にインデックスと頂点バッファが更新されます。その結果、**tube** メッシュが作られます。このチューブ メッシュの各頂点で、位置、テクスチャ UV、および 3 つのタンジェントベースのベクターを計算する必要があります。これを行う場合、**X** はケーブルに沿ってポイントし、**Z** はケーブルから真っ直ぐポイントし (法線)、**Y** は **X** と **Z** に対して垂直になります。こうしたプロパティはコンポーネントに公開されて、面の数、チューブの半径、およびケーブルにそって UV が何回タイリングされるかを制御する機能があります。
+
+[REGION:lightbox]
+[![](CC_RenderingGeo.png)(w:600)](CC_RenderingGeo.png)
+[/REGION]
+
+[REGION:caption]
+クリックしてフルサイズで表示
+[/REGION]
+
+
+## プラグインを有効にする
+
+Cable コンポーネントのプラグインはデフォルトで有効になっています。有効になっていない場合は、メイン ツールバーで、**[Edit]** > **[Plugins]** の順に選択します。次にプラグインのリストから、**[Rendering]** に進み、**[Cable Component]** の **[Enabled]** の隣にあるボックスにチェックを入れるようにします。 
+
+[REGION:lightbox]
+[![](CC_PluginEnable.png)(w:505)](CC_PluginEnable.png)
+[/REGION]
+
+[REGION:caption]
+クリックしてフルサイズで表示
+[/REGION]
+
+## Cable コンポーネントを使用する
+
+プロジェクトのレベルに Cable コンポーネントを追加するには、2 種類の方法があります。次のセクションでは、こうした方法について説明します。
+
+### モード パネルから Cable コンポーネントを使用する 
+
+[Modes (モード)] パネルから Cable コンポーネントを使用するには、以下の手順に従います。
+
+1. **[Modes]** パネルが表示されていることを確認し、 **クラスの検索** ボックスで、`Cable` という言葉を入力します。
+
+    ![](CC_Find_In_Modes.png)
+
+1. Cable アクタをワールドに追加するには、[Modes] パネル で Cable アクタをクリックし、それをレベルにドラッグします。 
+
+    [REGION:lightbox]
+    [![](CC_Add_CC_From_Modes.png)(w:700)](CC_Add_CC_From_Modes.png)
+    [/REGION]
+
+    [REGION:caption]
+    クリックしてフルサイズで表示
+    [/REGION]
+
+1. Cable アクタを配置、回転、スケーリングしてレベルのニーズに合わせます。
+
+    [OBJECT:EmbeddedVideo]
+        [PARAMLITERAL:width]
+        640
+        [/PARAMLITERAL]
+        [PARAMLITERAL:height]
+        360
+        [/PARAMLITERAL]
+        [PARAMLITERAL:videoid]
+        8sAwYlKV_ao
+        [/PARAMLITERAL]
+    [/OBJECT]
+
+### ブループリントで Cable コンポーネントを使用する
+
+ブループリントで Cable コンポーネントを使用するには、以下の手順に従います。
+
+1. まず、**BP_Cable** という新規ブループリントを作成します。このブループリントで **Actor** を親クラスとして使うようにします。
+
+    ![](CC_MakeNewBP.png)
+
+1. 次に、BP_Cable ブループリントの **[Components]** セクションから、**[Add Component]** ボタンをクリックして、リストで **Cable** コンポーネントを探します。コンポーネントが見つかったら、クリックしてコンポーネント リストに追加します。
+
+    ![](CC_Add_CC.png)
+
+1. Cable コンポーネントが追加された状態で、コンポーネント リストで **Cable** コンポーネントを選択し、**[Details]** パネルでプロパティを調整できるようにします。現時点ではすべてをデフォルトのままにして、必ずブループリントをコンパイルおよび保存するようにしてください。
+
+    ![](CC_Cable_Options.png)
+
+    [region:note]
+    ケーブルのいずれかの端が落ちるようにするには、ケーブル コンポーネントの [Details ] パネルで、**[Attach Start]** または ** [Attach End]** のいずれかのオプションのチェックを外します。これはゲーム実行中もエフェクトに合わせて切り替えることができます。
+    [/region]
+
+1. **コンテンツ ブラウザ** で Cable ブループリントを見つけてレベルにドラッグします。配置したら、必要に応じて移動ツールや回転ツールを使って配置します。
+
+    [REGION:lightbox]
+    [![](CC_Add_BP_CC.png)(w:700)](CC_Add_BP_CC.png)
+    [/REGION]
+
+    [REGION:caption]
+    クリックしてフルサイズで表示
+    [/REGION]
+
+## ケーブル終端にオブジェクトをアタッチする
+
+ケーブルのいずれかの端にオブジェクトをアタッチして、ケーブルと一緒にオブジェクトをスイングさせることもできます。UE4 プロジェクトでこの操作を行うには、以下の手順を行うだけです。
+
+1. まず **Cable アクタ** と **Static Mesh** をレベルに追加する必要があります。 
+
+    [REGION:lightbox]
+    [![](CC_Add_CC_And_SM.png)(w:500)](CC_Add_CC_And_SM.png)
+    [/REGION]
+
+    [REGION:caption]
+    クリックしてフルサイズで表示
+    [/REGION]
+
+    [region:note]
+    端にアタッチするスタティックメッシュの **[Mobility]** を **[Moveable]** に設定するようにします。
+    [/region]
+
+1. ワールド アウトライナーで Cable アクタの端にアタッチするスタティックメッシュを探して、それを Cable アクタの上にドラッグします。これを行うと、次のような入力ウィンドウが表示されます。
+
+    [REGION:lightbox]
+    [![](CC_Attach_To_End.png)(w:500)](CC_Attach_To_End.png)
+    [/REGION]
+
+    [REGION:caption]
+    クリックしてフルサイズで表示
+    [/REGION]
+
+1. **[Cable End]** オプションを選ぶと、ビューポートでスタティックメッシュが Cable アクタの端にスナップしているのがわかります。
+
+    [OBJECT:ComparisonSlider]
+        [PARAM:before]
+        ![Before](CC_Attach_Before.png)
+        [/PARAM]
+        [PARAM:after]
+        ![After](CC_Attach_After.png)
+        [/PARAM]
+    [/OBJECT]
+
+1. レベルで Cable アクタを選択します。次に **[Details]** パネルの **[Cable]** セクションで **[Attach End]** ボックスのチェックを外します。 
+
+    [REGION:lightbox]
+    [![](CC_Remove_ATE.png)(w:300)](CC_Remove_ATE.png)
+    [/REGION]
+
+    [REGION:caption]
+    クリックしてフルサイズで表示
+    [/REGION]
+
+    [region:note]
+    ケーブルをアクタにアタッチするには、**Attach Start** と **Attach End** のオプション以外も使用することができます。アタッチメント ポイントとして使用可能なソケットを指定することもできます。
+    [/region]
+
+1. これを行うと、ビューポートでケーブルは自由にスイングするようになります。
+
+    [OBJECT:EmbeddedVideo]
+        [PARAMLITERAL:width]
+        640
+        [/PARAMLITERAL]
+        [PARAMLITERAL:height]
+        360
+        [/PARAMLITERAL]
+        [PARAMLITERAL:videoid]
+        3auyPSMCGcE
+        [/PARAMLITERAL]
+    [/OBJECT]
+
+    [region:note]
+    ランタイムに **Attach Start** と **Attach End** のブールを動的に切り替えることができます。そうすることで面白いエフェクトを作ることができます。
+    [/region]
+
+## コリジョンと剛性
+
+[region:warning]
+コリジョンと剛性を有効にすると、Cable アクタの負荷が大幅に増えます。ケーブルがワールドで何かと衝突しなければならない場合や、エフェクトの見た目をよくするために剛性が必要な場合に限り、こうした機能を有効にしてください。こうした機能が不要ならば、パフォーマンスを上げるために無効にするとよいでしょう。
+[/region]
+
+Cable コンポーネントには、ケーブルがどれくらい剛性を持っているかを制御しながら、ワールドでケーブルを衝突させるオプションがあります。この機能を有効にするには、以下の手順を行います。
+
+1. まず、Cable コンポーネントの [Details] の [Cable] セクションで、小さな白いトライアングルを押して詳細オプションを展開します。
+
+    ![](CC_Advanced_Options.png)
+
+1. **[Enable Stiffness]** と **[Enable Collision]** の両方のオプションにチェックを入れて有効にします。
+
+    [REGION:lightbox]
+    [![](CC_Added_CC.png)(w:700)](CC_Added_CC.png)
+    [/REGION]
+
+    [REGION:caption]
+    クリックしてフルサイズで表示
+    [/REGION]
+
+1. Cable アクタを動かす、またはオブジェクトが衝突すると、Cable アクタすなわちケーブルが接触するオブジェクトと衝突します。
+
+    [OBJECT:EmbeddedVideo]
+        [PARAMLITERAL:width]
+        640
+        [/PARAMLITERAL]
+        [PARAMLITERAL:height]
+        360
+        [/PARAMLITERAL]
+        [PARAMLITERAL:videoid]
+        e18Kr8v-nNI
+        [/PARAMLITERAL]
+    [/OBJECT]
+
+## プロパティの内容
+
+以下の表は、Cable コンポーネントのプロパティを示したものです。
+
+#### Cable
+
+![](CC_Cable_Properties.png)
+
+|プロパティ名| 説明|
+|-------------|----------------|
+|**Attach Start**| ケーブルの始端を何かに修正するか、フリーのままにします。false の場合、コンポーネントのトランスフォームは、ケーブルの始まりの初期位置として使用されます。|
+|**Attach End**| ケーブルの終端を何かに修正するか (AttachEndTo および EndLocation を使って)、フリーのままにします。false の場合、AttachEndTo と EndLocation がケーブル終端の初期位置に使われます。|
+|**Attach End To**| ケーブルの終わりの位置を定義するアクタまたはコンポーネントです。|
+|**Component Property**| ケーブルをアタッチするコンポーネントのプロパティ名です。|
+|**Attach End To Socket Name**| アタッチする AttachEndTo コンポーネントのソケットの名前です。|
+|**End Location**| ケーブルの終端。指定した場合は、AttachEndTo (または AttachEndToSocketName) に相対的で、そうでなければ Cable コンポーネントに相対的になります。|
+|**Cable Length**| 静止したケーブルの長さです。|
+|**Num Segments**| ケーブルがいくつセグメントを持っているかです。|
+|**Solver Iterations**| ケーブルがどれくらい剛性を持つかを制御するソルバー イタレーションの数です。|
+|**Substep Time**| ケーブルのシミュレーション サブステップの時間を制御します。|
+|**Enable Stiffness**| 剛性コンストレイントをケーブルに追加します。|
+|**Enable Collision**| 各サブステップで各ケーブル パーティクルをスイープし、ワールドとのコリジョンを回避します。このコンポーネントで Collision Preset を使って何を衝突させるかを決めます。これによりケーブルのシミュレーションの負荷が大幅に高くなります。[REGION:note]これは現在、実験的な機能です。[/REGION]|
+
+### Cable Forces
+
+![](CC_CableForces_Properties.png)
+
+|プロパティ名| 説明|
+|-------------|----------------|
+|**Cable Forces**|ケーブルのすべてのパーティクルに適用される Force ベクター (ワールド空間) です。|
+|**Cable Gravity Scale**|このケーブルに影響を与えるワールドの重力に適用されるスケーリングです。|
+
+### ケーブルのレンダリング
+
+![](CC_CableRendering_Options.png)
+
+|プロパティ名| 説明|
+|-------------|----------------|
+|**Cable Width**|ケーブル ジオメトリがどれくらいの幅であるかです。|
+|**Num Sides**|ケーブル ジオメトリの面の数です。|
+|**Tile Material**|ケーブルの長手方向に沿ってマテリアルを何回繰り返すかです。|
+
+## 追加のリファレンス 
+
+以下は、Cable コンポーネントに関する詳しい情報が記載されている外部リファレンスです。**Verlet Integration (ベレの方法)** については、Thomas Jakobsen 氏による以下のドキュメントをご覧ください。
+
+*	[http://graphics.cs.cmu.edu/nsp/course/15-869/2006/papers/jakobsen.htm](http://graphics.cs.cmu.edu/nsp/course/15-869/2006/papers/jakobsen.htm)
+
+
+
+
+
+
+

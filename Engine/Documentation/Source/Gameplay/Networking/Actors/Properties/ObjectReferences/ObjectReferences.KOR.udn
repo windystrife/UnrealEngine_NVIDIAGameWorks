@@ -1,0 +1,42 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title:오브젝트 레퍼런스 리플리케이션
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking, Gameplay/Networking/Actors, Gameplay/Networking/Actors/Properties
+Description:오브젝트 레퍼런스 프로퍼티의 리플리케이션 방법에 대한 세부 정보입니다.
+Related: Gameplay/Networking/Actors/Properties/Conditions
+Related: Gameplay/Networking/Actors/RPCs
+version: 4.9
+
+일반적으로 오브젝트 레퍼런스는 UE4 멀티플레이 프레임워크에서 자동으로 처리됩니다. 무슨 뜻이냐면, 리플리케이트되는 UObject 프로퍼티가 있다면, 그 오브젝트에 대한 레퍼런스는 서버에 의해 할당된 특수 ID 로 네트워크를 통해 전송된다는 뜻입니다. 특수 ID 는 FNetworkGUID 입니다. 서버는 이 ID 할당을 담당한 뒤, 그에 대해 접속된 모든 클라이언트에 알립니다.
+
+오브젝트 레퍼런스 리플리케이션을 위해서는, UObject 프로퍼티를 replicated 로 마킹해 주면 됩니다:
+
+	class ENGINE_API AActor : public UObject
+	{
+		UPROPERTY( replicated )
+		AActor * Owner;
+	};
+
+이 경우 "Owner" 프로퍼티는 이 프로퍼티가 가리키는 액터에 대해 리플리케이트되는 레퍼런스가 됩니다.
+
+오브젝트가 네트워크를 통해 제대로 레퍼런싱되도록 하려면, 반드시 네트워킹을 지원해야 합니다. 그 여부를 검사하려면, `UObject::IsSupportedForNetworking()` 를 호출하면 됩니다. 이는 일반적으로 로우 레벨 함수로 간주되므로, 게임 코드에서 이 검사를 할 일은 별로 없습니다.
+
+일반적으로, 네트워크를 통해 한 오브젝트를 레퍼런싱할 수 있는지 결정하는 기준은 다음과 같습니다:
+
+* 리플리케이티드 액터는 레퍼런스로 리플리케이션 가능합니다.
+* 리플리케이티드 액터가 아닌 경우 반드시 안정된 이름을 사용해야 합니다 (패키지에서 직접 로드).
+* 리플리케이티드 컴포넌트는 레퍼런스로 리플리케이션 가능합니다.
+* 리플리케이티드 컴포넌트가 아닌 경우 반드시 안정된 이름을 사용해야 합니다.
+* 다른 모든 (액터나 컴포넌트가 아닌) UObject 는 로드된 패키지에서 직접 와야 합니다.
+
+### 안정된 이름의 오브젝트
+
+안정된 이름의 오브젝트는 단순히 서버와 클라이언트 양쪽에 존재하는 오브젝트로, 똑같은 이름을 갖습니다.
+
+패키지에서 직접 로드된 액터(게임플레이 도중 스폰된 것이 아니)라면 안정된 이름을 갖습니다.
+
+컴포넌트가 안정된 이름을 갖는 경우는:
+* 패키지에서 직접 로드된 경우,
+* 간단한 컨스트럭션 스크립트를 통해 추가된 경우,
+* (`UActorComponent::SetNetAddressable` 를 통해) 수동 마킹된 경우입니다.
+	* 서버와 클라이언트에 이름이 똑같도록 컴포넌트 이름을 수동으로 지어줘야겠다 알고있는 경우에만 사용해야 합니다 (`AActor` C++ 생성자에 추가된 컴포넌트가 좋은 예입니다).

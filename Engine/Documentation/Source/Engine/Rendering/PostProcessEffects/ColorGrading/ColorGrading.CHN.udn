@@ -1,0 +1,121 @@
+﻿INTSourceChangelist:1917101
+Availability:Public
+Title:颜色分级
+Crumbs: %ROOT%, Engine, Engine/Rendering, Engine/Rendering/PostProcessEffects
+Description:调整场景颜色所需的色调映射和颜色校正效果
+
+在虚幻引擎中，术语 **颜色分级** 包含了 **色调映射** 功能(从HDR到LDR的转换)和进一步的 **颜色校正** 功能(从LDR颜色到屏幕颜色的转换)。
+
+## 色调映射
+
+[EXCERPT:ToneMapping_Desc]
+**色调映射** 函数的功能是把大范围的HDR(高动态范围的)颜色映射为小范围的LDR(低动态范围)颜色，以便显示器可以显示该颜色。 这个过程是在后期处理过程中正常渲染之后完成的。 全局色调映射器是一个具有3个输入(RGB)和三个输出(RGB)的函数。 局部色调映射器也会在计算时将邻近像素作为计算因素，但其运算强度会更高(意味着处理速度更慢)。 一个良好的色调映射器函数即使像素颜色非常亮，也会尝试保留该像素的颜色。
+[/EXCERPT:ToneMapping_Desc]
+
+以下图表显示了范围从由0到5的每个通道是如何映射到新的0到1的范围的：
+
+![Tone Mapping Graphs](newtone.jpg)
+
+这是使用的函数：
+
+	GammaColor = LinearColor / (LinearColor + 0.187) * 1.035;
+
+注意明亮的颜色渐渐地变得更亮，但是要比暗颜色变亮的程度小得多。 黑色部分仍然是黑色，并且曲线会有一个几乎呈线性的部分会比没有进行色调映射的曲线更加陡峭。 那会导致对比度的提高。 当使用色调映射器时这是正常的，并且会获得一个不同的外观，因而为了获得更好的效果，源图片需要在亮度上更加具有动态性(更高的HDR)。 这样就可以呈现出更加真实的电影般的效果。
+
+现在呈现的色调映射器公式已经有了两个可调整的常量，如有更多的数学公式将可进行进一步的调整，但是找到一个好用的函数并不像达到我们所需的质量/便携性/性能那么简单。 我们决定坚持使用简单的公式，并使用简单的颜色查找来修改得到的LDR颜色。 因为我们已经把HDR颜色映射到了一个有限范围内，所以我们可以获得许多暗色表现方式，并且我们仍可以修改明亮的颜色。 这个方法是很容易理解的，它在局部控制上提供了很大的灵活性，以及几乎稳定不变的性能。 
+
+| 属性 | 描述 |
+| -------- | ----------- |
+| **Scene Color Tint** （场景着色）| 被应用为HDR场景颜色的过滤器颜色（乘积）。 [INCLUDE:#SceneColorTint] |
+| **Tonemapper Toe Factor** （色调映射器末端因数）| 启用对色调映射器中暗色的修改。 该值的范围是[0.0, 1.0]。 [INCLUDE:#TonemapperToeFactor] |
+
+<!--
+[EXCERPT:SceneColorTint]
+[REGION:imagetable]
+| ![Scene Color Tint - (1.0, 1.0, 1.0)](scene_tint_full_small.png)(w:390) | ![Scene Color Tint - (0.25, 0.25, 0.25)](scene_tint_quarter_small.png)(w:390)
+| ------ | ------ |
+| (1.0, 1.0, 1.0) | (0.25, 0.25, 0.25) |
+[/REGION]
+[/EXCERPT:SceneColorTint]
+
+[EXCERPT:TonemapperToeFactor]
+[REGION:imagetable]
+| ![Toe Factor - 0](toe_factor_0_small.png)(w:390) | ![Toe Factor - 1](toe_factor_1_small.png)(w:390)
+| ------ | ------ |
+| 0.0 | 1.0 |
+[/REGION]
+[/EXCERPT:TonemapperToeFactor]
+-->
+
+## 颜色校正
+
+[EXCERPT:LookupTexture]
+颜色校正是通过查找表(LUTs)来完成的。 我们决定不使用3个1维的查找表格而是使用单个3维的查找表格，因为这为我们提供了更加复杂的颜色转换(比如,颜色冲淡)。 以下图片显示了16x16x16中性色LUT (查找表)展开为一个256x16的贴图(正如当前在贴图浏览器中看到的这个贴图)：
+
+[REGION:raw]
+![Neutral LUT](RGBTable16x1.png)
+[/REGION]
+
+[REGION:note]
+您可以使用本页面的RGBTable16x1.png图片，但不要进行复制和粘贴，因为屏幕上显示的图片并不一定代表源图像。 
+
+* [LUT Texture Example](RGBTable16x1.png) -右键点击并 **另存为**
+
+[/REGION]
+
+修改后的贴图可能如下所示：
+
+[REGION:raw]
+![Sepia Tone LUT](LUT_Sepia.png)
+[/REGION]
+
+为使用LUT（查找表）,您需要在您要使用的后期处理体积中分配LUT贴图。 
+
+| 属性 | 描述 |
+| -------- | ----------- |
+| **Color Grading Intensity** (颜色分级强度)| 控制颜色校正效果的缩放因数。 |
+| **Color Grading LUT** （颜色分级查找表）| 用于颜色校正查找表的LUT贴图。 [INCLUDE:Engine/Rendering/PostProcessEffects/ColorGrading#ColorGradingLUT] |
+
+<!--
+[EXCERPT:ColorGradingLUT]
+[REGION:imagetable]
+| ![Natural Scene](lut_none.png)(w:265) | ![Greenish Scene](lut_green.png)(w:265) | ![Reddish Scene](lut_red.png)(w:265) |
+| ------ | ------ | ------ |
+| ![Neutral LUT](RGBTable16x1.png) | ![Greenish LUT](LUT_Greenish.png) | ![Reddish LUT](LUT_Reddish.png) |
+[/REGION:imagetable]
+[/EXCERPT:ColorGradingLUT]
+-->
+
+### LUT贴图创建
+
+流程如下：
+
+1. 获得您想调整的场景的具有代表性的屏幕截图，把它们放到一个Photoshop文档中。
+1. 加载中性色的 256x16 LUT到Photoshop中。
+
+	[REGION:note]
+	您可以使用本页面的RGBTable16x1.png图片，但不要进行复制和粘贴，因为屏幕上显示的图片并不一定代表源图像。 
+
+	* [LUT Texture Example](RGBTable16x1.png) -右键点击并 **另存为**
+
+	[/REGION]
+
+1. 把LUT插入到具有屏幕截图的Photshop文档中（在LUT文档中选择所有，复制，切换到屏幕截图文档，粘帖)。
+1. 应用颜色处理操作(最好通过添加调整层来实现，否则您需要提前使得所有东西都变平，这会使得稍后的256x16大小的图片裁剪变得更加复杂 )。
+1. 选择该256x16 LUT (在图层面板中选择LUT层，菜单:选择/加载 , 确定)。
+1. 复制已合并的LUT内容。（菜单：编辑/复制已合并内容）。
+1. 以引擎可以读取的某种非压缩格式粘帖并保存该256x16的贴图。(菜单：文件/新建，菜单：编辑/粘贴，菜单：文件/另存为）。
+1. 在编辑器中导入该贴图，然后定义ColorLookupTable贴图组。 
+
+
+可以进行各种颜色校正。 这里有几个示例：
+
+* Brightness(亮度)
+* Saturation(饱和度)
+* 简单的对比度(具有区间限定的线性变化)
+* 较高质量的对比度(比如，在中间部分具有比较陡峭的线性部分的曲线)
+* 选择性地修改图片的暗处、中间色调及亮处区域(比如，曲线)
+* 选择性地修改特定的颜色(从亮度处于单独通道的某些颜色空间内，展现的效果最佳，比如LAB)
+* 调整甚至可以在不同的颜色空间内进行(比如，LAB可以使得亮度和颜色独立，这是非常有用的)。 
+
+[/EXCERPT:LookupTexture]

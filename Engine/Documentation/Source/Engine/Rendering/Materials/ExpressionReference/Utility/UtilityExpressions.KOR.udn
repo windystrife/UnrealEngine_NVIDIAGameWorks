@@ -1,0 +1,668 @@
+﻿INTSourceChangelist:3531989
+Availability: Public
+Crumbs: %ROOT%
+Title: Utility 표현식
+Description:하나 이상의 입력에 여러가지 유용한 연산을 하는 표현식입니다.
+Type: Reference
+Version:4.16
+Parent:Engine/Rendering/Materials/ExpressionReference
+Order:
+Tags:Materials
+Topic-image:Utility_topic.png
+
+
+[EXCERPT:TOC]
+[TOC(start:2 end:2)]
+[/EXCERPT:TOC]
+
+
+여기서는 머티리얼의 출력 값에 영향을 주는 값을 입력할 수 있는 다양한 유틸리티 표현식을 확인할 수 있습니다. 예를 들어 GIReplace 노드는 오브젝트의 간접 반사광을 주어진 입력 값으로 대체하거나, LinearInterpolate 노드는 두 입력 값의 블렌딩을 알파 값으로 제어합니다. 머티리얼을 제어할 수 있는 것들이 여러가지 있으니 아래 예제에서 자세히 확인해 보시기 바랍니다.
+
+
+## A - H
+
+
+[EXCERPT:AntialiasedTextureMask]
+### AntialiasedTextureMask
+
+AntialiasedTextureMask 로는 부드러운 (안티 앨리어싱이 적용된) 트랜지션 마스크를 사용하는 머티리얼을 만들 수 있습니다. 이 마스크는 두 개의 복잡한 머티리얼 프로퍼티를 블렌딩하거나, (SoftMasked 와 잘 작동하는) 알파 블렌딩된 머티리얼을 페이드 아웃 시키는 데 사용할 수 있습니다. 그저 마스크가 지정된 텍스처를 (R G B A 중) 한 채널에 지정하고, 표현식에 사용된 채널을 설정한 다음 비교값을 지정합니다. 채널에 0=검정 에서 1=하양 의 회색조 값이 저장되어 있다 가정한다면, 비교 함수를 통해 마스크 결과 0 이 될지 1 이 될지를 결정합니다. 이 표현식은 파라미터로, 자손 Material Instance 에서 **Texture** 프로퍼티를 덮어쓸 수 있습니다.
+
+| 항목 | 설명 |
+| ---- | ---- |
+| [REGION:tablesection]프로퍼티[/REGION] ||
+| **Threshold** | 픽셀 커트라인으로 사용할 값을 지정합니다. 이 값보다 픽셀 값이 작으면 검정, 크면 하양이 됩니다. |
+| **Channel** | 마스크로 사용할 텍스처 채널을 지정합니다. |
+| **Texture** | 마스크 텍스처를 지정합니다. |
+| [REGION:tablesection]입력[/REGION] ||
+| **UVs** | 텍스처 마스크에 적용할 텍스처 좌표를 받습니다. |
+
+
+**모조 코드:**
+
+    Result = 1
+    if TextureLookup < Threshold then Result = 0
+    
+실제 구현은 훨씬 복잡한데, 계단현상을 피하기 위해 실제 픽셀 범위에 따라 0 에서 1 사이의 값을 반환하려 하기 때문입니다.
+
+예 (이 자그마한 128x128 텍스처는 미압축 최적의 퀄리티입니다):
+
+![ULogoLowBlurred.png](ULogoLowBlurred.png)
+
+(좌상단) 노멀 텍스처로 사용된 것과, (우하단) 방금 설명한 머티리얼 표현식에 사용된 것입니다:
+
+![AAMasked_Demo.png](AAMasked_Demo.png)
+
+이 기법은 블러링이 적용된 입력 콘텐츠나 확대 상태에서 두각을 드러냅니다. 압축으로 인한 퀄리티 손상이 크니 미압축 저해상도 텍스처를 사용하시기를 권합니다.
+
+[/EXCERPT:AntialiasedTextureMask]
+
+
+<!--------------------------------------------------------->
+
+
+### BlackBody
+
+Black Body (흑체)는 머티리얼 안에서 [black body radiation (흑체복사)](http://en.wikipedia.org/wiki/Black-body_radiation) 효과를 흉내내는 표현식입니다. 사용자가 (켈빈 단위로) 온도를 입력하면 그 색과 강도 결과를 베이스 컬러와 이미시브 값을 구동하는 데 사용하여 물리적으로 정확한 결과를 얻을 수 있습니다.
+
+[REGION:fullwidth]
+![](BlackBody.png)
+[/REGION]
+
+
+<!--------------------------------------------------------->
+
+### BumpOffset
+
+[EXCERPT:BumpOffset]
+BumpOffset 은 흔히 'Parallax Mapping' (시차 매핑)이라 알려진 것에 대한 언리얼 엔진 4 용어입니다. BumpOffset 표현식으로 별도의 지오메트리 추가 없이 머티리얼에 입체감을 줄 수 있습니다. BumpOffset 머티리얼은 회색조 _하이트맵_ (heightmap, 높이맵)을 사용하여 깊이 정보를 나타냅니다. 하이트맵에서 밝은 부분은 더욱 '튀어나와' 보이며, 이러한 부분은 표면을 따라 움직이는 카메라로 보면 시차를 (많이 움직인 것으로) 보이게 됩니다. 하이트맵의 어두운 부분은 '멀어 보이는' 부분으로, 조금 움직이는 부분입니다.
+[/EXCERPT:BumpOffset]
+
+
+| 항목 | 설명 |
+| ---- | ---- |
+| [REGION:tablesection]프로퍼티[/REGION] ||
+| **HeightRatio** | _하이트맵_ 에서 취한 깊이에 대한 배수입니다. 값이 클 수록 깊이도 극심해 집니다. 전형적인 값 범위는 0.02 에서 0.1 까지입니다. |
+| **ReferencePlane** | 이펙트를 적용할 텍스처 공간의 대략적인 높이를 지정합니다. 0 이면 텍스처가 표면에서 완벽히 떨어져 나온 것으로 왜곡되어 보이며, 0.5 (디폴트)면 표면 일부는 튀어나와 보이고 일부는 가라앉아 보입니다. |
+| [REGION:tablesection]입력[/REGION] ||
+| **Coordinate** | 표현식이 수정할 바탕 텍스처 좌표를 받습니다. |
+| **Height** | 하이트맵으로 사용할 텍스처를 (또는 값을) 받습니다. |
+| **HeightRatioInput** |  _하이트맵_ 에서 받은 깊이에 대한 배수입니다. 값이 클 수록 깊이값도 극심해 집니다. 전형적인 값 범위는 0.02 에서 0.1 까지입니다. 이 옵션이 사용되면 HeightRatio 프로퍼티의 값보다 이 입력값이 우선합니다. |
+
+[REGION:fullwidth]
+![BumpOffsetExample.png](BumpOffsetExample.png)
+[/REGION]
+
+
+<!--------------------------------------------------------->
+
+
+### ConstantBiasScale
+
+ConstantBiasScale 는 입력값을 받은 다음 편향치(Bias)를 더해 스케일 인수로 곱한 다음 결과를 출력하는 표현식입니다. 즉 예를 들어 [-1,1] 범위의 입력 데이터를 [0,1] 로 변환하려면, 편향치 1.0, 스케일 0.5 를 사용하면 됩니다.
+
+| 항목 | 설명 |
+| ---- | ---- |
+| [REGION:tablesection]프로퍼티[/REGION] ||
+| **Bias** | 입력에 더할 값을 지정합니다. |
+| **Scale** | 편향치가 적용된 결과에 대한 배수를 지정합니다. |
+
+
+![ConstantBiasScaleExample.png](ConstantBiasScaleExample.png)
+
+
+<!--------------------------------------------------------->
+
+
+### DDX
+
+DDX 표현식은 픽셀 셰이더 계산에 사용되는 GPU 하드웨어 기능, DDX 파생 계산을 노출시킵니다.
+
+
+<!--------------------------------------------------------->
+
+
+### DDY
+
+DDY 표현식은 픽셀 셰이더 계산에 사용되는 GPU 하드웨어 기능, DDY 파생 계산을 노출시킵니다.
+
+
+<!--------------------------------------------------------->
+
+
+### DepthFade
+
+**DepthFade** 펴현식은 반투명 오브젝트가 불투명 오브젝트와 겹칠 때 발생하는 보기 안좋은 이음새를 숨기는 데 사용됩니다.
+
+| 항목 | 설명 |
+| -------- | ----------- |
+| [REGION:tablesection]프로퍼티[/REGION] ||
+| **Fade Distance** | 페이드 거리 - 이만큼의 월드 스페이스 거리에 걸쳐 페이드가 일어납니다. FadeDistance 입력이 연결되지 않은 경우 사용됩니다ㅣ. |
+| [REGION:tablesection]입력[/REGION] ||
+| **Opacity** | 오파시티 - 뎁스 페이드 이전의 오브젝트 기존 불투명도 값을 받습니다. |
+| **FadeDistance** | 페이드 거리 - 이만큼의 월드 스페이스 거리에 걸쳐 페이드가 일어납니다. |
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![뎁스 페이드 전](Engine\Rendering\Materials\ExpressionReference\Depth\DepthFade0.png)(w:340)
+	[/PARAM]
+	[PARAM:after]
+	![뎁스 페이드 후](Engine\Rendering\Materials\ExpressionReference\Depth\DepthFade1.png)(w:340)
+	[/PARAM]
+[/OBJECT]
+
+[REGION:lightbox]
+[![](Engine\Rendering\Materials\ExpressionReference\Depth\DepthFadeNetwork.png)(h:340)](Engine\Rendering\Materials\ExpressionReference\Depth\DepthFadeNetwork.png)
+[/REGION]
+[REGION:caption]
+클릭하면 이미지 원본을 확인합니다. 
+[/REGION]
+
+
+<!--------------------------------------------------------->
+
+
+### DepthOfFieldFunction
+
+Depth of Field Function (뎁스오브필드 함수)는 머티리얼에 뎁스 오브 필드로 인한 블러링이 적용될 때 아티스트가 머티리얼에 적용되는 효과를 조절할 수 있도록 하기 위한 표현식입니다. 0-1 사이의 값을 출력하며, 0 은 "초점잡힌" 상태, 1 은 "완전히 흐려진" 상태를 나타냅니다. 이는 텍스처의 선명한 버전과 흐린 버전을 보간하기에 좋습니다. _뎁스_ 입력은 씬의 뎁스 오브 필드 계산의 기존 결과를 다른 계산으로 덮어쓰는 것이 가능합니다.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![블렌딩된 컬러](DepthOfFieldFunction_Color.png)(w:350)
+	[/PARAM]
+	[PARAM:after]
+	![보통 / 블러링된 텍스처 블렌딩](DepthOfFieldFunction_Texture.png)(w:350)
+	[/PARAM]
+[/OBJECT]
+
+[REGION:lightbox]
+[![](DepthOfFieldFunctionNetwork.png)(w:350)](DepthOfFieldFunctionNetwork.png)
+[/REGION]
+[REGION:caption]
+클릭하면 이미지 원본을 확인합니다. 
+[/REGION]
+
+
+<!--------------------------------------------------------->
+
+
+[EXCERPT:Desaturation]
+### Desaturation
+
+Desaturation 는 일정 비율에 따라 입력된 색의 채도를 감소(탈색), 다른 말로 회색조로 변환하는 표현식입니다.
+
+| 항목 | 설명 |
+| ---- | ---- |
+| [REGION:tablesection]프로퍼티[/REGION] ||
+| **Luminance Factors** | 각 채널의 탈색에 대한 공헌도를 지정합니다. 탈색했을 때 빨강 초록 파랑 어느 것이 밝은가를 조절합니다. |
+| [REGION:tablesection]입력[/REGION] ||
+| **Percent** | 입력에 적용할 탈색량을 지정합니다. 범위는 0.0 (완벽 탈색)에서 1.0 (탈색 없는 원색)까지 입니다. |
+
+
+![DesaturationExample.png](DesaturationExample.png)
+
+[REGION:note]
+**프로그래머:** 탈색된 색은 `D`, 입력 색은 `I`, 휘도 인수는 `L` 로 정의할 때, 출력은 `O = (1-Percent)*(D.dot(I)) + Percent*I` 입니다.
+[/REGION]
+[/EXCERPT:Desaturation]
+
+
+<!--------------------------------------------------------->
+
+
+[EXCERPT:Distance]
+### Distance
+
+Distance 표현식은 두 점/색/위치/벡터 사이의 (유클리드) 거리를 계산하여 결과값을 출력합니다. 1, 2, 3, 4 성분 벡터 연산이 가능은 합니다만, 채널 수는 서로 같아야 합니다. 
+
+| 항목 | 설명 |
+| ---- | ---- |
+| [REGION:tablesection]입력[/REGION] ||
+| **A** | 길이 무관 벡터나 값을 받습니다. |
+| **B** | 길이 무관 벡터나 값을 받습니다. |
+
+[REGION:fullwidth]
+![DistanceExample.png](DistanceExample.png)
+[/REGION]
+
+**모조 코드:**
+
+	Result = length(A - B)
+
+**로우 레벨 HLSL 코드:**
+	
+	float Result = sqrt(dot(A-B, A-B))
+	
+[/EXCERPT:Distance]
+
+
+<!--------------------------------------------------------->
+
+
+### DistanceFieldGradient
+
+**DistanceFieldGradient** 머티리얼 표현식은, 정규화되면, 오브젝트의 디스턴스 필드 내 X,Y,Z 이동 방향을 출력합니다.
+그러면 Distance Field Gradient 머티리얼 표현식 노드가 액체 흐름 시뮬레이션에 잘 맞습니다.
+
+[region:note]
+**Generate Mesh Distance Fields** (메시 디스턴스 필드 생성)은 **프로젝트 세팅** 의 **렌더링** 카테고리 아래 **메시 디스턴스 필드** 옵션이 켜져있어야 정상 작동합니다.
+[/region]
+
+| 항목 | 설명 |
+| -------- | ----------- |
+| **Position**  | 위치 - 입력이 없으면 현재 월드 포지션이 기본값입니다. |
+
+머티리얼에서 **DistanceFieldGradient** 머티리얼 표현식을 사용하는 방법 예제입니다.
+아래 예제에서 DistanceFieldGradient 를 먼저 정규화한 다음 Mask Channel 노드로 입력한 것을 볼 수 있습니다.
+그 이유는 DistanceFieldGradient 를 먼저 정규화시키지 않으면 방향 데이터를 얻을 수 없기 때문입니다.
+Mask Channel Parameter 를 추가한 것은 머티리얼 인스턴스 내 RGB 채널 전환을 쉽게 하기 위해서입니다.
+
+[Region:lightbox]
+[![](DistanceFieldGradient_Material.png)](DistanceFieldGradient_Material.png)
+[/Region]
+[REGION:caption]
+클릭하면 이미지 원본을 확인합니다. 
+[/REGION]
+
+실제 DistanceFieldGradient 활용 예제입니다.
+아래 그림은 다양한 RGB 옵션을 켰을 때 DistanceFieldGradient 가 어떤 데이터를 사용할 것인지 보여줍니다.
+
+[Region:lightbox]
+[![](DistanceFieldGradient_Example.png)(w:960)](DistanceFieldGradient_Example.png)
+[/Region]
+[REGION:caption]
+클릭하면 이미지 원본을 확인합니다. 
+[/REGION]
+
+<!---
+![](DistanceFieldGradient_Example.png)
+--->
+
+| 번호 | 설명 |
+| -------- | ----------- |
+| **1**  | R 채널을 켜고 다른 모든 채널을 끕니다. |
+| **2**  | G 채널을 켜고 다른 모든 채널을 끕니다. |
+| **3**  | B 채널을 켜고 다른 모든 채널을 끕니다. |
+
+
+<!--------------------------------------------------------->
+
+
+### DistanceToNearestSurface
+
+**Distance To Nearest Surface** 머티리얼 표현식 노드로 레벨의 글로벌 디스턴스 필드 내 아무 지점이나 샘플링하는 것이 가능합니다.
+이 머티리얼 표현식은 디스턴스 필드에서 씬의 최단 오클루더까지의 거리를 부호가 있는 월드 스페이스 유닛 단위로 출력하는 식으로 작동합니다.
+
+[region:note]
+**Generate Mesh Distance Fields** (메시 디스턴스 필드 생성)은 **프로젝트 세팅** 의 **렌더링** 카테고리 아래 **메시 디스턴스 필드** 옵션이 켜져있어야 정상 작동합니다.
+[/region]
+
+| 항목 | 설명 |
+| -------- | ----------- |
+| **Position**  | 위치 - 입력이 없으면 현재 월드 포지션이 기본값입니다. |
+
+**Distance To Nearest Surface** 머티리얼 표현식 실전 사용 예제입니다.
+
+
+[Region:lightbox]
+[![](DistanceNearSurface_01.png)(w:960)](DistanceNearSurface_01.png)
+[/Region]
+[REGION:caption]
+클릭하면 이미지 원본을 확인합니다. 
+[/REGION]
+
+![](DistanceNearSurface_02.png)(w:550)
+
+이 예제에서는 Distance To Nearest Surface 를 머티리얼의 오파시티 입력에 연결하고, 그 머티리얼을 레벨 바닥 바로 위에 배치한 스태틱 메시 평면에 적용하였습니다.
+Distance To Nearest Surface 의 역할은 머티리얼더러 스태틱 메시 평면이 씬에 배치된 다른 스태틱 메시와 교차되기 시작하면 그 부분을 빨갛게 만들라 합니다.
+
+
+<!--------------------------------------------------------->
+
+
+[EXCERPT:FeatureLevelSwitch]
+### FeatureLevelSwitch
+
+Feature Level Switch (피처 레벨 스위치) 노드는 저사양 디바이스용 단순화된 머티리얼을 만들어 줍니다.
+
+**사용 예**: 텍스처가 10 개 겹치면서 복잡한 연산을 하는 머티리얼도, 모바일 용으로는 하나의 스태틱 텍스처로 압축시킬 수 있습니다 (피처 레벨 ES2).
+
+| 항목 | 설명 |
+| -------- | ----------- |
+| [REGION:tablesection]입력[/REGION] ||
+| **Default** | 기본 피처 레벨입니다.|
+| **ES2** | OpenGL ES2 의 코어 성능으로 정의된 피처 레벨입니다. |
+| **ES3.1** | Metal 레벨 디바이스의 성능으로 정의된 피처 레벨입니다. |
+| **SM4** | DX10 셰이더 모델 4 의 코어 성능으로 정의된 피처 레벨입니다. |
+| **SM5** | DX11 셰이더 모델 5 의 코어 성능으로 정의된 피처 레벨입니다. |
+
+[/EXCERPT:FeatureLevelSwitch]
+
+
+<!--------------------------------------------------------->
+
+
+### Fresnel
+
+Fresnel (프레넬)은 표면 노멀과 카메라로의 방향에 대한 도트 곱에 따라 감쇠를 계산하는 표현식입니다. 표면 모러이 카메라쪽을 직접 가리킬 때, 출력값은 0 입니다. 표면 노멀이 카메라와 수직일 때, 출력값은 1 입니다. 중간에 음수 색이 없도록 결과는 [0,1] 범위로 제한됩니다.
+
+| 항목 | 설명 |
+| ---- | ---- |
+| [REGION:tablesection]프로퍼티[/REGION] ||
+| **Exponent** | 출력감의 감쇠 속도를 지정합니다. 값이 크면 더욱 빠르게 감쇠됩니다. |
+| **Base Reflect Fraction** | 표면을 수직 상태에서 봤을 때의 스페큘러 리플렉션 부분을 나타냅니다. 값이 1 이면 사실상 프레넬 이펙트를 끕니다. |
+| [REGION:tablesection]입력[/REGION] ||
+| **ExponentIn** | 출력 값의 감쇠 속도를 나타냅니다. 값이 크면 감쇠가 훨씬 조밀하고 빠르게 일어납니다. 사용되면 이 값은 Exponent 프로퍼티 값보다 항상 우선합니다. |
+| **Base Reflect Fraction** | 표면을 수직 상태에서 봤을 때의 스페큘러 리플렉션 부분을 나타냅니다. 값이 1 이면 사실상 프레넬 이펙트를 끕니다. 사용되면 이 값은 Exponent 프로퍼티 값보다 항상 우선합니다. |
+| **Normal** | 표면의 노멀을 나타내는 3채널 벡터값, 주로 노멀맵을 받습니다. 지정된 노멀이 없으면 메시의 탄젠트 노멀이 사용됩니다. |
+
+
+![FresnelExample.png](FresnelExample.png)
+
+
+<!--------------------------------------------------------->
+
+
+[EXCERPT:GIReplace]
+### GIReplace
+
+GIReplace (글로벌 일루미네이션 대체)는 머티리얼이 GI 용으로 사용될 때 아티스트가 다른, 보통 더욱 단순한 표현식 체인을 지정할 수 있도록 해 줍니다.
+
+**사용 예**: 라이트매스 스태틱 GI 및 LPV 다이내믹 GI 가 사용합니다.
+
+| 항목 | 설명 |
+| -------- | ----------- |
+| [REGION:tablesection]입력 [/REGION] ||
+| **Default** | 기본 GI 입니다. |
+| **StaticIndirect** | 구워진 간접광에 사용됩니다. |
+| **DynamicIndirect** | 동적인 간접광에 사용됩니다. |
+
+[INCLUDE:Engine\Rendering\LightingAndShadows\LightPropagationVolumes#gireplaceexample]
+
+
+[/EXCERPT:GIReplace]
+
+
+<!--------------------------------------------------------->
+
+
+## I - P
+
+
+<!--------------------------------------------------------->
+
+
+### LightmassReplace
+
+LightmassReplace 는 보통 렌더링 용도로 머티리얼을 컴파일할 때는 Realtime 입력을 틍과시키고, 글로벌 일루미네이션 용도로 머티리얼을 라이트매스로 익스포트할 때는 Lightmass 입력을 통과시키는 단순한 표현식입니다. WorldPosition 처럼 익스포트된 버전으로는 제대로 처리되지 않는 머티리얼 표현식에 대한 우회책으로 쓰기 좋습니다.
+
+| 항목 | 설명 |
+| ---- | ---- |
+| [REGION:tablesection]입력[/REGION] ||
+| **Realtime** | 일반 렌더링시 통과시킬 값을 받습니다. |
+| **Lightmass** | 머티리얼을 라이트매스로 익스포트시 통과시킬 값을 받습니다. |
+
+
+<!--------------------------------------------------------->
+
+
+[EXCERPT:LinearInterpolate]
+### LinearInterpolate
+
+LinearInterpolate 는 세 번째 값을 마스크로 사용하여 두 입력 값을 블렌딩하는 표현식입니다. 포토샵의 레이어 마스크처럼 두 텍스처 사이의 전환을 정의하는 마스크로 간주할 수 있습니다. 마스크의 강도 Alpha 는 두 입력값에서 취할 색 비율을 결정합니다. Alpha 가 0.0/검정이면 첫 입력이 사용됩니다. Alpha 가 1.0/하양이면 둘째 입력이 사용됩니다. Alpha 가 회색(0.0 에서 1.0 사이)이면 출력은 두 입력 사이의 혼합이 됩니다. 유념할 것은 채널별로 블렌딩이 일어난다는 점입니다. 즉 Alpha 가 RGB 색이라면, Alpha 의 빨강 채널 값이 A 와 B 의 빨강 채널 블렌딩을 정의하며, Alpha 의 초록 채널과는 *별개* 입니다. Alpha 의 초록 채널은 A 와 B 의 초록 채널 블렌딩을 정의합니다.
+
+| 항목 | 설명 |
+| ---- | ---- |
+| [REGION:tablesection]프로퍼티[/REGION] ||
+| **Const A** | 검정(0.0)에 매핑된 값입니다. A 입력이 연결되지 않았을 때만 사용됩니다. |
+| **Const B** | 하양(1.0)에 매핑된 값입니다. B 입력이 연결되지 않았을 때만 사용됩니다. |
+| **Const Alpha** | 마스크 알파로 사용할 값을 받습니다. Alpha 입력이 연결되지 않았을 때만 사용됩니다. |
+| [REGION:tablesection]입력[/REGION] ||
+| **A** | 검정(0.0)에 매핑된 값을 받습니다. |
+| **B** | 하양(1.0)에 매핑된 값을 받습니다. |
+| **Alpha** | 마스크 알파로 사용할 값을 받습니다. |
+
+
+**프로그래머:** LinearInterpolate 는 Alpha 파라미터 값에 따라 A 와 B 를 채널별로 선형보간합니다.
+
+![LerpExample.png](LerpExample.png)(w:900)
+[/EXCERPT:LinearInterpolate]
+
+
+<!--------------------------------------------------------->
+
+
+### Noise
+
+Noise 표현식은 제어할 수 있는 방식으로 프로시저럴 노이즈 필드를 생성합니다.
+
+| 항목 | 설명 |
+| ---- | ---- |
+| [REGION:tablesection]프로퍼티[/REGION] ||
+| **Scale** | 노이즈 셀의 전체적인 크기를 변경합니다. 수치가 작을 수록 노이즈가 커집니다. |
+| **Quality** | 외양/퍼포먼스 세팅입니다. 0 이 빠릅니다. 값이 높을 수록 느려지나 더 나아 보입니다. |
+| **Function** | 계산되는 노이즈 유형을 제어합니다. 옵션은 Simplex, Perlin, Gradient 입니다. |
+| **Turbulence** | 이 옵션을 켜면, 노이즈 옥타브마다 결과에 절대값만 더합니다. 비주얼 특성에 변화를 주고 날카로운 능선과 같은 모양을 만들 수 있습니다. |
+| **Levels** | 노이즈를 몇 개까지 합칠 것인지 입니다. Turbulence 가 켜져있을 때만 효과가 있습니다. |
+| **Output Min** | 노이즈 계산에 의한 최소값입니다. |
+| **Output Max** | 노이즈 계산에 의한 최대값입니다. |
+| **Level Scale** | 레벨 스케일은 항상 활성이며 새 옥타브마다 스케일 변화량을 결정합니다. |
+| **Tiling** | 노이즈를 지원하는 함수에 타일링을 허용합니다. 비용은 올라가지만, 노이즈를 심리스 래핑 텍스처에 구을 때 좋습니다. |
+| **Repeat Size** | 타일링할 때, 노이즈를 얼마나 자주 반복시킬지 입니다. |
+|| [REGION:tablesection]입력[/REGION] ||
+| **Position** | 3D 벡터를 통해 텍스처 크기를 조절할 수 있습니다. |
+| **FilterWidth** | 실제로는 노이즈 텍스처를 얼마나 뿌옇게 만들지 조절합니다. |
+
+![NoiseExample.png](NoiseExample.png)
+
+<!--
+[EXCERPT:NoiseFunctions]
+
+| Function |     | 설명 |
+| -------- | --- | ----------- |
+|Simplex | 텍스처 기반 |직접 사용 및 범프는 하이 퀄리티로 출력됩니다. 대략 레벨 당 인스트럭션 77, 텍스처 룩업 4 입니다. 타일링은 불가능합니다. |
+|Gradient | 텍스처 기반| 직접 사용 및 범프에 하이 퀄리티로 출력됩니다. 비타일링: 대략 레벨 당 인스트럭션 61, 텍스처 룩업 8 입니다. 타일링: 대략 레벨 당 인스트럭션 74, 텍스처 룩업 8 입니다. "비타일링" 모드에서도 반복은 128 입니다. 반복 크기 범위는 128 이하로 하는 게 좋습니다. 전에는 Perlin Noise (펄린 노이즈)라는 이름이었습니다.|
+|Fast Gradient | 3D 텍스처 | 직접 사용에는 하이 퀄리티로 출력되나, 범프에는 **나쁩니다**. 대략 레벨 당 인스트럭션 16, 텍스처 룩업 1 입니다. 항상 16 으로 반복 타일링되며, "타일링" 모드는 이 Fast Gradient 노이즈에는 옵션이 아닙니다. |
+| Gradient | 계산형 | 직접 사용 및 범프에 하이 퀄리티로 출력됩니다. 비타일링: 대략 레벨 당 인스트럭션 80, 텍스처 없습니다. 타일링: 대략 레벨 당 인스트럭션 143, 텍스처 없습니다. |
+| Value | 계산형 | 퀄리티가 낮지만, 순수한 계산형입니다. 비타일링: 대략 레벨 당 인스트럭션 53, 텍스처 없습니다. 타일링: 대략 레벨 당 인스트럭션 118, 텍스처 없습니다. 전에는 Gradient 노이즈라고 라벨이 잘못 붙어 있었습니다. |
+| Voronoi | | Worley (월리) 또는 Cellular (셀룰러) 노이즈라고도 합니다. Quality=1 은 8 셀 검색, Quality=2 는 16 셀 검색, Quality=3 는 27 셀 검색, Quality=4 는 32 셀 검색입니다. 전부 검색되는 셀마다 대략 20 인스트럭션 입니다. |
+[/EXCERPT]
+-->
+
+
+<!--------------------------------------------------------->
+
+
+### Previous Frame Switch
+
+**Previous Frame Switch** 머티리얼 표현식은 머티리얼 내 구현된 복잡한 [버텍스 애니메이션](Engine/Animation/Tools/VertexAnimationTool/) 이 올바른 모션 벡터를 생성하여 템포럴 AA 및 모션 블러와 정상 작동하도록 할 수 있습니다.
+
+시간 함수만 있는 머티리얼은 이미 변경 없이 작동하지만, 애니메이션에 영향을 줄 수 있는 머티리얼 파라미터같은 다른 변수를 처리하지 못합니다. Previous Frame Switch 머티리얼 표현식으로 이러한 유형의 문제를 수동으로 해결할 수 있는데, 예를 들어 블루프린트에서 프레임 사이 월드 포지션 오프셋의 변화로 유발되는 모션 벡터 생성에 대한 표현식을 수동 제공해 줄 수 있습니다.
+
+[REGION:note]
+이 기능의 정상 작동을 위해서는 **프로젝트 세팅** 중 **Accurate Velocities from Vertex Deformations** (버텍스 디포메이션에서 정확한 속도) 옵션을 켜야 합니다.
+[/REGION]
+
+| 항목 | 설명 |
+| -------- | ----------- |
+| Current Frame | 현재 프레임 - 시작 위치 레퍼런스로 사용되는 방향 벡터입니다. |
+| Previous Frame | 예전 프레임 - 추가시킬 블러 양에 대한 XYZ 레퍼런스로 사용되는 방향 벡터입니다. |
+
+머티리얼에서 **Previous Frame Switch** 머티리얼 표현식을 사용한 예제입니다.
+
+![](PreviousFrameSwitch.png)(w:900)
+
+이 예제에서 Previous Frame Switch 는 상수 값을 사용하여 Multiply 노드를 통해 방향 블러를 제어하고 있습니다.
+
+[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:videoid]
+	YbjqiNZr4K4
+	[/PARAMLITERAL]
+	[PARAMLITERAL:width]
+	100
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	56.25
+	[/PARAMLITERAL]
+	[PARAMLITERAL:units]
+	%
+	[/PARAMLITERAL]
+	[PARAMLITERAL:type]
+	simple
+	[/PARAMLITERAL]
+[/OBJECT]
+
+이 예제에서 보면 에픽에서 자체 제작한 포트나이트같은 게임에서 어떻게 사용하여 화면을 이루는 버텍스 애니메이션으로 모션 블러를 제어하고 있는지 확인할 수 있습니다.
+오른쪽의 애니메이션은 Previous Frame Switch 를 사용하여 모션 블러를 약간 추가한 반면, 왼쪽의 애니메이션은 그렇지 않은 것입니다.
+
+
+<!--------------------------------------------------------->
+
+
+## Q - Z
+
+
+<!--------------------------------------------------------->
+
+
+### QualitySwitch
+
+QualitySwitch(퀄리티 스위치) 표현식은 저사양 디바이스에서 낮은 퀄리티를 사용할 때처럼, 엔진의 퀄리티 레벨 전환에 따라 다양한 표현식 망을 사용할 수 있도록 해 줍니다.
+
+| 항목 | 설명 |
+| ---- | ---- |
+| [REGION:tablesection]입력[/REGION] ||
+| Default | 기본 비주얼 퀄리티용 네트워크에 사용되는 입력입니다. |
+| Low | 낮은 비주얼 퀄리티용 네트워크에 사용되는 입력입니다. |
+| High | 높은 비주얼 퀄리티용 네트워크에 사용되는 입력입니다. |
+
+
+<!--------------------------------------------------------->
+
+
+[EXCERPT:RotateAboutAxis]
+### RotateAboutAxis
+
+RotateAboutAxis(축 중심 회전) 표현식은 주어진 회전 축, 축 상의 점, 회전시킬 각에 따라 3채널 벡터 입력을 회전시키는 표현식입니다. 단순 시어즈보다 품질이 뛰어난 WorldPositionOffset 사용 애니메이션에 좋습니다. 
+
+| 항목 | 설명 |
+| ---- | ---- |
+| [REGION:tablesection]입력[/REGION] ||
+| **NormalizedRotationAxis** | 오브젝트의 회전 중심축을 나타내는 (0-1) 정규화된 벡터를 받습니다. |
+| **RotationAngle** | 회전각입니다. 값이 1 이면 360 도 한 바퀴 회전을 말합니다. |
+| **PivotPoint** | 오브젝트의 회전에 있어서의 중심점을 나타내는 3채널 벡터를 받습니다. |
+| **Position** | 오브젝트의 위치를 나타내는 3채널 벡터를 받습니다. |
+
+[REGION:fullwidth]
+![RotateAboutAxisExample.png](RotateAboutAxisExample.png)
+[/REGION]
+
+위 예제에서, 미리보기 평면이 세로 축으로 회전하는 것처럼 보일 것입니다.
+
+[/EXCERPT:RotateAboutAxis]
+
+
+<!--------------------------------------------------------->
+
+
+### SphereMask
+
+SphereMask 는 거리 계산에 따라 마스크 값을 출력하는 표현식입니다. 한 입력이 한 점의 위치이고 다른 입력이 일정 반경을 가진 구체의 중심이라면, 마스크 값은 약간의 전환 구역을 두고서 바깥은 1 이고 안은 0 입니다. 1, 2, 3, 4 성분 벡터에 작동합니다.
+
+| 항목 | 설명 |
+| ---- | ---- |
+| [REGION:tablesection]프로퍼티[/REGION] ||
+| **Attenuation Radius** | 거리 계산에 사용할 반경을 지정합니다. |
+| **Hardness Percent** | 전환 구역 크기를 지정합니다. 포토샵 브러시 하드니스 값처럼 작동합니다. 값이 0 이면 전환이 딱딱하게, 100 이면 부드럽게 일어남을 뜻합니다. |
+| [REGION:tablesection]입력[/REGION] ||
+| **A** | 검사할 지점의 위치를 나타내는 값을 받습니다. |
+| **B** | 구체의 중심을 나타내는 값을 받습니다. |
+
+[REGION:fullwidth]
+![SphereMaskExample.png](SphereMaskExample.png)
+[/REGION]
+[REGION:caption] 이 예제에서 프리뷰 오브젝트는 카메라와의 거리가 256 유닛 이상 멀어지면서 검정으로 서서히 희미해집니다.[/REGION]
+
+
+<!--------------------------------------------------------->
+
+
+### Vector Noise
+
+[INCLUDE:Engine\Rendering\Materials\ExpressionReference\Vector#VectorNoiseTest]
+
+
+<!--
+[EXCERPT:VectorNoiseFunctions]
+
+| 함수 | 설명 |
+|---------|-----------|
+| Cellnoise | 3D 스페이스의 인티저 그리드 셀 각각에 무작위 컬러입니다. 대략 10 인스트럭션 입니다. |
+| Perlin 3D Noise | 3D 출력 계산형 펄린 노이즈로, 각 채널 출력 범위는 -1 에서 1 입니다. 빨강 채널만 사용한다면 대략 83 인스트럭션이며, 세 채널 모두 사용하는 경우 125 인스트럭션입니다. |
+| Perlin Gradient | 펄린 노이즈 함수의 그레디언트를 계산합니다. RGB 출력에는 그레디언트 벡터가, A 에는 스칼라 노이즈가 들어있습니다. 대략 106 인스트럭션입니다. |
+| Perlin Curl | 3D 컬(곱슬) 노이즈를 계산합니다. 펄린 3D 노이즈의 수학적인 곱슬 버전이 출력됩니다. 대략 162 인스트럭션입니다. |
+| Voronoi | *Noise* 표현식의 Voronoi 함수와 같은 알고리즘을 사용하며, 인스트럭션 수도 같습니다. 하지만 RGB 는 각 보로노이 셀의 가장 가까운 시드 포인트 위치이며, A 는 그 시드 포인트까지의 거리입니다. |
+[/EXCERPT]
+-->
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

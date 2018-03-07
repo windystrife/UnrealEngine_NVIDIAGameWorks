@@ -1,0 +1,17 @@
+LOCAL_PATH := $(call my-dir)
+
+PATH_TO_LIBS = libs
+ 
+include $(CLEAR_VARS)
+LOCAL_MODULE := AmazonGamesJni
+LOCAL_SRC_FILES := $(PATH_TO_LIBS)/libAmazonGamesJni.so
+include $(PREBUILT_SHARED_LIBRARY)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := UE4
+
+LOCAL_C_INCLUDES := \
+    $(LOCAL_PATH)/../AGS \
+
+LOCAL_SRC_FILES := $(TARGET_ARCH_ABI)/libUE4.so
+include $(PREBUILT_SHARED_LIBRARY)

@@ -1,0 +1,122 @@
+﻿INTSourceChangelist:3244370
+Availability:Public
+Title:블루프린트 프로그래밍 지침
+Crumbs: %ROOT%, Programming, Engine/Blueprints/TechnicalGuide
+Description:블루프린트 친화적인 API 를 제대로 작성하는 법에 대한 팁과 정보입니다.
+Related:Engine/Blueprints/TechnicalGuide/ExtendingBlueprints 
+version: 4.9
+tags:Blueprints
+
+[TOC (start:2 end:2)]
+
+C++ 를 쓸 것이냐 블루프린트를 쓸 것이냐 결정하는 주요 요인은 두 가지입니다:
+-	속도
+-	표현식 복잡도
+
+이 두 요소 이외에 많은 부분은 게임의 복잡도와 팀의 구성에 달린 문제입니다. 프로그래머보다 아티스트가 많다면, C++ 보다는 블루프린트가 훨씬 많을 것입니다.
+반대로 프로그래머가 많다면, 블루프린트 보다는 C++ 코드가 많아지겠지요. 아마 대부분의 분들이 그 중간쯤에 위치해 있지 않을까 생각합니다. 에픽에서는,
+다수의 콘텐츠 제작자 작업방식이 매우 복잡한 블루프린트를 만들고, 프로그래머는 그 작업의 많은 부분을 새로운 블루프린트 노드로 코딩하여 짜 넣는 방법을 알아봅니다.
+그래서 가능하면 그 함수 덩어리를 새로운 C++ 함수로 이동시키는 것이지요. 블루프린트를 적극 활용하다가, 보다 간결한 함수성으로 줄일 수 있으면 
+(또는 프로그래머가 아닌 사람에게 너무 복잡해 지면) C++ 로 넘깁니다. 속도 문제라면 당연히 C++ 로 넘깁니다.
+
+
+### 속도
+속도의 경우, 블루프린트 실행은 C++ 실행보다 느립니다. 퍼포먼스가 나쁘다는 소리가 아니라, 계산이 많이 필요한 작업을 하거나, 매우 자주 실행되는 연산인 경우,
+블루프린트 보다는 C++ 를 사용하는 편이 낫다는 소리입니다. 하지만 프로젝트의 퍼포먼스나 팀에 최적인 방식으로 둘을 조합하는 것이 가능합니다.
+함수성이 많은 블루프린트가 있는 경우, 그 중 일부를 C++ 로 돌려서 속도를 올리면서도, 나머지는 블루프린트로 놔둬서 유연성을 유지합니다.  
+프로파일링에 어느 한 연산이 블루프린트로 시간이 많이 걸린다고 나오는 경우, 그 부분만 C++ 로 옮기고 나머지는 블루프린트로 놔둡니다.
+
+블루프린트 비주얼 스크립트로 작업을 했을 때 시간이 많이 걸리는 시스템의 예로는, 수천 단위의 액터를 제어하는 크라우드 시스템을 들 수 있습니다. 이 경우 퍼포먼스를 위해 
+의사 결정, 길찾기 등의 기타 함수성은 C++ 로 처리하고, 나머지 트윅 파라미터나 제어 함수는 블루프린트로 노출시킬 수도 있습니다.
+
+### 복잡도
+표현식 복잡도의 경우, 블루프린트보다 C++ 로 하는 편이 쉬울 수가 있습니다. 블루프린트가 할 수 있는 일은 많이 있지만, 노드로 표현하기는 힘든 것들이 있습니다.
+대규모 데이터 집합에 대한 연선, 문자열 조작, 대규모 데이터 세트에 대한 복잡한 계산 등은 모두 매우 복잡해서 비주얼 시스템으로는 처리하기가 쉽지 않습니다.
+그런 작업은 블루프린트보다는 C++ 로 하는 편이 나은데, 어떻게 돌아가는지 그림으로나 실제로나 더 이해하기 쉽기 때문입니다. 
+표현식의 복잡도 역시도 크라우드 시스템을 블루프린트 보다는 C++ 코드로 구현하는 것이 나은 이유가 됩니다.
+
+
+
+## 예제
+
+C++ 또는 블루프린트로 처리하면 최고인 함수성이 몇 가지 있는데, C++ 프로그래머와 블루프린트 제작자가 게임 제작 도중 같이 작업하는 
+예제 몇 가지는 이렇습니다.
+
+* 프로그래머가 커스텀 이벤트를 정의하는 Character 클래스를 C++ 로 만든 다음, 블루프린트를 사용해서 그 Character 클래스를 확장하고 실제 메시 할당 및 기본값을 설정합니다.
+ShooterGame 샘플 프로젝트에서 플레이어 캐릭터와 적 봇을 통해 이와 같은 구현을 확인합니다.
+
+* 능력 시스템의 기본 클래스는 C++ 로 구현하고 실제 내용은 디자이너가 블루프린트로 제작합니다. StrategyGame 샘플에서 보면, 기본 터렛은 C++ 로 정의되어 있지만,
+화염방사기, 대포, 화살 터렛의 작동방식은 모두 블루프린트로 정의되어 있습니다.
+
+* 픽업의 경우 "Collect" 또는 "Respawn" 함수는 Blueprint Implementable Event 로 하여, 디자이너가 이를 덮어써서 다양한 파티클 이미터와 사운드 이펙트를 스폰시킬 수 있습니다. ShooterGame 및 
+StrategyGame 양쪽 다 픽업은 이런 식으로 만들었습니다.
+
+
+## 블루프린트 API 만들기: 팁과 정보
+
+블루프린트 노출 API 를 만드는 프로그래머가 몇 가지 고려할 사항은 이렇습니다:
+
+* 옵션 파라미터는 블루프린트로 잘 처리됩니다:
+
+		/**
+		 * 스트링을 로그에 출력하고, 옵션을 통해 화면에도 출력합니다.
+		 * Print To Log 가 true 면 출력 로그 창에 보입니다. false 면 'Verbose' 일 경우에만 로그에 찍혀, 일반적으로는 나타나지 않습니다.
+		 *
+		 * @param	InString		The string to log out
+		 * @param	bPrintToScreen	Whether or not to print the output to the screen
+		 * @param	bPrintToLog		Whether or not to print the output to the log
+		 * @param	bPrintToConsole	Whether or not to print the output to the console
+		 * @param	TextColor		Whether or not to print the output to the console
+		 */
+		UFUNCTION(BlueprintCallable, meta=(WorldContext="WorldContextObject", CallableWithoutWorldContext, Keywords = "log print", AdvancedDisplay = "2"), Category="Utilities|String")
+		static void PrintString(UObject* WorldContextObject, const FString& InString = FString(TEXT("Hello")), bool bPrintToScreen = true, bool bPrintToLog = true, FLinearColor TextColor = FLinearColor(0.0,0.66,1.0));
+
+* 구조체를 반환하는 함수보다는, 반환 파라미터가 많은 함수가 낫습니다. 출력 핀이 다수인 노드를 만드는 법을 보여주는 스니펫입니다:
+
+		UFUNCTION(BlueprintCallable, Category = "Example Nodes")
+		static void MultipleOutputs(int32& OutputInteger, FVector& OutputVector);
+
+* 기존 함수에 파라미터를 새로 추가하는 것은 괜찮습니다만, 변경 또는 제거할 필요가 있는 경우 원래 것을 폐기(deprecate)시키고 새 함수를 추가해야 합니다. deprecation 메타데이터를 꼭 사용해 줘야 새 함수 관련 정보가 블루프린트에 나타납니다:
+
+		UFUNCTION(BlueprintCallable, Category="Collision", meta=(DeprecatedFunction, DeprecationMessage = "Use new CapsuleOverlapActors", WorldContext="WorldContextObject", AutoCreateRefTerm="ActorsToIgnore"))
+		static ENGINE_API bool CapsuleOverlapActors_DEPRECATED(UObject* WorldContextObject, const FVector CapsulePos, float Radius, float HalfHeight, EOverlapFilterOption Filter, UClass* ActorClassFilter, const TArray<AActor*>& ActorsToIgnore, TArray<class AActor*>& OutActors);
+
+* 함수가 enum 을 받아야 하는 경우, 'expand enum as execs' 메타데이터 사용을 고려해 보세요. 노드 사용이 쉬워질 수 있습니다.
+
+		UFUNCTION(BlueprintCallable, Category = "DataTable", meta = (ExpandEnumAsExecs="OutResult", DataTablePin="CurveTable"))
+		static void EvaluateCurveTableRow(UCurveTable* CurveTable, FName RowName, float InXY, TEnumAsByte<EEvaluateCurveTableResult::Type>& OutResult, float& OutXY);
+
+* 완료까지 시간이 걸리는 (여기로 이동 등의) 작업은 잠복성(latent) 함수여야 합니다.
+
+		/** 
+		 * 딜레이가 있는 잠복성 동작을 합니다.
+		 * 
+		 * @param WorldContext	World context.
+		 * @param Duration 		length of delay.
+		 * @param LatentInfo 	The latent action.
+		 */
+		UFUNCTION(BlueprintCallable, Category="Utilities|FlowControl", meta=(Latent, WorldContext="WorldContextObject", LatentInfo="LatentInfo", Duration="0.2"))
+		static void	Delay(UObject* WorldContextObject, float Duration, struct FLatentActionInfo LatentInfo );
+
+* 가급적 함수는 공유 라이브러리에 넣도록 하세요. 여러 클래스에서 사용하기가 쉬워지며, '타겟' 핀을 피할 수 있습니다.
+
+		class DOCUMENTATIONCODE_API UTestBlueprintFunctionLibrary : public UBlueprintFunctionLibrary
+
+* 가급적 노드에 `pure` 마킹을 하세요. 노드에 선 연결을 요하는 실행 핀을 없앨 수 있습니다.
+
+		/* 0 에서 Max - 1 사이 난수의 균등 분포를 반환합니다. */
+		UFUNCTION(BlueprintPure, Category="Math|Random")
+		static int32 RandomInteger(int32 Max);
+
+* 함수를 `const` 마킹을 하는 것으로도 블루프린트 노드에 실행 핀이 생기지 않도록 합니다:
+		/**
+		 * 액터에서 월드로의 변환을 구합니다.
+		 * @return 액터 스페이스에서 월드 스페이스로 변환하는 트랜스폼입니다.
+		 */
+		UFUNCTION(BlueprintCallable, meta=(DisplayName = "GetActorTransform"), Category="Utilities|Transformation")
+		FTransform GetTransform() const;
+
+
+
+
+

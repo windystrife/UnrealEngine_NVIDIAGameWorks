@@ -1,0 +1,113 @@
+Availability:Public
+Title: How Unreal Engine 4 Behavior Trees Differ
+Crumbs:%ROOT%, Engine, Gameplay, Engine/AI/BehaviorTrees
+Description:How Unreal Engine 4 Behavior Trees Differ From Traditional Behavior Trees
+
+[TOC(start:2 end:3)]
+
+This section is for people who are familiar with **Behavior Trees** generally and would like to dive into the Unreal Engine 4 implementation as quickly as possible.  For those who have not used behavior trees before, you may find some of the explanation here confusing. <!-- You may want to check out the user guide first. You can return to this section if you're interested in what we've done differently than others. -->
+
+There are three critical ways in which the UE4 implementation of Behavior Trees differs from "standard" behavior trees:
+
+## UE4 Behavior Trees Are Event-Driven
+
+**Event-driven** behavior trees avoid doing lots of work every frame.  Instead of constantly checking whether any relevant change has occurred, the behavior trees just passively listen for "events" which can trigger changes in the tree.
+
+Having an event-driven architecture grants improvements to both performance and debugging.  However, to take the most advantage of these improvements, you will need to understand the other differences to our trees and structure your behavior trees appropriately.
+
+Since the code does not have to iterate through the entire tree every tick, performance is much better!  Conceptually, instead of constantly asking "Are we there yet?", we can just rest until we are prodded and told "We are there!"
+
+When stepping forward and backward through the behavior tree's execution history to visually debug the behavior, it is ideal to make the history show relevant changes and not show irrelevant ones.  In the event-driven implementation, it is not necessary to filter out irrelevant steps that iterated over the tree and chose the same behavior as before, because that additional iteration never had to happen in the first place!  Instead, only changes to the location of execution in the tree or to blackboard values matter, and it is easy to just show those differences.  <!-- (See the debugging section for more information on how to step through the execution history and other debugging tricks.) -->
+
+## Conditionals Are Not Leaf Nodes
+
+In the standard model for behavior trees, conditionals are Task leaf nodes, which simply do not do anything other than succeed or fail.  Although nothing prevents you from making traditional conditional tasks, it is highly recommended that you use our Decorator system for conditionals instead.
+
+Making conditionals be decorators rather than tasks has a couple of significant advantages.
+
+First, conditional decorators make the behavior tree UI more intuitive and easier to read.  Since conditionals are at the root of the sub-tree they are controlling, you can immediately see what part of the tree is "closed off" if the conditionals are not met.  Also, since all leaves are action tasks, it is easier to see what actual actions are being ordered by the tree.   In a traditional model, conditionals would be among the leaves, so you would have to spend more time figuring out which leaves are conditionals and which leaves are actions.
+
+![](decorator.png)
+
+In this section of a Behavior Tree, the Decorators **Close Enough** and **Blackboard** can prevent the execution of the Sequence node's children.
+
+Another advantage of conditional decorators is that it is easy to make those decorators act as observers (waiting for events) at critical nodes in the tree.  This feature is critical to gaining full advantage from the event-driven nature of the trees.  <!-- Read more about how to use Conditional Decorators and their special properties here. -->
+
+## Special Handling for Concurrent Behaviors
+
+ Standard behavior trees often use a **Parallel** composite node to handle concurrent behaviors.  The Parallel node begins execution on all of its children simultaneously.  Special rules determine how to act if one or more of those child trees finish (depending on the desired behavior).
+
+[REGION:note]
+Parallel nodes are not necessarily multi-threading (executing tasks at truly the same time).  They are just a way to conceptually perform several tasks at once.  Often they still run on the same thread and begin in some sequence.  That sequence should be irrelevant since they will all happen in the same frame, but it is still sometimes important.
+[/REGION]
+
+Instead of complex Parallel nodes, UE4 Behavior Trees use **Simple Parallel** nodes and our own special node type which we call Services to accomplish the same sorts of behaviors.
+
+### Why not use Parallel nodes?
+
+1.	Parallel nodes can be very confusing, even for relatively simple behaviors. 
+
+	Effectively Parallel nodes are simultaneously running a bunch of separate sub-trees, but any or all of those sub-trees may need to abort if one of them fails, or they may succeed when the others finish (whether successful or failing).  Parallel behaviors can be confusing even in simple cases, and with the number of options potentially available, it can become highly confusing.
+
+1.	Parallel nodes make it harder to optimize performance, especially in terms of making event-driven trees.
+
+
+### What does UE4 use instead of Parallel nodes?
+
+There are three types of nodes which provide the functionality that would normally come from Parallel nodes:
+
+#### Simple Parallel nodes
+
+Simple Parallel nodes allow only two children: one which must be a single task node (with optional decorators), and the other of which can be a complete subtree.
+
+You can think of the Simple Parallel node as "While doing A, do B as well."  For example, "While attacking the enemy, move toward the enemy."  Basically, A is a primary task, and B is a secondary or filler task while waiting for A to complete.
+
+While there are some options as to how to handle the secondary meanwhile task (Task B), the node is relatively simple in concept compared to traditional Parallel nodes.  Nonetheless, it supports much of the most common usage of Parallel nodes.
+
+Simple Parallel nodes allow easy usage of some of our event-driven optimizations.  Full Parallel nodes would be much more complex to optimize.
+
+
+#### Services
+
+**Services** are special nodes associated with any composite node (Selector, Sequence, or Simple Parallel), which can register for callbacks every X seconds and perform updates of various sorts that need to occur periodically.
+
+For example, a service can be used to determine which enemy is the best choice for the AI pawn to pursue while the pawn continues to act normally in its behavior tree toward its current enemy.
+
+Services are active only as long as execution remains in the subtree rooted at the composite node with which the service is associated.
+
+<!-- Add screenshot showing what Services look like. -->
+
+#### Decorator "Observer Aborts" Property
+
+One common usage case for standard Parallel nodes is to constantly check conditions so that a task can abort if the conditions it requires becomes false.  For example, if you have a cat that performs a sequence, such as "Shake Rear End" and "Pounce", you may want to give up immediately if the mouse escapes into its mouse hole.  With Parallel nodes, you would have a child that checks if the mouse can be pounced on, and then another child that's the sequence to perform.  Since our Behavior Trees are event-driven, we instead handle this by having our conditional decorators observe their values and abort when necessary.  (In this example, you would just have the "Mouse Can Be Pounced On?" decorator on the sequence itself, with "Observer Aborts" set to "Self". )
+
+<!-- For more information, see the <LINK>"Observer Aborts" explanation page. -->
+
+
+
+
+## Advantages of UE4's Approach to Concurrent Behaviors
+
+### Clarity
+
+Using Services and Simple Parallel nodes creates simple trees that are easier to understand.
+
+### Ease of Debugging
+
+Clearer graphs are easier to debug.  In addition, having fewer simultaneous execution paths is a huge boon to watching what is actually happening in the graph.
+
+### Easier Optimizations
+
+Event-driven graphs are easier to optimize if they do not have a lot of subtrees simultaneously executing.
+
+
+## FAQ
+
+"Can you really do everything you can do with Parallel nodes?"
+
+* We believe you can do everything necessary with the nodes we are providing, with a better interface. Certainly the nodes above handle the most common cases.  If we find any edge cases that cannot be handled or are less than ideal, we will consider additional fixes to handle those cases.
+
+
+"Are these the only differences between UE4 Behavior Trees and a "standard" behavior tree?"
+
+* "Standard" is in quotes for a reason. There is really no such thing as "standard", so there could be any number of differences between UE4's implementation and whatever implementation you are most familiar with.  If you are familiar with an unusual implementation, it may have other critical differences, and there are likely more subtle differences regardless.  Hopefully these notes give you an idea of the most important differences relevant to how you will need to build your trees.  For more information about our special types of nodes, read the sections about those nodes.

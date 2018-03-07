@@ -1,0 +1,42 @@
+﻿INTSourceChangelist:2713422
+Availability:Public
+Title:复制对象引用
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking, Gameplay/Networking/Actors, Gameplay/Networking/Actors/Properties
+Description:关于如何复制对象引用属性的详细信息。
+Related: Gameplay/Networking/Actors/Properties/Conditions
+Related: Gameplay/Networking/Actors/RPCs
+version: 4.9
+
+一般而言，对象引用会在 UE4 多人游戏架构中自动处理。这就是说，如果您有一个已经复制的 UObject 属性，则对该对象的引用将作为服务器分配的专门 ID 通过网络进行发送。这个专门 id 是一个 FNetworkGUID。服务器将负责分配此 id，然后向所有已连接的客户端告知这一分配。
+
+要复制对象引用，您只需将一个 UObject 属性标记为已复制，就像下面这样：
+
+	class ENGINE_API AActor : public UObject
+	{
+		UPROPERTY( replicated )
+		AActor * Owner;
+	};
+
+这时，“Owner” 属性将作为其引用的 actor 的一个复制引用。
+
+对于通过网络合法引用的对象，必须对其提供支持以保证网络连接。要进行检查，您可以调用 `UObject::IsSupportedForNetworking()`。这通常被认为是一个底层函数，所以一般不需要在游戏代码中对其进行检查。
+
+您通常可以按照以下原则来确定是否可以通过网络引用一个对象：
+
+* 任何复制的 actor 都可以复制为一个引用
+* 任何未复制的 actor 都必须有可靠命名（直接从数据包加载）
+* 任何复制的组件都可以复制为一个引用
+* 任何未复制的组件都必须有可靠命名。
+* 其他所有 UObject（非 actor 或组件）必须由加载的数据包直接提供
+
+### 拥有可靠命名的对象
+
+拥有可靠命名的对象指的是存在于服务器和客户端上的同名对象。 
+
+如果 Actor 是从数据包直接加载（并非在游戏期间生成），它们就被认为是拥有可靠命名。
+
+满足以下条件的组件即拥有可靠命名：
+* 从数据包直接加载
+* 通过简单构建脚本添加
+* 采用手动标记（通过 `UActorComponent::SetNetAddressable` 进行）
+	* 只有当您知道要手动命名组件以便其在服务器和客户端上具有相同名称时，才应当使用这种方法（最好的例子就是 `AActor` C++ 构造函数中添加的组件）

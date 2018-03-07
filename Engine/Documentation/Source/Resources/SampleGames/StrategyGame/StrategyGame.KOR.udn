@@ -1,0 +1,284 @@
+﻿INTSourceChangelist:3151861
+Availability: Public
+Title:전략 게임
+Crumbs:%ROOT%, Resources
+Description:타워 디펜스 게임에 대해 다루는 문서입니다.
+Related: Gameplay/AI
+Related: Programming/Slate
+Related: Engine/Blueprints/UserGuide/Types/LevelBlueprint
+Related: Engine/Blueprints/Editor
+Related: Programming/Slate
+Related: Gameplay/Framework/UIAndHUD
+Related: Gameplay/Input
+Related: Engine/Rendering/ParticleSystems
+Version: 4.9
+
+
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Resources/SampleGames/StrategyGame:title%](StrategyGameTopic.png)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/StrategyGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/StrategyGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/StrategyGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Resources/SampleGames/StrategyGame:title%](StrategyGameTopic.png)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/StrategyGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/StrategyGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/StrategyGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+[REGION:fullwidth]
+![](StragetyGame.png)
+[/REGION]
+
+
+[TOC(start:2 end:2)]
+
+Tower Defense 샘플은 RTS/타워 디펜스 게임 예제입니다.
+
+특징적인 개념을 전부 나열해 보자면:
+
+* 간단한 AI 로직
+* 자동화된 폰
+* 탑뷰 카메라
+* 건물 건설
+* 메인 메뉴
+* 캔버스 드로잉과 슬레이트 위젯이 조합된 인게임 HUD
+* 인게임 메뉴
+
+Tower Defense 에서 플레이어는 석궁, 자동석궁, 화염방사 터렛을 짓고 미니언 폰의 보조를 받아 양조장을 지켜야 합니다. 양조장에서 업그레이드를 구매한 경우 
+폰은 망치와 방패를 장착할 수 있습니다. 터렛, 미니언, 업그레이드 모두 금광에서 채취하거나 적을 처치할 때마다 모을 수 있는 금이 들어갑니다. 플레이어가 세 번의 생명을 읽기 전까지 적 웨이브 다섯 번에 
+최종 보스까지 포함해서 살아남으면, 게임에 승리하게 됩니다!
+
+## AI 로직과 자동화된 폰
+
+![](minion_attack.png)
+
+Tower Defense 의 AI 로직은 간단한 유한 상태 머신(FSM) 구현입니다. 적 기지를 향해 이동하거나, 적을 공격하거나 하는 두 가지 상태 모두 
+`StrategyAIAction` 에서 상속된 별개의 클래스입니다. 이 상태는 가장 중요한 동작이 처음에 오는 우선권 배열에 저장됩니다. 이 배열을 대상으로 반복처리하여 가장 적합한 동작이 선택되고,
+우선권이 보다 높은 동작이 있는 경우 현재 동작을 중지합니다.
+
+적군과 아군 폰 모두 같은 AI 로직으로 움직입니다. 적군 기지를 향해 이동하다가 다른 팀의 폰을 만나면 공격하는 것이죠. 
+플레이어가 아군 폰의 이동이나 행위를 제어할 수는 없지만, 새 유닛을 구매하여 스폰시킬 수는 있습니다.
+
+미니언 폰의 로직 추가에 _블루프린트_ 가 사용되기도 했습니다. 적군과 아군 폰 모두 방패를 장착할 수 있는데, 아군 폰은 양조장에서 대장간 업그레이드를 구매하면 방패를 차게 되고, 
+적군 폰은 _레벨 블루프린트_ 에서 호출되는 **SpawnHeavyFunction** 또는 **SpawnEndBossFunction** 를 통해 스폰되는 경우 방패를 차게 됩니다. 폰이 방패를 들게 되면 자동석궁의 화살이 막혀 피해를 입히지 못하게 됩니다. 이 로직은 _블루프린트 인터페이스_ 를 사용하여 수행됩니다.
+**Minion_Test** _블루프린트_ 에도 충전된 화염 터렛에 맞은 적 폰을 늦추는 망이 들어 있습니다.
+
+## 건물 건설
+
+Tower Defense 에는 빌딩 클래스가 둘 있습니다. `StrategyBuilding` 과 `StrategyBuilding_Brewery` 인데요. Tower Defense 의 모든 터렛 유형은 물론이고 빈 건물 슬롯까지 `StrategyBuilding` 을 부모로 
+하여 _블루프린트_ 로 디자인되어 있습니다. 플레이어가 빈 건물 슬롯을 클릭하면 맥락 메뉴가 표시되며, 새 건물을 선택하면 건설이 시작됩니다. 건물이 건설되면 빈 건물 슬롯은 소멸되고 새 건물이 스폰됩니다.
+
+건물 업그레이드를 위한 방편도 마련되어 있습니다. `StrategyBuilding_Brewery` 클래스에 이러한 경우가 구현되어 있어, 업그레이드가 양조장 기지 근처 연결된 슬롯으로 내장됩니다.
+
+다시금 Tower Defense 의 코드는 기본 빌딩 클래스를 만들 뿐, Tower Defense 내 건물의 모든 로직과 디자인은 _블루프린트_ 의 레벨 디자이너가 만든 것입니다.
+
+### 양조장
+
+**Brewery** _블루프린트_ 에는 `StrategyBuilding_Brewery` 부모 클래스가 있으며, **AIDirector** 컴포넌트도 포함되어 있습니다. TowerDefenseMap 에는 두 개의 양조장이 배치되어 있는데, 하나는 적군 
+폰이 스폰되는 적 기지이고, 하나는 대장간과 무기고 업그레이드를 만들고 아군 폰을 스폰시킬 수 있는 아군 양조장입니다. **Brewery** _블루프린트_ 에는 그래프 로직이 없으며, 빌딩 프로퍼티에 대한 
+**디폴트** 세트와 **AIDirector**, **TriggerBox**, _스태틱 메시_ 가 포함된 **컴포넌트** 리스트 뿐입니다. 
+
+#### 업그레이드
+
+![](upgraded_brewery.png)
+
+아군 양조장에는 업그레이드 슬롯이 두 개 붙어있습니다. 이 슬롯은 역시 `StrategyBuilding` 클래스에서 파생된 _블루프린트 클래스_ 입니다. **Brewery** 메뉴에서 업그레이드를 선택하면, 
+한 슬롯은 그 업그레이드로 대체됩니다. 대장간 및 무기고 업그레이드는 한 번만 구매할 수 있습니다.
+
+대장간 업그레이드가 구매되면 건설이 시작되고 **Wall_Smithy** _블루프린트_ 에서 **OnBuildStarted** 이벤트가 발동됩니다. 이 _블루프린트_ 는 업그레이드 건설이 완료되면 시스템에 업그레이드 건설이 
+완료되었음을 알리기도 합니다. 이 시점 이후부터 아군 폰에는 방패가 장착되어 스폰되기 시작하며, 이 방패 어태치먼트는 `StrategyAttachment` 클래스로부터 파생된 _블루프린트_ 입니다. 대장간 건설 완료 
+보고 이후 "방패 부착" 행위가 할당되는 망은 TowerDefenseMap _레벨 블루프린트_ 의 접힌 그래프 **PlayerBaseUpgrades** 에 존재합니다. `StrategyAttachment` 클래스에는
+단순히 `SkeletalMeshComponent` 가 들어있으며, 메시와 어태치먼트 부착 지점은 **Attachment_Armorer** _블루프린트_ 의 **디폴트** 에 설정됩니다.
+
+무기고 _블루프린트_ 에는 **OnBuildStarted** 와 **OnBuildFinished** 이벤트와 같은 로직 셋업이 들어 있습니다. 무기고 건설 이후 스폰되는 아군 폰은 망치가 장착되며, 역시 `StrategyAttachment` 클래스에서 
+파생됩니다. 대장간 건설이 완료되었다는 보고 이후 "망치 부착" 동작을 할당하는 망은 TowerDefenseMap _레벨 블루프린트_ 의 접힌 그래프 **PlayerBaseUpgrades** 에도 존재합니다.
+
+### 터렛
+
+#### 빈 슬롯
+
+![](building_empty_slot.png)
+
+빈 슬롯 역시 `StrategyBuilding` 을 부모 클래스로 하는 _블루프린트_ **Wall_EmptySlot** 입니다. 이 _블루프린트_ 그래프에는 로직이 없으며, 이는 단지 _블루프린트 클래스_ 로, 빌딩 프로퍼티와 
+스태틱 메시에 대해 **디폴트** 가 설정되어 있고, 트리거 박스가 **컴포넌트** 로 설정된 것입니다.
+
+가능한 모든 터렛 업그레이드는 **빌딩** 카테고리의 **업그레이드** 섹션 내 **Wall_EmptySlot** _블루프린트_ 의 **디폴트** 에 설정되어 있습니다.
+
+
+#### 석궁
+
+![](building_arbalest_shooting.png)
+
+**Wall_arbalest** _블루프린트_ 에는 기본 터렛 유형인 석궁의 로직이 들어 있습니다. 석궁은 가장 가까운 적에게 중간 세기의 화살을 발사하며, 기본 모드는 화살 자동 발사입니다. 플레이어는 수동으로 
+석궁을 발사할 수도 있는데, 클릭한 후 화살을 발사하고자 하는 방향으로 끌어 놓으면 됩니다. 마우스를 길게 끌어 놓을 수록 더욱 강력하게 발사됩니다.
+
+
+석궁 화살은 다른 _블루프린트_ **Projectile_arbalest** 에 저장되며, `StrategyProjectile` 를 갖는 **TestProjectile** _블루프린트_ 에서 파생된 것입니다. **Wall_arbalest** _블루프린트_ 에는 다수의 하위망이 있으며, 모두 **이벤트 그래프** 안에 들어 있습니다. **컨스트럭션 스크립트** 에는 _블루프린트_ 로직이 없습니다.
+
+
+
+#### 자동석궁
+
+![](building_auto-arbalest_shooting.png)
+
+**Wall_arbalest_auto** _블루프린트_ 에는 자동석궁 로직이 들어 있습니다. 자동석궁은 벽에서 일직선으로 화살을 발사하며, 화살이 관통하는 모든 유닛에게 약간씩의 피해를 입힙니다.
+자동석궁 화살은 벽이나 방패를 든 적에 닿을 때까지 소멸되지 않습니다. 자동석궁을 클릭한 다음 원하는 방향으로 끌어 놓는 방식으로 조준할 수 있습니다.
+그러면 자동석궁은 마우스 버튼이 눌려 있는 동안 조준한 방향으로 계속해서 발사되며, 버튼을 놓으면 기본 발사 위치로 되돌아갑니다.
+
+석궁과 마찬가지로 이 터렛은 별도의 _블루프린트_ 에 들어있는 화살을 발사합니다. **Projectile_arbalest_auto** 자동석궁 화살은 방패를 든 적이나 벽에 맞을 때까지 사라지지 않으며, 이러한 동작은 
+**Interface_Auto_Arbalest** 와 **Interface_Auto_Projectile** _블루프린트 인터페이스_ 의 도움으로 이루어집니다.
+
+#### 화염방사기
+
+![](building_fire_shooting_normal.png)
+
+화염방사기는 다른 터렛 유형과 같은 화살을 발사하지는 않습니다. 그 대신 화염 영역 내 모든 적을 불태웁니다. 플레이어가 화염방사기를 클릭한 뒤 누르고 있는 것으로 충전시키는 것이 가능하며, 
+마우스 버튼을 얼마나 오래 누르고 있었는가에 따라 충전된 화염은 최대 세 배 까지의 피해를 입힐 수 있으며, 충전된 화염에 맞은 적 폰을 늦추는 것도 가능합니다. 플레이어가 화염방사기를 충전시키면,
+약간의 재사용 대기시간 경과 후 보통의 화염이 계속해서 방사됩니다.
+
+## 카메라
+
+Tower Defense 의 카메라에는 시야각이 고정되어 있으며, 마우스 스크롤 휠 버튼으로 줌 인/아웃이 가능합니다. 카메라 계산은 `StrategyPlayerController` 클래스 내 `CalcCamera` 함수 내에서 이루어지는 반면,
+카메라 최소/최대 오프셋, 카메라 각도, 카메라 속도 같은 상수를 `DefaultGame.ini` 에서 설정할 수 있습니다.
+
+관람자 폰은 보이는 폰이 없는 플레이어를 만들 때 사용됩니다.
+
+## 인게임 HUD
+
+인게임 HUD 는 캔버스 드로잉과 슬레이트 위젯을 혼합시켜 만듭니다.
+
+![](StrategyGameHUDcallouts.png)
+
+좌상단 구석의 게임 타이머는 게임 워밍업 동안의 카운트 다운을 담당하며, `SStrategySlateHUDWidget` 클래스의 `GetGameTime` 함수를 사용합니다. 게임이 시작되면 이 카운트다운은 사라지며,
+남은 생명 수(1)가 표시됩니다. "lives left" 표시에 대한 프로퍼티는 `AStrategyHUD` 클래스의 `DrawLives` 함수에 설정되어 있으며, 초기 생명 수는 
+**TowerDefenseMap** _레벨 블루프린트_ 의 **PlayerBaseUpgrades** 서브그래프에 설정됩니다.
+
+현재 금 자원은 화면 상단 중간에 표시됩니다(2). 게임 타이머와 자원 표시 모두 `SStrategySlateHUDWiget` 안에 기본 위젯을 사용하여 정의되었습니다. 최상위 레벨 위젯 전부가 
+이 클래스를 사용하여 생성되었으나, 이 위젯 전부가 기본적으로 표시되는 것은 아닙니다.
+
+미니맵은 HUD 좌하단 구석에 있습니다(3). 캔버스를 사용해서 그려지는 실제 맵 이미지와 입력을 처리하는 투명 슬레이트 위젯 오버레이로부터 만들어진 것입니다. 미니맵 영역에 버튼을 클릭한 뒤 드래그할 때의 
+카메라 이동은 `SStrategyMiniMapWidget` 가 담당합니다.
+
+건물 슬롯에 클릭하면 `SStrategyActionGrid` 메뉴가 나타납니다. 이 위젯의 인스턴스는 하나밖에 없으며, 그 위치는 활성화된 건물 슬롯에 의해 결정됩니다. 메뉴의 화면 위치 계산은 
+`DrawHUD` 메소드 안에서 이루어지며, 여기서 선택된 액터 위치를 2D 좌표로 투영해 줍니다. 이 메뉴에 대한 액션 버튼의 이벤트 매핑과 모양은 `AStrategyBuilding` 클래스의 
+`ShowActionMenu` 메소드나 `ShowCustomAction` 메소드 중 하나에서 정의됩니다. `Button` 위젯은 `SStrategyButtonWidget` 클래스에서 정의되며, 액션 버튼에 바인딩된 부가 정보는 
+`FActionButton` 정보 구조체에 저장됩니다.
+
+폰과 건물의 체력 막대는 `DrawActorsHealth` 메소드를 사용해서 캔버스 위에 그려집니다. 각 팀마다 다른 체력 막대 텍스처가 있습니다.
+
+[REGION:fullwidth]
+![](health_bar_textures.png)
+[/REGION]
+
+HUD 우하단 구석에는 `PauseButton` (4)으로, 게임 일시정지와 인게임 메뉴 표시여부를 토글시키는 버튼이 있습니다.
+
+게임 시간이 다 되거나 기지 중 하나가 파괴되면, 게임은 일시정지되고 "Victory" 또는 "Defeat" 텍스트 애니메이션이 화면 중앙에 표시됩니다. 애니메이션의 폰트 크기는 시간의 흐름에 따라 변합니다.
+이 텍스트는 Visibility, Font, Text 에 대한 델리게이트가 포함된 간단한 `STextBlock` 위젯을 사용해서 만들어진 것입니다.
+
+
+## 메뉴
+
+### 메인 메뉴
+
+![](StrategyGameMainMenu1.png)(w:700)
+
+
+메인 메뉴는 메뉴 전용 HUD 를 로드하는 **StrategyMenu** 맵에 포함되어 있습니다. 메뉴는 슬레이트 기반으로, `SStrategyMenuWidget` 이 메인 메뉴 애니메이션, 레이아웃, 이벤트 처리를 담당합니다.
+`SStrategyMenuItem` 클래스는 인게임 허드에서 사용된 `SStrategyButtonWidget` 를 상속하며, 단일 메뉴 항목에 대한 설명이 됩니다. 각 메뉴 항목과, 그 항목에 붙은 이벤트들은 
+`StrategyMenuHUD` 에 정의됩니다.
+
+이전 메뉴로 돌아가기 위해 메뉴들에 대한 공유 포인터 배열이 `MenuHistory` 변수에 저장됩니다. 이 변수는 전에 확인한 메뉴를 저장하는 스택같은 역할을 하여, 되돌아가기가 쉬우면서도 메뉴를 여러 곳에서 
+재사용할 수 있도록 한 메뉴의 부모를 저장해야 하는 요건을 없애 주기도 합니다.
+
+<!-- ![](StrategyGameMainMenu2.png)(w:700) -->
+
+메뉴 애니메이션에서는 `SStrategyMenuWidget::SetupAnimations` 에 정의된 보간 커브를 사용합니다. 각 커브에는 시작 시간, 기간, 보간 방법이 정의되어 있으며, 정방향으로도 역방향으로도 재생 가능합니다.
+특정 시간에서의 특성 애니메이션을 위해 0.0f 에서 1.0f 사이의 값이 반환되는 `GetLerp()` 가 사용됩니다.
+
+### 인게임 메뉴
+
+[REGION:fullwidth]
+![](StrategyGamePauseMenu.png)
+[/REGION]
+
+인게임 메뉴가 활성화되면 반투명 전체화면 슬레이트 오버레이가 표시되며, 게임은 일시정지됩니다. `PauseMenuButtons` 은 `SStrategySlateHUDWidget` 에 정의됩니다. 인게임 일시정지 메뉴에는 버튼이 둘 있습니다. 
+하나는 게임 종료, 다른 하나는 메인 메뉴 복귀입니다. 인게임 메뉴를 빠져나가려면 우하단 구석의 일시정지 버튼을 한 번 더 눌러야 합니다.
+
+## 레벨 블루프린트
+
+_레벨 블루프린트_ 에는 각 웨이브 스폰은 물론 초기화와 승리/패배 조건 등이 결정되는 모듈식 구조체가 있습니다.
+
+### 적 스폰
+
+각 웨이브는 spawn fast, span normal, span heavy 의 세 가지 _블루프린트 매크로_ 를 사용해서 구성됩니다. 이들 각각은 특정 유닛 파라미터와 어태치먼트를 구성한 다음 `StrategyAIDirector` 의 
+`SpawnMinions` 함수 발동을 기다립니다. 이 매크로는 적 양조장의 `StrategyAIDirector` 의 웨이브 스폰 완료 보고를 기다렸다가 실행이 하위망을 빠져나가도록 허용합니다.
+
+각 스폰 매크로는 두 개의 실행 입력과 하나의 정수 입력을 받는데, 실행 입력 하나는 매크로의 시작이고 다른 하나는 **OnWaveSpawned** 이벤트 발동 이후 **Gate** 를 여는 것이며, 정수 입력은 스폰시킬 폰 갯수입니다.  
+`StrategyAIDirector` 에서의 함수가 각 폰 웨이브 유형에 알맞는 입력과 함께 호출됩니다. 그 세 가지 함수는 `SetDefaultWeapon`, `SetDefaultArmor`, `SetBuffModifier` 입니다.  
+`SetDefaultWeapon` 과 `SetDefaultArmor` 는 _블루프린트_ 를 입력으로 받으며, 그 _블루프린트_ 를 새로 스폰되는 것의 기본 무기나 방어구로 할당시킵니다. 예를 들어 **SpawnFastMacro** 로 스폰되는 모든 
+적 스폰은 **Attachment_Smithy** 망치 _블루프린트_ 가 기본 무기로 되어 있으며, **SpawnHeavyMacro** 로 스폰되는 모든 적 폰에는 **Attachment_Armorer** 방패 _블루프린트_ 가 기본 방어구로 되어 있습니다.
+
+스폰중인 _블루프린트_ 함수에서 호출되는 마지막 `StrategyAIDirector` 함수는 `SetBuffModifier` 로, 폰의 공격 능력, 체력 보너스, 속도, 크기와 같은 여러가지 데이터 입력을 갖고 있습니다.
+이 입력은 모두 _블루프린트_ 에 노출되어 있어서, 스폰시킬 적 폰의 클래스를 레벨 디자이너가 새로 만들기가 매우 쉽습니다. 최종적으로 각 스폰중인 _블루프린트_ 함수는 적 양조장 
+`StrategyAIDirector` 의 `WaveSize` 프로퍼티를 설정합니다.
+
+적 웨이브의 갯수는 다섯으로, 각기 빠른/보통/무거운 적 폰 조합이 다양합니다. 웨이브 시작시 **Show Wave Title** 노드가 몇 번째 웨이브인지를 표시합니다. 그런 다음 웨이브의 
+첫 적 스폰이 호출됩니다. 스폰 이후에는 두 가지 유형의 딜레이가 있는데, **Delay** 노드로 설정되는 타이머 딜레이가 있고, **WaitForWaveMacro** 로 설정되는 폰 기반 딜레이가 있습니다. 
+**WaitForWaveMacro** 매크로는 살아있는 적 폰 갯수를 수시로 확인하여 딜레이 시간이 만료되거나 모든 적 폰이 죽을 때까지 실행이 매크로에 머물도록 합니다. 한 웨이브의 모든 스폰이 끝나고, 해당 웨이브의 모든 적 폰이 죽(거나 2 분이 지났)으면 
+_Remote Event_ 노드를 사용해서 다음 웨이브에 대한 _Custom Event_ 를 실행시킵니다.
+
+
+### 승리 및 패배 조건
+
+게임에서 기지의 생명은 세 개 입니다. 적 폰이 아군 양조장에 도달하면 생명이 하나 깎이고, 모든 생명이 깎이면 게임에 패배하게 됩니다. 적 보스가 아군 양조장에 도달해도 역시 게임에 패배하게 됩니다.
+게임에 승리하기 위해서는 생명을 다 잃기 전까지 적 폰의 다섯 웨이브 모두를 무찔러야 합니다. 승리 및 패배 결정 조건을 구성하는 망은 **TowerDefenseMap** 의 _레벨 블루프린트_ 안에 있으며, 함수 호출은 
+`AGameModeBase` 클래스에서 파생되는 `StrategyGameInfo` 클래스에 구성되어 있습니다. `StrategyGameInfo` 클래스에는 게임을 초기화키며 액터의 PreInitializeComponents, `SetGamePaused`, `SetGameDifficulty` 이전에 호출되기도 하는 `InitGame` 와 같은 함수도 들어 있습니다.
+
+웨이브 5 에 스폰되는 최종 보스를 죽이고 나면 _Remote Event_ 노드를 통해 **Winning** _Custom Event_ 가 호출됩니다. 그 후 **Win Condition** 코멘트 박스 안에 있는 이 _Custom Event_ 는 **WaitForWin** 하위망 실행을 발동 및 트리거시켜 
+아직 살아있는 적 폰이 없는지 검사합니다. 살아있는 적이 없으면 `Finish Game` 함수에 **WinningTeam** 입력을 "Player" 로 설정하여 호출합니다.
+
+**Lose Condition** 코멘트 박스 안에는 플레이어가 게임에 패배했을 때 `Finish Game` 함수에 **WinningTeam** 입력을 "Enemy" 로 설정하여 호출하는 노드가 둘 있습니다. 첫 번째는 적 폰이 아군 양조장에 도달하여 
+생명 세 개를 모두 잃었을 때 트리거되는 것입니다. 적 폰이 아군 양조장에 도달할 때마다 **MultiGate** 가 트리거됩니다. **MultiGate** 노드의 첫째 둘째 출력 실행 핀 각각은, 트리거될 때마다 아군 양조장의 
+NumberOfLives 수치를 1 씩 감소시키는 노드에 연결됩니다. 후자쪽 출력 실행 핀은 아군 양조장의 생명 갯수를 0 으로 설정한 다음 `Finish Game` 함수에 **WinningTeam** 을 "Enemy" 로 설정하여 호출합니다.
+적 보스가 스폰되면 "생명 세 개 짜리" **MultiGate** 로 통하는 **Gate** 노드를 닫고, **WinningTeam** 이 "Enemy" 로 설정된 두 번째 `Finish Game` 함수로 통하는 **Gate** 노드를 엽니다.
+여기서 최종 보스가 아군 양조장에 도달하면 **FinishGame** 함수가 활성화되어 게임에 패배하는 망이 생성됩니다.
+ 
+
+  
+
+## 자원 노드 - 금
+
+금광은 `StrategyResourceNode` 를 부모 클래스로 갖는 _블루프린트_ 입니다. 이 클래스에는 퍼블릭 함수 `GetAvailableResources` 와 `GetInitialResources`, 프로텍티드 함수 `OnDepleted`, 
+자원이 고갈되면 알리는 `BlueprintImplementableEvent`, 금광에 남은 자원 양을 설정하는 프로텍티드 프로퍼티 `NumResources` 가 들어 있습니다.
+
+금광 _블루프린트_ 에는 타이머에 금광이 나타났다 사라졌다 하게 만드는 하위망이 들어 있습니다. _블루프린트_ 내 **컨스트럭션 스크립트** 는 금광이 레벨에 놓이면 자동으로 숨겨지도록 설정합니다.
+금광이 나타나면 **AppearFX** 파티클 이펙트가 유령 노이즈와 함께 재생됩니다. 금광 채취에 성공하여 **OnDepleted** 이벤트가 발동되면, 금광에 존재하는 만큼의 금이 
+플레이어의 소지 금 총량에 더해집니다. **CollectFX** 파티클 이펙트와 **CoinSound** 가 재생되며, 노드는 다시 숨겨집니다. 플레이어가 노드에 클릭하여 제때 채취하는 데 실패하면
+**FadeFX** 파티클 이펙트와 유령 사운드가 재생됩니다.
+

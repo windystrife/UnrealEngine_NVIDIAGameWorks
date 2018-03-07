@@ -1,0 +1,338 @@
+//-----------------------------------------------------------------------------
+// File:		LPVCommon.usf
+//
+// Summary:		Common functionality for LPV shaders
+//
+// Created:		2013-03-01
+//
+// Author:		mailto:benwood@microsoft.com
+//
+//				Copyright (C) Microsoft. All rights reserved.
+//-----------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+
+#define REFINE_OVER_TIME	1
+
+#if REFINE_OVER_TIME
+  #define PREV_FRAME_MULTIPLIER			0.9f
+
+  // With REFINE_OVER_TIME enabled and a previous frame multiplier of 0.9, lighting 
+  // is effectively multiplied by 10. 
+  // Final lighting therefore needs to be divided by 10 to account for this
+  #define REFINE_LIGHTING_MULTIPLIER	0.1f
+#else
+	#define REFINE_LIGHTING_MULTIPLIER	1.0f
+#endif
+ 
+#define TILED_ADDRESSING		0
+
+#ifndef LPV_WRITE_SHADER
+#define LPV_WRITE_SHADER	0
+#endif
+
+
+//-------------------------------------------------------------------------------------------------
+SamplerState								gLpv3DTextureSampler;
+
+Texture3D<float>							gAOVolumeTexture; 
+Texture3D<float4>							gLpv3DTexture0;
+Texture3D<float4>							gLpv3DTexture1;
+Texture3D<float4>							gLpv3DTexture2;
+Texture3D<float4>							gLpv3DTexture3;
+Texture3D<float4>							gLpv3DTexture4;
+Texture3D<float4>							gLpv3DTexture5;
+Texture3D<float4>							gLpv3DTexture6;
+
+// Write shaders only
+#if LPV_WRITE_SHADER
+
+RWTexture3D<float4>							gLpv3DTextureRW0;
+RWTexture3D<float4>							gLpv3DTextureRW1;
+RWTexture3D<float4>							gLpv3DTextureRW2;
+RWTexture3D<float4>							gLpv3DTextureRW3;
+RWTexture3D<float4>							gLpv3DTextureRW4;
+RWTexture3D<float4>							gLpv3DTextureRW5;
+RWTexture3D<float4>							gLpv3DTextureRW6;
+
+RWTexture3D<float>							gAOVolumeTextureRW;
+
+#endif // LPV_WRITE_SHADER
+
+//-------------------------------------------------------------------------------------------------
+
+struct LPVCell
+{
+	float3 coeffs[9];
+	float AO;
+};
+
+//-------------------------------------------------------------------------------------------------
+// Functions
+//-------------------------------------------------------------------------------------------------
+
+void ClearCell( in out LPVCell cell )
+{ 
+	[unroll]
+	for ( int i = 0; i < 9; i++ ) 
+	{
+		cell.coeffs[i] = float3( 0.0f, 0.0f, 0.0f );
+	}
+
+	cell.AO = 0.0f;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+void MultiplyCell( in out LPVCell cell, float multiplier )
+{
+	[unroll]
+	for ( int i=0; i<9; i++ ) 
+	{
+		cell.coeffs[i] *= multiplier;
+	}
+	cell.AO *= multiplier;
+}
+
+void MultiplyCellCoeffs( in out LPVCell cell, float multiplier )
+{
+	[unroll]
+	for ( int i=0; i<9; i++ ) 
+		cell.coeffs[i] *= multiplier;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+void MultiplyCellV( in out LPVCell cellA, in out LPVCell cellB )
+{
+	[unroll]
+	for ( int i=0; i<9; i++ ) 
+	{
+		cellA.coeffs[i] *= cellB.coeffs[i];
+	}
+	cellA.AO *= cellB.AO;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+void AddCell( in out LPVCell cellA, in LPVCell cellB )
+{
+	[unroll]
+	for ( int i=0; i<9; i++ ) 
+	{
+		cellA.coeffs[i] += cellB.coeffs[i];
+	}
+	cellA.AO += cellB.AO;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+int3 IndexToGridPos( uint cellIndex )
+{
+	int3 texIndex;
+	texIndex.x = ( cellIndex % 32 );
+	texIndex.y = ( cellIndex / 32 ) %  32;
+	texIndex.z = cellIndex / ( 32 * 32 );
+	return texIndex;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+uint GetGridAddress( uint3 gridPos )
+{
+#if TILED_ADDRESSING
+	uint3 tileAddr = gridPos / 4;
+	uint3 rem = gridPos % 4;
+	return ( tileAddr.z*64 + tileAddr.y*8 + tileAddr.x ) * 64 +
+		   rem.z*16 + rem.y * 4 + rem.x;
+#else
+	return gridPos.z*32*32+gridPos.y*32+gridPos.x;
+#endif
+}
+
+//-------------------------------------------------------------------------------------------------
+
+// Unpacks an HDR colour from RGY32 
+float3 UnpackRGY32( uint packedColour )
+{
+	const float ONE_OVER_255 = 1.0f/255.0f;
+	float3 rgb;
+	rgb.r = ( packedColour & 0xff000000 ) >> 24;
+	rgb.g = ( packedColour & 0x00ff0000 ) >> 16;
+	rgb.b = 255.0f-(rgb.r+rgb.g);
+	float luminance = f16tof32( packedColour );
+	return rgb * luminance * ONE_OVER_255;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+// Packs an HDR colour to RGY32 
+uint PackRGY32( float3 colour )
+{
+	// @TODO: could normalise for more precision, but greater ALU in the decode
+	float luminance = (colour.r+colour.g+colour.b);
+	colour.rg /= luminance;
+
+	uint packedValue =	uint( colour.r * 255.0f + 0.5f ) << 24 |
+						uint( colour.g * 255.0f + 0.5f ) << 16; 
+
+	packedValue |= f32tof16( luminance );
+	return packedValue;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+float3 SHLookup( float3 coeffs[9], float3 n ) 
+{
+	const float1 c1 = 0.429043 ;
+	const float1 c2 = 0.511664 ;
+	const float1 c3 = 0.743125 ;
+	const float1 c4 = 0.886227 ;
+	const float1 c5 = 0.247708 ;
+
+	float3 n2 = n*n;
+	float xy = n.x*n.y ; 
+	float yz = n.y*n.z ; 
+	float xz = n.x*n.z ;
+
+	float3 colour = c1*coeffs[8]*(n2.x-n2.y) + c3*coeffs[6]*n2.z + c4*coeffs[0] - c5*coeffs[6] 
+            + 2.0f*c1*(coeffs[4]*xy + coeffs[7]*xz + coeffs[5]*yz) 
+            + 2.0f*c2*(coeffs[3]*n.x+coeffs[1]*n.y+coeffs[2]*n.z) ;
+
+	//return colour;
+	return max( colour, float3(0,0,0) );
+
+}
+
+//-------------------------------------------------------------------------------------------------
+
+float3 LPVCellLookup( in LPVCell cell, in float3 normal ) 
+{
+	return SHLookup( cell.coeffs, normal );
+}
+
+//-------------------------------------------------------------------------------------------------
+
+float3 SHGetDominantDirectionApproxScalar( in float coeffs[9] )
+{
+	float3 dir = float3( -coeffs[3], -coeffs[1], -coeffs[2] );
+	float len = length( dir );
+	float den = ( len > 0.01 ) ? len : 1.0f;
+	return dir/den;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+float3 WorldToGrid( float3 worldPos )
+{
+#if LPV_WRITE_SHADER
+	return worldPos * LpvWrite.OneOverLpvScale + LpvWrite.mLpvGridOffset;
+#else
+	return worldPos * LpvRead.OneOverLpvScale + LpvRead.mLpvGridOffset;
+#endif
+}
+
+//-------------------------------------------------------------------------------------------------
+
+float3 GridToWorld( float3 gridPos )
+{
+#if LPV_WRITE_SHADER
+	return ( gridPos - LpvWrite.mLpvGridOffset ) * LpvWrite.LpvScale;
+#else
+	return ( gridPos - LpvRead.mLpvGridOffset ) * LpvRead.LpvScale;
+#endif
+}
+
+//-------------------------------------------------------------------------------------------------
+
+float MaxGridExtent( float3 gridPos )
+{
+	float3 av = abs(gridPos-16.0f);
+	return max(av.x,max(av.y,av.z));
+}
+
+//-------------------------------------------------------------------------------------------------
+
+int GetGridIndex( float3 worldPos ) 
+{
+	float3 p = WorldToGrid( worldPos );
+
+	float maxExtent = MaxGridExtent( p );
+
+	if ( maxExtent > 16.0f )
+	{
+		return -1;
+	} 
+	else
+	{
+		int3 ui = int3( p );
+		return GetGridAddress( ui );
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+
+LPVCell ReadLpvCell( in uint cellIndex )
+{
+	LPVCell cell;
+	cell.AO = 0.0f;
+
+	int4 texIndex = int4( IndexToGridPos( cellIndex ), 0 );
+	float4 tex0 = gLpv3DTexture0.Load( texIndex );
+	float4 tex1 = gLpv3DTexture1.Load( texIndex );
+	float4 tex2 = gLpv3DTexture2.Load( texIndex );
+	float4 tex3 = gLpv3DTexture3.Load( texIndex );
+	float4 tex4 = gLpv3DTexture4.Load( texIndex );
+	float4 tex5 = gLpv3DTexture5.Load( texIndex );
+	float4 tex6 = gLpv3DTexture6.Load( texIndex );
+
+	cell.coeffs[0] = tex0.rgb; // tex0.a is reserved for secondary occlusion
+	cell.coeffs[1] = tex1.rgb; 
+	cell.coeffs[2] = float3( tex1.a, tex2.rg );
+	cell.coeffs[3] = float3( tex2.ba, tex3.r );
+	cell.coeffs[4] = tex3.gba;
+	cell.coeffs[5] = tex4.rgb;
+	cell.coeffs[6] = float3( tex4.a, tex5.rg );
+	cell.coeffs[7] = float3( tex5.ba, tex6.r );
+	cell.coeffs[8] = tex6.gba;
+	cell.AO = tex0.a;
+	return cell;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+LPVCell ReadLpvCellVolumeTextureFiltered( float3 gridPos )
+{
+	float3 texPos = gridPos / 32.0f; // Half pixel offset?
+	float4 tex0 = gLpv3DTexture0.SampleLevel( gLpv3DTextureSampler, texPos, 0 );
+	float4 tex1 = gLpv3DTexture1.SampleLevel( gLpv3DTextureSampler, texPos, 0 );
+	float4 tex2 = gLpv3DTexture2.SampleLevel( gLpv3DTextureSampler, texPos, 0 );
+	float4 tex3 = gLpv3DTexture3.SampleLevel( gLpv3DTextureSampler, texPos, 0 );
+	float4 tex4 = gLpv3DTexture4.SampleLevel( gLpv3DTextureSampler, texPos, 0 );
+	float4 tex5 = gLpv3DTexture5.SampleLevel( gLpv3DTextureSampler, texPos, 0 );
+	float4 tex6 = gLpv3DTexture6.SampleLevel( gLpv3DTextureSampler, texPos, 0 );
+
+	LPVCell cell; 
+	cell.coeffs[0] = tex0.rgb; // tex0.a is reserved for secondary occlusion
+	cell.coeffs[1] = tex1.rgb; 
+	cell.coeffs[2] = float3( tex1.a, tex2.rg );
+	cell.coeffs[3] = float3( tex2.ba, tex3.r );
+	cell.coeffs[4] = tex3.gba;
+	cell.coeffs[5] = tex4.rgb;
+	cell.coeffs[6] = float3( tex4.a, tex5.rg );
+	cell.coeffs[7] = float3( tex5.ba, tex6.r );
+	cell.coeffs[8] = tex6.gba;
+
+	cell.AO = tex0.a;
+	return cell;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+float ReadLpvCellAO( in uint cellIndex )
+{
+	int4 texIndex = int4( IndexToGridPos( cellIndex ), 0 );
+	return gLpv3DTexture0.Load( texIndex ).a;
+}
+
+//-------------------------------------------------------------------------------------------------

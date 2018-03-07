@@ -1,0 +1,861 @@
+﻿INTSourceChangelist:3388780
+Title:UE4 の C++ プログラミング入門
+Crumbs:
+Description:C++ プログラマー向け入門ガイド
+Availability:Public
+version:4.9
+
+![image alt text](image_0.png)
+
+## アンリアルの C++ は素晴らしい！
+
+この入門ガイドでは、アンリアル エンジンにおける C++ コードの書き方を学習します。アンリアル エンジンでの C++ プログラミングは楽しいです。すんなり入っていけるので、どうぞ心配しないでください。Unreal C++ を「補助的な C++」にしたいと考えているので、アンリアル C++ の機能の多くは誰もが簡単に使えるようになっています。
+
+始める前に、C++ あるいは他のプログラミング言語に慣れておくことが非常に重要です。このページは、C++ の経験者を前提に記述されていますが、C#、Java、JavaScript の経験のあるユーザーでも、似ている点が多いと感じるはずです。
+
+プログラミングの経験が全くないユーザー向けの説明もあります。[ブループリント ビジュアル スクリプト ガイド](Engine/Blueprints) をお読み頂ければ、大丈夫です！ゲーム全体をブループリント スクリプトで作成することも可能です！
+
+アンリアル エンジンで "古い単純な C++ コード" を書くことも可能ですが、この入門ガイドを通してアンリアルのプログラミング モデルの基礎を学習すれば、問題なくできるようになります。これについては、順番に説明していきます。
+
+## C++ とブループリント
+
+アンリアル エンジンでは、ゲームプレイ要素の作成手法として、C++ と Blueprints Visual Scripting の 2 種類が提供されています。C++ を使用する場合、プログラマーは基本のゲームプレイ システムを追加して、デザイナーがそのシステム上もしくはシステムを使ってレベルやゲーム用のカスタム仕様のゲームプレイを作成することができるようにします。これらのケースでは、C++ プログラマーは自分の好きな IDE (通常は Microsoft Visual Studio あるいは Apple の Xcode) で、そしてデザイナーはアンリアル エディタのブループリント エディタで作業します。
+
+ゲームプレイ API およびフレームワーク クラスはそれぞれのシステムで別々に使用することができますが、お互いの長所を活かして連動して使用すると本領を発揮します。つまり、こういう事です。エンジンは、プログラマーによるゲームプレイのビルディング ブロックの作成中に最もよく動作し、デザイナーがこれらのブロックを受け取って、興味深いゲームプレイを作成するのです。
+
+これを踏まえて、デザイナーのためにビルディング ブロックを作成する C++ プログラマーの典型的なワークフローを見てみましょう。このケースでは、後にデザイナーまたはプログラマーがブループリントを使って拡張するクラスを作成していきます。また、デザイナーが設定可能なプロパティを作成し、そこから新しい値を取得します。アンリアルで提供されているツールと C++ マクロを使えば、プロセス全体は非常に簡単です。
+
+### Class Wizard
+
+まず最初に、アンリアル エンジンのクラス ウィザードを使って、後にブループリントで拡張される基本となる C++ クラスを生成します。以下の画像は、アクタを新規作成するウィザードの最初のステップです。
+
+![image alt text](image_1.png)
+
+次に、ウィザードに生成したいクラス名を入力します。ここではデフォルト名を使っています。
+
+![image alt text](image_2.png)
+
+クラスの作成を選択すると、ウィザードがファイルを生成して、開発環境が開き、編集ができるようになります。生成されたクラス定義がこちらになります。クラス ウィザードについては、こちらの [リンク](Programming/Development/ManagingGameCode/CppClassWizard) をご覧ください。
+
+	#include "GameFramework/Actor.h"
+	#include "MyActor.generated.h"
+
+	UCLASS()
+	class AMyActor : public AActor
+	{
+		GENERATED_BODY()
+
+	public:
+		// Sets default values for this actor's properties (このアクタのプロパティのデフォルト値を設定)
+		AMyActor();
+
+		// Called every frame　(フレームごとに呼び出される)
+		virtual void Tick( float DeltaSeconds ) override;
+
+	protected:
+		// Called when the game starts or when spawned (ゲーム開始時またはスポーン時に呼び出される)
+		virtual void BeginPlay() override;
+	};
+
+クラス ウィザードは、オーバーロードと指定された **BeginPlay()** と **BeginPlay()** でクラスを生成します。**BeginPlay()** は、アクタがプレイ可能なステートになったことを知らせるイベントです。クラスのゲームプレイ ロジックはここから始めると分かりやすいです。**Tick()** は、最後の呼び出しが渡されてから経過する時間で、1 フレームにつき 1 回呼び出されます。ここで、循環ロジックを行うことが可能です。ただし、この機能が必要なければ、パフォーマンスを少し節約するために取り除くのが良いでしょう。削除後に、ティック示す行を必ず取り除くようにしてください。以下のコンストラクタには削除する行が含まれています。
+
+	AMyActor::AMyActor()
+
+	{
+
+		// Set this actor to call Tick() every frame. (フレーム毎に Tick() を呼び出すようにこのアクタを設定) (必要がなければパフォーマンス向上のためにオフにすることが可能)
+
+		PrimaryActorTick.bCanEverTick = true;
+
+	}
+
+### エディタでプロパティを表示させる方法
+
+クラスを作成したので、次はアンリアル エディタでデザイナーが設定するプロパティを幾つか作成してみましょう。**UPROPERTY()** という特殊なマクロを使えば、とても簡単にプロパティをエディタに公開することができます。方法は、以下のように、プロパティ宣言の前に **UPROPERTY(EditAnywhere)** マクロを使用するだけです。
+
+	UCLASS()
+	class AMyActor : public AActor
+	{
+		GENERATED_BODY()
+	public:
+
+	UPROPERTY(EditAnywhere)
+		int32 TotalDamage;
+
+		...
+	};
+
+これでもう、エディタの値を編集することができるようになります。さらに、**UPROPERTY()** マクロへ情報を渡せば、編集方法や編集箇所を調整することができます。例えば、TotalDamage プロパティを関連プロパティのあるセクション中で表示させたい場合、分類機能を使います。以下のプロパティ宣言がそれに当たります。
+
+	UPROPERTY(EditAnywhere, Category="Damage")
+	int32 TotalDamage;
+
+ユーザーがこのプロパティを編集しようとすると、同じカテゴリ名でマークされた他のプロパティと一緒に Damage という見出しの下に表示されるようになります。デザイナーが共通して使用する編集設定は、まとめて一緒にしておくと非常に便利です。
+
+それでは、いくつかプロパティをブループリントに公開してみましょう。
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Damage")
+	int32 TotalDamage;
+
+お気づきのように、プロパティを読み書く可能にするブループリント固有のパラメータがあります。BlueprintReadOnly という別のオプションは、ブループリントでそのプロパティを const として扱いたい場合に使用します。エンジンへのプロパティの公開の方法は、様々なオプションを使って制御することができます。その他のオプションは、こちらの [リンク](Programming/UnrealArchitecture/Reference/Properties/Specifiers) でご覧いただけます。
+
+以下のセクションを続ける前に、このサンプル クラスにプロパティをいくつか追加してみましょう。このアクタが対処するダメージをすべて制御するプロパティは既にありますが、もう少し進んでダメージを徐々に起こしてみましょう。以下のコードには、デザイナーが設定できるプロパティが 1 つと、デザイナーは見ることはできても変更はできないプロパティが 1 つ追加されています。
+
+	UCLASS()
+	class AMyActor : public AActor
+	{
+		GENERATED_BODY()
+	public:
+
+		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Damage")
+		int32 TotalDamage;
+
+		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Damage")
+		float DamageTimeInSeconds;
+
+		UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Transient, Category="Damage")
+		float DamagePerSecond;
+
+		...
+	};
+
+DamageTimeInSeconds は、デザイナーが修正可能なプロパティです。DamagePerSecond プロパティは、デザイナーが設定を使って計算した値です (次のセクション参照)。VisibleAnywhere フラグは、そのプロパティを表示可能とマークしますが、アンリアル エディタにおいて編集はできません。Transient フラグは、そのプロパティはディスクから保存やロードがされないことを表します。つまり、派生した、非永続的なプロパティです。この画像は、プロパティがクラス デフォルトの一部であることを表しています。
+
+![image alt text](image_3.png)
+
+### コンストラクタのデフォルトを設定する
+
+コンストラクタにプロパティのデフォルト値を設定すると、典型的な C++ クラスと同様に機能します。次の 2 つの例は、コンストラクタのデフォルト設定値です。2 つの機能は同等です。
+
+	AMyActor::AMyActor()
+	{
+		TotalDamage = 200;
+		DamageTimeInSeconds = 1.f;
+	}
+
+	AMyActor::AMyActor() :
+		TotalDamage(200),
+		DamageTimeInSeconds(1.f)
+	{
+	}
+
+コンストラクタにデフォルト値を追加すると、ビューはこうなります。
+
+![image alt text](image_4.png)
+
+デザイナーが設定するプロパティをインスタンスごとにサポートするために、所定のオブジェクトのインスタンス データからも値をロードします。このデータは、コンストラクタの後に適用されます。**PostInitProperties()** コール チェーンへ結合することで、デザイナーによる設定値に合わせてデフォルト値を作成することができます。**TotalDamage** と **DamageTimeInSeconds** の部分にデザイナーが値を指定する場合のプロセスの例です。これらはデザイナーが指定していますが、上の例で行ったように、実用的なデフォルト値を設定することができます。 
+[REGION:note]
+プロパティにデフォルト値を設定しないと、エンジンは自動的にプロパティにゼロまたはポインタ型であれば nullptr を設定します。
+[/REGION]
+	void AMyActor::PostInitProperties()
+	{
+		Super::PostInitProperties();
+		DamagePerSecond = TotalDamage / DamageTimeInSeconds;
+	}
+
+ここでも、**PostInitProperties()** コードを追加すると、同じプロパティが表示されます。
+
+![image alt text](image_5.png)
+
+###ホット リロード機能
+
+他のプロジェクトで C++ によるプログラミングに慣れている方には驚きの素晴らしい機能がアンリアルにはあります。エディタをシャットダウンせずに C++ の変更をコンパイルすることができます ! 方法は 2 通りあります。
+
+1. エディタを実行したまま、通常どおり Visual Studio または Xcode からビルドします。エディタは新しくコンパイルされた DLL を検出し、すぐに変更をリロードします！  
+
+	![image alt text](image_6.png)
+	[REGION:note]
+	デバッガーでアタッチされている場合は、Visual Studio でビルドできるようにまずデタッチする必要があります。
+	[/REGION]
+2. あるいは、エディタのメイン ツールバーの **[Compile (コンパイル)]** ボタンをクリックするだけです。
+
+	![image alt text](image_7.png)
+
+チュートリアルを進めていく中のセクションで、この機能を使用することができます。
+
+### ブループリントで C++ Class を拡張する
+
+ここまでで、単純なゲームプレイ クラスを C++ クラス ウィザードで作成し、デザイナーが設定するプロパティを幾つか追加しました。では次に、作成したこの質素なクラスから、デザイナーがどのようにユニークなクラスを作成するのか見てみましょう。
+
+まず AMyActor クラスからブループリント クラスを作成します。以下の画像では、選択した基本クラス名が AMyActor ではなく MyActor と表示されていることに注目してください。これは、名前が分かりやすくなるように、デザイナーがツールを使って意図的に命名規則を非表示にしています。
+
+![image alt text](image_8.png)
+
+**[Select (選択)]** を選択すると、デフォルト名がついた Blueprint クラスが作成されます。下の **コンテンツ ブラウザ** のスナップショットでお分かりのように、ここでは名前を「CustomActor1」にしました。
+
+![image alt text](image_9.png)
+
+これらは、デザイナーがこれからカスタマイズしていく最初のクラスです。まず最初に、ダメージのプロパティのデフォルト値を変更していきます。ここでは、デザイナーは **TotalDamage** を 300 に、そしてそのダメージの伝達時間を 2 秒に変更しました。すると、プロパティはこのようになりました。
+
+![image alt text](image_10.png)
+
+期待していた計算結果ではありません。150 になるはずだったのに、デフォルト値の 200 のままです。原因は、プロパティがロード プロセスから初期化された後、1 秒あたりのダメージ値しか計算していないからです。アンリアル エンジンのランタイムの変更は考慮されていないのです。エディタで変更されるとエンジンはターゲット オブジェクトを通知するので、この問題は容易に解決できます。以下のコードは、エディタで変更された抽出値を計算するのに必要な追加接続を示しています。
+
+	void AMyActor::PostInitProperties()
+	{
+		Super::PostInitProperties();
+
+		CalculateValues();
+	}
+
+	void AMyActor::CalculateValues()
+	{
+		DamagePerSecond = TotalDamage / DamageTimeInSeconds;
+	}
+
+	#if WITH_EDITOR
+	void AMyActor::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+	{
+		CalculateValues();
+
+		Super::PostEditChangeProperty(PropertyChangedEvent);
+	}
+	#endif
+
+**PostEditChangeProperty()** メソッドがエディタ固有の #ifdef 内にあることがわかります。これは、ゲームに必要なコードのみでゲームをビルドし、実行ファイルのサイズを無駄に大きくしてしまう余分なコードを削除するためです。そのコードをコンパイル対象にしたので、以下のように **DamagePerSecond** 値が期待通りになりました。
+
+![image alt text](image_11.png)
+
+### C++ とブループリント領域で関数を呼び出す
+
+ここまで、ブループリントへプロパティを公開する方法を説明しました。エンジンの詳細へ進む前に、最後にもう1 つだけ説明しておくことがあります。ゲームプレイ システムの作成中、デザイナーは C++ プログラマーが作成した関数を呼び出す必要があります。プログラマーもまた、C++ コードからブループリントに実装された関数を呼び出す必要があります。ではまず、ブループリントから呼び出し可能な CalculateValues() 関数の作成から始めてみましょう。関数のブループリントへの公開方法は、プロパティの公開と同じで簡単です。関数を宣言する前に、マクロを 1 つだけ配置します。以下のコードのスニペットを見ると、何が必要かがわかります。
+
+	UFUNCTION(BlueprintCallable, Category="Damage")
+	void CalculateValues();
+
+**UFUNCTION()** は、C++ 関数をリフレクション システムへ公開する処理をします。BlueprintCallable オプションが、それを Blueprints Virtual Machine へ公開します。関数に公開されたブループリントはすべて、右クリックのコンテキスト メニューが正しく動くように、関連付いたカテゴリを作る必要があります。以下の画像は、カテゴリがどのようにコンテキスト メニューに影響するかを示しています。
+
+![image alt text](image_12.png)
+
+ご覧のように、関数は **[Damage]** カテゴリから選択することができます。以下のブループリント コードは、依存データを再計算するための呼び出しによって TotalDamage 値が変化しています。
+
+![image alt text](image_13.png)
+
+これは、依存関係にあるプロパティの計算のためにさきほど追加したものと同じ関数を使います。エンジンの大部分は **UFUNCTION()** マクロ経由でブループリントへ公開されるので、C++ コードを書かずにゲームをビルドすることが可能です。ただし、基本のゲームプレイ システムとパフォーマンスが非常に重要なコードのビルドには、C++ を使用して、ビヘイビアのカスタマイズや、C ++ でビルドしたブロックから合成ビヘイビアを作成する方法がベストです。
+
+デザイナーが C++ コードを呼び出せるようになりました。次はさらにパワフルな方法で C++ とブループリント間を行き来してみましょう。この方法では、ブループリントで定義された関数を C++ コードで呼び出すことが可能になります。適合を確認したことを応答できるイベントをデザイナーに通知するために、よく使われる方法です。これには、エフェクトや、アクタの表示や非表示などの視覚的なインパクトのスポーンが含まれることが多いです。以下のコード スニペットは、ブループリントに実装される関数を表しています。
+
+	UFUNCTION(BlueprintImplementableEvent, Category="Damage")
+	void CalledFromCpp();
+
+この関数は他の C++ 関数と同様に呼び出されます。アンリアル エンジンは、ブループリント VM への呼び出し方を理解する基本の C++ 関数の実装を生成します。これが一般的に Thunk (サンク) と呼ばれるものです。対象のブループリントにこのメソッド用の関数ボディを持たなければ、関数はボディが動かず何も実行しない C++ 関数のようなビヘイビアになります。ブループリントのメソッド オーバーライド機能はそのままにして、C++ のデフォルトを実装したい場合はどうしたらよいでしょうか。この場合も、UFUNCTION() マクロにオプションがあります。以下のコード スニペットは、これを実現するため必要なヘッダーの変更を示しています。
+
+	UFUNCTION(BlueprintNativeEvent, Category="Damage")
+	void CalledFromCpp();
+
+このバージョンでは、ブループリント VM へ呼び出すためにサンク メソッドを生成しています。では、デフォルトの実装はどのように提供することができるのでしょうか。ツールが <function name>_Implementation() のような関数宣言を作成します。このバージョンの関数を提供しなければ、プロジェクトはリンクに失敗します。上記の宣言のための実装コードは以下になります。
+
+	void AMyActor::CalledFromCpp_Implementation()
+	{
+		// Do something cool here
+	}
+
+問題のブループリントがメソッドをオーバーライドしないと、このバージョンの関数が呼び出されるようになります。4.8 以降のビルド ツールでは、自動生成される _Implementation() 宣言が取り除かれ、ヘッダにそれを明確に追加することになります。
+
+ここまで、ゲームプレイ プログラマーがゲームプレイ機能をビルドするためにデザイナーと共に作業する一般的なワークフローとメソッドをウォークスルーしました。次は、挑戦する内容を選んで頂きます。このまま C++ 使用方法の詳細に進む、またはランチャーのサンプルを使って実践に挑戦してください。 
+
+## 詳細
+
+詳細についての学習を希望した皆さん。素晴らしい。では次に、ゲームクラス階層の見え方について説明します。このセクションでは、まず最初に基本のビルディング ブロックを説明し、その後で相互関連について説明します。カスタム仕様のゲームプレイ機能をビルドする場合、アンリアル エンジンがどのように継承とコンポジションを使い分けているかが分かります。
+
+### Gameplay クラス：Objects、Actors、Components
+
+主要なゲームプレイ クラスの大部分は、主要な 4 タイプから派生しています。それは、**UObject**、**AActor**、**UActorComponent**、**UStruct** です。これらのブロックを次のセクションで 1 つずつ説明します。これらのクラスから派生させずにタイプを作成することももちろん可能ですが、エンジンの機能には含まれません。**UObject** 階層の外側に作成されたクラスは、通常サードパーティ ライブラリの統合、OS の固有機能のラップ処理に使用されます。
+
+#### Unreal Objects (UObject)
+
+アンリアル エンジンの基本ビルド ブロックは UObject と呼ばれます。このクラスは、**UClass** と共にエンジン内で最も重要な数々の基本サービスを提供します。
+
+* プロパティとメソッドのリフレクション
+* プロパティのシリアライズ
+* ガーベジ コレクション
+* UObjects の名前検索
+* 設定可能なプロパティ値
+* プロパティとメソッドのネットワーク構築のサポート
+
+UObject から派生する各クラスには、クラス インスタンスに関するすべてのメタデータを含むシングルトン UClass が作成されます。UObject と UClass は両方とも、ゲームプレイ オブジェクトがライフタイムの間に行うすべての処理ルートになります。UClass は、UObject のインスタンスの見え方、シリアライズやネットワーク構築に利用できるプロパティを説明する、と考えると 2 つの違いが分かりやすいと思います。ほとんどのゲームプレイ開発は、直接 UObjects から派生するのではなく AActor と UActorComponent からの派生です。UClass/UObject の機能の詳細を知らなくてもゲームプレイ コードは記述できますが、このようなシステムの存在を覚えておくと役に立つでしょう。
+
+#### AActor
+
+AActor は、ゲームプレイ体験の一部を成すオブジェクトです。AActor は、デザイナーがレベル内に配置する、またはランタイム時にゲームプレイ システムによって作成されます。レベル内へ配置可能なオブジェクトは、すべてこの AActor からの拡張です。例えば、**AStaticMeshActor**、**ACameraActor**、**APointLight** などです。AActor は UObject からの派生なので、前のセクションの標準機能一覧にあるすべての機能を使用できます。AActor は、所有レベルがメモリからアンロードされると、ゲームプレイ コード (C++ またはブループリント) もしくは標準のガーベジ コレクション メカニズムで明示的に破壊することができます。AActor は、ゲーム オブジェクトの概要レベルのビヘイビアの基本です。AActor はまた、ネットワーク構築中にレプリケート可能な基本タイプでもあります。ネットワーク レプリケーション中は、AActor はネットワーク サポートを必要とする AActor に所有される UActorComponents に対して情報配布も可能です。
+
+AActor はそれぞれ独自のビヘイビア (継承による指定) がありますが、UActorComponents の階層のコンテナ (コンポジションによる指定) としても機能します。AActor の RootComponent メンバによって実行されるので、1 つの UActorComponent が他の多くのものを含むことができるようになります。AActor をレベル内に配置するためには、少なくとも平行移動、回転、スケールを含む **USceneComponent** がその AActor に含まれていなければなりません。 
+
+AActors では AActor のライフサイクル中に一連のイベントが呼び出されます。ライフサイクルを説明するイベントを簡単にまとめると、このようになります。
+
+* `BeginPlay` - オブジェクトが初めてゲームプレイに存在すると呼び出されます。
+* `Tick` - 徐々に作業を行うために 1 フレームにつき 1 回呼び出されます。
+* `EndPlay` - オブジェクトがゲームプレイ空間を去る時に呼び出されます。
+
+AActor の詳細については、 [](Programming/UnrealArchitecture/Actors) を参照してください。
+
+##### ランタイム ライフサイクル
+
+前の章では、AActor の ライフサイクルのサブセットについて説明しました。レベルに配置されたアクタのライフサイクルは、ロード、存在、レベルへのアンロード、破壊というように、簡単にイメージすることができると思います。ランタイムでの作成および破壊はどのようなプロセスなのでしょうか。アンリアル エンジンは、ランタイム時に AActor をスポーンして作成するための呼び出しをします。アクタのスポーンは、ゲーム内で通常のオブジェクトを作成するよりも若干複雑です。ニーズのすべてを満たすため、様々なランタイム システムを使って AActor を登録しておく必要があるからです。アクタの最初の位置と回転を設定する必要があります。物理はそれを知っておく必要があります。マネージャーはアクタにティックを指示するので、それを知っておく必要があります。その他いろいろです。そのため、アクタのスポーン専用メソッドの **UWorld::SpawnActor()** があります。アクタが正常にスポーンされると、次のフレームの **Tick()** の前に **BeginPlay()** 手法が呼び出されます。
+
+アクタがライフタイムを終えると、**Destroy()** を呼び出すことによってアクタを消去できます。このプロセスの間、破壊に対してロジックをカスタム仕様にできる **EndPlay()** が呼び出されます。Lifespan メンバを使用しても、アクタの生存期間を制御することができます。オブジェクトのコンストラクタ内、またはランタイムに別のコードを使って期間を設定することができます。設定期間が終わると、**Destroy()** がアクタ上に自動的に呼び出されます。
+
+アクタのスポーンについては、[](Programming/UnrealArchitecture/Actors/Spawning) ページをご覧ください。
+
+#### UActorComponent
+
+UActorComponent はそれぞれ独自のビヘイビアを持ち、ビジュアル メッシュ、パーティクルエフェクト、カメラ視点、物理インタラクションの提供など、各種 AActor タイプで共有する機能の基本となっています。AActor は全体的な目標達成にむけた一般的な役割をする一方、UActorComponent は全体目標をサポートする個々のタスクを実行する場合が多いです。コンポーネントは別のコンポーネントにアタッチしたり、アクタのルート コンポーネントになることも可能です。その際、1 つの親コンポーネントまたはアクタにしかアタッチすることができませんが、その下にはは多くの子コンポーネントをアタッチすることができます。コンポーネントのツリーを描いてみましょう。子コンポーネントには、親コンポーネントまたはアクタに対応して、位置、回転、スケールがつきます。
+
+アクタまたはコンポーネントには様々な使い方があります。アクタとコンポーネントの関係の考え方ですが、アクタは「これはなんですか？」という質問に対する答え、コンポーネントは「これは何でできていますか？」という質問に対する答えと考えてください。
+
+* RootComponent - AActor のツリー内の上位レベルを維持する AActor のメンバです。
+* Ticking - 所有する AActor の Tick() の一部としてコンポーネントはティックされます。
+
+##### 一人称キャラクターの分析
+
+ここまでは説明が中心で、例はほとんど紹介しませんでした。AActor と UActorComponent の関係性を図で説明するために、First Person Template を元に新規プロジェクトを生成した時に作成したブループリントを詳しく見てみましょう。以下の画像は **FirstPersonCharacter** アクタの **コンポーネント** ツリーです。**RootComponent** は **CapsuleComponent** です。**CapsuleComponent** に **ArrowComponent**、**Mesh** コンポーネント、**FirstPersonCameraComponent** がアタッチされています。一番左にあるコンポーネントは **FirstPersonCameraComponent** を親としてもつ Mesh1P コンポーネントです。つまり、一人称メッシュは一人称カメラと相対しています。 
+
+![image alt text](image_14.png)
+
+この **コンポーネント** ツリーを視覚的にすると以下の画像になります。**Mesh** コンポーネント以外のすべてのコンポーネントが 3D 空間にあります。
+
+![image alt text](image_15.png)
+
+コンポーネントのこのツリーは 1 つのアクタ クラスにアタッチされています。この例で分かるように、継承とコンポジションの両方を使用することで、複雑なゲームプレイ オブジェクトのビルドが可能になります。既存の AActor または UActorComponent をカスタマイズする場合は継承を使います。数多くの異なる AActor タイプで機能を共有する場合はコンポジションを使います。
+
+#### UStruct
+
+UStruct を使用するためには、特定のクラスから拡張する必要はなく、構造体に USTRUCT() とマークすれば、ビルド ツールが基本操作を行います。UObject と異なり、 UStructs はガーベジ コレクションではありません。それらのダイナミック インスタンスを作成した場合、ライフスタイルの管理は自分で行います。UStructs は、アンリアル エディタ内での編集、ブループリントの操作、シリアライズ、ネットワーク構築に対して UObject リフレクション サポートがされている簡素な古いデータ タイプという意味です。
+
+ゲームプレイ クラス構築で使用する基本的な階層をお話しました。このまま読み進めるか、サンプルを使用してみるか、再度選択してください。ゲームプレイ クラスについては [こちら](Programming/UnrealArchitecture/Reference/Classes) のページで、詳細が書かれたランチャーでサンプルを使用することができます。あるいは、次の章ではゲームをビルドするための C++ 機能についてさらに詳しく説明していきます。
+
+## 詳細情報
+
+C++ 機能について、もっと詳しく知りたいと思われた皆様、ようこそ。それではエンジンの機能について掘り下げていきましょう。
+
+### Unreal Reflection System
+
+[アンリアル プロパティ システム (Reflection) のブログ記事](https://www.unrealengine.com/blog/unreal-property-system-reflection)
+
+Gameplay クラスは特別なマークアップを使っているので、まずここで、アンリアル プロパティ システムの基本について少し説明します。UE4 は、ガーベジ コレクション、シリアライズ、ネットワーク レプリケーション、ブループリント/C++ などの動的な機能を有効にするリフレクションの独自の実装を使用しています。これらの機能はオプトインです。つまり、正しいマークアップを自分のタイプに追加しなければなりません。そうしない場合、アンリアルはそれらを無視し、それらに対してリフレクション データを生成します。基本的なマークアップの概要はこのような感じになります。
+
+* **UCLASS() **- アンリアルにクラスのリフレクション データを生成するように命令します。クラスは UObject から派生しなければなりません。 
+* **USTRUCT() **- アンリアルに構造体のリフレクション データを生成するように命令します。
+* **GENERATED_BODY()** - UE4 は、タイプ用に生成されたすべての必要なボイラープレート コードにこれを置き換えます。
+* **UPROPERTY() **- UCLASS  あるいは USTRUCT のメンバ変数を有効にして UPROPERTY として使用します。UPROPERTY はいろいろな用途があります。変数のレプリケート、シリアライズ、ブループリントからのアクセスを可能にします。UObject に対するリファレンス数の追跡をするガーベジ コレクターによっても使用されます。
+* **UFUNCTION() **- UCLASS あるいは USTRUCT のクラス メソッドを有効にして UFUNCTION として使用します。UFUNCTION は、クラス メソッドをブループリントから呼び出して、他の物の中で RPC として使用できるようにします。
+
+こちらは UCLASS の宣言の例です。
+
+	#include "MyObject.generated.h"
+
+	UCLASS(Blueprintable)
+	class UMyObject : public UObject
+	{
+		GENERATED_BODY()
+
+	public:
+		MyUObject();
+
+		UPROPERTY(BlueprintReadOnly, EditAnywhere)
+		float ExampleProperty;
+
+		UFUNCTION(BlueprintCallable)
+		void ExampleFunction();
+	};
+
+まず最初に "MyClass.generated.h" をインクルードしていることが分かります。アンリアルは、リフレクション データをすべて生成し、それをこのファイルに入れます。タイプを宣言するヘッダファイルの中で、このファイルを一番最後にインクルードします。
+
+例の中の UCLASS、UPROPERTY、UFUNCTION マークアップは、追加の指定子をインクルードします。必要ではありませんが、ここではデモ目的のために共通の指定子を追加しています。これらの指定子により、所定のビヘイビアやプロパティを指定することができます。
+
+* **Blueprintable** - ブループリントから拡張可能なクラスです。
+* **BlueprintReadOnly **- ブループリントからの読み取りは可能ですが、書き込みはできないプロパティです。
+* **Category** - エディタの [Details (詳細)] ビューでこのプロパティを表示する場所を定義します。整理に役立つプロパティです。
+* **BlueprintCallable **- ブループリントから呼び出し可能な関数です。
+
+指定子の数は非常に多いので、ここにまとめることはできません。以下のリンクをご覧ください。
+
+[UCLASS 指定子一覧](Programming/UnrealArchitecture/Reference/Classes/Specifiers)
+
+[UPROPERTY 指定子リスト](Programming/UnrealArchitecture/Reference/Properties/Specifiers)
+
+[UFUNCTION 指定子リスト](Programming/UnrealArchitecture/Reference/Functions/Specifiers)
+
+[USTRUCT 指定子リスト](Programming/UnrealArchitecture/Reference/Structs/Specifiers)
+
+### Object/Actor Iterators
+
+特定の UObject タイプのすべてのインスタンスおよびそのサブクラスをイタレートする非常に便利なツールです。
+
+	// Will find ALL current UObject instances (すべての Uobject インスタンスを見つけます)
+	for (TObjectIterator<UObject> It; It; ++It)
+	{
+		UObject* CurrentObject = *It;
+		UE_LOG(LogTemp, Log, TEXT("Found UObject named: %s"), *CurrentObject->GetName());
+	}
+
+イテレータでタイプをさらに細かく指定すると、検索範囲を絞ることができます。UObject から派生した UMyClass というクラスがあると仮定します。そのクラスのすべてのインスタンス (およびそこから派生したインスタンス) をこのように見つけることができます。
+
+	for (TObjectIterator<UMyClass> It; It; ++It)
+	{
+		// ...
+	}
+[REGION:warning]
+オブジェクト イテレータをエディタでプレイすると、期待どおりの結果は得られない場合があります。エディタがロードされているので、オブジェクト イテレータはエディタが使用しているだけの UObject だけでなく、ゲーム ワールド インスタンスに対して作成されたすべての **UObject** を返します。
+[/REGION]
+アクタ イテレータはオブジェクト イテレータとほぼ同じことを行いますが、AActor から派生したオブジェクトに対してのみ機能します。アクタ イテレータは上記のような問題はなく、現在のゲーム ワールド インスタンスで使用中のオブジェクトのみを返します。
+
+アクタ イテレータを作成する時は、**UWorld** インスタンスにポインタを与える必要があります。**APlayerController** などの多くの UObject クラスが提供する **GetWorld** メソッドを利用すると便利です。よく分からない場合は、UObject 上の **ImplementsGetWorld** メソッドで GetWorld メソッドを実行するか確認することができます。
+
+	APlayerController* MyPC = GetMyPlayerControllerFromSomewhere();
+	UWorld* World = MyPC->GetWorld();
+
+	// Like object iterators, you can provide a specific class to get only objects that are
+	// or derive from that class (他のイテレータと同様に、そのクラスまたは派生であるオブジェクトを取得するための特定のクラスを提供することができます。)
+	for (TActorIterator<AEnemy> It(World); It; ++It)
+	{
+		// ...
+	}
+
+[REGION:note]
+AActor は UObject から派生しているので、**TObjectIterator** を使って AActor のインスタンスも検索できます。エディタでプレイする場合だけ気を付けてください！
+[/REGION]
+
+## メモリ管理とガーベジ コレクション
+
+このセクションでは、UE4 のメモリ管理とガーベジ コレクション システムについて説明します。
+
+[Wiki: Garbage Collection & Dynamic Memory Allocation](https://wiki.unrealengine.com/Garbage_Collection_%26_Dynamic_Memory_Allocation)
+
+### UObjects とガーベジ コレクション
+
+UE4 はガーベジ コレクション システムを実装するためにリフレクション システムを使います。ガーベジ コレクションを使うと、UObjects の削除を手動で管理する必要はなく、それらに対するリファレンスの有効性の管理だけで済みます。ガーベジ コレクションを有効にするには、クラスが UObject の派生である必要があります。これから使うクラスの簡単な例がこちらです。
+
+	UCLASS()
+	class MyGCType : public UObject
+	{
+		GENERATED_BODY()
+	};
+
+ガーベジ コレクタでは、このコンセプトは ルートセット と呼ばれます。このルートセットは基本的には、ガーベジ コレクションの対象にならないとコレクタが知っているオブジェクトのリストです。ルートセット内のオブジェクトから対象のオブジェクトへのリファレンスのパスがある限り、オブジェクトはガーベジ コレクションの対象にはなりません。ルートセットへそのようなパスがオブジェクトに対して存在しないのであれば、unreachable (到達不可能) と呼ばれ、ガーベジ コレクタが次回実行された時に収集 (削除) されます。エンジンは一定間隔でガーベジ コレクタを実行します。
+
+では、何を「リファレンス」と見なせば良いのでしょう。UPROPERTY に格納されているすべての UObject ポインタです。簡単な例から紹介します。
+
+	void CreateDoomedObject()
+	{
+		MyGCType* DoomedObject = NewObject<MyGCType>();
+	}
+
+上記の関数を呼び出すと新しい UObject が作成されますが、どの UPROPERTY にもそれに対するポインタは格納しないので、ルートセットの一部にはなりません。やがて、ガーベジ コレクタはこのオブジェクトを到達不能と検出し破棄します。
+
+### アクタとガーベジ コレクション
+
+アクタは通常はガーベジ コレクションの対象ではありません。スポーンしたら、それらに対して自分で **Destroy()** を呼び出さなければなりません。すぐに削除は行われず、次のガーベジ コレクション フェーズで取り除かれます。
+
+UObject プロパティをもつアクタの場合は、こちらの方が一般的です。
+
+	UCLASS()
+	class AMyActor : public AActor
+	{
+		GENERATED_BODY()
+
+	public:
+		UPROPERTY()
+		MyGCType* SafeObject;
+
+		MyGCType* DoomedObject;
+
+		AMyActor(const FObjectInitializer& ObjectInitializer)
+			:Super(ObjectInitializer)
+		{
+			SafeObject = NewObject<MyGCType>();
+			DoomedObject = NewObject<MyGCType>();
+		}
+	};
+
+	void SpawnMyActor(UWorld* World, FVector Location, FRotator Rotation)
+	{
+		World->SpawnActor<AMyActor>(Location, Rotation);
+	}
+
+上記の関数を呼び出すと、ワールドにアクタがスポーンされます。アクタのコンストラクタは 2 つのオブジェクトを作成します。1 つは UPROPERTY にアサインされ、もう片方は元のポインタにアサインされます。アクタは自動的にルートセットの一部になるので、ルートセット オブジェクトから到達可能なため SafeObject はガーベジ コレクション対象にはなりません。ただし、DoomedObject にはあまり都合がよくありません。DoomedObject には UPROPERTY をマークしなかったので、コレクタはそれが参照されていることを知らずに、結果的に破棄します。
+
+UObject がガーベジ コレクション処理されると、それに対するすべての UPROPERTY リファレンスが nullptr に設定されます。オブジェクトがガーベジ コレクション処理されたかどうか安全に確認できるようになります。
+
+	if (MyActor->SafeObject != nullptr)
+	{
+		// Use SafeObject
+	}
+
+繰り返しになりますが、Destroy()  が呼び出されているアクタはガーベジ コレクタが次回実行されるまで削除されないので、これは重要です。**IsPendingKill()** メソッドを確認すれば、UObject が削除待ちの状態か分かります。メソッドが true を返せば、オブジェクトは削除され使用しないものと見なされます。
+
+### UStructs
+
+前述したように、 UStructs は UObject を軽くしたものです。従って、 UStructs はガーベジ コレクション対象にすることはできません。UStructs のダイナミック インスタンスを使用しなければいけない場合、後ほど説明するスマート ポインタを代わりに使用することができます。
+
+### Non-UObject References
+
+通常、non-UObjects はリファレンスをオブジェクトに追加してガーベジ コレクションを防ぐこともできます。そのためには、オブジェクトは **FGCObject** から派生して、**AddReferencedObjects** クラスをオーバーライドしなければなりません。
+
+	class FMyNormalClass : public FGCObject
+	{
+	public:
+		UObject* SafeObject;
+
+		FMyNormalClass(UObject* Object)
+			:SafeObject(Object)
+		{
+		}
+
+		void AddReferencedObjects(FReferenceCollector& Collector) override
+		{
+			Collector.AddReferencedObject(SafeObject);
+		}
+	};
+
+ガーベジ コレクション対象から外したい必要な UObject にハード参照を手動で追加する場合に **FReferenceCollector** を使います。オブジェクトが削除され、デストラクタが実行されると、オブジェクトは自動的に追加されたすべてのリファレンスをクリアします。
+
+### クラス名のプレフィックス
+
+アンリアル エンジンは、ビルド プロセス中にコードを生成するツールを提供します。これらのツールにはクラス名を付けることになっており、名前が一致しないと警告あるいはエラーをトリガーします。以下はクラス プレフィックスのリストです。ツールが期待する内容を説明しています。
+
+* プレフィックスが **A** の **Actor** から派生したクラスはプレフィックスが **A** になります。例： AControlle
+* **U** の **Object** から派生したクラスはプレフィックスが **U** になります。例： UComponent
+* **列挙型変数** はプレフィックスが **E** になります。例：EFortificationType
+* **Interface** クラスは通常プレフィックスが **I** になります。例：IAbilitySystemInterface
+* **Template** クラスはプレフィックスが **T** になります。例えば、TArray
+* **SWidget** (Slate UI) から派生したクラスはプレフィックスが **S** になります。例：SButton
+* その他の場合はプレフィックスがすべて [F](https://forums.unrealengine.com/showthread.php?60061-Unreal-trivia-What-does-the-F-prefix-on-classes-and-structs-stand-for) になります。例：FVector
+
+### 数値タイプ
+
+それぞれのプラットフォームは、例えば **short**、**int**、**long** などの基本タイプに対するサイズが異なるため、UE4 では以下のタイプを選択して使用できます。
+
+* **int8**/**uint8 **:8 ビットの符号付き / 符号なし整数
+* **int16**/**uint16 **:16 ビットの符号付き / 符号なし整数
+* **int32**/**uint32 **:32 ビットの符号付き / 符号なし整数
+* **int64**/**uint64 **:64 ビットの符号付き / 符号なし整数
+
+浮動小数点数値も、標準の **float (単精度実数型)**(32 ビット) と **double (倍精度実数型)** (64 ビット) タイプでサポートされています。
+
+アンリアル エンジンには **TNumericLimits<t>** というテンプレートがあり、タイプが保持できる最大値と最小値の範囲を検出します。詳細は以下の [リンク](https://docs.unrealengine.com/latest/INT/API/Runtime/Core/Math/TNumericLimits/index.html) をご覧ください。
+
+### 文字列
+
+UE4 では、必要に応じて文字列で作業するためのクラスを提供しています。
+
+[Full Topic: String Handling](Programming/UnrealArchitecture/StringHandling)
+
+#### FString
+
+**FString ** は可変のストリングで、std::string と似ています。FString には、文字列で作業しやすくするメソッドが含まれています。FString を作成するには、**TEXT()** マクロを使います。
+
+FString MyStr = TEXT("Hello, Unreal 4!").
+
+[Full Topic: FString API](https://docs.unrealengine.com/latest/INT/API/Runtime/Core/Containers/FString/index.html)
+
+#### FText
+
+**FText** は FString と似ていますが、ローカライズ化されたテキストに使われます。**NSLOCTEXT** マクロを使って FText を作成します。このマクロは、名前空間およびデフォルト言語の値を受け取ります。
+
+	FText MyText = NSLOCTEXT("Game UI", “Health Warning Message”, “Low Health!”)
+
+**LOCTEXT** マクロでも作成することができます。その場合は、ファイルごとに 1 回ずつ名前空間を定義することになります。ファイルの下部で名前空間を定義しないようにしてください。
+
+	// In GameUI.cpp
+	#define LOCTEXT_NAMESPACE "Game UI"
+	//...
+	FText MyText = LOCTEXT("Health Warning Message", "Low Health!")
+	//...
+
+	#undef LOCTEXT_NAMESPACE
+	// End of file
+
+[Full Topic: FText API](https://docs.unrealengine.com/latest/INT/API/Runtime/Core/Internationalization/FText/index.html)
+
+#### FName
+
+**FName** は、比較時にメモリと CPU 時間を保存するために、頻繁に繰り返す文字列を識別子として保存します。参照元となるオブジェクトすべての文字列全体を何度も保存する代わりに、FName は所定の文字列をマップし、ストレージ使用量が少ない **Index** を使います。Index は文字列の内容を 1 度保存し、その文字列が多数のオブジェクト間で使用される時にメモリを保存します。2 つの文字列は、文字列が等しいか一文字ずつ確認しなくても、**NameA.Index** が **NameB.Index** と等しいかを確認すれば、すぐに比較することができます。
+
+[Full Topic: FName API](https://docs.unrealengine.com/latest/INT/API/Runtime/Core/UObject/FName/index.html)
+
+#### TCHAR
+
+**TCHAR** は、使用されている文字群と関係のない文字を保存する方法として使用します。内部では、UE4 の文字列は **UTF-16** エンコードでデータを格納するために TCHAR 配列を使用します。TCHAR を返すオーバーロードされた間接参照演算子を使って、Raw データにアクセスすることができます。  
+
+[Full Topic: Character Encoding](Programming/UnrealArchitecture/StringHandling/CharacterEncoding)
+
+**‘%s’** 文字列形式の識別子が FString ではなく TCHAR を定義している場合、**FString::Printf** などの関数が必要になります。
+
+	FString Str1 = TEXT("World");
+	int32 Val1 = 123;
+	FString Str2 = FString::Printf(TEXT("Hello, %s! You have %i points."), *Str1, Val1);
+
+**FChar** タイプは、個々の TCHAR と機能するためのスタティック ユーティリティ関数を提供します。
+
+	TCHAR Upper('A');
+	TCHAR Lower = FChar::ToLower(Upper); // 'a'
+
+[REGION:note]
+FChar タイプは **TChar<TCHAR>** として定義されます (API でリストされているように)。
+[/REGION]
+
+[Full Topic: TChar API](https://docs.unrealengine.com/latest/INT/API/Runtime/Core/Misc/TChar/index.html)
+
+### コンテナ
+
+コンテナは、データのコレクションの格納を主要機能とするクラスです。これらのクラスの中で、**TArray**、** TMap**、TSet が一番よく使われます。これらはそれぞれ動的にサイズ化されているので、好きなサイズに調整することができます。
+
+[Full Topic: Containers API](https://docs.unrealengine.com/latest/INT/API/Runtime/Core/Containers/index.html)
+
+#### TArray
+
+上記 3 つのコンテナのうち、アンリアル エンジンで主に使用するコンテナは TArray です。このコンテナは **std::vector ** とほぼ同じ事を行いますが、さらに多くの機能性を備えています。以下は一般的な操作の一部です。
+
+	TArray<AActor*> ActorArray = GetActorArrayFromSomewhere();
+
+	// Tells how many elements (AActors) are currently stored in ActorArray. (現在 ActorArray に格納されているエレメント (AActors) の数と伝えます。)
+	int32 ArraySize = ActorArray.Num();
+
+	// TArrays are 0-based (the first element will be at index 0) (TArrays はゼロベース (最初のエレメントのインデックスはゼロです)
+	int32 Index = 0;
+	// Attempts to retrieve an element at the given index (所定のインデックスのエレメントを抽出します)
+	TArray* FirstActor = ActorArray[Index];
+
+	// Adds a new element to the end of the array (配列の最後に新しいエレメントを追加します)
+	AActor* NewActor = GetNewActor();
+	ActorArray.Add(NewActor);
+
+	// Adds an element to the end of the array only if it is not already in the array (配列にまだ存在しない場合のみ、配列の最後にエレメントを追加します)
+	ActorArray.AddUnique(NewActor); // Won't change the array because NewActor was already added (NewActor が追加されているので配列は変更しません)
+
+	// Removes all instances of 'NewActor' from the array (配列から 'NewActor' のすべてのインスタンスを取り除きます)
+	ActorArray.Remove(NewActor);
+
+	// Removes the element at the specified index (指定したインデックスのエレメントを取り除きます)
+	// Elements above the index will be shifted down by one to fill the empty space (インデックスの上にエレメントがある場合は空のスペースを入れるために 1 つ下に移動されます)
+	ActorArray.RemoveAt(Index);
+
+	// More efficient version of 'RemoveAt', but does not maintain order of the elements ('RemoveAt' の効率アップ版ですが、エレメントの順序は維持されません)
+	ActorArray.RemoveAtSwap(Index);
+
+	// Removes all elements in the array (配列内のすべてのエレメントを取り除きます)
+	ActorArray.Empty();
+
+TArrays には、エレメントがガーベジコレクション処理されるという利点が追加されています。これは、TArray が UPROPERTY としてマークされ、UObject から派生したポインタを格納すると仮定します。
+
+	UCLASS()
+	class UMyClass :UObject
+	{
+		GENERATED_BODY();
+
+		// ...
+
+		UPROPERTY()
+		TArray<AActor*> GarbageCollectedArray;
+	};
+
+ガーベジ コレクションの詳細については、後ほど説明します。
+
+[Full Topic: TArrays](Programming/UnrealArchitecture/TArrays)
+
+[Full Topic: TArray API](https://docs.unrealengine.com/latest/INT/API/Runtime/Core/Containers/TArray/index.html)
+
+#### TMap
+
+**TMap** は **std::map** のような、キー / 値のペアのコレクションです。TMap には、キーで簡単にエレメントを検索、追加、削除するメソッドが含まれています。後ほど説明する **GetTypeHash** 関数が定義されている限り、すべてのタイプをキーに使用することができます。
+
+グリッド状のゲームの作成中に、各マス目に格納する構成要素をクエリする必要が出てきたとします。TMap で簡単にそれが行えるようになります。マス目のサイズが小さく常に同じであればこの操作は一層簡単になりますが、ここではそうではない例を使ってみます。
+
+	enum class EPieceType
+	{
+		King,
+		Queen,
+		Rook,
+		Bishop,
+		Knight,
+		Pawn
+	};
+
+	struct FPiece
+	{
+		int32 PlayerId;
+		EPieceType Type;
+		FIntPoint Position;
+
+		FPiece(int32 InPlayerId, EPieceType InType, FIntVector InPosition) :
+			PlayerId(InPlayerId),
+			Type(InType),
+			Position(InPosition)
+		{
+		}
+	};
+
+	class FBoard
+	{
+	private:
+
+		// Using a TMap, we can refer to each piece by its position (TMap を使うと、それぞれの構成要素を位置で参照することができます)
+		TMap<FIntPoint, FPiece> Data;
+
+	public:
+		bool HasPieceAtPosition(FIntPoint Position)
+		{
+			return Data.Contains(Position);
+		}
+		FPiece GetPieceAtPosition(FIntPoint Position)
+		{
+			return Data[Position];
+		}
+
+		void AddNewPiece(int32 PlayerId, EPieceType Type, FIntPoint Position)
+		{
+			FPiece NewPiece(PlayerId, Type, Position);
+			Data.Add(Position, NewPiece);
+		}
+
+		void MovePiece(FIntPoint OldPosition, FIntPoint NewPosition)
+		{
+			FPiece Piece = Data[OldPosition];
+			Piece.Position = NewPosition;
+			Data.Remove(OldPosition);
+			Data.Add(NewPosition, Piece);
+		}
+
+		void RemovePieceAtPosition(FIntPoint Position)
+		{
+			Data.Remove(Position);
+		}
+
+		void ClearBoard()
+		{
+			Data.Empty();
+		}
+	};
+
+[Full Topic: TMaps](Programming/UnrealArchitecture/TMap)
+
+[Full Topic: TMap API](https://docs.unrealengine.com/latest/INT/API/Runtime/Core/Containers/TMapBase/index.html)
+
+#### TSet
+
+**TSet** は、**std::set** のように、ユニークな値のコレクションを格納します。**AddUnique** メソッドと **Contains** メソッドで、TArrays をセットで使用することができます。ただし、TArrays のようにこれらを UPROPERTY として使用できない点を我慢すれば、TSet の方がこれらの操作の実行が速いです。TSets も TArrays のようなエレメントのインデックス化を行いません。
+
+	TSet<AActor*> ActorSet = GetActorSetFromSomewhere();
+
+	int32 Size = ActorSet.Num();
+
+	// Adds an element to the set, if the set does not already contain it (そのセットにまだ含まれていない場合、エレメントを追加します)
+	AActor* NewActor = GetNewActor();
+	ActorSet.Add(NewActor);
+
+	// Check if an element is already contained by the set (セット内にエレメントがあるかチェックします)
+	if (ActorSet.Contains(NewActor))
+	{
+		// ...
+	}
+
+	// Remove an element from the set (セットからエレメントを取り除きます)
+	ActorSet.Remove(NewActor);
+
+	// Removes all elements from the set (セットからすべてのエレメントを取り除きます)
+	ActorSet.Empty();
+
+	// Creates a TArray that contains the elements of your TSet (Tset のエレメントを含む TArray を作成します)
+	TArray<AActor*> ActorArrayFromSet = ActorSet.Array();
+
+[Full Topic: TSet API](https://docs.unrealengine.com/latest/INT/API/Runtime/Core/Containers/TSet/index.html)
+
+今のところ、UPROPERTY としてマークすることができるコンテナ クラスは TArray のみであることに留意してください。つまり、他のコンテナ クラスは、レプリケート、保存、あるいはエレメントをガーベジ コレクション対象にすることができません。
+
+#### Container Iterators
+
+イテレータを使うと、コンテナの各エレメントのループが可能になります。TSet. を使ったイテレータ記法はこのような感じになります。
+
+	void RemoveDeadEnemies(TSet<AEnemy*>& EnemySet)
+	{
+		// Start at the beginning of the set, and iterate to the end of the set (セットの最初から開始し、そのセットの最後へイテレートします)
+		for (auto EnemyIterator = EnemySet.CreateIterator(); EnemyIterator; ++EnemyIterator)
+		{
+			// The * operator gets the current element (* 演算子は現在のエレメントを取得します)
+			AEnemy* Enemy = *EnemyIterator;
+			if (Enemy.Health == 0)
+			{
+				// 'RemoveCurrent' is supported by TSets and TMaps ('RemoveCurrent' は TSets と TMaps のサポート対象です)
+				EnemyIterator.RemoveCurrent();
+			}
+		}
+	}
+
+その他にも、イテレータを使った以下の操作がサポートされています。
+
+	// Moves the iterator back one element (イテレータを一つ後ろのエレメントへ移動します)
+	--EnemyIterator;
+
+	// Moves the iterator forward/backward by some offset, where Offset is an integer (Offset が整数の場合、イテレータをオフセットして前後に移動させます)
+	EnemyIterator += Offset;
+	EnemyIterator -= Offset;
+
+	// Gets the index of the current element (現在のエレメントのインデックスを取得します)
+	int32 Index = EnemyIterator.GetIndex();
+
+	// Resets the iterator to the first element (イテレータを最初のエレメントに戻します)
+	EnemyIterator.Reset();
+
+#### For-each Loop
+
+イテレータは素晴らしいツールですが、それぞれのエレメントを 1 回ずつループする場合は若干面倒です。各コンテナ クラスは、エレメントをループするために "for each" 形式の記述もサポートしています。TMap はキー / 値のペアを返すのに対し、TArray and TSet は各エレメントを返します。
+
+	// TArray
+	TArray<AActor*> ActorArray = GetArrayFromSomewhere();
+	for (AActor* OneActor :ActorArray)
+	{
+		// ...
+	}
+
+	// TSet - Same as TArray (TSet は TArray と同じです)
+	TSet<AActor*> ActorSet = GetSetFromSomewhere();
+	for (AActor* UniqueActor :ActorSet)
+	{
+		// ...
+	}
+
+	// TMap - Iterator returns a key-value pair (TMap はキー / 値のペアを返します)
+	TMap<FName, AActor*> NameToActorMap = GetMapFromSomewhere();
+	for (auto& KVP :NameToActorMap)
+	{
+		FName Name = KVP.Key;
+		AActor* Actor = KVP.Value;
+
+		// ...
+	}
+
+**auto** キーワードは自動的にポインタ / リファレンスを自動的に指定しません。自分で追加しなければなりません。
+
+#### TSet/TMap (ハッシュ関数) で独自のタイプを使用する
+
+TSet  と TMap  は、内部的に *ハッシュ関数* の使用が必要になります。TSet 内で、または TMap のキーとして使用したい独自クラスを作成する場合、独自のハッシュ関数を作成しなければなりません。一般的にこれらのタイプに分類されるほとんどの UE4 タイプは、独自のハッシュ関数を既に定義しています。
+
+ハッシュ関数は、タイプへの const ポインタ / リファレンスを受け取り、 uint64 を返します。この戻り値がいわゆるオブジェクトの *ハッシュ コード* です。そのオブジェクトに対して疑似ユニークな数字になっています。等しい 2 つのオブジェクトは、常に同じハッシュ コードを返します。
+
+	class FMyClass
+	{
+		uint32 ExampleProperty1;
+		uint32 ExampleProperty2;
+
+		// Hash Function (ハッシュ関数)
+		friend uint32 GetTypeHash(const FMyClass& MyClass)
+		{
+			// HashCombine is a utility function for combining two hash values (HashCombine は 2 つのハッシュ値を一緒にするユーティリティ関数です)
+			uint32 HashCode = HashCombine(MyClass.ExampleProperty1, MyClass.ExampleProperty2);
+			return HashCode;
+		}
+
+		// For demonstration purposes, two objects that are equal (デモンストレーションのために、2 つの等しい値は常に同じハッシュ コードを返します)
+		// should always return the same hash code.
+		bool operator==(const FMyClass& LHS, const FMyClass& RHS)
+		{
+			return LHS.ExampleProperty1 == RHS.ExampleProperty1
+				&& LHS.ExampleProperty2 == RHS.ExampleProperty2;
+		}
+	};
+
+TSet&lt;FMyClass&gt;  と TMap&lt;FMyClass, ...&gt;  は、キーをハッシュすると正しいハッシュ関数を使用します。ポインタをキーとして使用する場合は (`TSet<FMyClass*>` など) 、`uint32 GetTypeHash(const FMyClass* MyClass)` も実行してください。
+
+[Blog Post: UE4 Libraries You Should Know About](https://www.unrealengine.com/blog/ue4-libraries-you-should-know-about)
+

@@ -1,0 +1,180 @@
+﻿INTSourceChangelist:3238697
+Availability:Public
+Title:C++ を使ってレベルをロード / アンロードする
+Crumbs:%ROOT%, Engine, Engine/UI/LevelEditor
+Description:C++ で作成したカスタム ストリーミング アクタでレベルをストリームする方法
+parent:Engine/LevelStreaming/HowTo
+type:how-to
+order:3
+tags:Level Streaming
+
+[TOC]
+
+[INCLUDE:Engine/LevelStreaming/HowTo#levelstreamscenario]
+
+
+## C++ を使ってレベルをストリーミングする
+
+1. **コンテンツ ブラウザ** を開いて、**[C++ Class]** を新規作成します。このクラスは **アクタ** に基づくので、**アクタ** を選択して **[Next (次へ)]** をクリックします。
+
+1. 作成された **C++ Class** に「LevelStreamerActor」と名前を付けて、**[Create Class (クラスを作成)]** をクリックします。このクラスを Visual Studio または XCode で開くことができるようになります。
+
+このシナリオの場合、**Character** が OverlapVolume という Box コンポーネントをオーバーラップしたら、2 つ目のレベルをストリーミングします。 
+
+1. `LevelStreamerActor.h` で、VisibleAnywhere、BlueprintReadOnly であり、AllowPrivateAccess メタ フラグをもつ OverlapVolume を宣言します。
+		private:
+		// Overlap volume to trigger level streaming
+		UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
+		UBoxComponent* OverlapVolume;
+
+1. `LevelStreamerActor.cpp` で、LevelStreamerActor コンストラクタの中に、OverlapVolume を作成して RootComponent にします。
+		OverlapVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("OverlapVolume"));
+		RootComponent = OverlapVolume;
+
+1. `LevelStreamerActor.h` に戻って、protected の OverlapBegins 関数を宣言すると、BoxComponent の OnComponentBeginOverlap 関数に結合します。つまり、 
+OverlapBegins は UFUNCTION マクロでタグ付けされなければならず、OnComponentBeginOverlap と同じシグネチャを持たなければならないという意味です。
+		protected:
+
+		UFUNCTION()
+		void OverlapBegins(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult & SweepResult);
+
+1. `LevelStreamerActor.h` で、LevelToLoad を呼び出す EditAnywhere である protected の FName 変数も作成します。これにより、インスタンスごとに LevelToLoad を変更できるようになります。
+
+		UPROPERTY(EditAnywhere)
+		FName LevelToLoad;
+
+1.  GameplayStatics ライブラリから幾つか関数を使用して、`LevelStreamerActor.cpp` にこれが含まれるようにします。
+
+		#include "Kismet/GameplayStatics.h"
+
+1. OverlapBegins 機能を作成する準備ができました。`LevelStreamerActor.cpp` で、関数の定義を開始します。Index 0 でキャラクターを取得するために、GameplayStatics 関数 `GetPlayerCharacter` も使用できます。 
+
+		void OverlapBegins(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult & SweepResult);
+		{
+				ACharacter* MyCharacter = UGameplayStatics::GetPlayerCharacter(this, 0);		
+		}
+
+1. MyCharacter を取得したら、OtherActor が BoxComponent にオーバーラップしていることを確認します。さらに、LevelToLoad が空でないことを確認したら LoadStreamLevel を呼び出します。 
+
+		if (OtherActor == MyCharacter && LevelToLoad != "")
+		{
+			FLatentActionInfo LatentInfo;
+			UGameplayStatics::LoadStreamLevel(this, LevelToLoad, true, true, LatentInfo);
+		}
+
+1. LevelStreamerActor コンストラクタ で OverlapBegins を BoxComponent の OnComponentBeginOverlap に結合します。
+
+		OverlapVolume->OnComponentBeginOverlap.AddUniqueDynamic(this, &ALevelStreamerActor::OverlapBegins);
+
+	`LevelStreamerActor.h` は最終的にこのようになります。
+
+		#pragma once
+
+		#include "GameFramework/Actor.h"
+		#include "LevelStreamerActor.generated.h"
+
+		UCLASS()
+		class LEVELS_API ALevelStreamerActor : public AActor
+		{
+			GENERATED_BODY()
+
+		public:
+			// Sets default values for this actor's properties (このアクタのプロパティのデフォルト値を設定します)
+			ALevelStreamerActor();
+
+			// Called every frame (フレームごとに呼ばれます) 
+			virtual void Tick( float DeltaSeconds ) override;
+
+		protected:
+
+			// Called when the game starts or when spawned (ゲーム開始時またはスポーン時に呼ばれます)
+			virtual void BeginPlay() override;
+
+			UFUNCTION()
+			void OverlapBegins(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult & SweepResult);
+
+			UPROPERTY(EditAnywhere)
+			FName LevelToLoad;
+
+		private:
+			// Overlap volume to trigger level streaming
+			UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
+			UBoxComponent* OverlapVolume;
+
+		};
+
+		`LevelStreamerActor.cpp` は最終的にこのようになります。
+
+		#include "Levels.h"
+		#include "Kismet/GameplayStatics.h"
+		#include "LevelStreamerActor.h"
+
+		// Sets default values (デフォルト値を設定) 
+		ALevelStreamerActor::ALevelStreamerActor()
+		{
+			// Set this actor to call Tick() every frame. (フレーム毎に Tick() を呼び出すようにこのアクタを設定) You can turn this off to improve performance if you don't need it. (必要がなければパフォーマンスを向上させるためにオフにすることができます) 
+			PrimaryActorTick.bCanEverTick = true;
+
+			OverlapVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("OverlapVolume"));
+			RootComponent = OverlapVolume;
+
+			OverlapVolume->OnComponentBeginOverlap.AddUniqueDynamic(this, &ALevelStreamerActor::OverlapBegins);
+		}
+		// Called when the game starts or when spawned (ゲーム開始時またはスポーン時に呼ばれます)
+		void ALevelStreamerActor::BeginPlay()
+		{
+			Super::BeginPlay();
+
+		}
+
+		// Called every frame (フレームごとに呼ばれます) 
+		void ALevelStreamerActor::Tick( float DeltaTime )
+		{
+			Super::Tick( DeltaTime );
+
+		}
+
+		void ALevelStreamerActor::OverlapBegins(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult & SweepResult)
+		{
+				ACharacter* MyCharacter = UGameplayStatics::GetPlayerCharacter(this, 0);
+				if (OtherActor == MyCharacter && LevelToLoad != "")
+				{
+					FLatentActionInfo LatentInfo;
+					UGameplayStatics::LoadStreamLevel(this, LevelToLoad, true, true, LatentInfo);
+				}
+		}
+1. コードをコンパイルしたら、エディタに切り替えます。
+
+1. **LevelStreamer** ブループリントをレベル内に配置して、**Character** にストリームを開始させたいパーシスタント ワールドの部分、 
+およびストリーミング レベルとなる歩行可能なボリューム全体を囲むように配置とスケールを調節します。
+
+1. **Level to Stream** として **「SunTemple_Streaming」** と入力します。 
+
+1. ストリーミング レベルをテストするには、Play In Editor を使います。
+
+## C++ を使ってアンロードする
+
+_Character_ が BoxComponent からでる時にレベルをアンロードするには、`UGameplayStatics::UnloadStreamLevel` を呼び出して `OnComponentEndOverlap` へ結合する `OverlapEnds` 関数を作成します。次のコード スニペットを  
+your LevelStreamerActor: に追加します。
+
+LevelStreamerActor.h の場合:
+
+	UFUNCTION()
+	void OverlapEnds(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+
+
+
+LevelStreamerActor.cpp の場合:
+
+	void ALevelStreamerActor::OverlapEnds(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+	{
+			ACharacter* MyCharacter = UGameplayStatics::GetPlayerCharacter(this, 0);
+			if (OtherActor == MyCharacter && LevelToLoad != "")
+			{
+				FLatentActionInfo LatentInfo;
+				UGameplayStatics::UnloadStreamLevel(this, LevelToLoad, LatentInfo);
+			}
+	}
+
+コンストラクタの場合:
+	OverlapVolume->OnComponentEndOverlap.AddUniqueDynamic(this, &ALevelStreamerActor::OverlapEnds);

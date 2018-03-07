@@ -1,0 +1,62 @@
+﻿INTSourceChangelist:2713611
+Availability:Public
+Title: 客户端-服务器模式
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking
+Description:关于服务器在多人游戏中担当角色的概述。
+Related: Gameplay/Networking/Actors
+Related: Gameplay/Networking/Actors/Properties
+Related: Gameplay/Networking/Actors/RPCs
+Related: Gameplay/Framework
+version: 4.9
+
+[TOC (start:2 end:3)]
+
+
+UE4 多人游戏基于客户端-服务器模式。也就是说，会有一个服务器担当游戏状态的主控者，而连接的客户端将保持近似复本。
+
+服务器是 UE4 多人游戏的一个重要部分。服务器的作用包括：做出所有重要决定，包含所有的主控状态，处理客户端连接，转移到新的地图以及处理比赛开始/结束时的总体游戏流程等。
+
+## 启动服务器
+
+基本命令行（这些命令调用了编辑器执行文件，因此不需要熟数据（cooked data））：
+
+| 类型 | 命令 |
+| ---- | ----- |
+| 监听服务器 | `UE4Editor.exe ProjectName MapName?Listen -game` |
+| 专用服务器 | `UE4Editor.exe ProjectName MapName -server -game -log` |
+| 客户端 | `UE4Editor.exe ProjectName ServerIP -game` |
+
+[region:note]
+专用服务器在默认情况下并不会显示窗口。如果不使用 -log，您将不会看到任何呈现专用服务器的窗口。
+[/region]
+
+
+## 服务器游戏流程
+
+服务器负责驱动游戏流程。服务器的职责是在游戏开始/结束以及 actor 复制更新等情况下通知客户端转移到新地图。
+
+[主要架构部分](Gameplay/Framework) 大多在本文的讨论范围之外，但我们可以在遇到特定类型时讨论当时出现的一些关于多人游戏的额外细节。
+
+游戏状态和流程一般是通过 GameMode 这一 actor 来驱动。只有服务器才包含此 actor 的有效复本（客户端不包含复本）。要向客户端传达该状态，
+可以使用 GameState actor 显示 GameMode actor 的重要状态。这个 GameState actor 被标记为复制到每个客户端。客户端将包含此 GameState actor 的一个近似复本，
+而且能使用这个 actor 作为引用，用于了解游戏的一般状态。
+
+有关 GameMode 的详细说明，请参见 [GameMode 文档](Gameplay/Framework/GameMode)。
+
+## 连接过程
+
+如果一个服务器需要从网络连接的角度实现某种目的，它就必须要有客户端连接！
+
+当新的客户端初次连接时，会发生一些事情。首先，客户端要向即将连接的服务器发送一个请求。服务器将处理这条请求。如果它不拒绝连接，服务器会向客户端发回一个包含了继续运行所需信息的响应。
+
+主要步骤如下：
+1. 客户端发送连接请求。
+2. 如果服务器接受连接，则发送当前地图。
+3. 服务器等待客户端加载此地图。
+4. 加载之后，服务器将在本地调用 AGameMode::PreLogin。
+	* 这样可以使 GameMode 有机会拒绝连接
+5. 如果接受连接，服务器将调用 AGameMode::Login
+	* 该函数的作用是创建一个 PlayerController，可用于在今后复制到新连接的客户端。成功接收后，这个 PlayerController 将替代客户端的临时 PlayerController （之前被用作连接过程中的占位符）。
+	* 此时将调用 APlayerController::BeginPlay。应当注意的是，在此 actor 上调用 RPC 函数尚存在安全风险。您应当等待 AGameMode::PostLogin 被调用完成。
+6. 如果一切顺利，AGameMode::PostLogin 将被调用。
+	* 这时，可以放心的让服务器在此 PlayerController 上开始调用 RPC 函数。

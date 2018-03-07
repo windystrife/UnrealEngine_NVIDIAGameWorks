@@ -1,0 +1,238 @@
+Availability: Public
+Title:2. Extend Our Game Mode
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/UMG
+Description:Extending the project's Game Mode to add and remove menus from the screen.
+version:4.14
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[Previous Step](Programming\Tutorials\UMG\1 "%Programming\Tutorials\UMG\1:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[](Programming\Tutorials\UMG)
+	[/PARAM]
+	[PARAM:next]
+		[Next Step](Programming\Tutorials\UMG\3 "%Programming\Tutorials\UMG\3:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+
+1. The menus we create will be made from **User Widgets**. We'll need to write a function that creates and displays a new User Widget, and then call that function when the game starts. We'll also need to keep track of what we have created so that we can remove it later. Since each project already comes with a custom **GameMode** class, we can simply open ours, which is defined in HowTo_UMGGameMode.h. The following functions and properties will need to be added to the bottom of the class:
+
+		public:
+			/** Remove the current menu widget and create a new one from the specified class, if provided. */
+			UFUNCTION(BlueprintCallable, Category = "UMG Game")
+			void ChangeMenuWidget(TSubclassOf<UUserWidget> NewWidgetClass);
+
+		protected:
+			/** Called when the game starts. */
+			virtual void BeginPlay() override;
+
+			/** The widget class we will use as our menu when the game starts. */
+			UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "UMG Game")
+			TSubclassOf<UUserWidget> StartingWidgetClass;
+
+			/** The widget instance that we are using as our menu. */
+			UPROPERTY()
+			UUserWidget* CurrentWidget;
+
+1. In order to use User Widgets in our code,  and add the following line to the top of the #include section:
+
+		#include "Blueprint/UserWidget.h"
+
+1. Moving to HowTo_UMGGameMode.cpp now, we need to fill out the bodies of the two functions we declared. We'll start with overriding **BeginPlay()**:
+
+		void AHowTo_UMGGameMode::BeginPlay()
+		{
+			Super::BeginPlay();
+			ChangeMenuWidget(StartingWidgetClass);
+		}
+
+	[REGION:note]When overriding functions from a parent class (referenced by the word Super), as we do here with BeginPlay, it is often important to call the parent class' version of that function. Since our version of the function is only meant to add one step to the end of the existing procedure, we call **Super::BeginPlay** in the first line of the function.[/REGION]
+
+1. Next, still in HowTo_UMGGameMode.cpp, we need to define how we change between menus. We will need to remove whatever User Widget we have active from the viewport, if any. Then we can create and a new User Widget and add it to the viewport.
+
+		void AHowTo_UMGGameMode::ChangeMenuWidget(TSubclassOf<UUserWidget> NewWidgetClass)
+		{
+			if (CurrentWidget != nullptr)
+			{
+				CurrentWidget->RemoveFromViewport();
+				CurrentWidget = nullptr;
+			}
+			if (NewWidgetClass != nullptr)
+			{
+				CurrentWidget = CreateWidget<UUserWidget>(GetWorld(), NewWidgetClass);
+				if (CurrentWidget != nullptr)
+				{
+					CurrentWidget->AddToViewport();
+				}
+			}
+		}
+
+	[REGION:note]This code will create instances of any **Widgets** we provide and put them on the screen. It also removes them, so that only one is active at a time, although **Unreal Engine** can handle displaying and interacting with many Widgets at once. We never need to destroy a Widget directly, because removing it from the viewport and clearing (or changing) all variables that reference it will cause it to be cleaned up by Unreal Engine's garbage collection system.[/REGION]
+
+1. Finally, we need to set the input mode on our **Player Controller** class. To do this, we'll add a new C++ class to our project, based on **Player Controller**. Within this class, we only need to call one extra function when the game starts to ensure that we can interact with UI elements.
+
+	[![](NewClass.png)](NewClass.png)
+	[![](PlayerController.png)](PlayerController.png)
+	
+	In HowTo_UMGPlayerController.h, we will add the following override to the class:
+	
+		public:
+			virtual void BeginPlay() override;
+
+	In HowTo_UMGPlayerController.cpp, we will add our overridden function:
+	
+		void AHowTo_UMGPlayerController::BeginPlay()
+		{
+			Super::BeginPlay();
+			SetInputMode(FInputModeGameAndUI());
+		}
+
+
+----
+
+We have built the code framework to create and display menus, and remove them when they are no longer needed. We're ready to return to the **Unreal Editor** and design our menu assets!
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    code
+    [/PARAMLITERAL]
+    [PARAM:heading]
+    Finished Code
+    [/PARAM]
+    [PARAM:content]
+		**HowTo_UMG.Build.cs**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			using UnrealBuildTool;
+
+			public class HowTo_UMG : ModuleRules
+			{
+				public HowTo_UMG(TargetInfo Target)
+				{
+					PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "UMG" });
+
+					//PrivateDependencyModuleNames.AddRange(new string[] {  });
+
+					// Uncomment if you are using Slate UI
+					PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });
+		
+					// Uncomment if you are using online features
+					// PrivateDependencyModuleNames.Add("OnlineSubsystem");
+					// if ((Target.Platform == UnrealTargetPlatform.Win32) || (Target.Platform == UnrealTargetPlatform.Win64))
+					// {
+					//		if (UEBuildConfiguration.bCompileSteamOSS == true)
+					//		{
+					//			DynamicallyLoadedModuleNames.Add("OnlineSubsystemSteam");
+					//		}
+					// }
+				}
+			}
+
+		**HowTo_UMGGameMode.h**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "Blueprint/UserWidget.h"
+			#include "GameFramework/GameModeBase.h"
+			#include "HowTo_UMGGameMode.generated.h"
+
+			/**
+			 * 
+			 */
+			UCLASS()
+			class HOWTO_UMG_API AHowTo_UMGGameMode : public AGameModeBase
+			{
+				GENERATED_BODY()
+
+			public:
+				/** Remove the current menu widget and create a new one from the specified class, if provided. */
+				UFUNCTION(BlueprintCallable, Category = "UMG Game")
+				void ChangeMenuWidget(TSubclassOf<UUserWidget> NewWidgetClass);
+
+			protected:
+				/** Called when the game starts. */
+				virtual void BeginPlay() override;
+
+				/** The widget class we will use as our menu when the game starts. */
+				UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "UMG Game")
+				TSubclassOf<UUserWidget> StartingWidgetClass;
+
+				/** The widget instance that we are using as our menu. */
+				UPROPERTY()
+				UUserWidget* CurrentWidget;
+			};
+
+		**HowTo_UMGGameMode.cpp**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_UMG.h"
+			#include "HowTo_UMGGameMode.h"
+
+			void AHowTo_UMGGameMode::BeginPlay()
+			{
+				Super::BeginPlay();
+				ChangeMenuWidget(StartingWidgetClass);
+			}
+
+			void AHowTo_UMGGameMode::ChangeMenuWidget(TSubclassOf<UUserWidget> NewWidgetClass)
+			{
+				if (CurrentWidget != nullptr)
+				{
+					CurrentWidget->RemoveFromViewport();
+					CurrentWidget = nullptr;
+				}
+				if (NewWidgetClass != nullptr)
+				{
+					CurrentWidget = CreateWidget<UUserWidget>(GetWorld(), NewWidgetClass);
+					if (CurrentWidget != nullptr)
+					{
+						CurrentWidget->AddToViewport();
+					}
+				}
+			}
+			
+		**HowTo_UMGPlayerController.h**
+			// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "GameFramework/PlayerController.h"
+			#include "HowTo_UMGPlayerController.generated.h"
+
+			/**
+			 * 
+			 */
+			UCLASS()
+			class HOWTO_UMG_API AHowTo_UMGPlayerController : public APlayerController
+			{
+				GENERATED_BODY()
+				
+			public:
+				virtual void BeginPlay() override;
+			};
+
+		**HowTo_UMGPlayerController.cpp**
+			// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_UMG.h"
+			#include "HowTo_UMGPlayerController.h"
+
+			void AHowTo_UMGPlayerController::BeginPlay()
+			{
+				Super::BeginPlay();
+				SetInputMode(FInputModeGameAndUI());
+			}
+			
+    [/PARAM]
+[/OBJECT]
+
+%Steps%

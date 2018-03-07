@@ -1,0 +1,39 @@
+﻿INTSourceChangelist:3169600
+Availability:Public
+Title:Online Beacons
+Crumbs: %ROOT%, Engine
+Description:Online Beacons 系统总览
+Version:4.13
+parent:Engine
+Related:Gameplay/Networking/Actors/RPCs
+Related:Gameplay/Networking/Actors/Properties
+
+[TOC (start:2 end:3)]
+
+**Online Beacons** 是一个特殊类型的 **Actor**，可提供一种简易的方式与服务器联络并进行交互（通过 RPC），而无需让普通游戏连接来执行此任务。可以使用内置类，因为在一些情况下它们将被延展为自定义类，执行项目特定的交互、逻辑和信息请求。
+
+## Online Beacon 基类
+Beacon 类执行的常规操作是请求服务质量信息、在客户端需要加入的游戏中预留空位、接收游戏中玩家名列表、获取正在进行的游戏中的得分和运行时间，等等。以下类由引擎提供，构成了 Online Beacon 系统的基础：
+
+### AOnlineBeacon
+这是 `AOnlineBeaconClient` 和 `AOnlineBeaconHost` 的基类。它直接派生自 `AActor`。
+
+### AOnlineBeaconHost
+此类使用其自身的 `UNetDriver` 获得来自远程客户端电脑的传入 Online Beacon 连接。接收到连接时，它将在注册 `AOnlineBeaconHostObject` 实例列表中进行查找，找到与传入客户端匹配的实例并转交连接。此类通常不需要被派生，因其只管理客户端和注册 `AOnlineBeaconHostObject` 之间的初始连接。
+
+### AOnlineBeaconClient
+此类的子项连接到主机并执行实际的 RPC。它们其中一个将在客户端电脑上生成，一个由正确的 `AOnlineBeaconHostObject`（注册到服务器的 `AOnlineBeaconHost`）在服务器上生成。`GetBeaconType` 函数的输出（即为类名称）将用于对比此类的实例和正确主机对象类的注册实例。注意：这和普通的 Actor 生成方式（服务器生成 Actor 然后复制到客户端）不同。然而，客户端和服务器对象副本之间的连接建立后，对象复制将正常进行，任意一方均可向对方执行 RPC，而对象的服务器版本可对属性复制发送命令。
+该基类实现 `OnConnected` 和 `OnFailure` 函数。这两个函数可由子类覆盖，在连接时执行 RPC，或处理失败连接。此类是 Online Beacon 系统的主力，将执行 Beacon 所需的客户端端的工作。在成功连接事件中，服务器上将生成和源实例同步的另一个实例，此例也可执行服务器端的工作，通过客户端和服务器 RPC（或服务器到客户端的复制属性）进行协调和交流。
+
+### AOnlineBeaconHostObject
+此类也应被覆盖，使其和覆盖的 `AOnlineBeaconClient` 类配对。将客户端 `GetBeaconType` 的返回值和保存在 `BeaconTypeName` 成员变量中的值进行匹配即可完成配对。服务器的 `AOnlineBeaconHost` 检测到传入 `AOnlineBeaconClient` 的配对 `AOnlineBeaconHostObject` 时，它将指示 `AOnlineBeaconHostObject` 通过虚拟 `SpawnBeaconActor` 函数生成 `AOnlineBeaconClient` 的本地副本。此函数默认使用 `ClientBeaconActorClass` 成员变量确定要生成的 actor 类，此类应被设为配对的 `AOnlineBeaconClient` 类。它还将在生成对象的服务器副本上调用 `SetBeaconOwner`，以便客户端对象的服务器端实例与主机对象进行交流。此设置多数建立在基类中，无需被覆盖。
+
+## Online Beacon 范例
+引擎中已自带大量预建 Beacon 类配对。但您也可自行构建，Test Beacon 就是一个简单的好例子。`ATestBeaconClient` 派生自 `AOnlineBeaconClient`，`ATestBeaconHost` 派生自 `AOnlineBeaconHostObject`。Test Beacon 就是简单地在客户端和服务器之间来回执行重复的函数调用。以下是类一同工作的原理：
+1. 在 `ATestBeaconHost` 的构建函数中，`ClientBeaconActorClass` 设为 `ATestBeaconClient` 的类、`BeaconTypeName` 设为 `ClientBeaconActorClass` 的命名（调用 `GetName` 函数获得）。这样可确保 `AOnlineBeaconHost` 将两个 Test Beacon 类正确配对。
+1. 客户端的 `ATestBeaconClient` 成功连上服务器时，服务器的 `AOnlineBeaconHost` 实例将指引注册 `ATestBeaconHost` 生成其自身的 `ATestBeaconClient`，并在服务器上将其和 `ATestBeaconClient` 关联。这很重要，因为它使客户端和服务器 RPC 在两个 `ATestBeaconClient` 实例之间传递。
+1. 服务器的 `ATestBeaconHost` 将在它的 `ATestBeaconClient` 实例上调用 `OnClientConnected`（客户端 RPC）。因为此函数为客户端 RPC，调用函数的命令将被传至客户端电脑，而不会在服务器上调用函数。
+1. RPC 将在客户端的 `ATestBeaconClient` 实例上运行虚拟 `OnConnected` 函数。此函数已被覆盖，以便调用 `ClientPing`。
+1. `ClientPing` 将输出一些文本到调试日志，然后调用服务器 RPC `ServerPong`。它将在网络连接中传递，并在服务器的 `ATestBeaconClient` 实例上执行。
+1. `ServerPong` 将输出调试文本并调用 `ClientPing`，再触发对客户端联网 RPC 调用。
+1. 此过程将无限继续。这通常并非理想状态，尤其是这些 RPC 并未执行具体任务，它可用于记录相同 RPC 在两次分步运行之间的时间，以追踪服务器的 ping 时。因为可能存在延迟，所以这个 ping 检查不会按电脑和网络的最佳频率进行，或者客户端/服务器可能直接在数次 ping 后直接停止返回 ping。其他的使用范例可能涉及到唯一的 RPC 回叫到客户端，而不是继续循环，如连续询问一连串的问题“该服务器的游戏使用的是哪张地图？”或“这是一个夺旗服务器吗？”。这些问题的内容视特定游戏或项目的相关信息而定。

@@ -1,0 +1,234 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	DistanceFieldAOShared.usf
+=============================================================================*/
+
+#ifndef SORTTHREADGROUP_SIZEX
+#define SORTTHREADGROUP_SIZEX 1
+#endif
+
+#ifndef SORTTHREADGROUP_SIZEY
+#define SORTTHREADGROUP_SIZEY 1
+#endif
+
+#ifndef CONE_TRACE_PHASE
+#define CONE_TRACE_PHASE -1
+#endif
+
+// Must match C++
+#define NUM_CONE_STEPS 10
+
+// Must match C++
+#define NUM_CONE_DIRECTIONS 9
+
+// Must match C++
+#define AO_DOWNSAMPLE_FACTOR 2
+
+float AOObjectMaxDistance;
+float AOStepScale;
+float AOStepExponentScale;
+float AOMaxViewDistance;
+
+float AOGlobalMaxOcclusionDistance;
+
+// Gives the max occlusion distance regardless of whether the global distance field is in use
+float GetAOMaxDistance()
+{
+	return max(AOObjectMaxDistance, AOGlobalMaxOcclusionDistance);
+}
+
+// Pass a debug value through the pipeline instead of a bent normal
+#define PASS_THROUGH_DEBUG_VALUE 0
+
+// One for near, one for far
+#define NUM_CULLED_OBJECT_LISTS 2
+
+float GetStepOffset(float StepIndex)
+{
+	// Original heuristic
+	//return AOStepScale * exp2(AOStepExponentScale * StepIndex);
+
+	float temp = AOStepExponentScale * StepIndex;
+	return AOStepScale * (temp * temp + 1);
+}
+
+uint2 TileListGroupSize;
+ 
+Texture2D DistanceFieldNormalTexture;
+SamplerState DistanceFieldNormalSampler;
+
+float4 EncodeDownsampledGBuffer(FGBufferData GBufferData, float SceneDepth)
+{
+	float DepthSign = HasDistanceFieldRepresentation(GBufferData) > 0 ? 1 : -1;
+	float ZSign = GBufferData.ShadingModelID == SHADINGMODELID_UNLIT ? -1 : 1;
+	float ZChannel = GBufferData.WorldNormal.z > 0 ? .5f : 1;
+	float4 OutValue = float4(GBufferData.WorldNormal.xy, ZChannel * ZSign, DepthSign * SceneDepth);
+	return OutValue;
+}
+
+void GetDownsampledGBuffer(float2 ScreenUV, out float3 OutNormal, out float OutDepth, out bool bHasDistanceFieldRepresentation, out bool bLit)
+{
+	float4 TextureValue = Texture2DSampleLevel(DistanceFieldNormalTexture, DistanceFieldNormalSampler, ScreenUV, 0);
+	bHasDistanceFieldRepresentation = TextureValue.w > 0;
+	bLit = TextureValue.z > 0; 
+	OutDepth = abs(TextureValue.w);
+	OutNormal = float3(TextureValue.xy, sqrt(1 - dot(TextureValue.xy, TextureValue.xy)));
+	OutNormal.z *= abs(TextureValue.z) > .75f ? -1 : 1;
+}
+
+float GetDownsampledDepth(float2 ScreenUV)
+{
+	return abs(Texture2DSampleLevel(DistanceFieldNormalTexture, DistanceFieldNormalSampler, ScreenUV, 0).w);
+}
+
+uint CurrentLevelDownsampleFactor;
+float2 AOBufferSize;
+
+uint DownsampleFactorToBaseLevel;
+float2 BaseLevelTexelSize;
+
+Texture2D BentNormalAOTexture;
+SamplerState BentNormalAOSampler;
+#if !SUPPORTS_INDEPENDENT_SAMPLERS
+SamplerState ConfidenceSampler;
+#endif
+
+Texture2D IrradianceTexture;
+SamplerState IrradianceSampler;
+
+bool SphereIntersectCone(float4 SphereCenterAndRadius, float3 ConeVertex, float3 ConeAxis, float ConeAngleCos, float ConeAngleSin)
+{
+	float3 U = ConeVertex - (SphereCenterAndRadius.w / ConeAngleSin) * ConeAxis;
+	float3 D = SphereCenterAndRadius.xyz - U;
+	float DSizeSq = dot(D, D);
+	float E = dot(ConeAxis, D);
+
+	if (E > 0 && E * E >= DSizeSq * ConeAngleCos * ConeAngleCos)
+	{
+		D = SphereCenterAndRadius.xyz - ConeVertex;
+		DSizeSq = dot(D, D);
+		E = -dot(ConeAxis, D);
+
+		if (E > 0 && E * E >= DSizeSq * ConeAngleSin * ConeAngleSin)
+		{
+			return DSizeSq <= SphereCenterAndRadius.w * SphereCenterAndRadius.w;
+		}
+		else
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool SphereIntersectConeWithDepthRanges(float4 SphereCenterAndRadius, float3 ConeVertex, float3 ConeAxis, float ConeAngleCos, float ConeAngleSin, float4 ConeAxisDepthRanges)
+{
+	if (SphereIntersectCone(SphereCenterAndRadius, ConeVertex, ConeAxis, ConeAngleCos, ConeAngleSin))
+	{
+		float ConeAxisDistance = dot(SphereCenterAndRadius.xyz - ConeVertex, ConeAxis);
+		float2 ConeAxisDistanceMinMax = float2(ConeAxisDistance + SphereCenterAndRadius.w, ConeAxisDistance - SphereCenterAndRadius.w);
+
+		if (ConeAxisDistanceMinMax.x > ConeAxisDepthRanges.x && ConeAxisDistanceMinMax.y < ConeAxisDepthRanges.y
+			|| ConeAxisDistanceMinMax.x > ConeAxisDepthRanges.z && ConeAxisDistanceMinMax.y < ConeAxisDepthRanges.w)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+Buffer<float> RecordConeVisibility;
+float BentNormalNormalizeFactor;
+
+void FindBestAxisVectors2(float3 InZAxis, out float3 OutXAxis, out float3 OutYAxis )
+{
+	float3 UpVector = abs(InZAxis.z) < 0.999 ? float3(0,0,1) : float3(1,0,0);
+	OutXAxis = normalize( cross( UpVector, InZAxis ) );
+	OutYAxis = cross( InZAxis, OutXAxis );
+}
+
+float3 ComputeBentNormal(float3 RecordWorldNormal, uint RelativeRecordIndex)
+{
+	float3 TangentX;
+	float3 TangentY;
+	FindBestAxisVectors2(RecordWorldNormal, TangentX, TangentY);
+
+	float3 UnoccludedDirection = 0;
+
+	for (uint ConeIndex = 0; ConeIndex < NUM_CONE_DIRECTIONS; ConeIndex++)
+	{
+		float3 ConeDirection = AOSamples2.SampleDirections[ConeIndex].xyz;
+		float3 RotatedConeDirection = ConeDirection.x * TangentX + ConeDirection.y * TangentY + ConeDirection.z * RecordWorldNormal;
+
+		float ConeVisibility = RecordConeVisibility[RelativeRecordIndex * NUM_CONE_DIRECTIONS + ConeIndex];
+		UnoccludedDirection += ConeVisibility * RotatedConeDirection;
+	}
+
+	float InvNumSamples = 1.0f / (float)NUM_CONE_DIRECTIONS;
+	UnoccludedDirection = UnoccludedDirection * (BentNormalNormalizeFactor * InvNumSamples);
+
+	return UnoccludedDirection;
+}
+
+#ifndef CULLED_TILE_SIZEX
+#define CULLED_TILE_SIZEX 4
+#endif
+ 
+#ifndef TRACE_DOWNSAMPLE_FACTOR
+#define TRACE_DOWNSAMPLE_FACTOR 1
+#endif
+ 
+#ifndef CONE_TRACE_OBJECTS_THREADGROUP_SIZE
+#define CONE_TRACE_OBJECTS_THREADGROUP_SIZE 16
+#endif
+
+// Size of a culled tile at the resolution that cone tracing is done, in one dimension
+#define CONE_TILE_SIZEX (CULLED_TILE_SIZEX / TRACE_DOWNSAMPLE_FACTOR) 
+// Number of culled tiles per cone tracing threadgroup
+#define CONE_TRACE_TILES_PER_THREADGROUP (CONE_TRACE_OBJECTS_THREADGROUP_SIZE / (CONE_TILE_SIZEX * CONE_TILE_SIZEX))
+
+uint2 ScreenGridConeVisibilitySize;
+float2 JitterOffset;
+
+uint2 ComputeTileCoordinateFromScreenGrid(uint2 OutputCoordinate)
+{
+	uint2 TileCoordinate = OutputCoordinate * TRACE_DOWNSAMPLE_FACTOR / CULLED_TILE_SIZEX;
+	return TileCoordinate;
+}
+
+float2 GetBaseLevelScreenUVFromScreenGrid(uint2 OutputCoordinate, float JitterScale)
+{
+	float2 BaseLevelScreenUV = (OutputCoordinate * TRACE_DOWNSAMPLE_FACTOR + JitterOffset * JitterScale + float2(.5f, .5f)) * BaseLevelTexelSize;
+	return BaseLevelScreenUV;
+}
+
+float2 GetBaseLevelScreenUVFromScreenGrid(uint2 OutputCoordinate)
+{
+	return GetBaseLevelScreenUVFromScreenGrid(OutputCoordinate, 1);
+}
+
+float2 GetScreenUVFromScreenGrid(uint2 OutputCoordinate, float JitterScale)
+{
+	float2 ScreenUV = ((OutputCoordinate * TRACE_DOWNSAMPLE_FACTOR + JitterOffset * JitterScale) * AO_DOWNSAMPLE_FACTOR + View.ViewRectMin.xy + float2(.5f, .5f)) * View.BufferSizeAndInvSize.zw;
+	return ScreenUV;
+}
+
+float2 GetScreenUVFromScreenGrid(uint2 OutputCoordinate)
+{
+	return GetScreenUVFromScreenGrid(OutputCoordinate, 1);
+}
+
+Buffer<uint> CulledTilesStartOffsetArray;
+
+RWBuffer<uint> RWNumCulledTilesArray;
+RWBuffer<uint> RWCulledTilesStartOffsetArray;
+RWBuffer<uint> RWCulledTileDataArray;
+
+#define INVALID_TILE_INDEX 0xFFFF
+
+#ifndef CULLED_TILE_DATA_STRIDE
+#define CULLED_TILE_DATA_STRIDE 1
+#endif

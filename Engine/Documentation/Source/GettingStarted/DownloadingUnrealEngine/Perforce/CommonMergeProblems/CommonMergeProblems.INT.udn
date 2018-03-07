@@ -1,0 +1,161 @@
+Availability: Licensee
+Title:Common Merge Problems
+Crumbs:%ROOT%, Engine, Programming, Programming/Basics, GettingStarted/DownloadingUnrealEngine/Perforce
+Description:Explanation of many of the common problems encountered when merging new builds of the engine.
+version: 4.9
+
+[TOC(start:2)]
+
+
+
+## Tools
+
+Here are the tools recommended for merging and integrating Unreal Engine 4 QA-Approved Builds:
+
+
+* Araxis Merge: http://www.araxis.com/merge/
+* Perforce: http://www.perforce.com/
+
+
+
+
+## Merging
+
+A tool such as Araxis Merge can be very useful for handling merges. It can be integrated into version control systems such as Perforce, so you can have diff/merge handled by Araxis instead of the built-in tools.
+
+For merges of code drops, the folder comparisons (both two-way and three-way) in Araxis Merge help in comparing a current project with a recent QA-Approved Build; and in some cases, a previous QA-Approved Build. This strategy allows you to see what has evolved in a QA-Approved Build, as well as in your current project.
+
+Branching in a version control system such as Perforce when merging can be helpful, as well. Working with all merge-related changes in a separate branch keeps the base branch clean until you are ready to integrate the fully-merged changes over - usually after some regression testing and all issues resolved.
+
+Of course, it is always a best practice to have the discipline of having a modular approach to working with the engine, rather than stuffing everything into the base. Keeping the base as clean as possible will reduce a lot of merge-related bugs.
+
+Another strategy for managing merged code is to make sure that you put obvious comments in the base build code so that sections can be easily identified as changed:
+
+
+    
+    //myproject - modifying base code...
+    
+
+
+
+It is also useful to add a #define for your project:
+
+
+    
+    #define YOURGAME 1
+    
+
+
+
+You can then wrap that around custom code that is in base engine code:
+
+
+    
+    #ifdef YOURGAME
+       //myproject - doing custom stuff here...
+    #endif // YOURGAME
+    
+
+
+
+Ideally, you would want to be able to undefine everything and have a generic build; but that is not always possible.
+
+However, these techniques should make merging a lot more stable.
+
+
+
+## Integration
+
+Each QA build has lots of great changes.  Some of them touch a lot of files which can make merging a bit painful.
+
+A good way to handle these issues is to utilize the integration functionality in Perforce.
+
+
+1. Make an area in your depot for QA Builds. (e.g.  //depot/UE4Builds/... )
+
+1. When a new QA build comes out, Download it and then submit to your depot. 
+
+	A good way to submit dealing with all of the adding/deleting/editing of files is via the following command:
+	
+		REM PURPOSE:  make certain the default changelist in your default clientspec is empty
+		
+		REM takes 2 variables
+		REM %1 == the hard drive PATH (under the depot root) to the dir with the new version (e.g. c:/foo/bar/baz)
+		REM %2 == the depot path to the build (e.g. //depot_foo/bar/baz/...
+		
+		REM USAGE:  p4ModifiedFiles.bat c:/foo/bar/baz //depot_foo/bar/baz/...
+		
+		REM save state
+		set MODFILES_FIND_ORIG=%MODFILES_FIND%
+		set MODFILES_FIND=C:\bin\cygwin\bin\find.exe
+		
+		REM find all of the new files and add them
+		%MODFILES_FIND% %1 -type f | p4 -x - add
+		
+		REM open all changed files for edit
+		p4 diff -se %2 | p4 -x - edit
+		
+		REM open all removed files for delete
+		p4 diff -sd %2 | p4 -x - delete
+		
+		REM restore state
+		set MODFILES_FIND=%MODFILES_FIND_ORIG%
+	
+1. Use Perforce's integration  (`p4 integ`) to integrate from the //depot/UE4Builds/... to your engine in perforce (e.g. //depot/MyEngine/...).
+
+1. Use Perforce's Safe Automatic Resolve to automatically resolve files that have not been changed by you locally.  (e.g. copyright update touches basically all files. Many of which will not have been changed locally. )
+
+
+Reference: [http://www.perforce.com/perforce/doc.062/manuals/p4wsad/topics/resolving.html](http://www.perforce.com/perforce/doc.062/manuals/p4wsad/topics/resolving.html)
+
+Safe Automatic Resolve: If either your file, or their file (but not both files) are different from the base file, accept the differing version of the file as the head revision. If both files are different from base file, do not perform a resolve on this file.
+
+
+
+## Branching
+
+A typical branching policy is to branch as late as possible to minimize changes amongst the branches on both the code and content side.
+
+Once branched, it helps to keep up on changes made in branches, often requiring those responsible for changes made in a specific branch to integrate and merge relevant changes as appropriate.
+
+
+
+## Errors and Troubleshooting
+
+
+### "Not a class or namespace name" Error
+
+**Symptom:**
+A "not a class or namespace name" error on a class in a FooClass.h file's DECLARE_NATIVE_TYPE() macro. The class in question is declared above it in the FooClasses.h file, but presumably because of the #defines that are active when this file gets included, it is not seeing that declaration.
+
+**Cause:**
+An autogenerated header included in the LaunchEngineLoop.cpp (with NAMES_ONLY defined) was not included in the precompiled header (without NAMES_ONLY defined), causing a compile error.
+
+**Fix/Workaround:**
+Include the autogenerated header in the precompiled header with NAMES_ONLY defined.
+
+
+Reference: [https://udn.epicgames.com/lists/showpost.php?list=unprog3&id=10516](https://udn.epicgames.com/lists/showpost.php?list=unprog3&id=10516)
+
+
+### Enum Clashes
+
+**Symptom:**
+Licensees and Epic add an enum with the same value.
+
+**Cause:**
+Enums are serialized by value, not by name.
+
+**Fix/Workaround:**
+One workaround is to create a commandlet that patches up content, but this is a very error prone and time consuming task.  A better short term workaround is for licensees to pad enums.  This is easily done in C++ by specifying an offset in the enum, however in Blueprint, padding entries will have to be added manually. 
+ 
+The solution to this problem is an engine level change that serializes all enums as FNames, rather than by value.  This is an outstanding task: 41337.  This change would make renaming enums difficult, but that is a much less common case.
+
+
+Reference: [https://udn.epicgames.com/lists/showpost.php?list=unprog3&id=21598](https://udn.epicgames.com/lists/showpost.php?list=unprog3&id=21598)
+
+ 
+
+
+
+

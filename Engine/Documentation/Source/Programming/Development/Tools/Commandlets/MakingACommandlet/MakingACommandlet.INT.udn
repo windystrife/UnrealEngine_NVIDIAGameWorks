@@ -1,0 +1,237 @@
+Availability: Docs
+Title: How To Make a Commandlet
+Crumbs:%ROOT%, Programming, Programming/Development, Programming/Development/Tools
+Description:How to create completely new, custom commandlets to analyze or modify the content used in your game.
+
+[REGION:todo]
+	This page is converted from Unreal Engine 3 documentation and currently being reviewed. Information may be outdated.
+[/REGION]
+
+[TOC(start:2)]
+
+Commandlets are command line programs that run inside of the Unreal Engine environment. They are most often used to make bulk changes to content, iterate over content to get information about it, or as a unit testing mechanism.
+
+They are basically little applets that have the engine initialized but are mostly just confined to Windows console output.
+
+The engine automatically tries to see whether a command you passed on the commandline is a commandlet, and if it matches, executes the associated code.
+
+Check out UContentCommandlets.cpp and UnPackageUtilities for some examples on commandlets.
+
+
+
+## How To Make a Commandlet in Script
+
+Create a script class for your commandlet as seen below:
+
+
+    
+    class HelloWorldCommandlet extends Commandlet;
+    
+    event int Main( string Params )
+    {
+       log( " hello world " );
+    
+       return 0;
+    }
+    
+
+
+
+Or for a native commandlet:
+
+
+    
+    class HelloWorldCommandlet extends Commandlet
+    native;
+    
+    cpptext
+    {
+    int32 Main(const FString& CmdLine)
+    {
+       warnf(TEXT("hello world"));
+       return 0;
+    }
+    }
+    
+    native event int Main( string Params );
+    
+
+
+
+The Main() function is the entry point for your commandlet. The commandlet is passed a string containing all of the parameters for a given run. Note that for
+
+
+    
+    gamename.exe helloworld param1 param2 param3
+    
+
+
+
+Your commandlet would see the string `param1 param2 param3` as the command line parameters.
+
+
+
+## How To Make a Commandlet in Native Code
+
+Most commandlets are implemented as intrinsic classes in native code. The procedure for creating a commandlet in this way is quite different. You will find most commandlet declarations in `EditorCommandlets.h`.
+
+First, declare your class in a header file like `EditorCommandlets.h`:
+
+    
+    BEGIN_COMMANDLET(Name,Package)
+      // declare additional methods here.
+    END_COMMANDLET
+    
+
+
+The commandlet will have a classname of "UNameCommandlet" and will be placed in the package you specify (like Editor).
+
+Then, in a .cpp file (like `UContentCommandlets.cpp`), implement your commandlet's `Main()` function. If necessary, you can also override the `virtual !CreateCustomEngine()` function. See the UCommandlet source for more details.
+
+    
+    int32 UNameCommandlet::Main(const FString& Params)
+    {
+        // do yer stuff here...
+        return 0;
+    }
+    
+
+
+
+But you are not done yet! Since this is an intrinsic class, you must inform the script system of its presence. To do this, you will have to manually edit the `UnrealEdClasses.h` file, specifically the AUTO_INITIALIZE_REGISTRANTS_UNREALED #define. In that list, add a call to the `StaticClass()` function for your commandlet:
+
+    
+    #define AUTO_INITIALIZE_REGISTRANTS_UNREALED \
+        UNameCommandlet::StaticClass(); \
+    
+
+
+
+The next time you rebuild script the compiler will overwrite this file with your Commandlet class in this list in alphabetical order.
+
+
+
+## Giving Users Some Help
+
+Built into a commandlet is the ability to show help information about it, so that users can discover what it is and what options it supports. To make help information available for your commandlet, you need to add entries into the localized text file that your commandlet resides in. If you package is in Core, then you need to modify Core.int for your help information to show up. Below is a sample setting for the "hello world" commandlet residing in Core.
+
+
+    
+    [HelloWorldCommandlet]
+    HelpDescription="This commandlet displays hello world" HelpUsage="gamename.exe helloworld"
+    HelpWebLink="https://udn.epicgames.com/bin/view/Three/MakingACommandlet"
+    HelpParamNames[0]="param1"
+    HelpParamDescriptions[0]="Ignored since helloworld doesn't need params"
+    
+
+
+
+Notice that the section name must include the _commandlet_ as part of the class name. Without this, the commandlet would not be found. To see how this information is used, run the following commands:
+
+
+    
+    game.exe help help
+    game.exe help list
+    game.exe help webhelp help
+    
+
+
+
+
+
+## How To Use a Commandlet
+
+To execute a commandlet run your game with the commandlet name that you wish to run. For instance:
+
+
+    
+    examplegame make -full
+    
+
+
+
+launches the make commandlet inside of ExampleGame. Note that you do not have to specify the package name for native commandlets. If the make commandlet was a script-only commandlet, then it would be invoked using:
+
+
+    
+    examplegame editor.make -full
+    
+
+
+
+since it would not be loaded at startup. Also notice that the _commandlet_ portion of the name is not needed. The startup code automatically appends _commandlet= when trying to find the specified commandlet.
+
+
+
+## Common Commandlet Tasks
+
+A common thing to do is iterate over packages and perform some data processing on them. The following code (which can also be found as a comment at the top of `UContentCommandlets.cpp`) can get you started:
+
+
+    
+    // Below is a template commandlet than can be used when you want to perform an operation on all packages.
+    int32 UPerformAnOperationOnEveryPackage::Main(const FString& Params)
+    {
+        // Parse command line args.
+        TArray<FString> Tokens;
+        TArray<FString> Switches;
+    
+        const TCHAR* Parms = *Params;
+        ParseCommandLine(Parms, Tokens, Switches);
+    
+        // Build package file list.
+        const TArray<FString> FilesInPath( GPackageFileCache->GetPackageFileList() );
+        if( FilesInPath.Num() == 0 )
+        {
+            warnf( NAME_Warning, TEXT("No packages found") );
+            return 1;
+        }
+    
+        // Iterate over all files doing stuff.
+        for( int32 FileIndex = 0 ; FileIndex < FilesInPath.Num() ; ++FileIndex )
+        {
+            const FString& Filename = FilesInPath(FileIndex);
+            warnf( NAME_Log, TEXT("Loading %s"), *Filename );
+    
+            UPackage* Package = UObject::LoadPackage( NULL, *Filename, LOAD_None );
+            if( Package == NULL )
+            {
+                warnf( NAME_Error, TEXT("Error loading %s!"), *Filename );
+            }
+    
+            /////////////////
+            //
+            // Do your thing here
+            //
+            /////////////////
+    
+            TObjectIterator<UStaticMesh> It;...
+    
+            UStaticMesh* StaticMesh = *It;
+            if( StaticMesh->IsIn( Package )
+    
+    
+    
+    
+            UObject::CollectGarbage( RF_Native );
+        }
+    
+        return 0;
+    }
+    
+
+
+
+You might also want to look at `NormalizePackageNames()` in `PackageHelperFunctions.h` (which appeared in QA_APPROVED_BUILD_JUNE_2007). This function can create a filtered list of packages to iterate over, with a few more niceties beyond just iterating over `GPackageFileCache` (see the code for details).
+
+
+
+## Commandlet Listing
+
+Please refer to the [Commandlet List](Engine/Commandlets/CommandletList) page.
+
+ 
+
+
+
+

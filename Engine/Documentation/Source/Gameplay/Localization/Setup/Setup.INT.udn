@@ -1,0 +1,174 @@
+Availability:Public
+Title: Setup
+Crumbs:%ROOT%, Gameplay, Gameplay/Localization
+Description:How to set up a project for localization. 
+version: 4.9
+Parent:Gameplay/Localization
+Order:2
+
+[TOC (start:2)]
+
+Setting a project up for localization involves:
+* writing localization configuration scripts for the commandlet pipeline.
+* configuring where to load localization data from.
+* specifying which localization data should be packaged for distribution. 
+
+Conventionally, localization configuration scripts reside under `Config/Localization` while localization data resides under `Content/Localization`.
+
+[REGION:raw]
+![](SetupFlowchart.png)
+[/REGION:raw]
+
+[REGION:note]
+Setting up and iterating on localization is a manual process currently, but a dashboard UI for managing localization is in progress that will greatly simplify the workflow.
+[/REGION]
+
+
+
+
+## Localization Configuration Scripts
+The localization pipeline consists of [various commandlets](Gameplay/Localization/Commandlets) that handle gathering text, storing it, managing translations, and compiling them into binary forms 
+for use by the engine. A master commandlet runs these other commandlets via a configuration file that specifies the steps to execute.
+
+Typically, projects only require a single target that covers all of the text to be translated. A single configuration script then specifies all the steps and settings to run an iteration of 
+localization automation - gathering text, generating manifests and archives, importing any new translations, exporting any new source, and generating a compiled binary format localization 
+resource for use by the application.
+
+Below is an example localization configuration script that implements the conventional localization process.
+
+[REGION:codetitlebar]
+Config/Localization/Game.ini
+[/REGION:codetitlebar]
+	;Common settings to be used for all commandlets as needed.
+	[CommonSettings]
+	SourcePath=./Content/Localization/Game
+	DestinationPath=./Content/Localization/Game
+	ManifestName=Game.manifest
+	ArchiveName=Game.archive
+	ResourceName=Game.locres
+	PortableObjectName=Game.po
+	;English
+	SourceCulture=en
+	;English
+	CulturesToGenerate=en
+	;French - Commented Out
+	;CulturesToGenerate=fr
+	;Italian - Commented Out
+	;CulturesToGenerate=it
+	;German - Commented Out
+	;CulturesToGenerate=de
+	;Spanish - Commented Out
+	;CulturesToGenerate=es
+
+	;Gather text from source code and configuration files.
+	[GatherTextStep0]
+	CommandletClass=GatherTextFromSource
+	IncludePaths=./Source/
+	IncludePaths=./Config/
+	ExcludePaths=*/Config/Localization/*
+	SourceFileSearchFilters=*.h
+	SourceFileSearchFilters=*.cpp
+	SourceFileSearchFilters=*.ini
+
+	;Gather text from assets in content.
+	[GatherTextStep1]
+	CommandletClass=GatherTextFromAssets
+	IncludePaths=./Content/
+	ExcludePaths=*/Content/Localization/*
+	PackageExtensions=*.umap
+	PackageExtensions=*.uasset
+
+	;Create manifest with all gathered source text.
+	[GatherTextStep2]
+	CommandletClass=GenerateGatherManifest
+
+	;Create new archives/update existing archives with new entries from the manifest.
+	[GatherTextStep3]
+	CommandletClass=GenerateGatherArchive
+
+	;Import new translations from PO (portable object) files into existing archives.
+	[GatherTextStep4]
+	CommandletClass=InternationalizationExport
+	bImportLoc=true
+
+	;Export new source from existing archives into PO (portable object) files.
+	[GatherTextStep5]
+	CommandletClass=InternationalizationExport
+	bExportLoc=true
+
+	;Compile source text and translations into binary form for use by the application.
+	[GatherTextStep6]
+	CommandletClass=GenerateTextLocalizationResource
+
+
+### Example Directory Structure
+An example directory structure using a project called "MyProject", with two targets ("Game" and "DLC").
+* MyProject
+	* Config
+		* Localization
+			* Game.ini
+			* DLC.ini
+
+## Localization Data
+Projects must be configured to use their localization data. Paths to search for localization data are specified in `Config/DefaultGame.ini` under the `Internationalization` section using array 
+notation for the key `LocalizationPaths`. By default, localization data will be searched for in `Content/Localization/Game`, but this entry can be explicitly removed or replaced.
+
+[REGION:codetitlebar]
+Config/DefaultGame.ini Excerpt
+[/REGION:codetitlebar]
+
+	[Internationalization]
+	;This first entry is inherited from BaseGame.ini by default.
+	;+LocalizationPaths=%GAMEDIR%Content/Localization/Game
+	+LocalizationPaths=%GAMEDIR%Content/Localization/DLC
+
+
+### Example Directory Structure
+An example directory structure using a project called "MyProject", with two targets ("Game" and "DLC"), localized for English ("en") and Brazilian Portuguese ("pt-BR").
+
+* MyProject
+	* Content
+		* Localization
+			* Game
+				* Game.manifest
+				* en
+					* Game.archive
+					* Game.locres
+				* pt-BR
+					* Game.archive
+					* Game.locres
+			* DLC
+				* DLC.manifest
+				* en
+					* DLC.archive
+					* DLC.locres
+				* pt-BR
+					* DLC.archive
+					* DLC.locres
+
+## Packaging Settings
+In order to package the project properly, the supported cultures' localization data need to be specified for packaging. Within the editor, under the **File** menu, open the **Package Project** submenu, and 
+select **Packaging Settings...**. From the **Project Settings** window, under the **Packaging** category, expand the advanced section in order to access the **Localizations to Package** setting. You may check or uncheck 
+which cultures should have their localization data packaged. English is checked by default.
+
+
+![](SetupEditor.png)
+
+Alternatively, these settings can be modified directly in the `Config/DefaultGame.ini` file without using the editor UI, underneath the section `/Script/UnrealEd.ProjectPackagingSettings`, using the array 
+notation for the key `CulturesToStage`.
+
+[REGION:codetitlebar]
+Config/DefaultGame.ini Excerpt
+[/REGION:codetitlebar]
+	[/Script/UnrealEd.ProjectPackagingSettings]
+	+CulturesToStage=en
+	+CulturesToStage=fr
+	+CulturesToStage=it
+	+CulturesToStage=de
+	+CulturesToStage=es
+
+
+## Iteration
+Iterating on localization data involves running the GatherText commandlet and providing a localization configuration script. The commandline should be of the form: 
+
+	<ProjectFilePath> -Run=GatherText -Config=<PathToConfigFileRelativeToProjectRoot>

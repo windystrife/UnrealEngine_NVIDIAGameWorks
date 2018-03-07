@@ -1,0 +1,37 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	PostProcessVisualizeGBuffer.usf: PostProcessing shader to visualize the GBuffer
+=============================================================================*/
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+#include "DeferredShadingCommon.ush"
+#include "PostProcessHistogramCommon.ush"
+
+/** Main pixel shader function */
+void MainPS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
+{
+	float Alpha = 1;
+
+#if DRAWING_TILE
+	int2 PixelPos = (int2)SvPosition.xy;
+
+	// half viewport size
+	int2 HalfInsetSize = (int2)(ViewportSize.xy / 2);
+	// quarter viewport size
+	int2 QuarterInsetSize = (int2)(ViewportSize.xy / 4);
+
+	// 16 tiles over the full viewport
+	int2 QuarterTileXY = (int2)((uint2)PixelPos / QuarterInsetSize);
+	// pixel position within a quartertile 
+	int2 QuarterTileLocalPos = PixelPos - QuarterTileXY * QuarterInsetSize;
+
+	const int Border1 = 10;
+	const int Border2 = 8;
+	float BorderDistance = ComputeDistanceToRect(QuarterTileLocalPos, int2(0, 0) + Border1.xx, QuarterInsetSize - 2 * Border1.xx);
+	Alpha = 1 - saturate((BorderDistance - Border2.x) * 0.5f);
+#endif
+
+	OutColor = float4(Texture2DSample(PostprocessInput0, PostprocessInput0Sampler, UVAndScreenPos.xy).rgb, Alpha);
+}

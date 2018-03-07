@@ -1,0 +1,102 @@
+﻿INTSourceChangelist:2728663
+Availability:Public
+Title:アクタのライフサイクル
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture, Programming/UnrealArchitecture/Actors
+Description:アクタがロードまたはスポーン、最終的に消滅するまでのライフサイクル
+version:4.9
+
+[TOC (start:2 end:3)]
+
+
+このページは **アクタ** のライフサイクルの大まかな概要です。アクタがレベルへインスタンス化 (**スポーン**) され、その後消去 (**破壊**) されるのかを説明します。
+
+以下のフローグラフは、アクタをインスタンス化する 3 つの主要なパスを表示しています。アクタの作成方法に関係なく、アクタの破壊は結果的にすべて同じパスを使用します。
+
+## ライフサイクルの詳細
+
+[![](ActorLifeCycle1.png)](ActorLifeCycle1.png)
+
+## ディスクからロードする
+
+このパスは、レベルに既に配置されているすべてのアクタに存在します。例えば、LoadMap が発生した時、または AddToWorld (ストリーミングまたはサブレベルから) が呼ばれた時などです。
+
+1. パッケージ / レベルに配置するアクタはディスクからロードします。
+1. **PostLoad** - ディスクからロードした後、シリアル化されたアクタに呼び出されます。カスタム仕様のバージョンや修正されたビヘイビアはここに移動します。PostLoad は **PostActorCreated** と互いに排他的です。
+1. **InitializeActorsForPlay**
+1. **RouteActorInitialize** すべての非初期化アクタ対象 (シームレスな移行をカバー)
+	1. **PreInitializeComponents** - アクタのコンポーネントに InitializeComponent が呼ばれる前に呼ばれます
+	1. **InitializeComponent** - アクタに定義した各コンポーネントを作成するヘルパー関数
+	1. **PostInitializeComponents** - アクタのコンポーネントが初期化された後に呼ばれます。	
+1. **BeginPlay** - レベルが開始すると呼ばれます。
+
+## Play in Editor
+
+Play in Editor パスは Load from Disk (ディスクからロード) とほぼ同じですが、アクタがディスクからロードされることは決してありません。アクタはエディタからコピーします。
+
+1. エディタのアクタは新規ワールドに複製されます。
+1. **PostDuplicate** が呼ばれます
+1. **InitializeActorsForPlay**
+1. **RouteActorInitialize** すべての非初期化アクタ対象 (シームレスな移行をカバー)
+	1. **PreInitializeComponents** - アクタのコンポーネントに InitializeComponent が呼ばれる前に呼ばれます。
+	1. **InitializeComponent** - アクタに定義した各コンポーネントを作成するヘルパー関数です。
+	1. **PostInitializeComponents** - アクタのコンポーネントが初期化された後に呼ばれます。	
+1. **BeginPlay** - レベルが開始すると呼ばれます。
+
+## スポーン
+
+アクタのスポーン時にたどるパスです。
+
+1. **SpawnActor ** が呼ばれます。
+1. **PostSpawnInitialize** 
+1. **PostActorCreated** - アクタを作成した後にスポーンアクタに呼ばれます。ビヘイビアなどのコンストラクタはここに移動します。PostActorCreated は PostLoad と互いに排他的です。
+1. **ExecuteConstruction**:
+	* **OnConstruction** - アクタの構造です。ここでブループリントのアクタのコンポーネントが作成されて、ブループリントの変数が初期化されます。
+1. **PostActorConstruction**:
+	1. **PreInitializeComponents** - アクタのコンポーネントに InitializeComponent が呼ばれる前に呼ばれます。
+	1. **InitializeComponent** - アクタに定義した各コンポーネントを作成するヘルパー関数です。
+	1. **PostInitializeComponents** - アクタのコンポーネントが初期化された後に呼ばれます。	
+1. **OnActorSpawned** でブロードキャストします
+1. **BeginPlay** が呼ばれます。
+
+
+## ディファード スポーン
+
+アクタはいずれかのプロパティを "Expose on Spawn" に設定してディファードスポーンにすることができます。
+
+1. **SpawnActorDeferred** - プロシージャルなアクタをスポーンする設計です。ブループリント コンストラクション スクリプトの前に追加設定を有効にします。
+1. SpawnActor で発生するすべてですが、PostActorCreated の後に以下が起こります：
+	1. 有効ですが不完全なアクタインスタンスと一緒にさまざまな「初期化関数」を設定 / 呼び出します。
+	1. **FinishSpawningActor** - アクタを確定するために呼ばれます。スポーン アクタの並びにある ExecuteConstruction でピックアップします。
+
+
+
+## ライフサイクルの終了
+
+さまざまな方法でアクタを破壊できますが、ライフの消滅方法はいつも同じです。
+
+### ゲームプレイ中
+
+ほとんどのアクタはゲームプレイ中に実際に消滅しないので、これは完全に任意です。
+
+**Destroy** - アクタを取り除こうとするたびにゲームに手動で呼ばれますが、ゲームプレイはまだ続いています。アクタは保留中のキルとしてマーク付けされて、レベルのアクタの配列から取り除かれます。
+
+**EndPlay** - アクタのライフが最終に近づいていることを保証するために数か所で呼ばれます。プレイ中に Destroy や Level Transitions でこれを発行します。またアクタを格納しているストリーミングレベルがアンロードされた場合も発行します。EndPlay が呼び出されるすべての位置：
+
+* Destroy の明示的な呼出し
+* Play in Editor を終了
+* レベル移行 (シームレスな移動またはロードマップ)
+* アクタを格納するストリーミング レベルをアンロード
+* アクタのライフタイムが期限切れ
+* アプリケーションをシャットダウン (全アクタを破壊)
+
+どのように発生するかには関係なく、次のガーベジ コレクション サイクルでメモリを解放するために、アクタは RF_PendingKill とマーク付けされます。また手動で保留中のキルをチェックせずに、よりクリーンな FWeakObjectPtr<AActor> の使用を考慮してください。
+
+**OnDestroy** - Destroyに対するレガシーな response です。レベル移行や別のゲームクリーンアップ関数に呼ばれるため、ここにあるもの全てを EndPlay へ移動させましょう。
+
+## ガーベジ コレクション
+
+アクタに破壊のマークが付けられた後に、メモリからアクタを実際に削除するためにガーベジ コレクションが発生して、アクタが使用していた全リソースを解放します。
+
+1. **BeginDestroy** - アクタがメモリを解放して別のマルチスレッドリソースを処理する機会です (例えばグラフィックスレッドプロキシオブジェクト)。
+1. **IsReadyForFinishDestroy** - メモリを永久に解放する準備が整ったらガーベジ コレクションに知らせます。
+1. **FinishDestroy** - 最後にアクタは実際に破壊されます。これは内部データ構造を解放する別の機会です。メモリが解放される前の最後のコールです。

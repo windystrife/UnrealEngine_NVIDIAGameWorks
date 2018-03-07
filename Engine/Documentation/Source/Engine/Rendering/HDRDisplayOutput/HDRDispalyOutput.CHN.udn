@@ -1,0 +1,144 @@
+﻿INTSourceChangelist:3473611
+Availability:Public
+Crumbs:
+Title:高动态范围显示输出
+Description:HDR 显示输出和可用选项总览。
+Type:overview
+Type:landing
+SkillLevel:Intermediate
+Version:4.16
+Parent:Engine/Rendering/
+Order:28
+Tags:Rendering
+Topic-image:HDRDisplayOutput_Topic.png
+Social-image:HDRDisplayOutput_Social.png
+
+[TOC(start:2)]
+
+
+现在您可以在虚幻引擎 4 中利用更高的对比度和更广的色域等功能输出高动态范围（HDR）显示了！学习目标是使显示的图像拥有“真实世界”中自然光照条件下形成的特点。这是通向 **Academy Color Encoding System**（ACES）标准的一步。该标准可确保多个格式和显示之间的颜色均得到保留，也可 _提前检验_ 使用的源材质（无需再针对另一个媒介进行调整）。 
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Low Dynamic Range (LDR) ](LDR.png)(w:700)
+	[/PARAM]
+	[PARAM:after]
+	![High Dynamic Range (HDR) ](HDR.png)(w:700)
+	[/PARAM]
+[/OBJECT]
+[REGION:caption] <!--- Spacer --->
+[/REGION]
+[REGION:caption]
+此范例为模拟，仅限展示之用。在 LDR 屏幕上无法表达出 HDR 的差异。 
+[/REGION]
+
+在当前实现下，渲染场景的完整处理通过 **ACES Viewing Transform** 进行处理。此流程的工作原理是使用“参考场景的”和“参考显示的”图像。
+
+* **参考场景的** 图像保有源材质的原始 _线性光照_ 数值，不限制曝光范围。 
+* **参考显示的** 图像是最终的图像，将变为所用显示的色彩空间。 
+
+使用此流程后，初始源文件用于不同显示时便无需每次进行较色编辑。相反，输出的显示将映射到 
+正确的色彩空间。
+
+ACES Viewing Transform 在查看流程中将按以下顺序进行：
+
+* **Look Modification Transform (LMT)** - 这部分抓取应用了创意“外观”（颜色分级和矫正）的 ACES 颜色编码图像，输出由 ACES 和 Reference Rendering Transform（RRT）及 Output Device Transform（ODT）渲染的图像。
+* **Reference Rendering Transform (RRT)** - 之后，这部分抓取参考场景的颜色值，将它们转换为参考显示。在此流程中，它使渲染图像不再依赖于特定显示器，反而能保证它输出到特定显示器时拥有正确而宽泛的色域和动态范围（尚未创建的图像同样如此）。
+* **Output Device Transform (ODT)** - 最后，这部分抓取 RRT 的 HDR 数据输出，将其与它们能够显示的不同设备和色彩空间进行比对。因此，每个目标需要将其自身的 ODT 与 Rec709、Rec2020、DCI-P3 等进行比对。
+
+[REGION:note]
+如需了解 ACES Viewing Transform 的更多内容，请从 [ACES GitHub](https://github.com/ampas/aces-dev/tree/master/documents) 页面下载 PDF 文档，或查阅本页中“参考资料”部分中的链接。
+[/REGION]
+
+## 启用 HDR 输出
+
+开启控制台变量或使用蓝图中的 **GameUserSettings** 节点即可启用运行时的 HDR 输出。 
+
+![](HDRGameUserSettings.png)(w:800)
+
+Game User Settings 控制将自动锁定当前可用的最接近输出设备，并相应设置全部标记。另外，还可使用以下控制台变量启用并对 HDR 设备和色域输出所需的可用选项进行修改。 
+
+[REGION:simpletable]
+| 控制台变量 | 描述 |
+| --- | --- |
+| **r.HDR.EnableHDROutput** | 设为 1 时，它将重建交换链并启用 HDR 输出。|
+| **r.HDR.Display.OutputDevice** | 这是输出显示的设备格式 [INCLUDE:#deviceOuptut] |
+| **r.HDR.Display.ColorGamut** | 这是输出显示的色域。[INCLUDE:#colorGamut] |
+[/REGION]
+
+<!---
+[EXCERPT:deviceOuptut]
+|||
+| --- | --- |
+| **0** | sRGB (LDR) （默认） |
+| **1** | Rec709 (LDR) |
+| **2** | 显式伽马映射 (LDR) |
+| **3** | ACES 1000-nit ST-2084 (Dolby PQ) (HDR) |
+| **4** | ACES 2000-nit ST-2084 (Dolby PQ) (HDR) |
+| **5** | ACES 1000-nit ScRGB (HDR) |
+| **6** | ACES 2000-nit ScRGB (HDR) |
+[/EXCERPT:deviceOuptut]
+
+[EXCERPT:colorGamut]
+|||
+| --- | --- |
+| **0** | Rec709 / sRGB, D65 （默认） |
+| **1** | DCI-P3, D65 |
+| **2** | Rec2020 / BT2020, D65 |
+| **3** | ACES, D60 |
+| **4** | ACEScg, D60 |
+[/EXCERPT:colorGamut]
+--->
+
+设置 GameUserSettings 的蓝图或 C++ 调用后，即可运行烘焙项目，使用命令行参数 `-game mode`、使用 Standalone 游戏模式、或使用专属全屏在新窗口中使用 Play-in-Editor（PIE）模式（按下 **Alt** + **Enter** 或使用控制台窗口中的 `fullscreen` 命令）。 
+
+[REGION:note]
+当前 HDR 输出无法使用无边框窗口或窗口模式。
+[/REGION]
+
+
+### HDR 中的低动态范围（LDR） UI 支持
+
+[REGION:warning]
+此功能尚在实验阶段，可能会在未来的版本中被修改。
+[/REGION]
+
+启用 HDR 输出后，用户界面（UI）可能出现显示问题。因此虚幻引擎新增了实验性的 LDR UI 合成支持。它将尝试尽量匹配 LDR 的外观。推荐对 UI 稍微进行增强，以免和鲜艳主场景相比之下显得黯淡。 
+
+可使用以下控制台变量执行此操作：
+
+[REGION:simpletable]
+| 控制台变量 | 描述 |
+| --- | --- |
+| **r.HDR.UI.CompositeMode** | 设为 1 时，此变量将启用 HDR UI 合成，尝试保留 LDR 视觉效果和混合。|
+| **r.HDR.UI.Level** | 此变量将调整合成 UI 的明亮度。推荐将值设为 1.5 或 2。|
+[/REGION]
+
+
+## HDR 硬件和设置注意事项
+
+可用的显示器和电视种类繁多，另外还需考虑主机和 PC，因此可能需要使用特定的硬件块或修改设置，使 HDR 输出正常进行。在设置过程中需要考虑以下方面：
+
+* 用高速 HDMI 2.0 连接线将系统和 HDR 显示器连接，保证传输速度。（HDMI 1.4 也许可用，但显示内容时可能出现问题。）并非所有 HDMI 接口均支持 HDMI 2.0 和 HDR。如不确定，请参考显示器说明书。 
+* 确保电视端启用了 HDR。有时这可能列在电视或显示器设置中，如“HDMI 色深技术”或“增强格式”。如不确定，请参考显示器说明书。
+* 在某些主机上，以 PS4 为例，可能需要在系统设置中禁用 **Enable HDCP**，HDR 输出方能正常进行。
+* 可能需要在某些显示器上进行显示设置才能获得正确的输出。 
+	* 在 NVIDIA GPU 上，使用 NVIDIA 控制面板并调整显示分辨率 Output Color Format 使用 **RGB**、Output Color Depth 使用 **10-bit** 或 **12-bit**。硬件不同， 
+	可用选项也有所不同。如不确定，请参考显示器说明书。
+		[REGION:lightbox]
+		[![](NVControlPanel.png)(w:400)](NVControlPanel.png)
+		[/REGION]
+		[REGION:caption]
+		_点击图片查看全图。_
+		[/REGION]
+
+## 注意与限制
+
+* 由于和 LDR 控制之间的兼容性较差，HDR 输出中影片映射曲线将默认禁用。 
+* 当前只能实现 1000 尼特和 2000 尼特显示输出的路径。 
+* D3D11 限制将使 HDR 输出仅限于专属全屏支持。如拥有 Windows 10 的 D3D12 支持，可能可以延展为启用 HDR 输出的单独视口。Mac 上的实现已支持此功能。
+
+## 参考资料
+
+* ["ACES." Oscars.org | Academy of Motion Picture Arts and Sciences. 2017 年 2 月 6 日出版。2017 年 6 月 5 日上传。](http://www.oscars.org/science-technology/sci-tech-projects/aces)
+* ["Aces Documentation." Oscars.org | Academy of Motion Picture Arts and Sciences. 2016 年 9 月 26 日出版。2017 年 6 月 5 日上传。](http://www.oscars.org/science-technology/aces/aces-documentation)

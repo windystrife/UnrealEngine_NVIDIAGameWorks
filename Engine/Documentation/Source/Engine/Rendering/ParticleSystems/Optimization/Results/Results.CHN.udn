@@ -1,0 +1,267 @@
+﻿Availability: Public
+Title:获取结果
+Crumbs: %ROOT%, Engine, Engine/Rendering/ParticleSystems, Engine/Rendering/ParticleSystems/Optimization
+Description:分析粒子系统的常见问题区域。
+
+
+[TOC]
+
+
+
+## Cascade 中的核心系统 - GPU/游戏线程/渲染线程
+
+Cascade 会创建可以使动态性能消耗在虚幻引擎 4 中的三个核心引擎系统之间传播的完整粒子系统。  游戏线程、渲染线程和 GPU。
+
+
+* 在游戏线程 (gamethread) 上计算粒子仿真时间(Tick)。
+* 在渲染线程上计算粒子数据最终结果（打包几何体，描画函数调用）。
+* 在 GPU 上计算粒子可视程度（着色器复杂度，过渡描画）。
+
+
+所有这些系统相互并行地进行计算，所以如果其中某个系统速度降低可能在渲染过程中会出现瓶颈现象，等同于帧速率低的情况。 重点是要在 Cascade 中创建粒子系统的时候考虑所有这 3 个过程。
+
+还有一点也很重要，注意 Cascade 会在游戏线程上运行粒子评估，游戏性计算也是在这里进行的。
+
+(#OverdrawGraphics)
+
+
+
+## 过度描画 - GPU
+
+当您添加材质到平面粒子的表面，该材质在指令数中会形成性能损耗。  对于半透明物体，这个指令消耗会随着半透明物体堆栈上升而增加，最后造成过度描画。  不透明物体图层越多，消耗越高。 简单地说，可以将过渡描画描述为：
+
+
+    
+    过度描画 = Pixel shader cost（像素着色器消耗） = 图层的数量 * 受图层影响的平均像素数量 * 图层的平均指令数
+    
+
+
+您可以轻松地在 **Shader Complexity Mode（着色器复杂度模式）** 中看到这个损耗。  亮红色 = 300 条指令，粉色 = 600 条指令，而白色 >= 900 条指令。  在 PC 上按下 **Alt+8** 来查看着色器复杂度。
+
+[REGION:note]
+您可以在材质编辑器中查看材质的指令数。
+[/REGION]
+
+着色器复杂度会输出系统将要消耗的近似值，但是它还取决于场景，因为半透明物体要相对也有消耗的透明物体进行计算。
+
+检查您的效果使用情况，这一点也很关键。  可能在任何给定情境中调用的效果（武器撞击）通常需要比您可以自定义构建的效果更亮，这样才能与特定情境相符，因为它将会在消耗不断变动的情境中进行描画。
+
+可以使过渡描画影响处于控制范围内需要采取的一些步骤：
+
+
+* 降低发射率。
+* 减少材质指令数量。
+* 减少粒子范围（填充屏幕面积较小）。
+* 为近处/远处粒子发射创建 LOD，降低不同视线距离的消耗。
+* 检查并排放置互相堆叠在一起的发射器（静态放置的效果）。
+
+
+(#GameThread)
+
+
+
+## LODs - 细节层次 - GPU/游戏线程
+
+Cascade 中的 LOD 为用户提供了根据玩家距离发射器的距离控制模块和行为的功能。  为了使用 LOD 系统，可以对粒子系统中的任何属性进行修改。
+
+请参阅 [Cascade参考指南](Engine/Rendering/ParticleSystems/Cascade) 的[粒子系统细节层次 (LOD)](Engine/Rendering/ParticleSystems/Cascade#PartileSystemLODs)部分了解更多有关设置 LOD 的技术信息。
+
+重点是记住在创建 LOD 的时候会产生与未共享模块相关的内存消耗。  尽量在 LOD 之间共享很多歌模块，这样可以降低内存占用量。 只需创建为您想要修改的属性而设置的唯一模块。
+
+
+
+[OBJECT:topiclistnotitlealt]
+	[PARAM:icon]
+		![detailModes.png](detailModes.png)(convert:false)
+	[/PARAM]
+	[PARAM:description]
+	[INCLUDE:#lodfloat]
+	[/PARAM]
+[/OBJECT]
+
+<!--
+[EXCERPT:LODFloat]
+Cascade 中的预览模式与编辑器透视图的工作方式不同。 为了可以在 Cascade 中正确预览，请确保设置 **View（视图）** -> **Detail Mode（细节模式）** 为 **High（高）** 。
+
+Cascade 允许在 LOD 之间进行切换，并且显示指定的 LOD。  为了看到 Cascade 正确更新，请务必禁用 Editor LOD 视图模式。
+
+启用编辑器预览可以提供飞过场景以及在您四处移动的时候会看到粒子系统在 LOD 之间切换的功能。
+
+重点是仔细考虑这个场景，然后了解为了看到正常状态的效果需要多少个单元的现实情况。  在环境粒子系统的实例中，可以发射 0.00 粒子，并且在可能看不到粒子系统的时候减少更新时间。  通过按住鼠标中间按钮然后在任何正交视图（正面、侧面、顶部）中拖拽可以测量距离。
+[/EXCERPT:LODFloat]
+-->
+
+### LOD 距离检查时间
+
+**LOD Distance Check Time（LOD 距离检查时间）** 功能会指定游戏检查玩家与放置在场景中的发射器之间的距离的频率，以此确定要使用哪一个 LOD。  在将 LOD模式设置为自动化后 LOD Distance Check Time（LOD 距离检查时间）开始运行。
+
+将其设置为自动实质上会在您进行游戏的时候让游戏确定 LOD。  如果您增加了 LOD Distance Check Time，那么检查之间的时间量将会增加。  LOD DistanceCheckTime 以秒为单位进行计算，所以在设置它的时候要考虑您的玩家的最大运动速度。  如果您将 LOD Distance Check Time 的值设置为 0.00，那么会在每一帧对距离进行检查，这样做等同于降低性能。
+
+
+### LOD模式 - 游戏线程
+
+正确设置 LOD 方法对于性能和视觉效果来说至关重要。
+
+自动 - 游戏将会根据效果中定义的距离参数设置 LOD，使用 LOD Distance Check Time 设置。 通常用于可以循环但没有被游戏代码调用的环境效果。
+
+直接设置 - 在生成这个效果时确定 LOD（通常通过游戏代码）并且保留在定义的 LOD。  通常在诸如爆炸或撞击这样的爆炸效果中使用。
+
+激活自动 - 在生成效果时根据 LOD 中定义的距离参数定义 LOD。  通常用于像蓝图等这样要求 LOD 生成后就永远不发生变换的程序中调用的爆炸效果。
+
+
+##  固定 vs. 非固定的边界 - 游戏线程
+
+边界是引擎可以确定效果的可视性的方法之一。  这些看不见的坐标会告知引擎效果是否在视线范围内。  如果您的边界的一个角可见，那么引擎将会计算所有必要的效果分量。
+
+边界性能消耗比较大，每一帧都需要进行检查和更新，因此将边界设置为固定的，然后确定边界需要多大。  在某些情况下，如果您需要看到爆炸飞出的每一块碎片，那么您可能希望您的边界相对大一点。  如果您使消耗变低，那么将边界收紧到核心分量可能会提高性能，但是在边界超出视线范围的时候效果会突然消失。
+
+对于固定 vs. 非固定边界要注意一些事项。
+
+火箭轨迹快速移动效果（例如，火箭轨迹，追踪器或任何附加到射弹上的东西等等）不应该设置固定边界，或者将固定边界设置得很大，这样发射器将无法飞出边界外面。
+
+在设置边界的时候需要注意在您的系统中定义的本地 vs. 世界空间坐标。  如果将发射器旋转到您的边界朝向相反的方向，那么效果的元素可以飞出您的边界，同时会发生元素突然弹出视图的现象。
+
+(#RenderThread)
+
+
+
+## 描画调用函数 - 渲染线程
+
+粒子系统中的描画调用函数通常追踪很困难。  在确定描画调用函数消耗的时候要记住的几个综合因素。
+
+平面粒子发射的每个发射器对应 1 个描画调用函数，不考虑屏幕方位。
+
+网格物体发射的每个网格物体发射器对应 1 个描画调用，不考虑发射的网格物体数量。 但是，在移动设备上，性能消耗为每个 _发射_ 的网格物体消耗1个描画调用。 所以，在移动设备上，如果您在特效中有 2 个发射器，每个发射 10 个网格物体，那么您的消耗就是与该粒子相关的 20 个描画调用函数的消耗总量。
+
+材质通路也可以确定描画调用函数消耗。 您的材质中通路越多，您的效果中的描画函数调用就会越多。
+
+比如：
+
+
+* 粒子系统 A 的组成：  1 个发射器生成 12 个平面实例，使用带有 1 个通路的材质，整个系统消耗 1 个描画函数。
+* 粒子系统 B 的组成：  1 个发射器生成 12 个平面实例，使用带有 2 个通路的材质，整个系统消耗 2 个描画函数。
+* 粒子系统 C 的组成：  1 个发射器生成 12 个网格物体，使用带有 2 个通路的材质
+	* **移动平台**： 整个系统消耗24个描画函数。 （2 个通路每个调用12 个网格物体，因为每个网格物体是一个单独的描画函数调用，所以最后 = 24 个描画函数）
+	* **所有其它平台**： 整个系统消耗2个描画函数。
+* 粒子系统 D 的组成：  1 个发射器生成 6 个网格物体，使用带有 2 个通路的材质，与此同时 1 个发射器使用 1 个通路生成 10 个平面实例，所以整个系统消耗 13 个描画函数。 （2 个通路每个调用 * 6 个网格物体，因为每个网格物体是一个单独的描画函数调用，最后 = 12 个描画函数，1 个通路 * 10 个平面实例 = 1 个描画函数调用）
+
+
+可以增加通路的 Material Attribute（材质属性）：
+
+半透明材质 = 1 个通路基数
+
+* 变形 +2 个通路
+* `bUseLitTranslucencyDepthPass` +1 个通路
+* bUseLitTranslucencyPostRenderDepthPass +1 个通路
+* `bUsedWithFogVolumes` +2 个通路
+
+不透明 / 蒙板材质 = 2 个通路基数
+
+可以使用 `DumpParticleFrameRenderingStats` 命令查看特定场景的描画函数调用。  这个命令会输出详细列出了描画函数调用消耗的电子表格。
+
+描画函数调用造成的影响将会按比例增加被渲染的视图数量。 这意味着在分屏中效果将会加强。 请参阅[VFX 优化：分屏](Engine/Rendering/ParticleSystems/Optimization/SplitScreen)页面了解更多有关优化分屏后的效果的详细信息。
+
+重要的是在构建您的效果以及优化效果的时候记住对应的消耗。  如果由于描画函数调用使得您的渲染线程消耗较高，而环境在预算范围内，那么这里时可以开始看的地方。
+
+
+
+## 网格物体发射 - 游戏线程/渲染线程
+
+网格物体发射是 Cascade 中较为强大的一个功能。 因为发射率与描画函数调用的数量相同，所以可能会在移动设备上无意滥用这个功能。  另外，减少您的网格物体上的顶点数量也是个不错的方法。
+
+在某些情况下，可以使用一个单独的网格物体发射仿造大量物体，比如，在不消耗性能计算创建大量碎片时需要的所有平面实例的位置。
+
+
+
+## CPU碰撞 - 游戏线程
+
+通常在虚幻引擎4 中进行与CPU粒子碰撞相关的操作时性能消耗都比较高，所以只有在真正需要它们的时候才会使用。
+
+可以使用一些设置降低碰撞消耗，这些设置包括：
+
+
+* MaxCollisions: 尽量使这个值低一些。
+* Collision Completion Option（碰撞完成选项）： 将它设置为 HaltCollisions/Freeze 可以在到达 MaxCollision 后停止对场景进行碰撞检查。
+* Damping Factor（衰减因数）可以确定物体在碰撞后的弹跳量，值越低可能会更快地停下来（降低 Max Collision（最大碰撞） 值）。
+
+
+
+
+
+##  基于每个单位生成粒子 - GPU/游戏线程
+
+**基于每个单位生成粒子** 是 Cascade 中的功能，它可以在粒子系统移动的时候帮助填充空隙。  虽然这个功能可以用于创建好看的粒子轨迹，但是重点是在使用 Spawn Per Unit 时平衡视觉效果与性能限制。
+
+下面有一些控制发射的技巧：
+
+* 尽量使 Unit Scalar（单位标量）的值高一些，然后在它与发射率之间平衡，这样可以得到您需要的填充率，不会使效果过重。
+* 如果您知道自己使用 Spawn Per Unit 将会具有较高的发射率，那么尝试使用指令数较少的材质。
+* 调整 Max Frame Distance（最大帧距离）限制可以发射的粒子数量。  如果该发射器超出这个 Max Frame Distance（最大帧距离），那么 Spawn Per Unit 将会停止发射，直到它返回这个距离范围以内。  这样可以阻止发射器将大量平面实例转存到场景中。
+
+
+
+
+## 内存消耗
+
+Cascade 提供了显示大量与粒子系统创建相关的重要信息的功能。  它通常可以帮助显示这些信息，以便更好地了解您的系统分配的粒子数量以及您的系统发射的粒子数。
+
+Particle Allocation（粒子分配）可以确定在给定时间可以为发射器放置在世界中的粒子数量，它对确定您的粒子系统将会消耗多少内存起到了很大的作用。  您可以通过在 Cascade 中启用 View（视图）下拉菜单的粒子内存覆盖层看到内存估值。
+
+通过调整设置，可以看到内存消耗增加和减少。
+
+减少内存占用的方法包括：
+
+
+* 将系统中的模块数量减少到只包含指定操作所必需的模块。
+* 对于虚幻效果，减少 Loop Time（循环时间）/Duration（持续时间）（为每个虚幻分配更少的粒子）。
+* 减少生命周期（总体上说就是粒子更少）。
+* 尽量共享更多的模块。
+
+
+Cascade 具有在一个发射器与下一个发射器之间共享模块的功能。  使用这个功能有两个好处。  首先，如果您想要编辑多个发射器的值，那么您可以只编辑 1 个模块，然后更新所有其他设置即可。  其次，共享模块会减少内存占用量，因为烘焙版本会将模块消耗看做是该模块的 1 个实例。
+
+最近添加到烘焙器中的内容可以比较粒子系统中的所有模块，并确定相同的模块，然后共享模块自动减少烘焙时的内存占用量。
+
+
+
+## 更新时间 - 游戏线程
+
+Tick Time（更新时间）指的是在场景中更新粒子系统所花费的时间。  可以使用会列出估计粒子评估消耗所需要的所有相关信息的 stat 粒子命令查看 Tick Time（更新时间）。
+
+可以使用很多方法降低 Tick（更新）消耗。
+
+Tick Time（更新时间）会直接受到您的场景中处于激活状态的 emitterActor 数量的影响。  场景中处于激活状态的发射器越多，Tick Time（更新时间）的数值会越高。  如果在关卡启动的时候需要发射器循环，那么只应该将发射器设置为 autoActivate。
+
+如果在编辑器中加载关卡的时候可以看到大量平面实例/爆炸/爆裂效果，那么运行时会自动评估这些效果，而且在关卡加载完成的时候会出现明显的停顿现象。
+
+只要将效果放置在世界中后，就可以在效果中使用粒子参数留出位置偏移量。  通过使用粒子参数，可以减少发射器数量，从而总体降低更新消耗。  Particle Parameter（粒子参数）可以通过从单独设置模块的分布列表中选择 particleParameter 进行设置。
+
+当它们不在视图中时或者它们与不再在内存中的关卡的某个区域相关联的情况下，可以动态载出并禁用EmitterActor。  随关卡几何体一起动态加载 EmitterActor 是可以减少更新消耗的绝佳实践方案。  在气氛效果较强的情况下，可以在战斗过程中使用蓝图动作切换关闭和打开气氛，减少更新时间和消耗。
+
+加载到内存中但是不在视线范围内（也就是说在位于您上方的地板上）的 Particle System（粒子系统）也可以使用蓝图操作和动态加载体积进行切换，以此减少评估消耗。
+
+在某些情况下，网格物体效果是粒子系统的一个较好的代替。  放置的静态网格物体在游戏线程上没有评估消耗。  在很多情况下放置一个静态网格物体代替粒子系统的做法更有利。  这其中包括远景效果、雾效果等等。
+
+粒子数量直接影响评估计算的性能消耗。  场景中的粒子越多，它们存活的时间越长，需要进行的评估计算越多。  总的来说，将生命周期限制在效果需要的持续时间段内是个不错的实践方案。
+
+当系统不在最佳视线范围内时，在粒子系统中启用 LOD 可以减少粒子发射。  它可以帮助您从主要状态的角度考虑您的效果，允许关卡在视线距离变长的情况下效果质量降低。  将 LOD 收紧到要求的距离可以大大降低场景中的评估计算消耗，而视觉效果质量不会发生明显变化。
+
+检查您的评估计算消耗较高的效果，例如，Collisions（碰撞）、非固定边界以及每个单位生成粒子数量过高。  将边界设置为一个固定的状态可以显著提高性能，任何时候只要可能就应该使用固定边界。
+
+
+<!-- Old, UE3
+## Non Directional Lighting Costs - Game Thread
+
+Non Directional lighting adds depth and realism to particle effects by doing a trace within the world to determine lighting information around emitters spawned into the scene.  Non Directional Lighting comes at a Game Thread evaluation cost.  Non directional lighting is often used for weapon effects, impact effects, character effects, ambient fog effects, and Binked cinematic effects .
+
+Another option for matching particle color to a light environment would be to utilize a Particle Parameter to control color and alpha per Actor.   By using a particle parameter on a placed ambient effect which never moves, several costs are eliminated.
+
+
+1. Cost to store a unique color variant of an effect in memory.
+1. Cost to load a unique color variant at run-time.
+1. Cost to create each color variant in Cascade.
+1. Cost to light the effect to match the environment with Non Directional Lighting on the Game Thread.
+
+
+__It is recommended to use Non Directional Lighting in as many cases as performance allows, it can be helpful to setup your effects with a Particle Parameter in mind should you be required to use this method due to performance restrictions.__
+-->

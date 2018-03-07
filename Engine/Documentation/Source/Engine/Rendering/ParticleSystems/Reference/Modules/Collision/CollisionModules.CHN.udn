@@ -1,0 +1,121 @@
+﻿INTSourceChangelist:2872149
+Availability:Public
+Title:Collision 模块
+Crumbs: %ROOT%, Engine, Engine/Rendering/ParticleSystems, Engine/Rendering/ParticleSystems/Reference
+Description:这些模块处理粒子与其他 actor 之间的碰撞。
+Version:4.9
+
+[TOC(start:2 end:3)]
+
+## Collision 模块
+
+这些模块处理粒子与其他 actor 之间的碰撞。
+
+### Collision
+
+[OBJECT:EmbeddedVideo]
+[PARAMLITERAL:width]
+640
+[/PARAMLITERAL]
+[PARAMLITERAL:height]
+360
+[/PARAMLITERAL]
+[PARAMLITERAL:videoid]
+uD7MQf6sZZU
+[/PARAMLITERAL]
+[/OBJECT]
+
+使发射器处理粒子碰撞的参数。它包含下列属性：
+
+| 属性 | 描述 |
+| ---- | ---- |
+| [REGION:tablesection]Collision[/REGION]||
+| **Damping Factor** | 确定碰撞后粒子“减慢”程度的矢量 distribution。基于粒子生成的 EmitterTime 获取该数值，并将其保存在粒子中。|
+| **Damping Factor Rotation** | 确定碰撞后粒子旋转“减慢”程度的矢量 distribution。基于粒子生成的 EmitterTime 获取该数值，并将其保存在粒子中。|
+| **Max Collisions** | 确定一个粒子所拥有最大碰撞数的浮点 distribution。基于粒子生成的 EmitterTime 获取该数值。|
+| **Collision Completion Option** | 此列举说明达到最大碰撞数后粒子将出现的情况。其可为下列之一：[INCLUDE:#CollisionCompletionOption]|
+| **Apply Physics** | 确定粒子和碰撞对象之间是否应用物理的布尔值。[INCLUDE:#ApplyPhysicsNote] |
+| **Particle Mass** | 确定粒子质量的浮点 distribution - 在 bApplyPhysics 为 _true_ 时使用。基于粒子生成的 EmitterTime 获取该数值。|
+| **Dir Scalar** | 一个浮点值，用于调整粒子边界，防止出现相互穿插或较大间隙。|
+| **Pawns Do Not Decrement Count** | 如为 _true_，与 Pawns 之间的碰撞仍将存在效果，但不计入 MaxCollisions 的次数。这将使粒子在碰撞后从 pawn 上弹开，而不会停留在空中。|
+| **Only Vertical Normals Decrement Count** | 如为 _true_，无垂直碰撞法线的碰撞仍存在效果，但不计入 MaxCollisions 的次数。这将使粒子在碰撞后从墙上弹开，落到地上。|
+| **Vertical Fudge Factor** | 用于确定垂直与否的浮点值。真正垂直的条件是 Hit.Normal.Z == 1.0f。这将使 [1.0-VerticalFudgeFactor..1.0] 范围内的 Z 组件被算作垂直碰撞。|
+| **Delay Amount** | 粒子碰撞检查的延迟量。利用 EmitterTime 获取该数值。在更新中，粒子标记 IgnoreCollisions 将被设置，直至粒子 RelativeTime 超过 _Delay Amount_。|
+| [REGION:tablesection]Performance[/REGION]||
+| **Drop Detail** | 如为 _true_，且 WorldSettings 的 _Drop Detail_ 属性也为 _true_，模块将被无视。|
+| **Collide Only if Visible** | 如为 _true_，只有粒子系统被渲染的情况下才会产生碰撞。|
+| **Max Collision Distance** | 粒子碰撞产生的最大距离。|
+
+
+**Collision** 模块将为粒子荷载数据添加两个矢量（UsedDampingFactor 和 UsedDampingFactorRotation）以及一个整数（UsedMaxCollisions）。这些值用于跟踪每个粒子的碰撞信息。
+
+以下伪代码解释了碰撞粒子的更新过程。
+    
+    确定粒子的位置。这为必备条件，因为
+    在更新调用之前将不会计算实际位置。
+    在线检测中确定所用的适当范围。
+    if (SingleLineCheck indicates collision)
+    {
+        if (UsedMaxCollisions-- > 0)  // Still collisions available
+        {
+            Adjust the velocity and rotation based on the collision
+            if (Applying physics)
+            {
+                Add an appropriate impulse to the hit object.
+                (The Mass is grabbed from the distribution relative to the
+                    particle time.)
+            }
+        }
+        else
+        {
+            Out of collisions for this particle
+            Perform the appropriate action to take based on the CollisionCompletionOption
+        }
+    }
+
+
+### iOS 移动设备上的粒子碰撞
+
+结合 VFX 使用 **iOS** 移动设备端的 Particle Collision 模块时，需将 **Min Desired Frame Rate** 调至 30 FPS 以下。否则，粒子和世界场景中的对象无法产生碰撞的可能性较大。 
+因为一旦虚幻引擎 4（UE4）项目的帧率低于 30 FPS，UE4 将禁用粒子碰撞，以保证帧率高于 30 FPS。
+iOS 项目默认锁定 30 FPS，意味着粒子碰撞从开始便会被禁用。 
+为避免这种情况在您的 UE4 iOS 项目中发生，您需要前往 **Project Settings** > **General Settings** > **Framerate**。
+
+[REGION:lightbox]
+[![](Min_Desired_Frame_Rate.png)](Min_Desired_Frame_Rate.png)
+[/REGION]
+
+Framerate 部分打开后，将 **Min Desired Frame Rate** 设为低于 **30** FPS 的数值（如 25 FPS）。
+然后在粒子特效 Collision 模块的 **Performance** 部分下取消勾选 **Drop Detail** 选项。
+
+![](Drop_Detail_CM_Box.png)
+
+完成 Min Desired Frame Rate 的变更和 Drop Detail 框的取消勾选后， 
+在 iOS 移动设备端重新搭建或重新部署项目，确认粒子碰撞功能正常。 
+
+<!-----------
+
+#### 包括
+
+[EXCERPT:ApplyPhysicsNote]
+[REGION:note]
+	当前情况为单向：_粒子到对象_。粒子本身并未应用物理 - 它只会产生一个应用于碰撞对象上的冲量。
+[/REGION]
+[/EXCERPT:ApplyPhysicsNote]
+
+
+[EXCERPT:CollisionCompletionOption]
+[REGION:simpletable]
+|**选项**|**描述**|
+| --- | --- |
+|_EPCC_Kill_|达到 MaxCollisions 时销毁粒子。（这是默认行为。）|
+|_EPCC_Freeze_|就地冻结粒子。|
+|_EPCC_HaltCollisions_|停止碰撞检测，但保持更新。这可能会导致粒子 `下坠并穿过` 对象。|
+|_EPCC_FreezeTranslation_|停止粒子平移，但保持其他所有更新。|
+|_EPCC_FreeRotation_|停止粒子旋转，但保持其他所有更新。|
+|_EPCC_FreeMovement_|停止粒子平移/旋转，但保持其他所有更新。|
+[/REGION]
+[/EXCERPT:CollisionCompletionOption]
+
+
+------->

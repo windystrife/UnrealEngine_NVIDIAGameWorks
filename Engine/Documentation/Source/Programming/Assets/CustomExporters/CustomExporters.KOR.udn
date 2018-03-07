@@ -1,0 +1,97 @@
+﻿INTSourceChangelist:3108692
+Availability:Docs
+Title:커스텀 익스포터 작성하기
+Crumbs: %ROOT%, Engine, Engine/UI, Programming
+Description:커스텀 애셋 유형 익스포터 작성을 위한 프로그래머용 안내서입니다.
+
+[REGION:todo]
+	언리얼 엔진 3 에서 이식해 온 문서로 현재 검토중에 있습니다. 정보가 맞지 않을 수 있습니다.
+[/REGION]
+
+[TOC(start:2)]
+
+UExporter 클래스는 에디터의 복사/붙여넣기/복제 기능에 의해 사용되는 애셋을 익스포트하거나 또는 애셋을 파일로 익스포트하기 위해 에디터에서 사용됩니다.  익스포트 도구 클래스는 익스포트 도구 및 지원되는 익스포트 형식에 의해 지원되는 오브젝트 유형을 선언합니다.  익스포트 도구는 텍스트 또는 바이너리 중 하나를 지원합니다.
+
+UExporter 자매 클래스는 애셋을 임포트하고 붙여넣기하는데 사용될 뿐만 아니라 새로운 애셋을 만드는데 사용되는 UFactory입니다.  임포트 도구 작성하는 방법에 대한 자세한 내용은 [](Programming/Assets/CustomImporters) 페이지를 참고해 주시기 바랍니다.
+
+
+
+## 새로운 UExporter 클래스 추가하기
+
+UExporter 파생 유형은 게임 에디터 프로젝트에서 정의할 수 있습니다. UnrealEngine4 에 포함된 UExporter 파생형 예제는 Editor/UnrealEd/Classes/Exporters 에서 찾을 수 있는 클래스를 참고하시기 바랍니다.
+
+
+## 주의해야 할 UExporter 멤버
+
+다음은 UExporter 파생 유형의 생성자(Constructor)에서 전형적으로 설정되는 UFactory 멤버 목록입니다.
+
+
+### SupportedClass
+이 익스포트 도구에 의해 익스포트되는 오브젝트의 유형을 나타냅니다.
+
+
+### FormatExtension
+이 익스포트 도구에 의해 지원되는 파일 유형에 대한 파일 확장명의 목록입니다.  예를 들어 에디터에서 파일로 애셋이 익스포트될 때 사용자에게 제공되는 파일 대화 상자에서 사용됩니다.
+
+
+### FormatDescription
+이 익스포트 도구에 의해 지원되는 파일 유형에 대한 설명 목록입니다.  애셋을 파일로 익스포트할 때 에디터 UI에서 사용자에게 제공됩니다.
+
+
+### PreferredFormatIndex
+선호하는 익스포트 유형의 FormatExtension 배열에 대한 인덱스입니다.  대량 익스포트할 시 출력 형식을 자동으로 선택하는데 사용됩니다.
+
+
+### bText
+true인 경우 익스포트 도구는 ExportText를 통해 애셋을 텍스트로 익스포트할 수 있다는 것을 나타냅니다.  false인 경우 익스포트 도구는 ExportBinary를 통해 바이너리에만 익스포트할 수 있다는 것을 나타냅니다.
+
+
+
+## 바이너리 익스포트 도구의 예제
+
+아래는 사운드 오브젝트(USoundNodeWave)를 .wav로 익스포트하는데 사용되는 간단한 익스포트 도구의 구현 예제입니다.
+
+	/** 생성자 */
+	USoundExporterWAV::USoundExporterWAV(const FObjectInitializer& ObjectInitializer)
+		: Super(ObjectInitializer)
+	{
+		// 일회성 초기화를 담을 구조체
+		struct FConstructorStatics
+		{
+			ConstructorHelpers::FClassFinder<UObject> Class0;
+			FConstructorStatics()
+				: Class0(TEXT("class'SoundNodeWave'"))
+			{
+			}
+		};
+		static FConstructorStatics ConstructorStatics;
+
+		// 프로퍼티 초기화
+		SupportedClass = USoundNodeWave::StaticClass();
+		bText = false;
+		FormatDescription.Add(TEXT("Sound"));
+		FormatExtension.Add(TEXT("WAV"));
+	}
+
+	/** 사운드 데이터를 .wav 형태의 지정된 아카이브로 익스포트 */
+	bool USoundExporterWAV::ExportBinary( UObject* Object,
+											const TCHAR* Type,
+											FArchive& Ar,
+											FFeedbackContext* Warn,
+											int32 FileIndex,
+											uint32 PortFlags )
+	{
+		USoundNodeWave* Sound = CastChecked<USoundNodeWave>( Object );
+
+		// 이미 .wav 포맷 내부적으로 저장되어 있는/
+		// 사운드 데이터 익스포트
+		void* RawWaveData = Sound->RawData.Lock( LOCK_READ_ONLY );
+		Ar.Serialize( RawWaveData, Sound->RawData.GetBulkDataSize() );
+		Sound->RawData.Unlock();
+		return true;
+	}
+ 
+
+
+
+

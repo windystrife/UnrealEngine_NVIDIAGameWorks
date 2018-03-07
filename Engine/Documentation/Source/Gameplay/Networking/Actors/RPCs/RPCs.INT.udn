@@ -1,0 +1,123 @@
+Availability:Public
+Title: RPCs
+Crumbs:Gameplay, Gameplay/Networking, Gameplay/Networking/Actors
+Description:Designating function replication across the network
+Related: Gameplay/Networking/Actors/OwningConnections
+Related: Gameplay/Networking/Actors/Components
+
+[TOC (start:2 end:3)]
+
+**RPCs** (**Remote Procedure Calls**) are functions that are called locally, but executed remotely on another machine (separate from the calling machine). 
+
+RPC functions can be very useful and allow either the client or the server to send messages to each other over a network connection.
+
+The primary use case for these features are to do unreliable gameplay events that are transient or cosmetic in nature. These could include events that do things such as play sounds, spawn particles, or do other 
+temporary effects that are not crucial to the Actor functioning. Previously these types of events would often be replicated via Actor properties. 
+
+When using RPCs, it it also important to understand [how ownership works](Gameplay/Networking/Actors/OwningConnections), since it determines where most RPCs will run.
+
+## Using RPCs 
+To declare a function as an RPC, you simply need to add `Server`, `Client`, or `NetMulticast` keywords to the `UFUNCTION` declaration. 
+
+For example, to declare a function as an RPC that will be called on the server, but executed on the client, you would do this:
+
+	UFUNCTION( Client )
+	void ClientRPCFunction();
+
+To declare a function as an RPC that will be called on the client, but executed on the server is very similar but uses the `Server` keyword:
+
+	UFUNCTION( Server )
+	void ServerRPCFunction();
+
+There is another special type of RPC function type called Multicast. Multicast RPCs are designed to be called from the server, and then executed on the server as well as all currently connected clients. 
+To declare a multicast function, you simply use the `NetMulticast` keyword:
+
+	UFUNCTION( NetMulticast )
+	void MulticastRPCFunction();
+
+Multicast RPCs can also be called from clients but will only execute locally in this case.
+
+## Quick Tips
+
+Notice how we prepended the `Client`, `Server`, or `Multicast` keyword to the beginning of the functions. This is an agreed upon convention that we have made internally to signify to programmers 
+using this function that this will be called on the client, server, or all clients respectively.
+
+This is very useful to determine at a glance what machines this function will be called on during a multiplayer session.
+
+## Requirements and Caveats
+There are a few requirements that need to be met for RPCs to be completely functional:
+1.	They must be called from Actors.
+1.	The Actor must be replicated.
+1.	If the RPC is being called from server to be executed on a client, only the client who actually owns that Actor will execute the function.
+1.	If the RPC is being called from client to be executed on the server, the client must own the Actor that the RPC is being called on.
+1.	Multicast RPCs are an exception:
+	* If they are called from the server, the server will execute them locally as well as execute them on all currently connected clients.
+	* If they are called from clients, they will only execute locally, and will not execute on the server.
+	* For now, we have a simple throttling mechanism for multicast events: a multicast function will not replicate more than twice in a given Actor's network update period. Long term, we expect to improve on this and have better support for cross channel traffic management and throttling.
+
+The following tables summarize where a given type of RPC will execute, depending on the ownership of the calling actor (leftmost column).
+
+### RPC invoked from the server
+
+| Actor ownership			| Not replicated	| `NetMulticast`				| `Server`	| `Client`				|
+| ---------------------		| --------------	| ---------					| ---------	| ---------------------	|
+| **Client-owned actor**	| Runs on server			| Runs on server and all clients	| Runs on server	| Runs on actor's owning client	|
+| **Server-owned actor**	| Runs on server			| Runs on server and all clients	| Runs on server	| Runs on server				|
+| **Unowned actor**			| Runs on server			| Runs on server and all clients	| Runs on server	| Runs on server				|
+
+### RPC invoked from a client
+
+| Actor ownership						| Not replicated	| `NetMulticast`		| `Server`	| `Client`			|
+| -------------------------------------	| --------------	| ---------			| ---------	| -----------------	|
+| **Owned by invoking client**	| Runs on invoking client	| Runs on invoking client	| Runs on server	| Runs on invoking client	|
+| **Owned by a different client**	| Runs on invoking client	| Runs on invoking client	| Dropped	| Runs on invoking client	|
+| **Server-owned actor**				| Runs on invoking client	| Runs on invoking client	| Dropped	| Runs on invoking client	|
+| **Unowned actor**						| Runs on invoking client	| Runs on invoking client	| Dropped	| Runs on invoking client	|
+
+
+## Reliability
+
+By default, RPCs are unreliable. To ensure that an RPC call is executed on the remote machine, you can specify the `Reliable` keyword:
+
+	UFUNCTION( Client, Reliable )
+	void ClientRPCFunction();
+
+## Blueprints
+
+Functions that are marked as RPCs will also be replicated if called from Blueprints. In this case, they will follow the same rules as if they are being called from C++. It is not possible at this time to 
+dynamically mark functions as an RPC from Blueprints.
+
+Custom events can however be marked as replicated from within the Blueprint editor.
+
+To use this feature, create a new custom event in your event graph. Click on the custom event and edit the Replication settings in the details view:
+
+![](RPC_BP.png)
+
+## Validation
+
+Recently, the ability to add validation functions to RPCs was added to serve as a choke point for detecting bad data/inputs. The idea is if the validation function for an RPC detected that any of the 
+parameters were bad, it could notify the system to disconnect the client/server who initiated the RPC call.
+
+To declare a validation function for an RPC, simply add the `WithValidation` keyword to the `UFUNCTION` declaration statement:
+
+	UFUNCTION( Server, WithValidation )
+	void SomeRPCFunction( int32 AddHealth );
+
+Then, somewhere next to the Implementation function, put the Validate function:
+
+	bool SomeRPCFunction_Validate( int32 AddHealth )
+	{
+		if ( AddHealth > MAX_ADD_HEALTH )
+		{
+			return false;                       // This will disconnect the caller
+		}
+		return true;                              // This will allow the RPC to be called
+	}
+
+	void SomeRPCFunction_Implementation( int32 AddHealth )
+	{
+		Health += AddHealth;
+	}
+
+A more recent change was added to UHT to require client->server RPC's to have a _Validate function. This is to encourage secure server RPC functions, and to make it as easy as possible for someone to 
+add code to check each and every parameter to be valid against all the known input constraints.

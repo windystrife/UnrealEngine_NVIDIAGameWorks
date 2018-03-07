@@ -1,0 +1,104 @@
+﻿Availability:Public
+Title:Butterfly（バタフライ）
+Crumbs:%ROOT%, Resources, Resources/Showcases/BlueprintExamples
+Description:Butterly ブループリントの概要
+Related:Engine/Blueprints/Overview
+Related:Engine/Blueprints/UserGuide/Variables
+Related:Engine/Animation/AnimBlueprints/EventGraph
+Related:Engine/Blueprints/UserGuide/UserConstructionScript
+Related:Engine/Animation/AnimBlueprints/EventGraph
+Related:Gameplay/AI
+Version:4.9
+
+[REGION:fullwidth]
+![](ButterflyHeader.png)
+[/REGION]
+
+[EXCERPT:Overview]
+レベルの中央にある 2 羽のメカニカルなバタフライを例に使って、ブループリントでの基本的な AI ビヘイビアの作成方法を説明します。バタフライは、休憩のため中心点に戻ろうとするまで、しばらくの間ランダムに方向を変えながら、特定の中心点の周りを飛びます。障害物に遭遇すると、それに向かって滑らかに着陸し、しばらくして再び飛び立ちます。バタフライは長く飛べば飛ぶほど、休憩が長くなります。
+[/EXCERPT:Overview]
+
+バタフライの Blueprint アクタはそれ自体がレベルの周囲を移動するのではなく、そのコンポーネントが移動します。各コンポーネントは、単一のボディ メッシュを親に持つ 2 枚の羽のメッシュで構成されています。それぞれのメッシュは Timeline ノードによってアニメートされ、ボディを上下に浮き沈みさせながら羽ばたきます。イベントグラフはバタフライのコンポーネントを前方向に移動させます。数秒ごとに飛んでいく新しいポイントを選びながら、半径内のランダム ポイントに向くように操縦します。 
+
+**Attractor Location** という名前のベクター変数は _Editiable (編集可能)_ です。つまり、ユーザーに公表されています。この変数は 3D Widget を表示し、バタフライの飛行範囲の中心点を決定するために動き回ることも可能にします。しばらく飛んでから、バタフライがこのスポットに戻るように、遠くに行き過ぎないようにスクリプトで操縦します。
+
+バタフライが飛行中は前方に障害物がないか確認するため、絶えずトレース線を描きます。このトレース線がサーフェスにぶつかると、衝撃ポイントの位置と法線 (サーフェス角) が与えられます。このデータは後に、バタフライの着陸角度と位置の計算に使用されます。次にタイムラインが再生され、Linear Interpolate ノードが滑らかにバタフライを現在の位置から着陸位置へ移動させます。
+
+タイムラインでアニメートしたシステムがもう 1 つ存在し、これでバタフライの羽に適用されたマテリアルのパラメータを操作して電光エフェクトで羽を動かします。
+
+試しに、スタティック メッシュを木のそばに作成してバタフライの動きを見てみましょう。メッシュがバタフライの飛行パス内に存在しコリジョン サーフェスを持つ限り、AI システムが着陸可能なサーフェスを探知しバタフライはそこに着陸を試みます。
+
+
+![](landingOnPyramid.png)
+
+
+## ブループリントの設定
+
+このブループリントのコンポーネントリスト、コンストラクションスクリプト、そしてイベントグラフは以下のタスクを実行します。
+
+
+
+|ブループリントの特性 |目的 |
+|---|---|
+| **Components List** | [INCLUDE:#ButterflyCL] |
+| **Construction Script** | [INCLUDE:#ButterflyCS] |
+| **Event Graph** | [INCLUDE:#ButterflyEG] |
+
+
+##編集可能な変数
+
+
+システム内にエクスポーズされた変数は、羽に適用されるマテリアルのパラメータの他に Attractor Point の中心位置を制御します。 
+
+
+![](Properties_Butterfly.png)
+
+
+
+| プロパティ | 目的 |
+| --- | --- |
+| **Attractor Location** | ユーザーはこの変数を使って、AI のナビゲーションの中心点をカスタマイズすることができます。バタフライは定期的にこのスポットに飛んで戻ります。変数は 3D ウィジェットも有効にし、ベクターがビューポート内のウィジェット経由で設定され、ブループリントが選択されると表示されるようにします。
+| **Max Flight Range** | Attractor Location ポイントからバタフライが飛んで帰ってくることのできるアンリアル単位の最大半径です。 |
+| **Wing Color** | ユーザーがバタフライの羽の色をカスタマイズできるプロパティです。ブループリントのそれぞれのインスタンスは固有のマテリアル インスタンス ダイナミクス (MID) を受け取るので、レベル内にはそれぞれが固有の色を持つバタフライが数羽いる場合があります。
+
+
+
+
+
+
+<!----------EXCERPTS---------------
+
+[EXCERPT:ButterflyCL]
+ _Components List_ 以下の方法でバタフライを集めます (インデント付けは親の関係であることを意味します)。
+[REGION:raw]![](ButterflyComponentList.png)[/REGION]
+[REGION:note]
+	トレイルのコンポーネントはパーティクル システムですが、ボディと羽のコンポーネントはスタティック メッシュです。
+[/REGION]
+
+
+[/EXCERPT:ButterflyCL]
+
+[EXCERPT:ButterflyCS]
+コンストラクション スクリプトは以下のタスクを実行します。
+* Attractor オブジェクトの最初の位置を割り当てます。
+* 羽のスタティック メッシュに対し [Material Instance Dynamic (MID)](Engine/Rendering/Materials/MaterialInstances) を作成し割り当てます。
+* エクスポーズされた Details panel プロパティからマテリアルの設定データを集め、それらをマテリアルに適用します。
+[/EXCERPT:ButterflyCS]
+
+
+[EXCERPT:ButterflyEG]
+イベント グラフは以下のタスクを実行します。
+ゲームプレイの開始時
+* 羽のマテリアルのアニメーションの設定と開始
+* バタフライの前方への移動
+* バタフライの回転をターゲットに向けてゆっくり回転するように更新
+* コリジョンと着陸シーケンス開始の照合
+* 羽とボディのアニメート
+* 着陸後、しばらく休憩
+* 休憩後、着陸シーケンスの前の最後の位置へ飛んで戻る
+* 新しいターゲットを選び、再び開始
+[/EXCERPT:ButterflyEG]
+
+
+
+-----------/EXCERPTS------------->

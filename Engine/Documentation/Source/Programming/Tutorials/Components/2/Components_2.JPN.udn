@@ -1,0 +1,186 @@
+﻿INTSourceChangelist:2727334
+Availability:Public
+Title:2.入力設定と Pawn Movement コンポーネントの作成
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/Components
+Description:ポーンの移動方法を定義する入力設定とカスタムの Pawn Movement コンポーネントの構築
+version:4.9
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[前のステップ](Programming\Tutorials\Components\1 "%Programming\Tutorials\Components\1:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[](Programming\Tutorials\Components\)
+	[/PARAM]
+	[PARAM:next]
+		[次のステップ](Programming\Tutorials\Components\3 "%Programming\Tutorials\Components\3:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+1. **アンリアルエディタ** へ戻って、プロジェクトの入力設定を行います。設定値は **Edit (編集)** ドロップダウン メニューの **Project Settings (プロジェクト設定)** にあります。
+
+	![](EditProjectSettings.png)
+
+	設定メニューに移動したら、左パネルの **エンジン** セクションから **Input (入力)** を選択します。パーティクル システムの切り替えを設定する **Action Mapping (アクションマッピング)** 、**ポーン** を動かす 2 つの **Axis Mappings** 、そして **ポーン** を回転するためにもう一つの **Axis Mapping** を設定しなくてはいけません。
+
+	| ----- | ----- | ----- |
+	| Action Mapping (アクション マッピング) | | |
+	| ParticleToggle (パーティクルの切替) | スペース バー | |
+
+	| ----- | ----- | ----- |
+	| Axis Mapping (軸マッピング) | | |
+	| MoveForward (前方向へ移動) | W | 1.0 |
+	|  | S | -1.0 |
+	| MoveRight (右へ移動) | A | -1.0 |
+	|  | D | 1.0 |
+	| Turn (ターン) | Mouse X | 1.0 |
+
+	![](InputSettings.png)
+
+1. Pawn クラスですべての動きを直接処理する代わりに、動きを管理する **Movement コンポーネント** を作成します。このチュートリアルでは、 **Pawn Movement コンポーネント** クラスを拡張します。最初に **ファイル** のドロップダウンメニューから **Add Code to Project (コードをプロジェクトに追加)** コマンドを選択します。
+
+	![](AddCPPCode.png)
+
+	Pawn クラスとは異なり、 Pawn Movement コンポーネントはデフォルトで表示されません。このコマンドを探すには、 **Show All Classes (すべてのクラスを表示)** オプションにチェックをいれなくてはいけません。
+
+	![](ShowAllClasses.png)
+
+	検索バーに「movement」と入力するとリストの検索範囲を絞り込めます。
+
+	![](ChooseParentClass.png)
+
+	[REGION:tip]Pawn Movement コンポーネントにはパワフルな内蔵機能がいくつかあり一般的な物理機能に役立ちます。また、多数ある Pawn タイプの間で移動コードを共有する最適な方法です。プロジェクトが大きくなるにつれて乱雑な状態になったり、ポーンがより複雑になることを防ぐために、機能の分割にコンポーネントを使用することはグッドプラクティスです。[/REGION]
+
+	Pawn クラスを "CollidingPawn" と呼ぶため、このクラスを "CollidingPawnMovement コンポーネント" と呼びましょう。
+
+	![](NameComponent.png)
+
+----
+
+これで入力設定を定義して、カスタムの Pawn Movement コンポーネントを作成しました。**Visual Studio** に戻って、Pawn Movement Component を使用時の ポーンの移動方法を定義するためにコードを記述しましょう。
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    code
+    [/PARAMLITERAL]
+    [PARAM:heading]
+	    作業中のコード
+    [/PARAM]
+    [PARAM:content]
+		**CollidingPawn.h**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "GameFramework/Pawn.h"
+			#include "CollidingPawn.generated.h"
+
+			UCLASS()
+			class HOWTO_COMPONENTS_API ACollidingPawn : public APawn
+			{
+				GENERATED_BODY()
+
+			public:
+				// Sets default values for this pawn's properties (このポーンのプロパティのデフォルト値を設定)
+				ACollidingPawn();
+
+				// ゲーム開始時またはスポーン時に呼ばれます。
+				virtual void BeginPlay() override;
+	// フレームごとに呼ばれます。
+
+				virtual void Tick( float DeltaSeconds ) override;
+
+				// 機能と入力をバインドするために呼ばれます。
+				virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override;
+
+				UParticleSystemComponent* OurParticleSystem;
+			};
+
+		**CollidingPawn.cpp**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_Components.h"
+			#include "CollidingPawn.h"
+
+			// デフォルト値を設定
+			ACollidingPawn::ACollidingPawn()
+			{
+ 				// Set this pawn to call Tick() every frame. (フレーム毎に Tick() を呼び出すには、このポーンを設定します)必要がなければパフォーマンスを向上させるためにオフにすることができます。
+				PrimaryActorTick.bCanEverTick = true;
+
+				// Our root component will be a sphere that reacts to physics (ルート コンポーネントは物理に反応するスフィア (球体) になります)
+				USphereComponent* SphereComponent = CreateDefaultSubobject<USphereComponent>(TEXT("RootComponent"));
+				RootComponent = SphereComponent;
+				SphereComponent->InitSphereRadius(40.0f);
+				SphereComponent->SetCollisionProfileName(TEXT("Pawn"));
+
+				// Create and position a mesh component so we can see where our sphere is (スフィアの位置が分かるようにメッシュ コンポーネントを作成して配置します)
+				UStaticMeshComponent* SphereVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualRepresentation"));
+				SphereVisual->AttachTo(RootComponent);
+				static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereVisualAsset(TEXT("/Game/StarterContent/Shapes/Shape_Sphere.Shape_Sphere"));
+				if (SphereVisualAsset.Succeeded())
+				{
+					SphereVisual->SetStaticMesh(SphereVisualAsset.Object);
+					SphereVisual->SetRelativeLocation(FVector(0.0f, 0.0f, -40.0f));
+					SphereVisual->SetWorldScale3D(FVector(0.8f));
+				}
+
+				// Create a particle system that we can activate or deactivate (アクティブまたは非アクティブに出来るパーティクルシステムを作成)
+				OurParticleSystem = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("MovementParticles"));
+				OurParticleSystem->AttachTo(SphereVisual);
+				OurParticleSystem->bAutoActivate = false;
+				OurParticleSystem->SetRelativeLocation(FVector(-20.0f, 0.0f, 20.0f));
+				static ConstructorHelpers::FObjectFinder<UParticleSystem> ParticleAsset(TEXT("/Game/StarterContent/Particles/P_Fire.P_Fire"));
+				if (ParticleAsset.Succeeded())
+				{
+					OurParticleSystem->SetTemplate(ParticleAsset.Object);
+				}
+
+				// Use a spring arm to give the camera smooth, natural-feeling motion (カメラにスムーズで自然な動きを与えるためにスプリング アームを使用) 
+				USpringArmComponent* SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraAttachmentArm"));
+				SpringArm->AttachTo(RootComponent);
+				SpringArm->RelativeRotation = FRotator(-45.f, 0.f, 0.f);
+				SpringArm->TargetArmLength = 400.0f;
+				SpringArm->bEnableCameraLag = true;
+				SpringArm->CameraLagSpeed = 3.0f;
+
+				// Create a camera and attach to our spring arm (カメラを作成してスプリングアームに親子付け)
+				UCameraComponent* Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("ActualCamera"));
+				Camera->AttachTo(SpringArm, USpringArmComponent::SocketName);
+
+				// Take control of the default player (デフォルト プレイヤーをコントロール)
+				AutoPossessPlayer = EAutoReceiveInput::Player0;
+			}
+
+			// ゲーム開始時またはスポーン時に呼ばれます。
+			void ACollidingPawn::BeginPlay()
+			{
+				Super::BeginPlay();
+	}
+
+
+			// フレームごとに呼ばれます。
+			void ACollidingPawn::Tick( float DeltaTime )
+			{
+				Super::Tick( DeltaTime );
+
+			}
+
+			// 機能と入力をバインドするために呼ばれます。
+			void ACollidingPawn::SetupPlayerInputComponent(class UInputComponent* InputComponent)
+			{
+				Super::SetupPlayerInputComponent(InputComponent);
+
+			}
+
+
+    [/PARAM]
+[/OBJECT]
+
+%Steps%

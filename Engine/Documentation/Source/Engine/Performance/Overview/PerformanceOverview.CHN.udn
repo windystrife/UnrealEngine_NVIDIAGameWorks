@@ -1,0 +1,244 @@
+﻿INTSourceChangelist:2956400
+Availability:Public
+Title:性能与概要分析概述
+Crumbs:%ROOT%, Engine
+Description:如何识别性能问题并加以解决。
+Navigation:topic
+version:4.9
+parent:Engine/Performance
+order:1
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Performance/Overview:title%](performance_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/start_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Performance/Overview:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Performance/Overview:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Performance/Overview]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Performance/Overview:title%](performance_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/start_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Performance/Overview:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Performance/Overview:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Performance/Overview]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+
+[TOC (start:2 end:3)]
+
+本指南主要阐述渲染主题，因为这是对性能要求最高的区域。添加更多对象、提高分辨率、添加照明以及改进材质都会
+对性能产生实质影响。幸运的是，在渲染中，通常很容易恢复一定的性能。许多渲染功能可通过控制台变量进行调整。 
+
+您可使用编辑器输出日志或游戏控制台来完成下列操作：
+* 设置控制台变量 (**cvarname value**) 
+* 获取当前状态 (**cvarname**) 
+* 获取变量的帮助 (**cvarname ?**)。 
+
+有需要时，您可将设置放入 ConsoleVariables.ini，其语法如下：**cvarname=value**。要查找适当的控制台变量，您可使用 **DumpConsoleVars** 或自动补全系统。 
+大部分渲染变量以 **r.** 开头。
+
+* 有关控制台变量以及切换其他引擎选项以提高性能的更多信息，请参阅 [](Engine/Performance\Options) 参考页面。
+
+## 一般提示
+
+在理想情况下，您应在尽可能接近所关注目标的位置进行概要分析。例如，良好的概要分析情况是在带有已构建光照贴图的目标硬件上 
+独立地测试游戏。 
+
+为了进行良好的概要分析，最好建立与那些有可能在结果中添加噪声的事项相隔离的可再现情况。即使是编辑器也会添加一些噪声（例如，打开的 **内容浏览器** 会增加渲染成本）， 
+因此，最好直接在游戏中进行概要分析。在某些情况下，甚至最好更改代码（例如，禁用随机数生成器）。**Pause** 命令或 **Slomo 0.001** 对于使情况更加稳定 
+可能非常有帮助。
+
+请测量几次，以确定您的概要分析的准确程度。Stat 命令（例如 **stat unit** 和 **stat fps**）可以为您提供一些起步数值。准确的概要分析应该以毫秒 (ms) 而非 
+每秒帧数 (fps) 为单位来执行。您可在数值之间轻松完成转换，但以 fps 为单位进行测量时，相对的改善没有多大意义。在讨论个别的功能时，我们的讨论 
+是以毫秒为单位，因为它不会测量帧。
+
+如果您看到 30 fps (~33.3ms) 或 60 fps (~16.6ms) 的限制，那么可能已启用 VSync。为了更准确地进行计时，最好在不使用该功能的情况下进行概要分析。
+
+您不应期望在非常简单的场景下可获得极高的帧速率。许多设计选项支持复杂场景（例如，延迟渲染），但以基本成本较高为代价。您还可能会遇到 
+限制帧速率的对象。有需要时，应该对此类选项（例如，**t.MaxFPS** 和 **r.VSync**）加以调整。
+
+* 要了解有关设置内容和关卡以提高性能的提示与准则，请参阅 [](Engine/Performance\Guidelines) 页面。
+* 有关 stat 命令的信息，请参阅 [](Engine/Performance\StatCommands) 页面。
+
+## 确定限制因素
+
+现代的硬件有许多并行运行的单元（例如，GPU：内存、三角形/顶点/像素处理等等，以及 CPU：多个 CPU、内存等等）。通常，这些单元需要彼此等待。
+首先，您需要确定限制因素。优化该因素有可能提高性能。优化错误的因素纯属浪费时间，并可能会引入新的错误，甚至 
+会导致其他情况下的性能下降。在改进该区域之后，通常最好再次进行概要分析，因为这可能会揭示以前未显现的新性能瓶颈。
+
+首先，您应检查帧速率是否受 CPU 或 GPU 成本限制。一如既往，您可调整工作负载（例如，更改分辨率）并查看效果。从下图中，您可轻松了解
+引擎的内置功能 **stat unit**。
+
+[REGION:imagetable]
+| ![](stat_unit.png)(w:160) |
+| :----:| 
+| CONSOLE: stat unit |
+[/REGION]
+
+实际帧时间受下列三项因素中的某一项限制：**游戏**（CPU 游戏线程）、**绘制**（CPU 渲染线程）或 **GPU** (GPU)。 
+在这里，我们可以看到 **GPU** 是限制因素（三者中的最大者）。为了获得较小的 **帧** 时间，我们必须优化 GPU 工作负载。
+
+* [](Engine/Performance\CPU)
+* [](Engine/Performance\GPU)
+
+## 显示标志
+
+引擎显示标志可用来切换许多渲染功能。编辑器将在一个方便使用的二维 UI 中列出所有显示标志。您可单击复选框以切换多个复选框，而无需关闭菜单。
+
+在游戏中，您可使用 show 命令。使用 show 可获取所有显示标志及其状态的列表。使用 **_show showflagname_** 可切换功能。请注意，此命令仅在游戏视口中有效，因此在编辑器
+视口中，需要使用编辑器 UI。您可在游戏中或在编辑器中使用控制台变量（例如 **_showflag.Bloom_**）来覆盖显示标志值，但这样做还会禁用 UI。
+
+[REGION:note]
+某些功能仍会消耗性能，即使不再渲染也是如此，例如，show particles 会隐藏粒子，但仍需要模拟时间
+以便支持稍后重新启用这些功能。控制台变量 **_fx.freezeparticlesimulation_** 允许您同时禁用更新部分（也有编辑器 UI）。
+另一个命令，show tessellation，可禁用三角形放大，但仍使用铺嵌着色器。
+[/REGION:note]
+
+良好的概要分析起点是对高级别功能进行概要分析，例如 show StaticMeshes 或 show tessellation。
+
+所有显示标志也作为控制台变量公开，例如 console show Bloom 为 **_showflag.Bloom 0_**，或在配置文件中公开：showflag.Bloom = 0
+控制台变量需要较多的键盘输入，但它们还会覆盖编辑器 UI 显示标志，并可像其他控制台变量一样放入配置文件。
+
+对概要分析最有用的标志如下所示：
+
+| 显示标志 | 说明 |
+| -------- | ----------- |
+| **ScreenSpaceReflections** | 切换屏幕空间反射，可能会产生大量性能成本，仅影响像素直至特定粗糙度（通过 r.SSR.MaxRoughness 进行调整，或在后处理设置中进行调整）。
+| **AmbientOcclusion** | 屏幕空间环境光遮蔽（对某些场景的益处非常有限，对于静态对象，您在光照系统中烘培 AO）。
+| **AntiAliasing** | 切换任何抗锯齿效果（TemporalAA 和 FXAA），使用 TemporalAA 可切换到 FXAA（速度更快，质量更低）。
+| **Bloom** | 根据镜头光斑和高光功能来影响图像。
+| **DeferredLighting** | 切换所有延迟照明处理过程。
+| **DirectionalLights** **PointLights** **SpotLights** | 切换不同的光源类型（对于了解各类光源的效果及性能影响非常有用）。
+| **DynamicShadows** | 切换所有动态阴影（阴影贴图渲染和阴影过滤/投射）。
+| **GlobalIllumination** | 切换烘培式照明与动态间接照明 (LPV)。
+| **LightFunctions** | 切换光函数渲染。
+| **PostProcessing** | 切换所有后处理过程。
+| **ReflectionEnvironment** | 切换反射环境处理过程。
+| **Refraction** | 切换折射处理过程。
+| **Rendering** | 整体切换渲染。
+| **Decals** | 切换贴花渲染。
+| **Landscape** **Brushes** **StaticMeshes** **SkeletalMeshes** **Landscape** | 切换所渲染的几何体。
+| **Translucency** | 切换半透明渲染。
+| **Tessellation** | 切换铺嵌（仍运行铺嵌着色器，但产生更多三角形）。
+| **IndirectLightingCache** | 切换具有已失效的光照贴图的动态对象或静态对象是否使用间接照明缓存。
+| **Bounds** | 显示编辑器中选择的对象的界限量。
+| **Visualize SSR** | 将所有受屏幕空间反射影响的像素渲染为亮橙色（速度较慢），如下所示。
+
+[REGION:imagetable]
+| ![](SSR.png)(w:794) |
+| :----:| 
+| CONSOLE: r.SSR.MaxRoughness 0.9 = 最佳质量（左），r.SSR.MaxRoughness 0.1 = 速度较快（右）|
+| 不照亮（上），show VisualizeSSR（下）|
+[/REGION]
+
+
+### 视图模式
+
+视图模式无非是显示标志的组合。编辑器 UI 与显示标志无关，您可使用 ViewMode 控制台命令在它们之间进行切换。
+对性能最有用的模式如下所示：**线框**、**光线复杂性**、**着色器复杂性** 和 **照亮**。
+
+
+![](ViewModes.png)(w:794)
+
+_各种视图模式（按阅读顺序排列）：照亮、光线复杂性（越暗越好）、线框、着色器复杂性（绿色较好）_
+
+
+## 如何处理各种硬件
+
+虚幻引擎在许多图形功能中内置了 [可伸缩性](Engine/Performance/Scalability)。不同应用程序有不同的需求，因此建议您定制系统。
+
+[REGION:note]
+集成式图形芯片的内存子系统通常速度较慢，但它们的 ALU 和纹理单元也较少。对各种硬件进行测试或确定实际性能特征至关重要。
+SynthBenchmark 工具可帮助您确定值得测试的硬件组。对于现代 GPU，100 附近的值较为正常，但如果您在某些区域看到不相称的变化，您可确定此 GPU 具有特殊的
+特征，可能需要特别加以注意。
+[/REGION]
+
+您可通过在控制台中输入 SynthBenchmark 来使用此工具。
+
+
+    FSynthBenchmark (V0.92)：
+    ===============
+    Main Processor:
+            ...0.025383 s/Run 'RayIntersect'
+            ...0.027685 s/Run 'Fractal'
+ 
+    CompiledTarget_x_Bits:64
+    UE_BUILD_SHIPPING:0
+    UE_BUILD_TEST:0
+    UE_BUILD_DEBUG:0
+    TotalPhysicalGBRam:32
+    NumberOfCores (physical):16
+    NumberOfCores (logical):32
+    CPU Perf Index 0:100.9
+    CPU Perf Index 1:103.3
+  
+    Graphics:
+    Adapter Name:'NVIDIA GeForce GTX 670'
+    （在 Optimus 上，名称可能错误，但内存量应该是正确的）
+    Vendor Id:0x10de
+    GPU Memory:1991/0/2049 MB
+          ...4.450 GigaPix/s, Confidence=100% 'ALUHeavyNoise'
+          ...7.549 GigaPix/s, Confidence=100% 'TexHeavy'
+          ...3.702 GigaPix/s, Confidence=100% 'DepTexHeavy'
+          ...23.595 GigaPix/s, Confidence=89% 'FillOnly'
+          ...1.070 GigaPix/s, Confidence=100% 'Bandwidth'
+ 
+    GPU Perf Index 0:96.7
+    GPU Perf Index 1:101.4
+    GPU Perf Index 2:96.2
+    GPU Perf Index 3:92.7
+    GPU Perf Index 4:99.8
+    CPUIndex:100.9
+    GPUIndex:96.7
+
+
+## 针对一段时间生成图表
+
+获得较长时间段（例如，游戏中的剧情画面或为了测试许多情况而设置的摄像机路径）的统计单元时间可能非常有用。
+
+以下图表是在 Android 设备（流式）上根据剧情画面而生成的。在此剧情画面之前及之后，已输入控制台命令 StartFPSChart 和 StopFPSChart。
+产生的 .csv 文件（位于 [ProjectFolder]\Saved\Cooked\Android_ES31\SubwayPatrol\Saved\Profiling\FPSChartStats）已在 Microsoft Excel 中打开。
+在本示例中，我们已移除前 4 个标题行，进行全选，并已插入“随直线散布”点。
+
+[REGION:imagetable]
+| ![](fpschart.png)(w:837) |
+| :----:| 
+| 控制台：StartFPSChart 和 StopFPSChart |
+[/REGION]
+
+
+## 有关性能及概要分析的更多信息
+* [](Engine/Performance/SystemSettings)
+* [](Engine/Performance/Profiler)
+* [](Engine/Performance/Scalability)
+* [VFX 优化：核心优化概念](Engine/Rendering/ParticleSystems/Optimization/Concepts)
+
+
+
+
+

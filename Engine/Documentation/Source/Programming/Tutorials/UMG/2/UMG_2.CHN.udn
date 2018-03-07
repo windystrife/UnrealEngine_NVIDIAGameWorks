@@ -1,0 +1,186 @@
+﻿Availability: Public
+Title:2. 扩展游戏模式
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/UMG
+Description:扩展项目的游戏模式以从屏幕中添加和移除菜单。
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[上一步](Programming\Tutorials\UMG\1 "%Programming\Tutorials\UMG\1:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[编程指南主页](Programming\Tutorials\)
+	[/PARAM]
+	[PARAM:next]
+		[下一步](Programming\Tutorials\UMG\3 "%Programming\Tutorials\UMG\3:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+
+1. 我们创建的菜单来自于 **User Widgets（用户控件）** 。 我们需要写一个创建和展示新 **User Widgets（用户控件）** 的函数，然后在游戏启动时调用该函数。 我们还需要追溯已经创建的内容，这样我们可以在稍后移除它。 由于每个项目已经有了自定义的 **Game Mode（游戏模式）** 类，我们可以打开自己的类，它在`HowTo_UMGGameMode.h`中进行定义。 我们需要添加以下函数和属性到类的底部位置：
+
+		public:
+			/** 在游戏开始时调用。 */
+			virtual void BeginPlay() override;
+
+			/** 移除当前菜单控件并且如果可能，从指定类中创建新控件。 */
+			UFUNCTION(BlueprintCallable, Category = "UMG Game")
+			void ChangeMenuWidget(TSubclassOf<UUserWidget> NewWidgetClass);
+
+		protected:
+			/** 在游戏开始时我们将作为菜单使用的控件类。 */
+			UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "UMG Game")
+			TSubclassOf<UUserWidget> StartingWidgetClass;
+
+			/** 用作为菜单的控件实例。 */
+			UPROPERTY()
+			UUserWidget* CurrentWidget;
+
+1. 为了在代码中使用 **User Widgets（用户控件）** ，我们添加以下行到"#include"部分的顶部位置：
+
+		#include "Blueprint/UserWidget.h"
+
+1. 现在在`HowTo_UMGGameMode.cpp`中，我们需要填充两个声明的函数主体。 我们首先从BeginPlay()开始：
+
+		void AHowTo_UMGGameMode::BeginPlay()
+		{
+			Super::BeginPlay();
+			ChangeMenuWidget(StartingWidgetClass);
+		}
+
+	[REGION:note]当我们从父类中覆盖函数时（由Super字符所引用），正如我们在此处使用 _BeginPlay_ 所做的，调用该函数的父类版本一般都很重要。 由于我们的函数版本仅用于对已存步骤的结束处添加一个步骤，我们在函数的第一行中调用 _Super::BeginPlay_ 。[/REGION]
+
+1. 接下来，在`HowTo_UMGGameMode.cpp`中，我们需要定义如何在菜单间进行变更。 我们需要从视口中移除任意激活的 **User Widget（用户控件）** （如存在的话）。 然后我们可以创建新的 **User Widget（用户控件）** 并将其添加到视口中。
+
+		void AHowTo_UMGGameMode::ChangeMenuWidget(TSubclassOf<UUserWidget> NewWidgetClass)
+		{
+			if (CurrentWidget != nullptr)
+			{
+				CurrentWidget->RemoveFromViewport();
+				CurrentWidget = nullptr;
+			}
+			if (NewWidgetClass != nullptr)
+			{
+				CurrentWidget = CreateWidget<UUserWidget>(GetWorld(), NewWidgetClass);
+				if (CurrentWidget != nullptr)
+				{
+					CurrentWidget->AddToViewport();
+				}
+			}
+		}
+
+	[REGION:note]这个代码将会创建我们提供的任意 **Widgets（控件）** 的实例，并将其放置于屏幕上。 它也可以用来移除实例，所以即使 **Unreal Engine（虚幻引擎）** 可以同时处理许多 **Widgets（控件）** 的显示和互动，一次也只能激活一个实例。 我们不需要直接销毁 **Widgets（控件）** ，因为将其从视口中移除并清除（或者变更）引用它的所有变量将会导致其被 **Unreal Engine's（虚幻引擎的）** 垃圾收集系统清除。[/REGION]
+
+
+----
+
+我们已经构建了代码的框架以创建和显示菜单，并在不需要它们时移除它们。 我们可以返回 **Unreal Editor（虚幻编辑器）** 并设计菜单资源了！
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    代码
+    [/PARAMLITERAL]
+    [PARAM:heading]
+    完成的代码
+    [/PARAM]
+    [PARAM:content]
+		**HowTo_UMG.Build.cs**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			using UnrealBuildTool;
+
+			public class HowTo_UMG : ModuleRules
+			{
+				public HowTo_UMG(TargetInfo Target)
+				{
+					PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "UMG" });
+
+					//PrivateDependencyModuleNames.AddRange(new string[] {  });
+
+					// 如果您正在使用Slate UI则取消注释
+					PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });
+		
+					// 如果您正在使用在线功能则取消注释
+					// PrivateDependencyModuleNames.Add("OnlineSubsystem");
+					// if ((Target.Platform == UnrealTargetPlatform.Win32) || (Target.Platform == UnrealTargetPlatform.Win64))
+					// {
+					//		if (UEBuildConfiguration.bCompileSteamOSS == true)
+					//		{
+					//			DynamicallyLoadedModuleNames.Add("OnlineSubsystemSteam");
+					//		}
+					// }
+				}
+			}
+
+		**HowTo_UMGGameMode.h**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "Blueprint/UserWidget.h"
+			#include "GameFramework/GameMode.h"
+			#include "HowTo_UMGGameMode.generated.h"
+
+			/**
+			 * 
+			 */
+			UCLASS()
+			class HOWTO_UMG_API AHowTo_UMGGameMode : public AGameMode
+			{
+				GENERATED_BODY()
+
+			public:
+				/** 在游戏开始时调用。 */
+				virtual void BeginPlay() override;
+
+				/** 移除当前菜单控件并且如果可能，从指定类中创建新控件。 */
+				UFUNCTION(BlueprintCallable, Category = "UMG Game")
+				void ChangeMenuWidget(TSubclassOf<UUserWidget> NewWidgetClass);
+
+			protected:
+				/** 在游戏开始时我们将作为菜单使用的控件类。 */
+				UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "UMG Game")
+				TSubclassOf<UUserWidget> StartingWidgetClass;
+
+				/** 用作为菜单的控件实例。 */
+				UPROPERTY()
+				UUserWidget* CurrentWidget;
+			};
+
+		**HowTo_UMGGameMode.cpp**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_UMG.h"
+			#include "HowTo_UMGGameMode.h"
+
+			void AHowTo_UMGGameMode::BeginPlay()
+			{
+				Super::BeginPlay();
+				ChangeMenuWidget(StartingWidgetClass);
+			}
+
+			void AHowTo_UMGGameMode::ChangeMenuWidget(TSubclassOf<UUserWidget> NewWidgetClass)
+			{
+				if (CurrentWidget != nullptr)
+				{
+					CurrentWidget->RemoveFromViewport();
+					CurrentWidget = nullptr;
+				}
+				if (NewWidgetClass != nullptr)
+				{
+					CurrentWidget = CreateWidget<UUserWidget>(GetWorld(), NewWidgetClass);
+					if (CurrentWidget != nullptr)
+					{
+						CurrentWidget->AddToViewport();
+					}
+				}
+			}
+    [/PARAM]
+[/OBJECT]
+
+%Steps%

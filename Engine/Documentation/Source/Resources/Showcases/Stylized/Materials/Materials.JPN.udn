@@ -1,0 +1,85 @@
+﻿INTSourceChangelist:2726448
+Availability:Public
+Title:スタイライズド レンダリング マテリアル
+Crumbs:%ROOT%, Resources, Resources/Showcases/Stylized
+Description:UE4 に同梱のスタイライズド レンダリング ショーケースに使用されている特別なマテリアルの概要
+Related:Engine/Rendering/Materials
+Related:Engine/Rendering/Materials/MaterialInstances
+Related:Engine/Rendering/PostProcessEffects
+Version:4.9
+
+彩色された芸術作品の実現を印象付けるために、シーンのマテリアルにはある特別な技術を適用しています。重要な 2 つの例は、こずえ付近に表示されている「流動的なブラシ ストローク」の効果と、常にプレイヤーの方向を向いている 2D スタイルのフォリッジです。
+
+[INCLUDE:Resources/Showcases/Stylized#InstanceNote]
+
+### 流動的なブラシ ストローク効果を与えた木の葉
+
+[REGION:fullwidth]
+![](TreeTopMaterial.png)
+[/REGION]
+
+[REGION:note]
+このマテリアルのネットワークを理解するには、コンテンツブラウザで **M_Tree_Leaf_Base_Solid** マテリアルを検索して開きます (**ダブルクリック**)。
+[/REGION]
+
+シーンに表示される木の上部付近に、葉のような印象を与える流動的なブラシ ストローク効果が表示されています。マスクされたマテリアルと、一時的なアンチエイリアス処理を組み合わせて実現しています。
+
+
+
+[REGION:lightbox]
+[![](FloatingBrushStrokesNetwork.png)(w:900)](FloatingBrushStrokesNetwork.png)
+[/REGION]
+
+
+ネットワークの最も重要な箇所は、 DitherTemporalAA Material 関数です。この関数は時間経過とともに移動する点 (点刻法) のパターンを作成します。マスクされたマテリアル上でオパシティマスクの一部として使用すると、彩度を抑えたままのマスクに維持して、柔らかい印象のマスクとなります。 
+
+これは DitherTemporalAA ノードを使用または未使用のツリーです。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![With DitherTemporalAA](DitheredStrokes.png)(%Dither%)
+	[/PARAM]
+	[PARAM:after]
+	![Without DitherTemporalAA](NonDitheredStrokes.png)(%Dither%)
+	[/PARAM]
+[/OBJECT]
+
+
+[VAR:Dither]
+w:600
+[/VAR]
+
+ただし、エンジン機能である **TemporalAA** の使用に必要な技術に留意してください。この機能は _初期設定でアクティブ_ になっています。**AA Method** プロパティ経由でポストプロセスのボリューム内にオーバーライドすることができます。これは _Misc_ カテゴリ配下にあります。
+
+![](AAOverride.png)
+
+###フォリッジのマテリアル
+
+![](FoliageExample.png)
+
+[REGION:note]
+このマテリアルのネットワークを理解するには、コンテンツブラウザで **M_Grass_Masked Material** マテリアルを検索して開きます (**ダブルクリック**)。
+[/REGION]
+
+
+地形全体に散乱している一連のフォーリッジは、平面ではあるけれども常にプレイヤーに対面しています。動作は、 World Position Offset Material 入力を経由してマテリアルで定義されます。この入力は、マテリアル内のベクター演算を通じてメッシュの頂点の編集を可能にします。オブジェクトを再形成、サイズ変更、もしくはこの場合、オブジェクトのジオメトリをカメラに向けて回転することができます。
+
+この動作を処理する式は、 **Face camera on 1 axis comment block** 内にあります。
+
+
+**クリックして画像をフルサイズで表示**
+[REGION:lightbox]
+[![](FaceCameraNetwork.png)(w:800)](FaceCameraNetwork.png)
+[/REGION]
+
+
+このネットワークで特に重要なのが Custom 式ノードです。このノードは入力を HLSL コードで書くことを可能にします。現在は以下の数学式を使用して実行しています。
+
+	float2 output; 
+	float2 Input1; 
+	output = atan2 (In.y,In.x); 
+	return (output);
+
+実用的な式ですが注意して使用してください。Custom ノードは、内部最適化プロセスである Material ノードの折りたたみを防ぎます。実際には Material ネットワークの効率性が若干悪くなります。 
+
+

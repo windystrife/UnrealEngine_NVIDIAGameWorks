@@ -1,0 +1,605 @@
+﻿INTSourceChangelist:2754055
+Title:TArray:虚幻引擎中的数组
+Crumbs:
+Description:
+Availability:Public
+Version:4.9
+
+主要使用的容器类为 **TArray**。TArray 类负责同类其他对象（称为元素）序列的所有权和组织。TArray 是序列，其元素拥有定义完善的排序，其函数用于确定性地操作对象及其排序。
+
+## TArray
+
+TArray 是虚幻引擎中最常用的容器类。其设计决定了它速度较快、内存消耗较小、安全性高。TArray 类型由两大属性定义：主要为其元素类型和一个任选的分配器。
+
+元素类型是将被存储在数组中的对象类型。TArray 被称为同质容器：其所有元素均完全为相同类型。不能进行不同元素类型的混合。
+
+分配器经常会被省略，适合最常使用的分配器即为默认设置。它定义对象在内存中的排列方式；以及数组如何进行扩张，以便容纳更多的元素。如默认行为不符合您的要求，可选取多种不同的分配器，或自行进行编写。稍后进行详细讨论。
+
+TArray 是一个数值类型，意味着应该以其他内置类型（如 int32 或浮点）的方式对其进行处理。它被设计为不可被继承，通过 new/delete 在堆上创建/销毁 TArray 均非常规操作。元素也是数值类型，为容器所拥有。数组被销毁时元素也将被销毁。如从另一个 TArray 创建 TArray 变量，将把其元素复制到新变量中；不存在共享状态。
+
+## 创建并填充数组
+
+如要创建数组，将其以此定义：
+
+	TArray<int32> IntArray;
+
+这会创建一个空数组，用以保存一个整数序列。元素类型可以是根据普通 C++ 数值规则进行复制和销毁的数据类型，如 int32、FString、TSharedPtr 等。TArray 未指定分配器，因此它采用基于堆的常规分配。此时尚未进行内存分配。
+
+TArray 可以多种方式进行填入。一种方式是使用 **Init** 函数，用大量元素副本填入数组。
+
+	IntArray.Init(10, 5);
+	// IntArray == [10,10,10,10,10]
+
+**Add** 和 **Emplace** 函数可用于在数组末端创建新对象：
+
+	TArray<FString> StrArr;
+	StrArr.Add    (TEXT("Hello"));
+	StrArr.Emplace(TEXT("World"));
+	// StrArr == ["Hello","World"]
+
+元素被添加时，内存从分配器中被分配。Add 和 Emplace 函数可达到同样效果，但存在细微不同：
+
+* Add 函数将把一个元素类型实例复制（或移动）到数组中。
+* Emplace 函数将使用您赋予的参数构建一个元素类型的新实例。
+
+因此在 TArray<FString> 中，Add 函数将从字符串文字创建一个临时 FString，然后将临时内容移至容器内的新 FString 中；而 Emplace 函数将使用字符串文字直接创建其 FString。最终结果相同，但 Emplace 可避免创建临时文件。对 FString 之类的非浅显值类型而言，临时文件通常有害无益。Push 也可用作 Add 的同义词。
+
+总体而言，Emplace 优于 Add。Emplace 可避免在调用点创建不必要的临时文件并将它们复制或传入容器。经验法则：在浅显类型上使用 Add，在其他类型上使用 Emplace。Emplace 的效率不会比 Add 低，但有时 Add 读取更佳。
+
+利用 **Append** 可将多个元素一次性从另一个 TArray（或指针+大小）添加到一个常规 C 数组：
+
+	FString Arr[] = { TEXT("of"), TEXT("Tomorrow") };
+	StrArr.Append(Arr, ARRAY_COUNT(Arr));
+	// StrArr == ["Hello","World","of","Tomorrow"]
+
+如尚不存在等值元素，**AddUnique** 只添加一个新元素到容器。使用元素类型的运算符 == 检查等值性：
+
+	StrArr.AddUnique(TEXT("!"));
+	// StrArr == ["Hello","World","of","Tomorrow","!"]
+	
+	StrArr.AddUnique(TEXT("!"));
+	// StrArr is unchanged as "!" is already an element
+
+和 Add、Emplace 和 Append 一样，**Insert** 允许在给定索引添加一个单一元素或元素数组的一个副本。
+
+	StrArr.Insert(TEXT("Brave"), 1);
+	// StrArr == ["Hello","Brave","World","of","Tomorrow","!"]
+
+**SetNum** 函数可直接设置数组元素的数量。如新数量大于当前数量，则使用元素类型的默认构建函数创建新元素：
+
+	StrArr.SetNum(8);
+	// StrArr == ["Hello","Brave","World","of","Tomorrow","!","",""]
+
+如新数量小于当前数量，SetNum 将移除元素。元素移除的详细信息之后奉上：
+
+	StrArr.SetNum(6);
+	// StrArr == ["Hello","Brave","World","of","Tomorrow","!"]
+
+## 迭代
+
+有多种方法可在数组元素上进行迭代，推荐方法为 C++ 的 ranged-for 功能：
+
+	FString JoinedStr;
+	for (auto& Str :StrArr)
+	{
+		JoinedStr += Str;
+		JoinedStr += TEXT(" ");
+	}
+	// JoinedStr == "Hello Brave World of Tomorrow ! "
+
+当然也可使用基于索引的常规迭代：
+
+	for (int32 Index = 0; Index != StrArr.Num(); ++Index)
+	{
+		JoinedStr += StrArr[Index];
+		JoinedStr += TEXT(" ");
+	}
+
+最后，还可通过数组自身迭代器类型对迭代进行控制。函数 **CreateIterator** 和 **CreateConstIterator** 可分别用于元素的读写和只读访问：
+
+	for (auto It = StrArr.CreateConstIterator(); It; ++It)
+	{
+		JoinedStr += *It;
+		JoinedStr += TEXT(" ");
+	}
+
+##排序
+
+调用 **Sort** 函数即可对数组进行排序：
+
+	StrArr.Sort();
+	// StrArr == ["!","Brave","Hello","of","Tomorrow","World"]
+
+在此，数值以元素类型运算符 < 的均值对数值进行排序。在 FString 中，这是一个不区分大小写的词典编纂对比。二进制谓词可提供不同的排序语意，如：
+
+	StrArr.Sort([](const FString& A, const FString& B) {
+		return A.Len() < B.Len();
+	});
+	// StrArr == ["!","of","Hello","Brave","World","Tomorrow"]
+
+现在按字符串长度进行排序。注意：三个长度相同的字符串 -“Hello”、“Brave”和“World” 已事先改变与其数组中位置相对的排序。这是因为 Sort 并不稳定，等值元素（因为长度相同，此处字符串为等值）的相对排序无法保证。Sort 作为 quicksort 实现。
+
+**HeapSort** 函数，无论带或不带二元谓词，均可用于执行堆排序。是否选择使用它则取决于特定数据和与 Sort 函数之间的排序效率对比。和 Sort 一样，HeapSort 并不稳定。如使用 HeapSort 代替 Sort，以下便是结果（此例中结果相同）：
+
+	StrArr.HeapSort([](const FString& A, const FString& B) {
+		return A.Len() < B.Len();
+	});
+	// StrArr == ["!","of","Hello","Brave","World","Tomorrow"]
+
+最后，**StableSort** 可在排序后保证等值元素的相对排序。如调用的是 StableSort 而非上述的 Sort 或 HeapSort，结果如下所示：
+
+	StrArr.StableSort([](const FString& A, const FString& B) {
+		return A.Len() < B.Len();
+	});
+	// StrArr == ["!","of","Brave","Hello","World","Tomorrow"]
+
+结果便是：在之前进行词典编纂排序后，“Hello”、“Brave”和“World” 将保留同样的相对排序。StableSort 作为归并排序实现。
+
+## 查询
+
+使用 **Num** 函数可询问数组保存的元素数量：
+
+	int32 Count = StrArr.Num();
+	// Count == 6
+
+如需直接访问数组内存（如为确定 C 类 API 的互操作性），可使用 **GetData()** 函数将指针返回到数组中的元素。只有数组存在且未被执行任何变异操作时，该指针方为有效。StrPtr 第一个 Num() 指数才可被解除引用：
+
+	FString* StrPtr = StrArr.GetData();
+	// StrPtr[0] == "!"
+	// StrPtr[1] == "of"
+	// ...
+	// StrPtr[5] == "Tomorrow"
+	// StrPtr[6] - undefined behavior
+
+如容器为常量，则返回的指针也为常量。
+
+也可就这些元素的大小对容器进行询问：
+
+	uint32 ElementSize = StrArr.GetTypeSize();
+	// ElementSize == sizeof(FString)
+
+可使用索引操作符 [] 获取元素，并将一个从零开始的索引传递到需要的元素中：
+
+	FString Elem1 = StrArr[1];
+	// Elem1 == "of"
+
+传递小于零或大于等于 Num() 的无效索引会引起运行时错误。可使用 **IsValidIndex** 函数询问容器，确定特定索引是否有效：
+
+	bool bValidM1 = StrArr.IsValidIndex(-1);
+	bool bValid0  = StrArr.IsValidIndex(0);
+	bool bValid5  = StrArr.IsValidIndex(5);
+	bool bValid6  = StrArr.IsValidIndex(6);
+	// bValidM1 == false
+	// bValid0  == true
+	// bValid5  == true
+	// bValid6  == false
+
+运算符 [] 返回一个引用，因此它还可用于变异数组中的元素（假定数组不为常量）：
+
+	StrArr[3] = StrArr[3].ToUpper();
+	// StrArr == ["!","of","Brave","HELLO","World","Tomorrow"]
+
+和 GetData 函数一样 - 如数组为常量，运算符 [] 将返回一个常量引用。还可使用 **Last** 函数从数组末端反向进行索引编入。索引默认为零。**Top** 函数是 Last 的同义词，唯一区别是其不接受索引：
+
+	FString ElemEnd  = StrArr.Last();
+	FString ElemEnd0 = StrArr.Last(0);
+	FString ElemEnd1 = StrArr.Last(1);
+	FString ElemTop  = StrArr.Top();
+	// ElemEnd  == "Tomorrow"
+	// ElemEnd0 == "Tomorrow"
+	// ElemEnd1 == "World"
+	// ElemTop  == "Tomorrow"
+
+可询问数组是否包含一个特定元素：
+
+	bool bHello   = StrArr.Contains(TEXT("Hello"));
+	bool bGoodbye = StrArr.Contains(TEXT("Goodbye"));
+	// bHello   == true
+	// bGoodbye == false
+
+或询问数组是否包含与特定谓词匹配的元素：
+
+	bool bLen5 = StrArr.ContainsByPredicate([](const FString& Str){
+		return Str.Len() == 5;
+	});
+	bool bLen6 = StrArr.ContainsByPredicate([](const FString& Str){
+		return Str.Len() == 6;
+	});
+	// bLen5 == true
+	// bLen6 == false
+
+使用函数的 **Find** 家族可找到元素。使用 Find 确定元素是否存在并返回其索引：
+
+	int32 Index;
+	if (StrArr.Find(TEXT("Hello"), Index))
+	{
+		// Index == 3
+	}
+
+这会将索引设为找到的首个元素的索引。如存在重复元素而希望找到最末元素的索引，则使用 **FindLast** 函数：
+
+	int32 IndexLast;
+	if (StrArr.FindLast(TEXT("Hello"), IndexLast))
+	{
+		// IndexLast == 3, because there aren't any duplicates
+	}
+
+两个函数均会返回一个布尔型，指出是否已找到一个元素，同时在找到元素索引时将其写入变量。
+
+Find 和 FindLast 也可直接返回元素索引。如不将索引作为显式参数传递，这两个函数便会执行此操作。这将比上述函数更简洁，使用哪个函数则取决于您的特定需求或风格。
+
+如未找到元素，将返回特殊的 INDEX_NONE 值：
+
+	int32 Index2     = StrArr.Find(TEXT("Hello"));
+	int32 IndexLast2 = StrArr.FindLast(TEXT("Hello"));
+	int32 IndexNone  = StrArr.Find(TEXT("None"));
+	// Index2     == 3
+	// IndexLast2 == 3
+	// IndexNone  == INDEX_NONE
+
+**IndexOfByKey** 工作方式相似，但允许元素和任意对象进行对比。通过 Find 函数进行的搜索开始前，参数将被实际转换为元素类型（此例中的 FString）。使用 IndexOfByKey，则直接对“键”进行对比，以便在键类型无法直接转换到元素类型时照常进行搜索。
+
+IndexOfByKey 可用于运算符 ==（ElementType、KeyType）存在的任意键类型；然后这将被用于执行比较。IndexOfByKey 将返回首个找到的元素的索引；如未找到元素，则返回 INDEX_NONE。
+
+	int32 Index = StrArr.IndexOfByKey(TEXT("Hello"));
+	// Index == 3
+
+**IndexOfByPredicate** 函数可用于寻找与特定谓词匹配的首个元素的索引；如未找到，则返回特殊的 INDEX_NONE 值。
+
+	int32 Index = StrArr.IndexOfByPredicate([](const FString& Str){
+		return Str.Contains(TEXT("r"));
+	});
+	// Index == 2
+
+可将指针返回找到的元素，而不返回指数。**FindByKey** 与 IndexOfByKey 相似，将元素和任意对象进行对比，对找到的元素返回指针。如未找到，则返回 nullptr：
+
+	auto* OfPtr  = StrArr.FindByKey(TEXT("of")));
+	auto* ThePtr = StrArr.FindByKey(TEXT("the")));
+	// OfPtr  == &StrArr[1]
+	// ThePtr == nullptr
+
+同样，**FindByPredicate** 的使用方式和 IndexOfByPredicate 相似，不同点是返回的是指针，而非函数：
+
+	auto* Len5Ptr = StrArr.FindByPredicate([](const FString& Str){
+		return Str.Len() == 5;
+	});
+	auto* Len6Ptr = StrArr.FindByPredicate([](const FString& Str){
+		return Str.Len() == 6;
+	});
+	// Len5Ptr == &StrArr[2]
+	// Len6Ptr == nullptr
+
+最后，**FilterByPredicate** 函数将返回匹配特定谓词的元素数组：
+
+	auto Filter = StrArray.FilterByPredicate([](const FString& Str){
+		return !Str.IsEmpty() && Str[0] < TEXT('M');
+	});
+
+##移除
+
+可使用函数的 **Remove** 家族从数组中移除元素。Remove 函数将移除与传入元素相等的所有元素：
+
+	StrArr.Remove(TEXT("hello"));
+	// StrArr == ["!","of","Brave","World","Tomorrow"]
+	
+	StrArr.Remove(TEXT("goodbye"));
+	// StrArr is unchanged, as it doesn't contain "goodbye"
+
+注意：即使我们要求移除“hello”，“HELLO”仍然将被移除。通过元素类型的运算符 == 可对相等性进行测试；记住 FString，这是一个不区分大小写的对比。
+
+通过 **Pop** 函数可移除数组的最后元素：
+
+	StrArr.Pop();
+
+	// StrArr == ["!", "of", "Brave", "World"]
+
+Remove 函数将移除对比相等的全部实例。例如：
+
+	TArray<int32> ValArr;
+	int32 Temp[] = { 10, 20, 30, 5, 10, 15, 20, 25, 30 };
+	ValArr.Append(Temp, ARRAY_COUNT(Temp));
+	// ValArr == [10,20,30,5,10,15,20,25,30]
+	
+	ValArr.Remove(20);
+	// ValArr == [10,30,5,10,15,25,30]
+
+可使用 **RemoveSingle** 移除离数组前部最近的元素。在以下情况尤为实用：数组中可能存在重复，而只希望删除一个；或作为优化，数组只能包含此种元素的一个，因为找到并移除后搜索将停止：
+
+	ValArr.RemoveSingle(30);
+	// ValArr == [10,5,10,15,25,30]
+
+使用 **RemoveAt** 函数即可按元素索引移除元素。索引必须存在，否则会出现运行时错误。需注意：指数从零开始：
+
+	ValArr.RemoveAt(2); // Removes the element at index 2
+	// ValArr == [10,5,15,25,30]
+	
+	ValArr.RemoveAt(99); // This will cause a runtime error as
+	                       // there is no element at index 99
+
+使用 **RemoveAll** 函数即可移除与谓词匹配的元素。例如，移除 3 的倍数的所有数值：
+
+	ValArr.RemoveAll([](int32 Val) {
+		return Val % 3 == 0;
+	});
+	// ValArr == [10,5,25]
+
+[REGION:note]
+在所有这些情况中，当元素被移除时，其后的元素将被下移到更低的指数中，因为数组中不能出现空洞。
+[/REGION]
+
+移动过程存在开销。如不介意剩余元素的排序，可使用 **RemoveSwap**、**RemoveAtSwap** 和 **RemoveAllSwap** 函数减少此开销。这些函数的工作方式与其非交换变种相似，不同之处在于它们不保证剩余元素的排序，因此它们的实现效率更高：
+
+	TArray<int32> ValArr2;
+	for (int32 i = 0; i != 10; ++i)
+		ValArr2.Add(i % 5);
+	// ValArr2 == [0,1,2,3,4,0,1,2,3,4]
+	
+	ValArr2.RemoveSwap(2);
+	// ValArr2 == [0,1,4,3,4,0,1,3]
+	
+	ValArr2.RemoveAtSwap(1);
+	// ValArr2 == [0,3,4,3,4,0,1]
+	
+	ValArr2.RemoveAllSwap([](int32 Val) {
+		return Val % 3 == 0;
+	});
+	// ValArr2 == [1,4,4]
+
+最后，使用 **Empty** 函数可将所有元素移除：
+
+	ValArr2.Empty();
+	// ValArr2 == []
+
+##运算符
+
+数组是常规数值类型，可通过标准复制构建函数或赋值运算符被复制。因数组严格拥有其元素，数组复制是深度复制，因此新数组将拥有其自身的元素副本：
+
+	TArray<int32> ValArr3;
+	ValArr3.Add(1);
+	ValArr3.Add(2);
+	ValArr3.Add(3);
+	
+	auto ValArr4 = ValArr3;
+	// ValArr4 == [1,2,3];
+	ValArr4[0] = 5;
+	// ValArr3 == [1,2,3];
+	// ValArr4 == [5,2,3];
+
+作为 Append 函数的替代物，可通过 += 运算符对数组进行串联。
+
+	ValArr4 += ValArr3;
+	// ValArr4 == [5,2,3,1,2,3]
+
+TArray 还支持移动语意。使用 **MoveTemp** 函数可调用此语意。在移动后，源数组将保证为空：
+
+	ValArr3 = MoveTemp(ValArr4);
+	// ValArr3 == [5,2,3,1,2,3]
+	// ValArr4 == []
+
+使用运算符 == 和 != 可对数组进行比较。元素的排序很重要 - 元素数量和排序均相同的两个数组才被视为相等。元素的对比通过其自身的运算符 == 进行：
+
+	TArray<FString> FlavorArr1;
+	FlavorArr1.Emplace(TEXT("Chocolate"));
+	FlavorArr1.Emplace(TEXT("Vanilla"));
+	// FlavorArr1 == ["Chocolate","Vanilla"]
+	
+	auto FlavorArr2 = Str1Array;
+	// FlavorArr2 == ["Chocolate","Vanilla"]
+	
+	bool bComparison1 = FlavorArr1 == FlavorArr2;
+	// bComparison1 == true
+	
+	for (auto& Str :FlavorArr2)
+	{
+		Str = Str.ToUpper();
+	}
+	// FlavorArr2 == ["CHOCOLATE","VANILLA"]
+	
+	bool bComparison2 = FlavorArr1 == FlavorArr2;
+	// bComparison2 == true, because FString comparison ignores case
+	
+	Exchange(FlavorArr2[0], FlavorArr2[1]);
+	// FlavorArr2 == ["VANILLA","CHOCOLATE"]
+	
+	bool bComparison3 = FlavorArr1 == FlavorArr2;
+	// bComparison3 == false, because the order has changed
+
+## 堆
+
+TArray 拥有支持二叉堆数据结构的函数。堆是一个二叉树类型。在树中，父节点等于其子节点，或在其所有子节点前排序。作为数组实现时，树的根节点位于元素 0，索引 N 处节点左右子节点的指数分别为 2N+1 和 2N+2。子类彼此之间不存在特定排序。
+
+调用 **Heapify** 函数可将现有数组转变为堆。这被重载为是否接受谓词，非断言的版本将使用元素类型的操作符 < 确定排序：
+
+	TArray<int32> HeapArr;
+	for (int32 Val = 10; Val != 0; --Val)
+		HeapArr.Add(Val);
+	// HeapArr == [10,9,8,7,6,5,4,3,2,1]
+	HeapArr.Heapify();
+	// HeapArr == [1,2,4,3,6,5,8,10,7,9]
+
+下图是树的直观展示：
+
+[REGION:raw] 
+![image alt text](image_0.png)
+[/REGION]
+
+树中的节点可按堆化数组中元素的排序从左至右、从上至下进行读取。注意：被转换为堆后，无必要进行数组的排序。虽然排序数组也是有效堆，堆结构的定义较为宽松，允许相同集元素存在多个有效堆。
+
+通过 HeapPush 函数可将新元素添加到堆，对其他节点进行整理，对堆进行维护：
+
+	HeapArr.HeapPush(4);
+	// HeapArr == [1,2,4,3,4,5,8,10,7,9,6]
+
+[REGION:raw] 
+![image alt text](image_1.png)
+[/REGION]
+
+**HeapPop** 和 **HeapPopDiscard** 函数用于移除堆上的顶部节点。两者之间的区别是前者接受对元素类的引用，返回顶部元素的副本；而后者只是简单地移除顶部节点，不进行任何形式的返回。两个函数得出的数组变更一致，重新适当排列其他元素可对堆进行维护：
+
+	int32 TopNode;
+	HeapArr.HeapPop(TopNode);
+	// TopNode == 1
+	// HeapArr == [2,3,4,6,4,5,8,10,7,9]
+
+[REGION:raw] 
+![image alt text](image_2.png)
+[/REGION]
+
+**HeapRemoveAt** 将从给定索引的数组移除元素，然后重新排列元素，对堆进行维护：
+
+	HeapArr.HeapRemoveAt(1);
+	// HeapArr == [2,4,4,6,9,5,8,10,7]
+
+[REGION:raw] 
+![image alt text](image_3.png)
+[/REGION]
+
+需要注意：只有在结构已经为一个有效堆时（如在 Heapify() 调用、其他堆操作、或手动将数组调为堆之后），才会调用 HeapPush、HeapPop、HeapPopDiscard 和 HeapRemoveAt。
+
+此外，每个这些函数，包括 Heapify，均可通过任选二元谓词确定堆中节点元素的排列。使用谓词时，应在所有堆操作中使用相同的谓词，以维持正确的结构。未指定谓词时，堆操作使用元素类型的运算符 < 确定排列。
+
+最后，可使用 **HeapTop** 查看堆的顶部节点，无需变更数组：
+
+	int32 Top = HeapArr.HeapTop();
+	// Top == 2
+
+## Slack
+
+因为数组的尺寸可进行调整，因此它们使用的是可变内存量。为避免每次添加元素时需要重新分配，分配器通常会提供比需求更多的内存，使之后进行的 Add 调用不会因为重新分配而出现性能损失。同样，删除元素通常不会释放内存。容器中元素数量和下次分配前可添加的元素数量之差即称为 **slack**。
+
+默认构建的数组不分配内存，则 slack 初始为零。使用 **GetSlack** 函数即可找出数组中的 slack 量。另外，通过 Max 函数可获取到容器重新分配之前数组可保存的最大元素数量。GetSlack() is equivalent to Max() - Num():
+
+	TArray<int32> SlackArray;
+	// SlackArray.GetSlack() == 0
+	// SlackArray.Num()      == 0
+	// SlackArray.Max()      == 0
+	
+	SlackArray.Add(1);
+	// SlackArray.GetSlack() == 3
+	// SlackArray.Num()      == 1
+	// SlackArray.Max()      == 4
+	
+	SlackArray.Add(2);
+	SlackArray.Add(3);
+	SlackArray.Add(4);
+	SlackArray.Add(5);
+	// SlackArray.GetSlack() == 17
+	// SlackArray.Num()      == 5
+	// SlackArray.Max()      == 22
+
+重新分配后，容器中的 slack 量由分配器决定，不取决于数组使用者。
+
+多数情况下均不必太在意 slack。但如您对此有所知晓，即可使用它对数组进行优化，获得益处。例如，如您知道自己即将添加 100 个新元素到数组，您可确保添加前拥有至少为 100 的 slack，使元素添加时不出现分配。上文所述的 Empty 函数接受任选的 slack 参数：
+
+	SlackArray.Empty();
+	// SlackArray.GetSlack() == 0
+	// SlackArray.Num()      == 0
+	// SlackArray.Max()      == 0
+	SlackArray.Empty(3);
+	// SlackArray.GetSlack() == 3
+	// SlackArray.Num()      == 0
+	// SlackArray.Max()      == 3
+	SlackArray.Add(1);
+	SlackArray.Add(2);
+	SlackArray.Add(3);
+	// SlackArray.GetSlack() == 0
+	// SlackArray.Num()      == 3
+	// SlackArray.Max()      == 3
+
+**Reset** 函数的工作方式与 Empty 相似，不同之处是 - 如当前分配已提供所请求的 slack，函数将不释放内存。然而，如所请求的 slack 更大，它将分配更多的内存：
+
+	SlackArray.Reset(0);
+	// SlackArray.GetSlack() == 3
+	// SlackArray.Num()      == 0
+	// SlackArray.Max()      == 3
+	SlackArray.Reset(10);
+	// SlackArray.GetSlack() == 10
+	// SlackArray.Num()      == 0
+	// SlackArray.Max()      == 10
+
+最后，使用 **Shrink** 函数可移除作废的 slack。此函数将把分配重新调整为所需要的大小，使其保存当前的元素序列，而无需实际移动元素：
+
+	SlackArray.Add(5);
+	SlackArray.Add(10);
+	SlackArray.Add(15);
+	SlackArray.Add(20);
+	// SlackArray.GetSlack() == 6
+	// SlackArray.Num()      == 4
+	// SlackArray.Max()      == 10
+	SlackArray.Shrink();
+	// SlackArray.GetSlack() == 0
+	// SlackArray.Num()      == 4
+	// SlackArray.Max()      == 4
+
+## 原始内存
+
+本质上而言，TArray 只是一些分配内存的包装器。对分配的字节进行直接修改和自行创建元素即可将 TArray 作为包装器使用，十分实用。TArray 将通过其拥有的信息尽量执行，但有时需要下降一个等级。
+
+需注意，这些函数允许使容器变为无效状态。如出现失误，将引起未定义行为。在调用这些函数后，调用其他常规函数之前，您可决定是否使容器变回有效状态。
+
+**AddUninitialized** 和 **InsertUninitialized** 函数将为数组添加一些未初始化的空间。它们的工作方式分别与 Add 和 Insert 函数相同，但它们不会调用元素类型的构建函数。对拥有安全性或便利性构建函数的结构体而言，这十分实用，但这将完全重写任意方式的状态（如使用 Memcpy 调用），因此要避免出现构建的损失：
+
+	int32 SrcInts[] = { 2, 3, 5, 7 };
+	TArray<int32> UninitInts;
+	UninitInts.AddUninitialized(4);
+	FMemory::Memcpy(UninitInts.GetData(), SrcInts, 4*sizeof(int32));
+	// UninitInts == [2,3,5,7]
+
+如您需要或希望自行控制构建过程，它们还可为计划自行显式的对象创建保留部分内存。
+
+	TArray<FString> UninitStrs;
+	UninitStrs.Emplace(TEXT("A"));
+	UninitStrs.Emplace(TEXT("D"));
+	UninitStrs.InsertUninitialized(1, 2);
+	new ((void*)(UninitStrs.GetData() + 1)) FString(TEXT("B"));
+	new ((void*)(UninitStrs.GetData() + 2)) FString(TEXT("C"));
+	// UninitStrs == ["A","B","C","D"]
+
+**AddZeroed** 和 **InsertZeroed** 的工作方式相似，不同点是它们会把添加/插入的空间字节清零。如需将类型插入有效的按位零状态，这将非常实用。
+
+	struct S
+	{
+		S(int32 InInt, void* InPtr, float InFlt)
+			:Int(InInt)
+			, Ptr(InPtr)
+			, Flt(InFlt)
+		{
+		}
+		int32 Int;
+		void* Ptr;
+		float Flt;
+	};
+	TArray<S> SArr;
+	SArr.AddZeroed();
+	// SArr == [{ Int: 0, Ptr: nullptr, Flt: 0.0f }]
+
+**SetNumUninitialized** 和 **SetNumZeroed** 函数的工作方式与 SetNum 相似。不同之处在于 - 新数字大于当前数字时，新元素的空间将分别为未初始化或按位归零。通过使用 AddUninitialized 和 InsertUninitialized，您应该确保新元素根据需要被正确地构建到新空间中（如有必要）：
+
+	SArr.SetNumUninitialized(3);
+	new ((void*)(SArr.GetData() + 1)) S(5, (void*)0x12345678, 3.14);
+	new ((void*)(SArr.GetData() + 2)) S(2, (void*)0x87654321, 2.72);
+	// SArr == [
+	//   { Int:0, Ptr: nullptr,    Flt:0.0f  },
+	//   { Int:5, Ptr:0x12345678, Flt:3.14f },
+	//   { Int:2, Ptr:0x87654321, Flt:2.72f }
+	// ]
+	
+	SArr.SetNumZeroed(5);
+	// SArr == [
+	//   { Int:0, Ptr: nullptr,    Flt:0.0f  },
+	//   { Int:5, Ptr:0x12345678, Flt:3.14f },
+	//   { Int:2, Ptr:0x87654321, Flt:2.72f },
+	//   { Int:0, Ptr: nullptr,    Flt:0.0f  },
+	//   { Int:0, Ptr: nullptr,    Flt:0.0f  }
+	// ]
+
+应谨慎使用未初始化或归零的函数。如对一个元素类型进行修改，以包括需要构建的成员、或不拥有有效按位清零状态的成员，可导致无效数组元素和未定义行为的出现。这些函数在类型数组上最为实用。这些数组（如 FMatrix 或 FVector）几乎不会发生变化。
+
+## 杂项
+
+**BulkSerialize** 函数是序列化函数，可用作替代运算符 <<，以便将数组作为原始字节块进行序列化，而不执行每个元素的序列化。元素类型为浅显时（如内置类型或纯数据结构体），性能将会得到提高。
+
+**CountBytes** 和 **GetAllocatedSize** 函数用于估计数组当前应用的内存量。CountBytes 接受 FArchive，GetAllocatedSize 可被直接调用。它们常用于统计报告。
+
+**Swap** 和 **SwapMemory** 函数均接受两个指数，将对这些指数上元素的数值进行交换。它们相等，不同点是 Swap 会在指数上执行额外的错误检查，并断言指数是否处于范围之外。
+

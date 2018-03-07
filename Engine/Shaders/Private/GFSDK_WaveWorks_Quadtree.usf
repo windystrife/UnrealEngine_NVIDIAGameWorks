@@ -1,0 +1,100 @@
+/*
+ * This code contains NVIDIA Confidential Information and is disclosed 
+ * under the Mutual Non-Disclosure Agreement. 
+ * 
+ * Notice 
+ * ALL NVIDIA DESIGN SPECIFICATIONS AND CODE ("MATERIALS") ARE PROVIDED "AS IS" NVIDIA MAKES 
+ * NO REPRESENTATIONS, WARRANTIES, EXPRESSED, IMPLIED, STATUTORY, OR OTHERWISE WITH RESPECT TO 
+ * THE MATERIALS, AND EXPRESSLY DISCLAIMS ANY IMPLIED WARRANTIES OF NONINFRINGEMENT, 
+ * MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE. 
+ * 
+ * NVIDIA Corporation assumes no responsibility for the consequences of use of such 
+ * information or for any infringement of patents or other rights of third parties that may 
+ * result from its use. No license is granted by implication or otherwise under any patent 
+ * or patent rights of NVIDIA Corporation. No third party distribution is allowed unless 
+ * expressly authorized by NVIDIA.  Details are subject to change without notice. 
+ * This code supersedes and replaces all information previously supplied. 
+ * NVIDIA Corporation products are not authorized for use as critical 
+ * components in life support devices or systems without express written approval of 
+ * NVIDIA Corporation. 
+ * 
+ * Copyright © 2008- 2016 NVIDIA Corporation. All rights reserved.
+ * 
+ * NVIDIA Corporation and its licensors retain all intellectual property and proprietary
+ * rights in and to this software and related documentation and any modifications thereto.
+ * Any use, reproduction, disclosure or distribution of this software and related
+ * documentation without an express license agreement from NVIDIA Corporation is
+ * strictly prohibited.
+ */
+ 
+ /**
+ * WaveWorks_Quadtree.usf: Code for WaveWorks QuadTree
+ */
+
+// HS
+cbuffer nv_waveworks_quad0 {
+	float4 nv_waveworks_quad1;
+	float4 nv_waveworks_quad2;
+};
+
+// VS
+cbuffer nv_waveworks_quad3 {
+	float4x4 nv_waveworks_quad4;
+	float4 nv_waveworks_quad5;
+	float4 nv_waveworks_quad6;
+};
+struct GFSDK_WAVEWORKS_VERTEX_INPUT
+{
+	float4 nv_waveworks_quad7;
+};
+
+float3 GFSDK_WaveWorks_GetUndisplacedVertexWorldPosition(GFSDK_WAVEWORKS_VERTEX_INPUT In)
+{
+	float2 nv_waveworks_quad8 = In.nv_waveworks_quad7.xy;
+
+#if !USING_TESSELLATION
+	float nv_waveworks_quad9 = 0.5f;
+	float nv_waveworks_quad10 = nv_waveworks_quad6.w;
+	float2 nv_waveworks_quad11 = nv_waveworks_quad8;
+	float2 nv_waveworks_quad12 = nv_waveworks_quad11;
+	float nv_waveworks_quad13 = 0.f;
+	for(int nv_waveworks_quad14 = 0; nv_waveworks_quad14 != 4; ++nv_waveworks_quad14) {
+		float2 nv_waveworks_quad15;
+		float2 nv_waveworks_quad16 = modf(nv_waveworks_quad9*nv_waveworks_quad11.xy,nv_waveworks_quad15);
+		if(0.5f == nv_waveworks_quad16.x && 0.5f == nv_waveworks_quad16.y) nv_waveworks_quad12.xy = nv_waveworks_quad11.xy - nv_waveworks_quad10;
+		else if(0.5f == nv_waveworks_quad16.x) nv_waveworks_quad12.x = nv_waveworks_quad11.x + nv_waveworks_quad10;
+		else if(0.5f == nv_waveworks_quad16.y) nv_waveworks_quad12.y = nv_waveworks_quad11.y + nv_waveworks_quad10;
+		float3 nv_waveworks_quad17 = mul(float4(nv_waveworks_quad11,0.f,1.f), nv_waveworks_quad4).xyz - nv_waveworks_quad5.xyz;
+		float nv_waveworks_quad18 = length(nv_waveworks_quad17);
+		float nv_waveworks_quad19 = log2(nv_waveworks_quad18 * nv_waveworks_quad6.x) + 1.f;
+		nv_waveworks_quad13 = saturate(nv_waveworks_quad19 - float(nv_waveworks_quad14));
+		if(nv_waveworks_quad13 < 1.f) {
+			break;
+		} else {
+			nv_waveworks_quad11 = nv_waveworks_quad12;
+			nv_waveworks_quad9 *= 0.5f;
+			nv_waveworks_quad10 *= -2.f;
+		}
+	}
+	nv_waveworks_quad8.xy = lerp(nv_waveworks_quad11, nv_waveworks_quad12, nv_waveworks_quad13);
+#endif 
+
+	float4 temp = float4(nv_waveworks_quad8,In.nv_waveworks_quad7.zw);
+	float3 RotatatedPosition = nv_waveworks_quad4[0].xyz * temp.xxx + nv_waveworks_quad4[1].xyz * temp.yyy + nv_waveworks_quad4[2].xyz + temp.zzz;
+	return (RotatatedPosition + (float3(nv_waveworks_quad4[0].w, nv_waveworks_quad4[1].w, nv_waveworks_quad4[2].w)));
+}
+
+#if USING_TESSELLATION
+	float GFSDK_WaveWorks_GetEdgeTessellationFactor(float4 vertex1, float4 vertex2)
+	{
+		float4 nv_waveworks_quad20 = 0.5*(vertex1 + vertex2);
+		float nv_waveworks_quad21 = length (vertex1 - vertex2);
+		float nv_waveworks_quad22 = length(nv_waveworks_quad1.xyz - nv_waveworks_quad20.xyz);
+		return max(1.0,nv_waveworks_quad2.x * nv_waveworks_quad21 / nv_waveworks_quad22);
+	}
+	float GFSDK_WaveWorks_GetVertexTargetTessellatedEdgeLength(float3 vertex)
+	{
+		float nv_waveworks_quad23 = length(nv_waveworks_quad1.xyz - vertex.xyz);
+		return nv_waveworks_quad23 / nv_waveworks_quad2.x;
+	}
+#endif

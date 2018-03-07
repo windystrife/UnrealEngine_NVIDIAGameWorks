@@ -1,0 +1,55 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title:조건식 프로퍼티 리플리케이션
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking, Gameplay/Networking/Actors, Gameplay/Networking/Actors/Properties
+Description:조건에 따라 액터 프로퍼티를 리플리케이트하는 법에 대한 상세 정보입니다.
+version: 4.9
+
+프로퍼티가 일단 리플리케이션 등록되면 해제시킬 수 없습니다 (여기서 평생이라는 부분이 나옵니다). 그 이유는 가급적 많은 정보를 구워넣어서, 같은 프로퍼티 세트에 대해 다수의 접속에서 작업물 공유의 이점을 활용할 수 있도록 하기 위함입니다. 그러면 계산 시간이 많이 절약됩니다.
+
+그러면 이 프로퍼티 리플리케이트 여부를 어떻게 미세 조정할까요? 여기서 조건형 프로퍼티가 등장합니다.
+
+기본적으로 리플리케이트되는 각 프로퍼티에는 조건이 내장되어 있는데, 변경되지 않은 경우 리플리케이트하지 않는다는 것입니다.
+
+프로퍼티 리플리케이션에 대한 세밀한 제어를 위해, 부차적인 조건을 추가시킬 수 있는 특수 매크로가 있습니다.
+
+이 매크로는 `DOREPLIFETIME_CONDITION` 라 합니다. 그 사용법 예제는 다음과 같습니다:
+
+	void AActor::GetLifetimeReplicatedProps( TArray< FLifetimeProperty > & OutLifetimeProps ) const
+	{
+		DOREPLIFETIME_CONDITION( AActor, ReplicatedMovement, COND_SimulatedOnly );
+	}
+
+조건 매크로에 전달된 `COND_SimulatedOnly` 플래그는 이 프로퍼티의 리플리케이션 여부를 고려하기도 전에 추가 검사를 하도록 합니다. 이 경우, 이 액터의 시뮬레이션 사본이 있는 클라이언트에만 리플리케이트합니다.
+
+이것의 커다란 장점 중 하나는, 대역폭이 저장된다는 점입니다. 이 액터의 자율 프록시 버전이 있는 클라이언트는 이 프로퍼티에 대해 알 필요가 없다고 한 것이기 때문입니다 (예를 들면 이 클라이언트는 이 프로퍼티를 예측 목적으로 직접 설정하고 있습니다). 또 한가지 장점은, 이 프로퍼티를 받지 않는 클라이언트의 경우, 서버가 클라이언트의 로컬 사본을 짓밟지 않는다는 점입니다.
+
+현재 지원되는 조건 목록을 한 눈에 나타낸 것으로, `Engine\Source\Runtime\CoreUObject\Public\UObject\CoreNet.h` 의 `ELifetimeCondition` Enum 에 지정된 것입니다:
+
+| 조건 | 설명 |
+|-----------|-------------|
+| `COND_InitialOnly`		| 이 프로퍼티는 초기 번치에만 전송을 시도합니다. |
+| `COND_OwnerOnly`			| 이 프로퍼티는 액터의 오너에만 전송합니다. |
+| `COND_SkipOwner`			| 이 프로퍼티는 오너를 제외한 모든 접속에 전송합니다. |
+| `COND_SimulatedOnly`		| 이 프로퍼티는 시뮬레이션되는 액터에만 전송합니다. |
+| `COND_AutonomousOnly`		| 이 프로퍼티는 자율 액터에만 전송합니다. |
+| `COND_SimulatedOrPhysics`	| 이 프로퍼티는 시뮬레이션되는 또는 bRepPhysics 액터에 전송합니다. |
+| `COND_InitialOrOwner`		| 이 프로퍼티는 초기 패킷시, 또는 액터의 오너에 전송합니다. |
+| `COND_Custom`				| 이 프로퍼티에는 별다른 조건이 없지만, SetCustomIsActiveOverride 를 통해 껐다 켰다 토글 기능을 원합니다. |
+
+지금까지 이미 알려진 상태를 기반으로 한 조건에 대해 이야기했습니다. 이를 통해 프로퍼티 리플리케이션에 대한 충분히 제어하면서도 엔진에 필요한 최적화를 하는 것이 쉬워집니다.
+
+하지만 이것으로 충분히 제어가 안된다면? 그에 대해서 한 가지 더 이야기할 것이 있습니다. `DOREPLIFETIME_ACTIVE_OVERRIDE` 라는 매크로가 있는데, 원하는 맞춤형 조건을 사용하여 프로퍼티 제어 시기를 완벽 제어할 수 있습니다. 한 가지 주의할 점은, 접속 단위가 아니라 매크로 단위입니다. 다른 말로, 맞춤형 조건에서 접속별로 바뀔 수 있는 상태를 사용하는 것은 안전하지 않다는 것입니다. 예제는 아래와 같습니다.
+
+	void AActor::PreReplication( IRepChangedPropertyTracker & ChangedPropertyTracker )
+	{
+		DOREPLIFETIME_ACTIVE_OVERRIDE( AActor, ReplicatedMovement, bReplicateMovement );
+	}
+
+ReplicatedMovement 프로퍼티는 이제 bReplicateMovement 가 True 일 때만 리플리케이트됩니다.
+
+그럼 이 매크로를 항상 사용하면 되지 않을까요? 그러지 말아야 하는 이유가 크게 두 가지 있습니다:
+* 맞춤형 조건 값이 많이 바뀐다면, 느려질 수 있습니다.
+* 접속별로 변경 가능한 조건은 사용할 수 없습니다 (여기서 RemoteRole 검사는 하지 마세요).
+
+프로퍼티 리플리케이션 조건으로 제어권과 퍼포먼스의 조화가 가능합니다. 검사에 걸리는 시간을 최적화시키고 프로퍼티를 여러 접속에 전송할 수 있는 기회를 주는 반면, 프로그래머에게 프로퍼티 리플리케이션 방법 및 시기에 대한 미세 조정 권한을 주는 것입니다.

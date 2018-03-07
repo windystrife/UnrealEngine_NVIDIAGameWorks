@@ -1,0 +1,335 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	ShadowProjectionPixelShader.usf: Pixel shader for projecting a shadow depth buffer onto the scene.
+=============================================================================*/
+#ifndef FORCE_FLOATS
+// TODO: remove this requirement: Iphone6/Metal needs full float for the depth comparison.
+#define FORCE_FLOATS (COMPILER_METAL)
+#endif
+
+#ifndef USE_FADE_PLANE
+	#define USE_FADE_PLANE 0
+#endif
+
+#ifndef SHADOW_QUALITY
+	#define SHADOW_QUALITY 6
+#endif
+
+#ifndef APPLY_TRANSLUCENCY_SHADOWS
+	#define APPLY_TRANSLUCENCY_SHADOWS 0
+#endif
+
+#ifndef USE_PCSS
+	#define USE_PCSS 0
+#endif
+
+#ifndef SPOT_LIGHT_PCSS
+#define SPOT_LIGHT_PCSS 0
+#endif
+
+
+#include "Common.ush"
+
+#if FEATURE_LEVEL >= FEATURE_LEVEL_SM5
+	// Gather() is supported
+	#define FEATURE_GATHER4 1
+#else
+	// Gather() is not supported
+	#define FEATURE_GATHER4 0
+#endif
+
+#include "ShadowProjectionCommon.ush"
+#include "ShadowFilteringCommon.ush"
+#if USE_PCSS
+#include "ShadowPercentageCloserFiltering.ush"
+#endif
+#include "DeferredShadingCommon.ush"
+#include "DynamicLightingCommon.ush"
+
+float ShadowFadeFraction;
+float ShadowSharpen;
+float4x4 ScreenToShadowMatrix;
+// .x:DepthBias, y: MaxSubjectZ - MinSubjectZ
+float2 ProjectionDepthBiasParameters;
+
+#if USE_FADE_PLANE
+	float FadePlaneOffset;
+	float InvFadePlaneLength;
+#endif
+
+#if USE_PCSS
+	// PCSS specific parameters.
+	//	- x: tan(0.5 * Directional Light Angle) in shadow projection space;
+	//  - y: Max filter size in shadow tile UV space.
+	float4 PCSSParameters;
+#endif
+
+float4 ModulatedShadowColor;
+float4 ShadowTileOffsetAndSize;
+
+float3 ModulatedShadowBlendOp(float3 Source)
+{
+#if (COMPILER_GLSL_ES2)
+	half4 Dest = FramebufferFetchES2();
+	Dest.rgb = Decode32BPPHDR(Dest).rgb;
+#else
+	half4 Dest = half4(0, 0, 0, 0);
+#endif
+	return Source.rgb*Dest.rgb;
+}
+
+/**
+* Entry point for uniform manual PCF that supports lights using normal shadows.
+*/
+EARLYDEPTHSTENCIL
+void Main(
+	in float4 SVPos : SV_POSITION,
+	out float4 OutColor : SV_Target0
+	)
+{
+	const FPQMPContext PQMPContext = PQMPInit(SVPos.xy);
+
+	float2 ScreenUV = float2( SVPos.xy * View.BufferSizeAndInvSize.zw );
+	float SceneW = CalcSceneDepth( ScreenUV );
+	float4 ScreenPosition = float4(((ScreenUV.xy - View.ScreenPositionScaleBias.wz ) / View.ScreenPositionScaleBias.xy) * SceneW, SceneW, 1);
+	float4 ShadowPosition = mul(ScreenPosition, ScreenToShadowMatrix);
+	float4 HomogeneousWorldPosition = mul(ScreenPosition, View.ScreenToWorld);
+	float3 WorldPosition = HomogeneousWorldPosition.xyz / HomogeneousWorldPosition.w;
+
+	float ShadowZ = ShadowPosition.z;
+	ShadowPosition.xyz /= ShadowPosition.w;
+
+#if MODULATED_SHADOWS
+	// UE-29083 : work around precision issues with ScreenToShadowMatrix on low end devices.
+	ShadowPosition.xy *= ShadowTileOffsetAndSize.zw;
+	ShadowPosition.xy += ShadowTileOffsetAndSize.xy;
+#endif
+
+#if USE_PCSS
+	float3 ScreenPositionDDX = DDX(ScreenPosition.xyz);
+	float3 ScreenPositionDDY = DDY(ScreenPosition.xyz);
+	float4 ShadowPositionDDX = mul(float4(ScreenPositionDDX, 0), ScreenToShadowMatrix);
+	float4 ShadowPositionDDY = mul(float4(ScreenPositionDDY, 0), ScreenToShadowMatrix);
+	#if SPOT_LIGHT_PCSS
+		// perspective correction for derivatives, could be good enough and way cheaper to just use ddx(ScreenPosition)
+		ShadowPositionDDX.xyz -= ShadowPosition.xyz * ShadowPositionDDX.w;
+		ShadowPositionDDY.xyz -= ShadowPosition.xyz * ShadowPositionDDY.w;
+	#endif
+#endif
+
+
+	// Clamp pixel depth in light space for shadowing opaque, because areas of the shadow depth buffer that weren't rendered to will have been cleared to 1
+	// We want to force the shadow comparison to result in 'unshadowed' in that case, regardless of whether the pixel being shaded is in front or behind that plane
+	float LightSpacePixelDepthForOpaque = min(ShadowZ, 0.99999f);
+	// Must not clamp for SSS shadowing, the subsurface gradient must continue past the far plane
+	float LightSpacePixelDepthForSSS = ShadowZ;
+
+
+	float Shadow = 1;
+	float SSSTransmission = 1;
+	
+	float BlendFactor = 1;
+	
+	// For debugging
+	#define UNFILTERED_SHADOW_PROJECTION 0
+
+	#if UNFILTERED_SHADOW_PROJECTION
+	{
+		Shadow = LightSpacePixelDepthForOpaque < Texture2DSampleLevel(ShadowDepthTexture, ShadowDepthTextureSampler, ShadowPosition.xy, 0).r;
+	}
+	#elif APPLY_TRANSLUCENCY_SHADOWS
+	{
+		Shadow = CalculateTranslucencyShadowing(ShadowPosition.xy, ShadowZ);
+	}
+	#elif USE_PCSS
+	{
+		FPCSSSamplerSettings Settings;
+
+		#if SPOT_LIGHT_PCSS
+		{
+			float CotanOuterCone = DeferredLightUniforms.SpotAngles.x * rsqrt(1. - DeferredLightUniforms.SpotAngles.x * DeferredLightUniforms.SpotAngles.x);
+			float WorldLightDistance = dot(DeferredLightUniforms.NormalizedLightDirection, DeferredLightUniforms.LightPosition - WorldPosition);
+			Settings.ProjectedSourceRadius = 0.5 * DeferredLightUniforms.SourceRadius * CotanOuterCone / WorldLightDistance;
+			Settings.TanLightSourceAngle = 0;
+		}
+		#else
+		{
+			Settings.ProjectedSourceRadius = 0;
+			Settings.TanLightSourceAngle = PCSSParameters.x;
+		}
+		#endif
+		Settings.ShadowDepthTexture = ShadowDepthTexture;
+		Settings.ShadowDepthTextureSampler = ShadowDepthTextureSampler;
+		Settings.ShadowBufferSize = ShadowBufferSize;
+		Settings.ShadowTileOffsetAndSize = ShadowTileOffsetAndSize;
+		Settings.SceneDepth = LightSpacePixelDepthForOpaque;
+		Settings.TransitionScale = SoftTransitionScale.z;
+		Settings.MaxKernelSize = PCSSParameters.y;
+		Settings.SvPosition = SVPos;
+		Settings.PQMPContext = PQMPContext;
+		Settings.DebugViewportUV = ScreenUV;
+		
+		Shadow = DirectionalPCSS(Settings, ShadowPosition.xy, ShadowPositionDDX.xyz, ShadowPositionDDY.xyz);
+	}
+	#else // !USE_PCSS
+	{
+		FPCFSamplerSettings Settings;
+		
+		Settings.ShadowDepthTexture = ShadowDepthTexture;
+		Settings.ShadowDepthTextureSampler = ShadowDepthTextureSampler;
+		Settings.ShadowBufferSize = ShadowBufferSize;
+		Settings.TransitionScale = SoftTransitionScale.z;
+		Settings.SceneDepth = LightSpacePixelDepthForOpaque;
+		Settings.bSubsurface = false;
+		Settings.bTreatMaxDepthUnshadowed = false;
+		Settings.DensityMulConstant = 0;
+		Settings.ProjectionDepthBiasParameters = 0;
+
+		Shadow = ManualPCF(ShadowPosition.xy, Settings);
+	}
+	#endif // !USE_PCSS
+		
+	#if USE_FADE_PLANE
+		// Create a blend factor which is one before and at the fade plane, and lerps to zero at the far plane.
+		BlendFactor = 1.0f - saturate((SceneW - FadePlaneOffset) * InvFadePlaneLength);
+	#endif
+
+	#if FEATURE_LEVEL >= FEATURE_LEVEL_SM4 && !FORWARD_SHADING && !APPLY_TRANSLUCENCY_SHADOWS
+
+		FGBufferData GBufferData = GetGBufferData(ScreenUV);
+
+		BRANCH
+		if (IsSubsurfaceModel(GBufferData.ShadingModelID))
+		{
+			float Opacity = GBufferData.CustomData.a;
+			// Derive density from a heuristic using opacity, tweaked for useful falloff ranges and to give a linear depth falloff with opacity
+			float Density = -.05f * log(1 - min(Opacity, .999f));
+			if( GBufferData.ShadingModelID == SHADINGMODELID_HAIR || GBufferData.ShadingModelID == SHADINGMODELID_EYE )
+			{
+				Opacity = 1;
+				Density = 1;
+			}
+			//@todo - Use a larger kernel filter based on material opacity
+			// This is not being done currently because a varying opacity causes discontinuities in the shadow result
+			// Note: Snapping based on the largest size kernel is done in FProjectedShadowInfo::FProjectedShadowInfo, MaxDownsampleFactor is set to 4
+			// Only factors of MaxDownsampleFactor will be stable
+			float SquareRootFilterScale = lerp(1.999f, 0, Opacity);
+			int SquareRootFilterScaleInt = SquareRootFilterScale + 1;
+
+			#if UNFILTERED_SHADOW_PROJECTION
+				float ShadowMapDepth = Texture2DSampleLevel(ShadowDepthTexture, ShadowDepthTextureSampler, ShadowPosition.xy, 0).x;
+				SSSTransmission = CalculateSubsurfaceOcclusion(Density, LightSpacePixelDepthForSSS, ShadowMapDepth.xxx).x;
+			#else
+		
+				// default code path
+				FPCFSamplerSettings Settings;
+				
+				Settings.ShadowDepthTexture = ShadowDepthTexture;
+				Settings.ShadowDepthTextureSampler = ShadowDepthTextureSampler;
+				Settings.ShadowBufferSize = ShadowBufferSize;
+				Settings.TransitionScale = SoftTransitionScale.z;
+				Settings.SceneDepth = LightSpacePixelDepthForSSS + ProjectionDepthBiasParameters.x;
+				Settings.bSubsurface = true;
+				Settings.bTreatMaxDepthUnshadowed = false;
+				Settings.DensityMulConstant = Density * ProjectionDepthBiasParameters.y;
+				Settings.ProjectionDepthBiasParameters = ProjectionDepthBiasParameters;
+				
+				// ideally we use a larger filter kernel for SSSbut as Gather4 makes that harder
+				SSSTransmission = ManualPCF(ShadowPosition.xy, Settings); 
+			#endif
+		}
+
+	#endif
+	
+	#if !USE_PCSS
+		// There is no point changing the shadow sharpen on PCSS, can directly reduce the light
+		// source angle that would actually make the algorithm to run faster.
+		Shadow = saturate( (Shadow - 0.5) * ShadowSharpen + 0.5 );
+	#endif
+
+	// 0 is shadowed, 1 is unshadowed
+	// RETURN_COLOR not needed unless writing to SceneColor;
+	float FadedShadow = lerp(1.0f, Square(Shadow), ShadowFadeFraction);
+
+#if FORWARD_SHADING
+	float LightInfluenceMask = GetLightInfluenceMask(WorldPosition);
+	// Constrain shadowing from this light to pixels inside the light's influence, since other non-overlapping lights are packed into the same channel
+	FadedShadow = lerp(1, FadedShadow, LightInfluenceMask);
+	// Write into all channels, the write mask will constrain to the correct one
+	OutColor = EncodeLightAttenuation(FadedShadow);
+#else
+	float FadedSSSShadow = lerp(1.0f, Square(SSSTransmission), ShadowFadeFraction);
+
+	// the channel assignment is documented in ShadowRendering.cpp (look for Light Attenuation channel assignment)
+	OutColor = EncodeLightAttenuation(half4(FadedShadow, FadedSSSShadow, FadedShadow, FadedSSSShadow));
+#endif
+
+	#if USE_FADE_PLANE
+		// When the fade plane is in use for CSMs, we output the fade value in the alpha channel for blending.
+		OutColor.a = BlendFactor;
+	#endif
+
+#if MODULATED_SHADOWS
+		OutColor.rgb = lerp(ModulatedShadowColor.rgb, float3(1, 1, 1), FadedShadow);
+		OutColor.a = 0;
+#if (ES2_PROFILE || ES3_1_PROFILE) && ( (COMPILER_GLSL_ES2) || (MOBILE_EMULATION) )
+		// Do decal blending if encoding requires it.
+		if (GetHDR32bppEncodeMode() == HDR_ENCODE_RGBE)
+		{
+			OutColor.rgb = ModulatedShadowBlendOp(OutColor.rgb);
+			// do 32bpp hdr encoding for mobile if required.
+			// Do not mosaic encode result as this will break during hw modulated blend op.
+			OutColor = Encode32BPPHDR(OutColor, SVPos.xy);
+		}
+#endif
+#endif
+}
+
+#if FEATURE_LEVEL >= FEATURE_LEVEL_SM4
+
+float4 LightPositionAndInvRadius;
+// .x:DepthBias, y: unused
+float2 PointLightDepthBiasParameters;
+
+/** Pixel shader for projecting a one pass point light shadow from a cube map. */
+void MainOnePassPointLightPS(
+	in float4 SVPos : SV_POSITION,
+	out float4 OutColor : SV_Target0
+	)
+{
+	float2 ScreenUV = float2( SVPos.xy * View.BufferSizeAndInvSize.zw );
+	float SceneW = CalcSceneDepth( ScreenUV );
+	float2 ScreenPosition = ( ScreenUV.xy - View.ScreenPositionScaleBias.wz ) / View.ScreenPositionScaleBias.xy;
+	float4 HomogeneousWorldPosition = mul(float4(ScreenPosition.xy * SceneW, SceneW, 1), View.ScreenToWorld);
+ 	float3 WorldPosition = HomogeneousWorldPosition.xyz / HomogeneousWorldPosition.w;
+
+	// For debugging
+#define OUTPUT_CUBE_SHADOW_DEPTH_NO_FILTERING 0
+#if OUTPUT_CUBE_SHADOW_DEPTH_NO_FILTERING
+	float3 LightVector = LightPositionAndInvRadius.xyz - WorldPosition.xyz;
+	// Note: point light shadow depth is Z / W, not linear
+	float Shadow = TextureCubeSampleLevel(ShadowDepthCubeTexture, ShadowDepthTextureSampler, LightVector, 0);
+#else
+ 	float Shadow = CubemapHardwarePCF(WorldPosition, LightPositionAndInvRadius.xyz, LightPositionAndInvRadius.w, PointLightDepthBiasParameters.x);
+
+	Shadow = saturate( (Shadow - 0.5) * ShadowSharpen + 0.5 );
+#endif
+
+	float FadedShadow = lerp(1.0f, Square(Shadow), ShadowFadeFraction);
+
+#if FORWARD_SHADING
+	float LightInfluenceMask = GetLightInfluenceMask(WorldPosition);
+	FadedShadow = lerp(1, FadedShadow, LightInfluenceMask);
+	OutColor = EncodeLightAttenuation(FadedShadow);
+#else
+	// Light attenuation buffer has been remapped. 
+	// Point light shadows now write to the blue channel.
+	OutColor.b = EncodeLightAttenuation(FadedShadow);
+	OutColor.rga = 1;
+	// SSS is not correctly handled but at least it should be shadowed
+	OutColor.a = OutColor.b;
+#endif
+}
+ 
+#endif

@@ -1,0 +1,133 @@
+Availability:Public
+Title:Derived Data Cache
+Crumbs:%ROOT%, Engine
+Description: Overview of the Derived Data Cache and the storage of assets in formats used by UE4 and its target platforms. 
+version: 4.9
+Parent:Engine
+type:overview
+order:24
+
+The **Derived Data Cache** (DDC) stores versions of assets in the formats used by the engine and its 
+target platforms, as opposed to the source formats artists create that are imported into the editor 
+and stored in .uasset files. Content stored in the DDC is disposable in that it can always be 
+regenerated at any time using the data stored in the .uasset file. Storing these derived formats 
+externally makes it possible to easily add or change the formats used by the engine without needing to 
+modify the source asset file.
+
+## Using a Shared DDC
+
+Studios should use a shared DDC that all users in a particular location can access. This way, only one 
+person needs to build the derived asset format(s) and they are automatically available to all other 
+users. There will occasionally be stalls when assets need to be processed, but the results are remembered 
+and shared. So with a handful of developers or more, most people will not notice any impact.
+
+[REGION:warning]
+Never copy an entire DDC across the internet, back up your DDC, or restore a DDC from a backup. This will 
+not do any harm, but it is a waste of time as it generally takes longer to transfer the amount of data stored 
+in the DDC than it would to simply generate it from scratch locally.
+[/REGION]
+
+To set up a shared DDC, override the paths for the `[InstalledDerivedDataBackendGraph]` or `[DerivedDataBackendGraph]` (depending on whether you use the binary install from the Epic Game Launcher or compile from source) by declaring this 
+section in your game's **DefaultEngine.ini**. This section is originally declared in the **BaseEngine.ini** 
+where the paths are set to Epic's internal DDC share. Re-declare the section and change the paths to point 
+to a share on your network (e.g. `Path=\\mystudio.net\DDC`):
+
+%Globals:BinarySourceSelectVar%
+
+[OBJECT:ToggleButtonContent]
+	[PARAMLITERAL:category]
+	BinarySourceSelect
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	binaryinstall
+	[/PARAMLITERAL]
+	[PARAMLITERAL:active]
+	active_button_content
+	[/PARAMLITERAL]
+	[PARAM:content]
+			[InstalledDerivedDataBackendGraph]
+			MinimumDaysToKeepFile=7
+			Root=(Type=KeyLength, Length=120, Inner=AsyncPut)
+			AsyncPut=(Type=AsyncPut, Inner=Hierarchy)
+			Hierarchy=(Type=Hierarchical, Inner=Boot, Inner=Pak, Inner=EnginePak, Inner=Local, Inner=Shared)
+			Boot=(Type=Boot, Filename=\%GAMEDIR\%DerivedDataCache/Boot.ddc, MaxCacheSize=256)
+			Local=(Type=FileSystem, ReadOnly=false, Clean=false, Flush=false, PurgeTransient=true, DeleteUnused=true, UnusedFileAge=17, FoldersToClean=-1, Path=../../../Engine/DerivedDataCache)
+			Shared=(Type=FileSystem, ReadOnly=false, Clean=false, Flush=false, DeleteUnused=true, UnusedFileAge=19, FoldersToClean=-1, Path=\\mystudio.net\DDC, EnvPathOverride=UE-SharedDataCachePath)
+			AltShared=(Type=FileSystem, ReadOnly=true, Clean=false, Flush=false, DeleteUnused=true, UnusedFileAge=19, FoldersToClean=-1, Path=\\mystudio.net\DDC2, EnvPathOverride=UE-SharedDataCachePath2)
+			Pak=(Type=ReadPak, Filename=\%GAMEDIR\%DerivedDataCache/DDC.ddp)
+			EnginePak=(Type=ReadPak, Filename=../../../Engine/DerivedDataCache/DDC.ddp)
+	[/PARAM]
+[/OBJECT]
+[OBJECT:ToggleButtonContent]
+	[PARAMLITERAL:category]
+	BinarySourceSelect
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	sourceinstall
+	[/PARAMLITERAL]
+	[PARAMLITERAL:active]
+	[/PARAMLITERAL]
+	[PARAM:content]
+			[DerivedDataBackendGraph]
+			MinimumDaysToKeepFile=7
+			Root=(Type=KeyLength, Length=120, Inner=AsyncPut)
+			AsyncPut=(Type=AsyncPut, Inner=Hierarchy)
+			Hierarchy=(Type=Hierarchical, Inner=Boot, Inner=Pak, Inner=EnginePak, Inner=Local, Inner=Shared)
+			Boot=(Type=Boot, Filename=\%GAMEDIR\%DerivedDataCache/Boot.ddc, MaxCacheSize=256)
+			Local=(Type=FileSystem, ReadOnly=false, Clean=false, Flush=false, PurgeTransient=true, DeleteUnused=true, UnusedFileAge=17, FoldersToClean=-1, Path=../../../Engine/DerivedDataCache)
+			Shared=(Type=FileSystem, ReadOnly=false, Clean=false, Flush=false, DeleteUnused=true, UnusedFileAge=19, FoldersToClean=-1, Path=\\mystudio.net\DDC, EnvPathOverride=UE-SharedDataCachePath)
+			AltShared=(Type=FileSystem, ReadOnly=true, Clean=false, Flush=false, DeleteUnused=true, UnusedFileAge=19, FoldersToClean=-1, Path=\\mystudio.net\DDC2, EnvPathOverride=UE-SharedDataCachePath2)
+			Pak=(Type=ReadPak, Filename=\%GAMEDIR\%DerivedDataCache/DDC.ddp)
+			EnginePak=(Type=ReadPak, Filename=../../../Engine/DerivedDataCache/DDC.ddp)
+	[/PARAM]
+[/OBJECT]
+
+
+
+Satellite studios working out of a single shared code base can set the **UE-SharedDataCachePath** environment 
+variable to a path that all users at each location can read and write to. This allows each location to 
+have its own shared DDC. 
+
+For example:
+
+	UE-SharedDataCachePath=\\mystudio.net\DDC
+
+## Using a Local DDC
+
+Lone developers or developers working remotely generally just use a local DDC. To tell the engine not to 
+try and use a shared DDC, use one of the methods below:
+
+* Pass `-ddc=noshared` on the command line.
+* Set the environment variable to a local drive hard drive: 
+    
+		UE-SharedDataCachePath=c:\DDC
+
+
+## Building Derived Data
+
+Generally, the user who imports the asset is the one who builds the derived data since they will most 
+likely be using and testing them out in the engine. However, there may be occasions when a new asset 
+needs to be processed. This happens automatically on an as-needed basis and should not result in much 
+of an impact when running fast hardware, though there may be occasional stalls.
+ 
+You can fill your derived data caches at any time by passing the arguments below to the executable:
+ 
+	UE4\Engine\Binaries\Win64\UE4Editor.exe MyGame -run=DerivedDataCache -fill 
+
+We do this on a nightly basis to ensure the DDC is always primed, but it is not necessary in general 
+as the automatic caching should just work.
+
+## Distributing with a DDC
+ 
+Cooking is generally the preferred method for packaging games since cooked builds do not need nor use a DDC. However, 
+DDCs can be packaged for distribution if the need arises.
+
+**To package a DDC:**
+ 
+1. Run the **UE4Editor.exe** from the UE4/Engine/Binaries/Win64 directory passing it the arguments shown below:
+
+		UE4Editor.exe [GameName] -run=DerivedDataCache -fill -DDC=CreatePak
+ 
+1. This creates a **DDC.ddp** file in the UE4\[GameName]\DerivedDataCache
+
+1. The engine automatically detects and uses the .ddp file.

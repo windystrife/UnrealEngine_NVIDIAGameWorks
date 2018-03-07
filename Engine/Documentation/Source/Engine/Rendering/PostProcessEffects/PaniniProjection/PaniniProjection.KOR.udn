@@ -1,0 +1,79 @@
+﻿INTSourceChangelist:3599948
+Availability:Public
+Crumbs: %ROOT%
+Title:파니니 투영
+Description:광각 FOV 뷰의 측면에 원근 투영의 지오메트리 왜곡 문제를 해결하는 3D 투영 방식입니다.
+Type: Overview
+SkillLevel:Beginner
+Version:4.16
+Parent:Engine/Rendering/PostProcessEffects
+Order:7
+Tags:Post Process
+Topic-image:PaniniProjection_Topic.png
+
+## 환경설정
+
+기본적으로 언리얼 엔진 4 는 원근 투영 방식을 사용합니다. 하지만 이러한 투영 모델은 광각 FOV 에서 작업시 
+지오메트리 왜곡이 생깁니다. FOV = 120 인 상태로 구체를 보면 다음과 같이 
+매우 눈에 띕니다.
+
+![](qagame_fov120.png)
+
+그래서 언리얼 엔진은 Panini Projection (파니니 투영)을 사용하여 이 문제 해결을 시도하는 옵션 포스트 프로세싱 패스를 
+제공합니다. 이 포스트 프로세싱은, 원근 투영 대신 파니니 투영으로 렌더링되는 픽셀의 위치를 
+원래 있어야 할 곳으로 변위시킨다는 개념입니다. 그 구성을 위해서는 r.Upscale.Panini.D 를 0 이상으로 설정해 주기만 하면 됩니다. 
+이 포스트 프로세스 이펙트는 Upscaling 패스에서 이루어집니다. 즉 이 패스는 r.ScreenPercentage != 100 또는 
+r.Upscale.Panini.D > 0 인 경우 사용된다는 뜻입니다. 이 파라미터를 더욱 자세히 이해하기 위해서는, 
+문서 하단의 참고 문헌 링크의 연구 논문 원문을 직접 참고해 보시기 바랍니다.
+
+![](qagame_fov120_panini.png)
+
+r.Upscale.Panini.D > 0 이면 이펙트가 직접 강조됩니다. 하지만 이게 유일한 파라미터는 아닙니다. r.Upscale.Panini.S 는
+논문의 하드 컴프레션과 함께 선형보간됩니다. 여전히 구체 구석이 가려진 것처럼 보인다면, 이 파라미터도 같이 
+조정해주면 됩니다. 하지만 r.Upscale.Panini.S < 0 인 경우, 구석에 렌더링되지 않은 것처럼 보이는 
+검정 픽셀이 나타나기 시작합니다.
+
+![](qagame_fov120_vertical_compression.png)
+
+이 이펙트 작동방식을 보다 자세히 이해하기 이해서는, r.Upscale.ScreenFit 을 조정해보는 것도 도움이 됩니다. 
+한 가지 염두에 둘 것은, 끝에 있는 원근 투영 픽셀 중 일부는 화면 상하단 부근에서 
+나타나지 않을 수 있습니다.
+
+![](qagame_actual_effect.png)
+
+
+## 직선
+
+파니니 투영은 선에 대해 여러가지가 보장됩니다. 우선 수직선은 r.Upscale.Panini.D 나 r.Upscale.Panini.S 값이 어떻든 
+수직이 보장됩니다. 둘째, 화면 중앙을 가로지르는 선 역시 r.Upscale.Panini.S = 0 이면 r.Upscale.Panini.D 값이 어떻든 
+수직이 보장됩니다. 이러한 수학적 속성은 일인칭 슈팅 게임에 이상적입니다. 
+왜냐하면 화면 중앙을 향하는 무기의 파니니 투영은 
+중앙을 향한 직선이 유지될 것이기 때문입니다.
+
+![](shootergame_fov120.png)
+![](shootergame_fov120_panini.png)
+
+
+## 중앙 블러링
+
+이 포스트 프로세싱 이펙트의 문제 한 가지는, r.Upscale.Panini.D 상승에 따라 화면 중앙에 
+블러링 현상이 나타나기 시작한다는 점입니다. 파니니 투영을 업스케일 패스에 구현한 것도, 
+바로 이 현상에 대비하기 위해 선명화 필터를 적극 활용하기 위해서입니다. 하지만 이러한 
+문제를 고치기에는 순식간에 역부족이 될 수 있습니다. 그래서 그러한 문제 해결을 돕기 위해 
+r.ScreenPercentage 를 올려야 할 수도 있지만, 그렇게 되면 그려야 하는 픽셀 수가 
+늘어나므로 전반적인 렌더링 퍼포먼스 비용이 생기게 됩니다. 이런 경우, 높은 화면 비율을 
+감당할 수 없는 하드웨어에서는 r.Upscale.Panini.D 값을 낮추면서 이 이펙트가 여전히 
+업스케일 패스의 선명화 필터에만 의존하도록 하는 방법을 고려해 볼 수 있습니다.
+
+![](shootergame_fov120_panini_screen_percentage.png)
+
+파니니 투영을 사용하는 또 한가지 방법은, 월드 포지션 오프셋을 출력하는 머티리얼 함수를 
+머티리얼의 월드 포지션 오프셋 입력 핀에 연결시키는 방법을 통하는 것입니다. 이는 사실 
+언리얼 토너먼트에서 원근 투영 왜곡 문제 해결을 위해 무기를 다른 FOV 로 렌더링하는 방법 
+대신 사용하는 것입니다. UT 의 GitHub 리포지터리를 살펴보는 것도 좋을 것입니다.
+
+
+## 참고 문헌
+
+* [원저자 논문 웹사이트](http://tksharpless.net/vedutismo/Pannini/).
+* [원저자 직접 링크](http://tksharpless.net/vedutismo/Pannini/panini.pdf).

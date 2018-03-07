@@ -1,0 +1,72 @@
+﻿INTSourceChangelist:2697163
+Availability:Public
+Title:摄像机
+Crumbs:%ROOT%, Gameplay, Gameplay/Framework
+Description:摄像机代表玩家的视角；玩家如何看世界。
+Version: 4.9
+type:reference
+parent:Gameplay/Framework
+order:6
+tags:Gameplay Framework
+
+**Camera**代表玩家的视角；玩家如何看世界。因此， 
+摄像机只和人控制的玩家有关。**PlayerController** 指定摄像机类， 
+并实例化 Camera Actor（用于计算玩家从哪个位置和方向 
+看世界）。
+
+[REGION:note]
+有关如何使用摄像机的基本示例，请参见[使用摄像机](Gameplay\HowTo\UsingCameras)文档。你也可以用[CameraAnim功能](Gameplay/Framework/Camera/Animations)在摄像机上分层放置动画。
+[/REGION]
+
+## CameraComponent 和 CameraActor
+
+摄像机的所有属性和行为均在**CameraComponent**中创建；`CameraActor`  类主要用作 CameraComponent 的包装器，以使摄像机可以被直接放置在
+该等级内，而非另一个类中。  
+
+在 CameraComponent 中可以设置摄像机为透视模式或正交模式。垂直视野(FOV)可被设置为透视模式， 
+而世界单位内的宽度可被设置为正交模式。在这两种模式下可以指定宽高比，并为常见设备预设宽高比和显示类型。 
+[后期处理效果](Engine/Rendering\PostProcessEffects)可被加至摄像机，并且也可以衡量后期处理效果的强度。
+
+两个组件被添加到 CameraComponent ，以辅助编辑器中的视觉位置，尽管它们在游戏期间将不可见。 **FrustumComponent**显示 
+摄像机的视场在哪里。默认不显示它，但可以通过在**Viewport**中选择**Show > Advanced > Camera Frustums**来开启它。StaticMeshComponent 代表摄像机 
+ 在该等级内的位置。 
+
+
+## PlayerCameraManager
+
+PlayerCameraManager 类是一个摄像机管理器。默认情况下，其自身内置行为与待查看目标和由控制台命令触发的调试摄像机混合。否则，它会查询 
+ViewTarget，以确定如何调整摄像机的视角，以及所有其它摄像机设置。通常不需要 PlayerCameraManager 子类——需要对 PlayerCameraManager 稍作修改， 
+如果自动规则不足，可能还要添加设置 ViewTarget 的规则。
+
+如果需要添加 PlayerCameraManager 子类，用蓝图添加，而不是用 C++，“BlueprintUpdateCamera”函数用于实现自定义摄像机。当
+使用该函数时，返回_true_来使用返回值，或返回_false_来忽略它们。
+
+### ViewTarget
+
+ViewTarget 结构在 PlayerCameraManager 中定义，负责向 PlayerCameraManager 提供理想的视角(POV)。ViewTarget 包含有关 Actor 目标、Actor 目标的控制器
+（用于非本地控制的 Pawn），以及 PlayerState 的信息（用于在观看的同时跟随同一个玩家完成 Pawn 过渡和其它变更）。摄像机信息
+被通过视角属性以“FMinimalViewInfo”结构的形式传给 PlayerCameraManager。该结构包含来自 CameraComponent 的基本摄像机信息，包括位置、转动、
+放映模式（透视或正交）、视场、投影宽度、宽高比和后期处理效果。让 PlayerCameraManager 能访问这些值使 PlayerCameraManager 能在
+摄像机管理期间混合两种摄像机模式。 
+
+
+## 摄像机责任链
+
+可以随时提供游戏特定的摄像机行为和摄像机“责任链”（从上到下通过以下类传递，然后转到 ALocalPlayer，并以渲染、场景视图，以及其它相关系统结束）：
+
+### CameraComponent 
+
+如果 ViewTarget 是 CameraActor，或者是包含**CameraComponent** 的 Actor 并且“bFindCameraComponentWhenViewTarget”设置为_true_，则 CameraComponent 将
+提供有关摄像机属性的信息。“bTakeCameraControlWhenPossessed”是可以为任何 Pawn设置的相关属性，被 PlayerController 占有时，Pawn 会自动成为 ViewTarget。
+
+### Actor 或 PlayerController
+
+**PlayerControllers**  和 **Actors** 都含有 CalcCamera 函数。如果`bFindCameraComponentWhenViewTarget`为_true_，而且 CameraComponent 存在，Actor 的 CalcCamera 函数返回 Actor 中的首个 CameraComponent 的摄像机视图。  
+否则，它获取 Actor 的位置和循环。在 PlayerController 中，CalcCamera 函数的行为方式与第二种情况类似，如果存在占有 Pawn，则返回其位置以及 
+PlayerController 的控制循环。  
+
+
+ PlayerCameraManager
+
+PlayerCameraManager 中的 **UpdateViewTarget** 函数查询 ViewTarget，并返回该 ViewTarget 的视角。如果你有子类化的 APlayerCameraManager，  
+并且没在查看 CameraComponent，该函数也称为 BlueprintUpdateCamera。

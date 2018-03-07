@@ -1,0 +1,52 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	DownSampleDepthPixelShader.usf: Downsamples scene depth by a factor of 2.
+=============================================================================*/
+
+#include "Common.ush"
+
+float2 ProjectionScaleBias;
+float4 SourceTexelOffsets01;
+float4 SourceTexelOffsets23;
+float UseMaxDepth;
+
+void Main(
+	noperspective float2 InUV : TEXCOORD0,
+	out float OutDepth : SV_DEPTH,
+	out float4 OutColor : SV_Target0
+	)
+{
+	OutColor = 0;
+
+	// Lookup the four view space Z's of the full resolution pixels corresponding to this low resolution pixel
+	float ViewSpaceZ0 = CalcSceneDepth(InUV + SourceTexelOffsets01.xy);
+	float ViewSpaceZ1 = CalcSceneDepth(InUV + SourceTexelOffsets01.zw);
+	float ViewSpaceZ2 = CalcSceneDepth(InUV + SourceTexelOffsets23.xy);
+	float ViewSpaceZ3 = CalcSceneDepth(InUV + SourceTexelOffsets23.zw);
+
+	float MaxDepth = max(max(ViewSpaceZ0, ViewSpaceZ1), max(ViewSpaceZ2, ViewSpaceZ3));
+
+	// Max depth shrinks the silhouettes around foreground objects and is conservative for depth testing
+	// Sample 0 has consistent error, use whichever one is requested for this downsample
+	float Depth = UseMaxDepth > 0 ? MaxDepth : ViewSpaceZ0;
+	// Convert view space Z into post projection Z and output post projection Z / W as the depth buffer expects.
+	OutDepth = (Depth * ProjectionScaleBias.x + ProjectionScaleBias.y) / Depth;
+}
+
+#ifndef STENCIL_LIGHTING_CHANNELS_SHIFT 
+#define STENCIL_LIGHTING_CHANNELS_SHIFT 0
+#endif
+   
+void CopyStencilToLightingChannelsPS(  
+	noperspective float2 InUV : TEXCOORD0,
+	out uint4 OutValue : SV_Target0
+	)
+{
+	uint2 IntUV = (uint2)(InUV * (float2)View.BufferSizeAndInvSize.xy);
+	uint Stencil = SceneStencilTexture.Load(uint3(IntUV, 0)) STENCIL_COMPONENT_SWIZZLE;
+	uint ShiftedStencil = Stencil >> STENCIL_LIGHTING_CHANNELS_SHIFT;
+	// Flip the lowest channel bit, it was stored inverted so we can clear stencil to 0 as a default
+	uint LightingChannels = (ShiftedStencil & 0x6) | (~ShiftedStencil & 0x1);
+	OutValue = LightingChannels;
+}

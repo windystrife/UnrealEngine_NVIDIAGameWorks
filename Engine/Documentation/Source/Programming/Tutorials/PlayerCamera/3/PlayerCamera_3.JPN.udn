@@ -1,0 +1,342 @@
+﻿INTSourceChangelist:2637589
+Availability:Public
+Title:3.入力に対応する C++ コードの記述
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/PlayerCamera
+Description:入力でポーンとカメラをコントロールするコードを実装してみましょう。
+バージョン:4.9
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[前の手順](Programming\Tutorials\PlayerCamera\2 "%Programming\Tutorials\PlayerCamera\2:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[プレイヤー制御カメラ チュートリアルのホームページ](Programming\Tutorials\PlayerInput)
+	[/PARAM]
+	[PARAM:next]
+		[次の手順](Programming\Tutorials\PlayerCamera\4 "%Programming\Tutorials\PlayerCamera\4:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+1. 使用可能な入力マッピングをゲームに設定したので、受信データを格納するメンバ変数をいくつか設定しましょう。更新の間に、移動とマウスから見える軸それぞれの 2D ベクター値が必要です。ズームインまたはズームアウトビューのどちらへ移動させるべきか、2 つのステートの間隔が現時点でどれくらいあるのかも知る必要があります。これを実現するために「PawnWithCamera.h」ファイルのクラス定義へ以下のコードを追加しなくてはいけません：
+
+		//Input variables (入力変数)
+		FVector2D MovementInput;
+		FVector2D CameraInput;
+		float ZoomFactor;
+		bool bZoomingIn;
+
+1. 入力を追跡する関数が必要なので、「PawnWithCamera.h」ファイルのクラス定義に以下の関数を追加して作成しましょう：
+
+		//Input functions (入力関数)
+		void MoveForward(float AxisValue);
+		void MoveRight(float AxisValue);
+		void PitchCamera(float AxisValue);
+		void YawCamera(float AxisValue);
+		void ZoomIn();
+		void ZoomOut();
+
+	以下のコードで「PawnWithCamera.cpp」ファイルにこれらの関数を記入していきます：
+
+		//Input functions (入力関数)
+		void APawnWithCamera::MoveForward(float AxisValue)
+		{
+			MovementInput.X = FMath::Clamp<float>(AxisValue, -1.0f, 1.0f);
+		}
+
+		void APawnWithCamera::MoveRight(float AxisValue)
+		{
+			MovementInput.Y = FMath::Clamp<float>(AxisValue, -1.0f, 1.0f);
+		}
+
+		void APawnWithCamera::PitchCamera(float AxisValue)
+		{
+			CameraInput.Y = AxisValue;
+		}
+
+		void APawnWithCamera::YawCamera(float AxisValue)
+		{
+			CameraInput.X = AxisValue;
+		}
+
+		void APawnWithCamera::ZoomIn()
+		{
+			bZoomingIn = true;
+		}
+
+		void APawnWithCamera::ZoomOut()
+		{
+			bZoomingIn = false;
+		}
+
+	[REGION:note]ZoomFactor にはまだ何もしていません。この変数はボタンのステートに基づいて時間の経過と共に常に変化するため、**ポーン** の **Tick** 関数実行時に更新されます。[/REGION]
+
+1. 入力データを格納するコードを作成したので、あとは **アンリアル エンジン** にコードを呼び出すタイミングを伝えるのみです。ポーンに対応するイベントを入力するバインディング関数は **APawnWithCamera::SetupPlayerInputComponent** にバインディングコードを追加するのみのシンプルな作業です。以下のように追加します：
+
+		//Hook up events for "ZoomIn" (ZoomIn の Hook up イベント)
+		InputComponent->BindAction("ZoomIn", IE_Pressed, this, &APawnWithCamera::ZoomIn);
+		InputComponent->BindAction("ZoomIn", IE_Released, this, &APawnWithCamera::ZoomOut);
+
+		//Hook up every-frame handling for our four axes (4 つの軸に各フレーム処理を接続)
+		InputComponent->BindAxis("MoveForward", this, &APawnWithCamera::MoveForward);
+		InputComponent->BindAxis("MoveRight", this, &APawnWithCamera::MoveRight);
+		InputComponent->BindAxis("CameraPitch", this, &APawnWithCamera::PitchCamera);
+		InputComponent->BindAxis("CameraYaw", this, &APawnWithCamera::YawCamera);
+
+1. ポーンと **カメラ** をフレームごとに更新するために、Tick 関数でこれらの値が使用できるようになりました。以下のコードブロックは「PawnWithCamera.cpp」ファイルの **APawnWithCamera::Tick** にすべて追加しなくてはいけません：
+
+		//Zoom in if ZoomIn button is down, zoom back out if it's not (ZoomIn ボタンが押されたらズームイン、押されなければズームアウト)
+		{
+			if (bZoomingIn)
+			{
+				ZoomFactor += DeltaTime / 0.5f;			//Zoom in over half a second (0.5秒でズームイン)
+			}
+			else
+			{
+				ZoomFactor -= DeltaTime / 0.25f;		//Zoom out over a quarter of a second (0.25秒でズームアウト)
+			}
+			ZoomFactor = FMath::Clamp<float>(ZoomFactor, 0.0f, 1.0f);
+			//Blend our camera's FOV and our SpringArm's length based on ZoomFactor (ZoomFactorに基づいてカメラのFOVとスプリングアームの長さをブレンド)
+			OurCamera->FieldOfView = FMath::Lerp<float>(90.0f, 60.0f, ZoomFactor);
+			OurCameraSpringArm->TargetArmLength = FMath::Lerp<float>(400.0f, 300.0f, ZoomFactor);
+		}
+	[REGION:note]このコードはハードコードされた値をいくつか使用します。使用する値は、0.5 秒や 0.25 秒のズーム回数、90 度でズームアウト、60 度でズームインする FOV 値、またはカメラ距離の 400 ズームアウト、300 ズームインの値などです。このような値は、プログラマー以外の人によるコードの変更、コードを再コンパイルしないでプログラマーが変更、またはエディタでゲームをプレイ中でも変更できるように、 **UPROPERTY(EditAnywhere)** をタグ付けした変数として通常はエディタに公開されています。[/REGION]
+
+		//Rotate our actor's yaw, which will turn our camera because we're attached to it (アクタのヨーを回転。ヨーに親子付けしているためカメラを回転します)
+		{
+			FRotator NewRotation = GetActorRotation();
+			NewRotation.Yaw += CameraInput.X;
+			SetActorRotation(NewRotation);
+		}
+
+		//Rotate our camera's pitch, but limit it so we're always looking downward (カメラのピッチを回転しますが、常に下向きになるようにこれを制限します)
+		{
+			FRotator NewRotation = OurCameraSpringArm->GetComponentRotation();
+			NewRotation.Pitch = FMath::Clamp(NewRotation.Pitch + CameraInput.Y, -80.0f, -15.0f);
+			OurCameraSpringArm->SetWorldRotation(NewRotation);
+		}
+	このコードブロックはマウスの X 軸でポーンのヨーを直接回転しますが、ピッチに反応するカメラシステムのみがマウスの Y 軸から変更します。**アクタ** または **アクタ** のサブクラスを回転すると、実質的にルートレベル **コンポーネント** を回転します。コンポーネントの親子付け対象すべてに間接的に影響します。
+
+		//Handle movement based on our "MoveX" and "MoveY" axes (MoveX と MoveY 軸に基づいて移動を処理)
+		{
+			if (!MovementInput.IsZero())
+			{
+				//Scale our movement input axis values by 100 units per second (移動入力軸の値を 1 秒あたり 100 単位でスケーリング)
+				MovementInput = MovementInput.SafeNormal() * 100.0f;
+				FVector NewLocation = GetActorLocation();
+				NewLocation += GetActorForwardVector() * MovementInput.X * DeltaTime;
+				NewLocation += GetActorRightVector() * MovementInput.Y * DeltaTime;
+				SetActorLocation(NewLocation);
+			}
+		}
+	**GetActorForwardVector** と **GetActorRightVector** を使用すると、アクタが対面している方向と相対的な動きになります。カメラはアクタと同じ方向に対面するため、前進キーはプレイヤーから見える対象物と相対的に常に前進します。
+
+1. コーディングはこれで終了です。コードをコンパイルして、**アンリアル エンジン** エディタの **レベルエディタ** へ **コンテンツ ブラウザ** から新規クラスをドラッグできるようになりました。
+
+	[![](ClassInContentBrowser.png)](ClassInContentBrowser.png)
+
+	**スタティック メッシュ** やその他のビジュアル コンポーネント を自由に追加したり、または何も追加しないでプレイをお楽しみください。レベル内のプレイヤーをカメラで追跡すると、カメラ移動はスムーズな加速と減速、回転はタイトで瞬間の動作に感じるはずです。Camera Rotation Lag を追加したり Camera Lag を増減させるなど **SpringArmComponent** のプロパティをいくつか変更して、コントロールの操作性の違いを感じてみてください。
+
+	[![](SpringArmValues.png)](SpringArmValues.png)
+
+1. コーン メッシュを回転させると、下図のようになります。
+
+	[![](FinalScreen.png)](FinalScreen.png)
+
+----
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    コード
+    [/PARAMLITERAL]
+    [PARAM:heading]
+	    完成コード
+    [/PARAM]
+    [PARAM:content]
+		**PawnWithCamera.h**
+			// Copyright 1998-2017 Epic Games, Inc.All Rights Reserved.
+
+			#pragma once
+
+			#include "GameFramework/Pawn.h"
+			#include "PawnWithCamera.generated.h"
+
+			UCLASS()
+			class HOWTO_PLAYERCAMERA_API APawnWithCamera : public APawn
+			{
+				GENERATED_BODY()
+
+			public:
+				// Sets default values for this pawn's properties (このポーンのプロパティの既定値を設定)
+				APawnWithCamera();
+
+				// Called when the game starts or when spawned (ゲーム開始またはスポーン時に呼ばれます)
+				virtual void BeginPlay() override;
+
+				// Called every frame (フレームごとに呼ばれます)
+
+				virtual void Tick( float DeltaSeconds ) override;
+
+				// Called to bind functionality to input (機能と入力をバインドするために呼ばれます)
+				virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override;
+
+			protected:
+				UPROPERTY(EditAnywhere)
+				USpringArmComponent* OurCameraSpringArm;
+				UCameraComponent* OurCamera;
+
+				//Input variables (入力変数)
+				FVector2D MovementInput;
+				FVector2D CameraInput;
+				float ZoomFactor;
+				bool bZoomingIn;
+
+				//Input functions (入力関数)
+				void MoveForward(float AxisValue);
+				void MoveRight(float AxisValue);
+				void PitchCamera(float AxisValue);
+				void YawCamera(float AxisValue);
+				void ZoomIn();
+				void ZoomOut();
+			};
+
+		**PawnWithCamera.h**
+			// Copyright 1998-2017 Epic Games, Inc.All Rights Reserved.
+
+			#include "HowTo_PlayerCamera.h"
+			#include "PawnWithCamera.h"
+
+			// Sets default values (デフォルト値を設定)
+			APawnWithCamera::APawnWithCamera()
+			{
+ 				// Set this pawn to call Tick() every frame. You can turn this off to improve performance if you don't need it.(フレームごとに Tick() を呼び出すためこのポーンを設定します。必要なければパフォーマンスを向上させるためにオフにできます。)
+				PrimaryActorTick.bCanEverTick = true;
+
+				//Create our components (コンポーネントを作成)
+				RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+				OurCameraSpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraSpringArm"));
+				OurCameraSpringArm->AttachTo(RootComponent);
+				OurCameraSpringArm->SetRelativeLocationAndRotation(FVector(0.0f, 0.0f, 50.0f), FRotator(-60.0f, 0.0f, 0.0f));
+				OurCameraSpringArm->TargetArmLength = 400.f;
+				OurCameraSpringArm->bEnableCameraLag = true;
+				OurCameraSpringArm->CameraLagSpeed = 3.0f;
+				OurCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("GameCamera"));
+				OurCamera->AttachTo(OurCameraSpringArm, USpringArmComponent::SocketName);
+
+				//Take control of the default Player (デフォルトプレイヤーをコントロール)
+				AutoPossessPlayer = EAutoReceiveInput::Player0;
+			}
+
+			// Called when the game starts or when spawned (ゲーム開始またはスポーン時に呼ばれます)
+			void APawnWithCamera::BeginPlay()
+			{
+				Super::BeginPlay();
+
+			}
+
+			// Called every frame (フレームごとに呼ばれます)
+			void APawnWithCamera::Tick( float DeltaTime )
+			{
+				Super::Tick(DeltaTime);
+
+				//Zoom in if ZoomIn button is down, zoom back out if it's not (ZoomIn ボタンが押されたらズームイン、押されなければズームアウト)
+				{
+					if (bZoomingIn)
+					{
+						ZoomFactor += DeltaTime / 0.5f;			//Zoom in over half a second (0.5秒でズームイン)
+					}
+					else
+					{
+						ZoomFactor -= DeltaTime / 0.25f;		//Zoom out over a quarter of a second (0.25秒でズームアウト)
+					}
+					ZoomFactor = FMath::Clamp<float>(ZoomFactor, 0.0f, 1.0f);
+					//Blend our camera's FOV and our SpringArm's length based on ZoomFactor (ZoomFactorに基づいてカメラのFOVとスプリングアームの長さをブレンド)
+					OurCamera->FieldOfView = FMath::Lerp<float>(90.0f, 60.0f, ZoomFactor);
+					OurCameraSpringArm->TargetArmLength = FMath::Lerp<float>(400.0f, 300.0f, ZoomFactor);
+				}
+
+				//Rotate our actor's yaw, which will turn our camera because we're attached to it (アクタのヨーを回転。ヨーに親子付けしているためカメラを回転します)
+				{
+					FRotator NewRotation = GetActorRotation();
+					NewRotation.Yaw += CameraInput.X;
+					SetActorRotation(NewRotation);
+				}
+
+				//Rotate our camera's pitch, but limit it so we're always looking downward (カメラのピッチを回転しますが、常に下向きになるようにこれを制限します)
+				{
+					FRotator NewRotation = OurCameraSpringArm->GetComponentRotation();
+					NewRotation.Pitch = FMath::Clamp(NewRotation.Pitch + CameraInput.Y, -80.0f, -15.0f);
+					OurCameraSpringArm->SetWorldRotation(NewRotation);
+				}
+
+				//Handle movement based on our "MoveX" and "MoveY" axes (MoveX と MoveY 軸に基づいて移動を処理)
+				{
+					if (!MovementInput.IsZero())
+					{
+						//Scale our movement input axis values by 100 units per second (移動入力軸の値を 1 秒あたり 100 単位でスケーリング)
+						MovementInput = MovementInput.SafeNormal() * 100.0f;
+						FVector NewLocation = GetActorLocation();
+						NewLocation += GetActorForwardVector() * MovementInput.X * DeltaTime;
+						NewLocation += GetActorRightVector() * MovementInput.Y * DeltaTime;
+						SetActorLocation(NewLocation);
+					}
+				}
+			}
+
+			// Called to bind functionality to input (機能と入力をバインドするために呼ばれます)
+			void APawnWithCamera::SetupPlayerInputComponent(class UInputComponent* InputComponent)
+			{
+				Super::SetupPlayerInputComponent(InputComponent);
+
+				//Hook up events for "ZoomIn" (ZoomIn の Hook up イベント)
+				InputComponent->BindAction("ZoomIn", IE_Pressed, this, &APawnWithCamera::ZoomIn);
+				InputComponent->BindAction("ZoomIn", IE_Released, this, &APawnWithCamera::ZoomOut);
+
+				//Hook up every-frame handling for our four axes (4 つの軸に各フレーム処理を接続)
+				InputComponent->BindAxis("MoveForward", this, &APawnWithCamera::MoveForward);
+				InputComponent->BindAxis("MoveRight", this, &APawnWithCamera::MoveRight);
+				InputComponent->BindAxis("CameraPitch", this, &APawnWithCamera::PitchCamera);
+				InputComponent->BindAxis("CameraYaw", this, &APawnWithCamera::YawCamera);
+			}
+
+			//Input functions (入力関数)
+			void APawnWithCamera::MoveForward(float AxisValue)
+			{
+				MovementInput.X = FMath::Clamp<float>(AxisValue, -1.0f, 1.0f);
+			}
+
+			void APawnWithCamera::MoveRight(float AxisValue)
+			{
+				MovementInput.Y = FMath::Clamp<float>(AxisValue, -1.0f, 1.0f);
+			}
+
+			void APawnWithCamera::PitchCamera(float AxisValue)
+			{
+				CameraInput.Y = AxisValue;
+			}
+
+			void APawnWithCamera::YawCamera(float AxisValue)
+			{
+				CameraInput.X = AxisValue;
+			}
+
+			void APawnWithCamera::ZoomIn()
+			{
+				bZoomingIn = true;
+			}
+
+			void APawnWithCamera::ZoomOut()
+			{
+				bZoomingIn = false;
+			}
+
+
+    [/PARAM]
+[/OBJECT]
+
+%Steps%

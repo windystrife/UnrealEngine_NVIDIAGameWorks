@@ -1,0 +1,84 @@
+﻿INTSourceChangelist:2105020
+Availability:Public
+Title:暴露游戏元素给蓝图
+Crumbs: %ROOT%, Programming, Engine/Blueprints/TechnicalGuide
+Description: 关于为蓝图暴露游戏元素的游戏参数的技术指南。
+
+[TOC(start:2)]
+
+
+## 概述
+
+作为程序员，使用蓝图可以使您的代码非常灵活，这会为您带来很多好处。比如， 
+游戏设计人员可能想在游戏中实现一种新类型的武器。您作为程序员， 
+可以像以前一样编写武器相关代码,但是您需要暴露一些重要的功能，比如 
+设计速率和Fire()函数。测试后，设计人员决定他们需要修改 
+枪支的射击速率，以便在曲线上应用。这时不需要重新编码该枪支的射击速率并重新 
+编译游戏，设计人员可以简单地到蓝图中，直接地修改射击速率，这样既可以节省设计人员的时间， 
+也可以节省程序员的时间。
+
+
+## 创建蓝图可以继承的类
+
+为了创建继承于一个类的蓝图，那么该类必须定义为 **Blueprintable(可蓝图化的)** ，这涉及到 
+在处理类定义的 `UCLASS()` 宏中添加这个关键字。该关键字使得蓝图系统 
+知道这个类的存在，以便该类显示在 **New Blueprint(新建蓝图)** 对话框的类列表中，并且可以  
+选择它作为正在创建的蓝图的父类。
+
+声明蓝图可以继承的类的最简单的格式如下所示：
+
+	UCLASS(Blueprintable)
+	class AMyBlueprintableClass : AActor
+	{
+		GENERATED_UCLASS_BODY()
+	}
+
+
+| 关键字 | 描述 |
+| -- | -- |
+| **Blueprintable** | 暴露这个类为创建蓝图时可以接受的基类。默认为是NotBlueprintable，除非从其他类继承Blueprintable关键字。子类可以继承这个属性。|
+| **BlueprintType** | 暴露这个类作为蓝图中变量可以使用的一种类型。|
+| **NotBlueprintable** | 指定这个类是不能作为创建蓝图的基类。使得父类具有的Blueprintable关键字无效。|
+
+
+## 可读和可写属性
+
+为了将在C++类中定义的一个变量暴露给继承该类的蓝图，那么那个变量在处理变量定义的 `UPROPERTY()` 宏 
+中必须使用以下列出的其中一个关键字进行定义。
+这些关键字使得蓝图系统意识到该变量的存在，从而使它显示在 **MyBlueprint（我的蓝图）** 面板中，并且可以   
+设置或访问它的值。
+
+	//Character's Health
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Character")
+	float health;
+
+| 关键字 | 描述 |
+| -- | -- |
+| **BlueprintReadOnly** | 该属性由蓝图读取，但是不能修改。|
+| **BlueprintReadWrite** | 该属性可以从蓝图中读取或写入。|
+| [REGION:tablesection]多路广播代理关键字[/REGION] ||
+| **BlueprintAssignable** | 暴露该属性来在蓝图中进行分配赋值。|
+| **BlueprintCallable** |  暴露该属性来在蓝图图表中进行调用。|
+
+## 可执行的和可重载的函数
+
+为了从蓝图中调用一个原生函数，则必须在处理函数定义的  `UFUNCTION()` 宏中使用 
+以下列出的其中一个关键字来定义函数。这些关键字使得蓝图系统意识到 
+该函数的存在，以便它可以显示在关联菜单或者Palette(控制板)中，可以添加到图表中并执行（如果它们是事件）， 
+以便可以进行重载及执行。
+
+声明BlueprintCallable（蓝图可调用）函数的最简单的形式如下所示：
+
+	//Fire a Weapon
+	UFUNCTION(BlueprintCallable, Category="Weapon")
+	void Fire();
+
+
+| 关键字 | 描述 |
+| -- | -- |
+| [REGION:tablesection]蓝图到原生代码的通信[/REGION] ||
+| **BlueprintCallable** | 这是一个可以从蓝图中调用的原生函数，它执行原生代码，修改正在调用它的对象上的一些内容或者一些其他的全局状态。这意味着它应该是“提前规划的”，或者已经清楚地知道相对于其他节点的执行顺序。我们通过白色执行连线完成这个处理。所有蓝图可调用的函数都按照它们沿着白色执行线出现的顺序进行调用。|
+| **BlueprintPure** |这是一个可以从蓝图中调用的原生函数，它执行原生代码，不会修改调用它的对象的任何内容，也不会修改任何其他的全局状态。这意味着调用该代码不会修改任何内容，它仅是取入输入，并向您提供一个输出。像数学节点(+ 、 - 、 * 等)、变量获取节点、或者任何不永久性地修改任何内容的东西都属于这类内容。这些内容不需要规划如何执行，它们没有线连接到白色执行线。编译器会根据哪个BlueprintCallable节点需要这些节点处理的数据来自动地辨别出他们。|
+| [REGION:tablesection]原生代码到蓝图的通信[/REGION] ||
+| **BlueprintImplementableEvent** | 这是我们允许原生函数调用蓝图的主要方式。它们就像您在蓝图本身内实现的虚函数。如果函数没有实现，那么该函数调用将会被忽略掉。需要注意的很重要的一点是，如果一个BlueprintImplementableEvent没有返回值或输出参数，那么它将呈现为一个事件，您可以通过右击并从蓝图的事件图表中选择它。如果他具有返回值或任何输出参数，那么它将列在 **My Blueprints(我的蓝图)** 中，并且可以通过右击它并选择 “实现”函数来重载它。注意，BlueprintImplementableEvents没有该函数的原生代码实现。|
+| **BlueprintNativeEvent** |这些关键字和上面的一样，但是它具有该函数的原生默认实现，如果蓝图没有重载该函数则调用默认实现。如果蓝图没有实现函数，您需要某种默认行为；但是在需要重载函数的地方，您又需要重载该函数，对于这种情况这个关键字是非常有用的。这些关键字的性能消耗较大，所以我们仅把它们放在需要该功能的地方。当您重载该BlueprintNativeEvent时，如果您想调用原生实现，那么通过右击该事件或函数入口节点并选择"Add call to parent" ， 您仍然可以调用原生实现。|

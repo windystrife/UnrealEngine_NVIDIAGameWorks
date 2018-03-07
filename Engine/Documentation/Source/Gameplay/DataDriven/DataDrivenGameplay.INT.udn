@@ -1,0 +1,153 @@
+Availability:Public
+Title: Data Driven Gameplay Elements
+Crumbs:%ROOT%
+Description:Driving gameplay elements using externally stored data.
+version: 4.9
+type:reference
+tags:Gameplay
+
+[toc(start:2 end:2)]
+
+Data driven gameplay helps mitigate the amount of work and complexity involved, as well as providing 
+the ability to visualize and parameterize data creation and progression, for games that have an extended 
+lifetime well beyond that of a typical boxed game, and require constant tweaking and balancing of data 
+based on player feedback. The ability to move data out to **Microsoft Excel** or other spreadsheet documents that can be 
+maintained using proven tools and then imported to automatically take effect in the game.
+
+There are two new ways that data can be imported into UE4 through Excel documents:
+
+* **DataTables**
+* **CurveTables**
+
+
+These Excel documents are .xlsm (macro enabled Excel documents) that have macro based export 
+buttons to enable easily exporting to the intermediate data format, comma separated variables (.csv). 
+These documents all reside in a single location to help make data easy to find and modify.
+
+* [](Example.xlsm) (**Right-click** and **Save as...** to download)
+
+
+## Data Tables
+
+DataTables, as the name implies, is a table of miscellaneous but related data grouped in a meaningful 
+and useful way, where the data fields can be any valid UObject property, including asset references. Before a designer can import a 
+CSV file into a DataTable, a programmer has to create the row container telling the engine how to interpret the data. 
+These tables consist of column names that have a 1:1 mapping to a given code based UStruct and its variables, 
+which must inherit from **FTableRowBase** to be recognized by the importer. 
+
+The first column is expected to be named Name and contains the names by which each row is accessed for use in game. Subsequent columns 
+have a variable name for a heading and below, in the same column, the data for that row/column intersection. Given this 
+format, a single row maps 1:1 directly to the structure inherited from FTableRowBase.
+
+### Example
+
+As an example, here is a definition for level up experience data and the CSV document that supplies the data to the game:
+
+	/** Structure that defines a level up table entry */
+	USTRUCT(BlueprintType)
+	struct FLevelUpData : public FTableRowBase
+	{
+		GENERATED_USTRUCT_BODY()
+
+	public:
+
+		FLevelUpData()
+		: XPtoLvl(0)
+		, AdditionalHP(0)
+		{}
+
+		/** The 'Name' column is the same as the XP Level */
+
+		/** XP to get to the given level from the previous level */
+		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=LevelUp)
+		int32 XPtoLvl;
+
+		/** Extra HitPoints gained at this level */
+		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=LevelUp)
+		int32 AdditionalHP;
+
+		/** Icon to use for Achivement */
+		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=LevelUp)
+		TSoftObjectPtr<UTexture> AchievementIcon;
+	};
+
+
+**CSV Document:**
+
+	Name,XPtoLvl,AdditionalHP,AchievementIcon
+	1,0,0,"Texture2d'/Game/Textures/AchievementIcon1'"
+	2,1000,9,"Texture2d'/Game/Textures/AchievementIcon2'"
+	3,1000,10,"Texture2D'/Game/Textures/AchievementIcon3'"
+	4,1500,12,"Texture2D'/Game/Textures/AchievementIcon4'"
+	5,2000,14,"Texture2D'/Game/Textures/AchievementIcon5'"
+
+[REGION:tip]
+The double quotes around the asset type are important for the property importing pipeline. Without them, the text is imported as Texture2d'. 
+[/REGION]
+
+## Data Curves
+
+Data Curves work in a somewhat similar manner to DataTables, however they only support floating point 
+types. As with DataTables, the first column is named Name and contains the names by which each row 
+is accessed for use in game. Each column heading after the first stores the X-axis variable for a 
+curve to be plotted. The data under this heading is the Y-axis value for the given row. Given this 
+format, a single row corresponds to a curve that code can access and interpolate data along.
+
+### Example
+
+Here is an example table for damage progression:
+
+[REGION:simpletable]
+|                      | 0   | 1   | 2   | 3   |
+| -------------------- | --- | --- | --- | --- |
+| Melee_Damage         | 15  | 20  | 25  | 30  |
+| Melee_KnockBack      | 1   | 2   | 4   | 8   |
+| Melee_KnockBackAngle | 10  | 45  | 60  | 65  |
+| Melee_StunTime       | 0   | 1   | 5   | 7   |
+[/REGION]
+
+## Importing Process
+
+Importing a CSV file is a simple process:
+
+1.	Save your file out of Excel or another spreadsheet software with the .csv extension.
+2.	Open Unreal Editor, and click on **Import** in the **Content Browser**.
+3.  Navigate and select the CSV file you want to import as a DataTable.
+4.  Finally, choose the row representation from the drop down list, in this case, LevelUpData.
+
+	![](levelupdata_options.png)
+
+	This creates a DataTable object in the current directory of the **Content Browser**.
+
+	![](datatableobject.png)
+
+	You can view the contents of the DataTable in the editor by **Double-clicking** on the object. You can update the object by **Right-clicking** on the object and selecting **Reimport** from the menu. 
+	Note that the original file path is used when reimporting the object. Here is the view of the data just after importing:
+	
+	![](datatableview.jpg)
+
+## Data Hookup
+
+Hooking up data from these tables is quite easy. From a programmer's perspective, all you must do is 
+place a Blueprint-exposed variable of either **FDataTableRowHandle** or **FCurveTableRowHandle**, 
+depending on if you want a DataTable or CurveTable, respectively. From a content provider's point of 
+view, this will expose a data field with two subfields:
+
+1.	DataTable/CurveTable - this is the content reference to the table that holds the data.
+2.	RowName - this is the name in the first column of the row you wish to get data from.
+
+
+## Data Usage (Programmers Only)
+
+Once you have the data hooked up, using the data is quite simple. The handle structures provide helper 
+functions (**FindRow()** and **GetCurve()**) that allow you to retrieve either a struct or curve filled with data. 
+In the case of a FCurveTableRowHandle, an FRichCurve pointer is returned. The FDataTableRowHandle, however, 
+allows you to specify a structure in the template function call. This structure can be the final structure 
+or any of its parents in the inheritance hierarchy.
+
+One final note is that all structures and curves returned should not be cached further than the local scope 
+of a function. This is to ensure that if the table is refreshed via re-import, the data changes take effect 
+immediately and that no invalid pointers are accessed.
+
+In the above DataTable example, the asset that is referenced is a lazy loaded asset (TSoftObjectPtr handles this). 
+If the Asset field type was set to UTexture, all of the assets would be loaded whenever the DataTable was loaded.

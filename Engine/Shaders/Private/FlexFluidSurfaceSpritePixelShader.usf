@@ -1,0 +1,151 @@
+/*=============================================================================
+	FlexFluidSurfaceRendering.cpp: fluid rendering
+	Copyright (c) 2012 NVIDIA Corporation. All rights reserved.
+=============================================================================*/
+
+#include "Common.ush"
+
+float ParticleSizeScaleInv;
+
+void SphereDepthMainPS(
+	float4 Position : SV_POSITION,
+	float4 ViewPos : TEXCOORD7,
+	float4 ParticleViewPosAndSize : PARTICLE_VIEW_POS_AND_SIZE,
+	out float ViewDepth : SV_TARGET0,
+	out float Depth : SV_DEPTH
+	)
+{
+	float3 LocalPos = ViewPos.xyz - ParticleViewPosAndSize.xyz;
+	float Radius = ParticleViewPosAndSize.w;
+
+	float Radius2 = Radius*Radius;
+	float Dist2 = dot(LocalPos, LocalPos);
+
+	// Discard pixels outside of the sphere
+	if (Dist2 >= Radius2)
+		discard;
+
+	float DepthOffset = sqrt(Radius2 - Dist2);
+
+	float4 SurfaceViewPos = float4(ViewPos.x, ViewPos.y, ViewPos.z - DepthOffset, 1.0f); 
+	float4 SurfaceClipPos = mul(SurfaceViewPos, View.ViewToClip);
+	
+	//offset to get better coverage by shadow stencil operations (relevant for PreShadows)
+	float ShadowOffsetZ = Radius*0.5f;
+	
+	ViewDepth = SurfaceViewPos.z + ShadowOffsetZ;
+
+	//debug visualization of depth values
+	//float debugvis = clamp((SurfaceViewPos.z - 100.0)/900.0f, 0.0, 1.0); 
+	//ViewDepth = debugvis;
+
+	Depth = SurfaceClipPos.z/SurfaceClipPos.w;
+}
+
+float sqr(float a) { return a*a; }
+
+float Sign(float x) { return x < 0.0 ? -1.0: 1.0; }
+
+bool SolveQuadratic(float a, float b, float c, out float minT, out float maxT)
+{
+	if (a == 0.0 && b == 0.0)
+	{
+		minT = maxT = 0.0;
+		return false;
+	}
+
+	float discriminant = b*b - 4.0*a*c;
+
+	if (discriminant < 0.0)
+	{
+		return false;
+	}
+
+	float t = -0.5*(b + Sign(b)*sqrt(discriminant));
+	minT = t / a;
+	maxT = c / t;
+
+	//float t = 0.5f/a;
+	//float q = sqrt(discriminant);
+	//minT = (-b + q)*t;
+	//maxT = (-b - q)*t;
+	
+	if (minT > maxT)
+	{
+		float tmp = minT;
+		minT = maxT;
+		maxT = tmp;
+	}
+
+	return true;
+}
+
+float TexResScale;
+
+void EllipsoidDepthMainPS(
+	float4 Position : SV_POSITION,
+	float4x4 InvQuadric : INV_QUADRIC,
+	out float ViewDepth : SV_TARGET0,
+	out float Depth : SV_DEPTH
+	)
+{
+	ResolvedView = ResolveView();
+
+	float4 ScreenPos;
+	ScreenPos.xy = ( (Position.xy - View.ViewRectMin.xy*TexResScale) / (View.ViewSizeAndInvSize.xy*TexResScale) - 0.5 ) * float2(2,-2);	// BRG - check, was ViewSizeAndSceneTexelSize
+	ScreenPos.zw = float2(-1, 1);
+	float4 ViewDir = mul(ScreenPos, ResolvedView.ClipToView);
+
+	// Ray to parameter space
+	float4 RayDir = mul(float4(ViewDir.xyz, 0.0), InvQuadric);
+	float4 RayOrigin = InvQuadric[3];
+
+	// set up quadratric equation
+	float A = sqr(RayDir.x) + sqr(RayDir.y) + sqr(RayDir.z); // - sqr(RayDir.w);
+	float B = RayDir.x*RayOrigin.x + RayDir.y*RayOrigin.y + RayDir.z*RayOrigin.z - RayDir.w*RayOrigin.w;
+	float C = sqr(RayOrigin.x) + sqr(RayOrigin.y) + sqr(RayOrigin.z) - sqr(RayOrigin.w);
+
+	float MinT;
+	float MaxT;
+
+	if (SolveQuadratic(A, 2.0*B, C, MinT, MaxT))
+	{
+		float3 ViewPos = ViewDir.xyz*MinT;
+		float4 ClipPos = mul(float4(ViewPos, 1.0), ResolvedView.ViewToClip);
+
+		//offset to get better coverage by shadow stencil operations (relevant for PreShadows)
+		float ShadowOffsetZ = 0.0f; // Radius*0.5f;
+
+		ViewDepth = ViewPos.z + ShadowOffsetZ;
+		Depth = ClipPos.z / ClipPos.w;
+		return;
+	}
+	else
+	{
+		Depth = 0.0f;
+		discard;	
+	}
+}
+
+float SphereThicknessMainPS(
+	float4 Position : SV_POSITION,
+	float4 ViewPos : TEXCOORD7,
+	float4 ParticleViewPosAndSize : PARTICLE_VIEW_POS_AND_SIZE
+	) : COLOR
+{
+	float3 LocalPos = ViewPos.xyz - ParticleViewPosAndSize.xyz;
+	float Radius = ParticleViewPosAndSize.w;
+
+	float Radius2 = Radius*Radius;
+	float Dist2 = dot(LocalPos, LocalPos);
+
+	// Discard pixels outside of the sphere
+	if (Dist2 >= Radius2)
+		discard;
+
+	float DepthOffset = sqrt(Radius2 - Dist2);
+
+	// scale thickness with original particle size
+	// assuming that particle radius is equivalent with rest distance between particles
+	return DepthOffset*ParticleSizeScaleInv;
+}

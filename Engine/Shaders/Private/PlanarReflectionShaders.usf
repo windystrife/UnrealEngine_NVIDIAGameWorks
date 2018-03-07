@@ -1,0 +1,146 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+ PlanarReflectionShaders.usf
+=============================================================================*/
+
+#include "Common.ush"
+#include "DeferredShadingCommon.ush"
+#include "PlanarReflectionShared.ush"
+
+Texture2D SceneColorInputTexture;
+SamplerState SceneColorInputSampler;
+
+float4 SampleSceneColorInput(float2 UV)
+{
+	return Texture2DSampleLevel(SceneColorInputTexture, SceneColorInputSampler, UV, 0);
+}
+
+float GaussianWeight1d(float u, float KernelRadius)
+{
+	float TwoKernelRadiusSq = 2 * KernelRadius * KernelRadius;
+	return exp(-u * u / TwoKernelRadiusSq) / sqrt(PI * TwoKernelRadiusSq);
+}
+
+float InvPrefilterRoughnessDistance;
+
+void VerticalSample(float2 InUV, float y, float KernelRadiusY, float CenterDistanceToPlane, float CenterReflectionDistance, bool bSearchUp, inout float4 AccumulatedColor, inout float AccumulatedWeight)
+{
+	float2 SampleUV = float2(InUV.x, InUV.y + y * View.BufferSizeAndInvSize.w);
+	float SampleDepth = CalcSceneDepth(SampleUV);
+	float SampleReflectionDistance = max(SampleDepth - CenterDistanceToPlane, 0);
+	float ScatterKernelSize = max(KernelRadiusY * saturate(SampleReflectionDistance * InvPrefilterRoughnessDistance), 1);
+	float SampleWeight = GaussianWeight1d(y, ScatterKernelSize);
+	float ColorHalfTexelOffset = .5f * View.BufferSizeAndInvSize.w;
+	float YPosition = InUV.y * View.BufferSizeAndInvSize.y + y;
+
+	if (bSearchUp)
+	{
+		// Mask by depth, don't accept contribution from pixels much further than the mirror reflection depth
+		// This prevents reading from background areas that were revealed due to the clip plane
+		float DepthMask = SampleReflectionDistance < CenterReflectionDistance * 2;
+		SampleWeight *= DepthMask;
+		// Can't use bilinear filtering when we are depth masking
+		ColorHalfTexelOffset = 0;
+
+		float ViewportMask = YPosition > View.ViewRectMin.y;
+		SampleWeight *= ViewportMask;
+	}
+	else
+	{
+		float ViewportMask = YPosition < View.ViewRectMin.y + View.ViewSizeAndInvSize.y;
+		SampleWeight *= ViewportMask;
+	}
+
+	// Half texel offset for bilinear
+	float4 SampleColor = SampleSceneColorInput(SampleUV + float2(0, ColorHalfTexelOffset));
+
+	AccumulatedColor += SampleColor * SampleWeight;
+	AccumulatedWeight += SampleWeight;
+}
+
+float KernelRadiusY;
+
+void PrefilterPlanarReflectionPS(
+	float2 InUV : TEXCOORD0,
+	float3 ScreenVector : TEXCOORD1,
+	float4 SVPos : SV_POSITION,
+	out float4 OutColor : SV_Target0
+	)
+{
+#if ENABLE_PLANAR_REFLECTIONS_PREFILTER
+	BRANCH
+	if (KernelRadiusY > 0)
+	{
+		// Compute distance from camera origin to the camera vector intersection with the reflection plane
+		float CenterDistanceToPlane = -(dot(View.WorldCameraOrigin, ReflectionPlane.xyz) - ReflectionPlane.w) / dot(normalize(ScreenVector), ReflectionPlane.xyz);
+		// Note: reading from depth after the temporal AA pass
+		// This works without jittering because we disable temporal AA jittering for planar reflections
+		float CenterSceneDepth = CalcSceneDepth(InUV);
+		float CenterReflectionDistance = max(CenterSceneDepth - CenterDistanceToPlane, 0);
+
+		float4 AccumulatedColor = 0;
+		float AccumulatedWeight = 0;
+
+		// Two texels at a time with bilinear
+		LOOP
+		for (float y = 0; y < KernelRadiusY; y += 2)
+		{
+			VerticalSample(InUV, y, KernelRadiusY, CenterDistanceToPlane, CenterReflectionDistance, false, AccumulatedColor, AccumulatedWeight);
+		}
+
+		LOOP
+		for (float y = -2; y > -KernelRadiusY; y -= 2)
+		{
+			VerticalSample(InUV, y, KernelRadiusY, CenterDistanceToPlane, CenterReflectionDistance, true, AccumulatedColor, AccumulatedWeight);
+		}
+
+		AccumulatedColor = AccumulatedColor / max(AccumulatedWeight, .0001f);
+
+		// We cleared the planar reflection alpha to 1, and base pass writes 0
+		float ValidContentMask = 1 - AccumulatedColor.a;
+		OutColor = float4(AccumulatedColor.rgb, ValidContentMask);
+	}
+	else
+#endif // ENABLE_PLANAR_REFLECTIONS_PREFILTER
+	{
+		float4 SceneColorValue = SampleSceneColorInput(InUV);
+		// We cleared the planar reflection alpha to 1, and base pass writes 0
+		float ValidContentMask = 1 - SceneColorValue.a;
+		OutColor = float4(SceneColorValue.xyz, ValidContentMask);
+	}
+
+// WaveWorks Start
+	if (PlanarReflectionWaveWorksParameters.w > 0)
+	{
+		float CenterDistanceToPlane = -(dot(View.WorldCameraOrigin, ReflectionPlane.xyz) - ReflectionPlane.w) / dot(normalize(ScreenVector), ReflectionPlane.xyz);
+		float CenterSceneDepth = CalcSceneDepth(InUV);
+		float CenterReflectionDistance = max(CenterSceneDepth - CenterDistanceToPlane, 0);
+
+		OutColor *= float4((pow(2.718, PlanarReflectionWaveWorksParameters.xyz * -PlanarReflectionWaveWorksParameters.w * CenterReflectionDistance / 100.0)), 1.0);
+	}
+// WaveWorks End
+}
+
+void PlanarReflectionPS(
+	float2 InUV : TEXCOORD0,
+	float3 ScreenVector : TEXCOORD1,
+	float4 SVPos : SV_POSITION,
+	out float4 OutColor : SV_Target0
+	)
+{
+	ResolvedView = ResolveView();
+	OutColor = 0;
+
+	float SceneDepth = CalcSceneDepth(InUV);
+	float3 WorldPosition = ScreenVector * SceneDepth + View.WorldCameraOrigin;
+		
+	FScreenSpaceData ScreenSpaceData = GetScreenSpaceData(InUV);
+
+	// Skip unlit pixels (skybox)
+	BRANCH
+	if (ScreenSpaceData.GBuffer.ShadingModelID > 0)
+	{
+		OutColor = ComputePlanarReflections(WorldPosition, ScreenSpaceData.GBuffer.WorldNormal, ScreenSpaceData.GBuffer.Roughness, PlanarReflectionSampler);
+	}
+}

@@ -1,0 +1,546 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	PostProcessMotionBlur.usf: PostProcessing MotionBlur
+=============================================================================*/
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+#include "DeferredShadingCommon.ush"		// FGBufferData
+#include "FastMath.ush"
+#include "Random.ush"
+
+// from the paper: We use SOFT Z EXTENT = 1mm to 10cm for our results
+#define SOFT_Z_EXTENT 1
+
+// 0:off / 1:on, useful to debug the motionblur algorithm
+#define MOTIONBLUR_TESTCHART 0
+
+// --------------------------------------------------------------------------
+
+// MOTION_BLUR_QUALITY == 0:visualize, 1:low, 2:medium, 3:high, 4:very high
+
+// to scale to normalized motionblur velocity
+// xy:includes y flip, zw:unused
+float4 VelocityScale;
+
+// xy:IndividualVelocityScale.xy zw:unused, from postprocess settings
+float4 MotionBlurParameters;
+
+// ------------------------------------------
+
+uint GetStepCountFromQuality()
+{
+#if MOTION_BLUR_QUALITY == 1
+	return 4;
+#elif MOTION_BLUR_QUALITY == 2
+	return 6;
+#elif MOTION_BLUR_QUALITY == 3
+	return 8;
+#else // MOTION_BLUR_QUALITY == 4
+	return 16;
+#endif
+}
+
+uint	bDrawMax;
+
+void VelocityScatterVS(
+	uint VId : SV_VertexID,
+	uint IId : SV_InstanceID,
+	out nointerpolation float4 OutColor : TEXCOORD0,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	OutPosition =  float4(0, 0, 0, 1);
+
+	// needs to be the same on C++ side (faster on NVIDIA and AMD)
+	uint QuadsPerInstance = 8;
+
+	// remap the indices to get vertexid to VId and quadid into IId
+	IId = IId * QuadsPerInstance + (VId / 4);
+	VId = VId % 4;
+
+	// triangle A: 0:left top, 1:right top, 2: left bottom
+	// triangle B: 3:right bottom, 4:left bottom, 5: right top
+	float2 CornerOffset = float2(VId % 2, VId / 2) * 2 - 1;
+
+	uint2 PixelPos = uint2( IId % ViewportRect.z, IId / ViewportRect.z );
+
+	BRANCH
+	if( PixelPos.y >= ViewportRect.w )
+	{
+		OutColor = 0;
+		return;
+	}
+
+	float4 MinMaxVelocity = PostprocessInput0[ PixelPos ];
+	OutColor = MinMaxVelocity;
+
+	float4 MinMaxVelocityPixels = MinMaxVelocity * MotionBlurParameters.z;
+	float2 VelocityPixels = MinMaxVelocityPixels.zw;
+	
+#if 1
+	BRANCH
+	if( dot( VelocityPixels, VelocityPixels ) * 16*16 <= 0.25 )
+	{
+		OutPosition.xy = ( PixelPos + CornerOffset * 0.5 - ScreenPosToPixel.zw ) / ScreenPosToPixel.xy;
+		OutPosition.z = 0.0002;		// zero clips
+		return;
+	}
+#endif
+
+	float  VelocityLengthPixelsSqr = dot( VelocityPixels, VelocityPixels );
+	float  VelocityLengthPixelsInv = rsqrtFast( VelocityLengthPixelsSqr );
+	float  VelocityLengthPixels = VelocityLengthPixelsSqr * VelocityLengthPixelsInv;
+	float2 VelocityDir = VelocityPixels * VelocityLengthPixelsInv;
+
+	// Project pixel corner on to dir. This is the oriented extent of a pixel.
+	// 1/2 pixel because shape is swept tile
+	// +1/2 pixel for conservative rasterization
+	// 99% to give epsilon before neighbor is filled. Otherwise all neighbors lie on edges of quad when no velocity in their direction.
+	float Extent = abs( VelocityDir.x ) + abs( VelocityDir.y );
+	CornerOffset *= float2( VelocityLengthPixels, 0 ) + Extent.xx * 0.99;
+
+	const float TwoPixelRadius = sqrt( 2.0 );
+	//CornerOffset *= float2( VelocityLengthPixels, 0 ) + TwoPixelRadius.xx;
+
+	// Orient along velocity direction
+	float2 AxisX = VelocityDir;
+	float2 AxisY = float2( -VelocityDir.y, VelocityDir.x );
+	CornerOffset = AxisX * CornerOffset.x + AxisY * CornerOffset.y;
+		
+	OutPosition.xy = ( PixelPos + CornerOffset - ScreenPosToPixel.zw ) / ScreenPosToPixel.xy;
+
+	// Depth ordered by velocity length
+	OutPosition.z = bDrawMax ? VelocityLengthPixels : length( MinMaxVelocityPixels.xy );
+	OutPosition.z = clamp( OutPosition.z / ScreenPosToPixel.x * 0.5, 0.0002, 0.999 );
+}
+
+void VelocityScatterPS(
+	nointerpolation float4 InColor : TEXCOORD0,
+	out float4 OutColor : SV_Target0
+	)
+{
+	OutColor = InColor;
+}
+
+
+
+//-----------------------------------
+
+float2 DepthCmp( float CenterDepth, float SampleDepth, float DepthScale )
+{
+	return saturate( 0.5 + float2( DepthScale, -DepthScale ) * (SampleDepth - CenterDepth) );
+}
+
+float2 SpreadCmp( float OffsetLength, float2 SpreadLength, float PixelToSampleScale )
+{
+	return saturate( PixelToSampleScale * SpreadLength - max( OffsetLength - 1, 0 ) );
+}
+
+float SampleWeight( float CenterDepth, float SampleDepth, float OffsetLength, float CenterSpreadLength, float SampleSpreadLength, float PixelToSampleScale, float DepthScale )
+{
+	float2 DepthWeights = DepthCmp( CenterDepth, SampleDepth, DepthScale );
+	float2 SpreadWeights = SpreadCmp( OffsetLength, float2( CenterSpreadLength, SampleSpreadLength ), PixelToSampleScale );
+	return dot( DepthWeights, SpreadWeights );
+}
+
+float2 DecodeVelocity( float2 Velocity )
+{
+#if 1
+	// 11:11:10  (VelocityLength, VelocityAngle, Depth)
+	float VelocityLength = Velocity.x;
+	float VelocityAngle = Velocity.y * (2 * PI) - PI;
+	sincos( VelocityAngle, Velocity.x, Velocity.y );
+	Velocity *= VelocityLength;
+#else
+	// 11:11:10 (Velocity.xy, Depth)
+	// Stored signed value in 6e5 unsigned float
+	// Extract sign from top bit of exponent
+	Velocity *= Velocity >= 2.0 ? (-1.0 / 32768.0) : 1;
+#endif
+	return Velocity;
+}
+
+float GetVelocityLengthPixels( float2 EncodedVelocity )
+{
+#if 1
+	// 11:11:10  (VelocityLength, VelocityAngle, Depth)
+	float VelocityLength = EncodedVelocity.x;
+	VelocityLength *= MotionBlurParameters.y;
+	return min( VelocityLength, MotionBlurParameters.w );
+#else
+	float2 Velocity = DecodeVelocity( EncodedVelocity ) * ScreenPosToPixel.xy;	// in pixels
+	float  VelocityLengthSqr = dot( Velocity, Velocity );
+	float  VelocityLength = sqrtFast( VelocityLengthSqr );
+	return min( VelocityLength, MotionBlurParameters.w );
+#endif
+}
+
+#define CLAMP_UV 1
+
+float4 MainMotionBlurCommon(float2 UV, float2 ScreenSpacePos, uint2 PixelPos)
+{
+	float4 OutColor = 0;
+	const uint StepCount = GetStepCountFromQuality() / 2;
+
+#if 0
+	float2 PosMod = float2( PixelPos & 1 );
+	float Dither = ( PosMod.x * 0.5 - 0.25 ) * ( PosMod.y * 2 - 1 );
+	float Random = RandFast( PixelPos );
+	float Random2 = RandFast( PixelPos, 5521 );
+#else
+	float Random = InterleavedGradientNoise( PixelPos, 0 );
+	float Random2 = InterleavedGradientNoise( PixelPos, 1 );
+#endif
+
+	float2 TileJitter = ( float2( Random, Random2 ) - 0.5 ) * 0.5;
+	float2 TileUV = min( ( PixelPos - ViewportRect.xy + 0.5 ) / 16.0 + TileJitter, ViewportRect.zw ) * PostprocessInput3Size.zw;
+
+	float4 MinMaxVelocity = PostprocessInput3.SampleLevel(PostprocessInput3Sampler, TileUV, 0);
+	//float4 MinMaxVelocity = PostprocessInput3[ ( PixelPos - ViewportRect.xy ) / 16 ];
+
+	float2 MinVelocityPixels = MinMaxVelocity.xy * MotionBlurParameters.y;
+	float2 MaxVelocityPixels = MinMaxVelocity.zw * MotionBlurParameters.y;
+
+	float MinVelocityLengthSqrPixels = dot( MinVelocityPixels, MinVelocityPixels );
+	float MaxVelocityLengthSqrPixels = dot( MaxVelocityPixels, MaxVelocityPixels );
+
+	// TODO expose cvars
+	bool bSkipPath = MaxVelocityLengthSqrPixels < 0.25;
+	bool bFastPath = MinVelocityLengthSqrPixels > 0.4 * MaxVelocityLengthSqrPixels;
+
+	float4 CenterColor = PostprocessInput0.SampleLevel( PostprocessInput0Sampler, UV, 0 );
+
+	BRANCH
+	if( bSkipPath )
+	{
+		SetSceneColorLayoutToFloat4(OutColor, CenterColor);
+		return OutColor;
+	}
+
+	float2 MinViewportUV = (View.ViewRectMin + 0.5) * View.BufferSizeAndInvSize.zw;
+	float2 MaxViewportUV = (View.ViewRectMin + View.ViewSizeAndInvSize.xy - 0.5) * View.BufferSizeAndInvSize.zw;
+
+#if 1
+	float4 SearchVectorPixels = float4( MaxVelocityPixels, -MaxVelocityPixels );
+#else
+	// Clip MaxVelocity to screen rect
+	float2 InvVelocityScreen = ScreenPosToPixel.x * rcp( MaxVelocityPixels + 0.00001f );
+	float2 MinIntersect = -InvVelocityScreen - ScreenSpacePos * InvVelocityScreen;
+	float2 MaxIntersect =  InvVelocityScreen - ScreenSpacePos * InvVelocityScreen;
+	float4 FarIntersect = float4( max( MinIntersect, MaxIntersect ), max( -MinIntersect, -MaxIntersect ) );
+	float2 Intersect = saturate(min(FarIntersect.xz, FarIntersect.yw) );
+
+	// +/-
+	float4 SearchVectorPixels = MaxVelocityPixels.xyxy * float4( Intersect.xx, -Intersect.yy );
+#endif
+	float4 SearchVector = SearchVectorPixels * PostprocessInput0Size.zwzw;
+
+	// converts pixel length to sample steps
+	float PixelToSampleScale = StepCount * rsqrt( dot( MaxVelocityPixels, MaxVelocityPixels ) );
+
+	BRANCH
+	if( bFastPath )
+	{
+		float4 ColorAccum = 0;
+
+		UNROLL
+		for( uint i = 0; i < StepCount; i++ )
+		{
+			float2 OffsetLength = (float)i + 0.5 + float2( Random - 0.5, 0.5 - Random );
+			float2 OffsetFraction = OffsetLength / StepCount;
+
+			float2 SampleUV[2];
+			SampleUV[0] = UV + OffsetFraction.x * SearchVector.xy;
+			SampleUV[1] = UV + OffsetFraction.y * SearchVector.zw;
+
+#if CLAMP_UV
+			SampleUV[0] = clamp( SampleUV[0], MinViewportUV, MaxViewportUV );
+			SampleUV[1] = clamp( SampleUV[1], MinViewportUV, MaxViewportUV );
+#endif
+
+			ColorAccum += PostprocessInput0.SampleLevel( PostprocessInput0Sampler, SampleUV[0], 0 );
+			ColorAccum += PostprocessInput0.SampleLevel( PostprocessInput0Sampler, SampleUV[1], 0 );
+		}
+	
+		ColorAccum *= 0.5 / StepCount;
+
+		OutColor = ColorAccum;
+	}
+	else
+	{
+		float3 CenterVelocityDepth = PostprocessInput2.SampleLevel( PostprocessInput2Sampler, UV, 0 ).xyz;
+		float  CenterDepth = CenterVelocityDepth.z;
+		float  CenterVelocityLength = GetVelocityLengthPixels( CenterVelocityDepth.xy );
+		
+		float4 ColorAccum = 0;
+		float  ColorAccumWeight = 0;
+
+		UNROLL
+		for( uint i = 0; i < StepCount; i++ )
+		{
+			float2 SampleUV[2];
+			float4 SampleColor[2];
+			float  SampleDepth[2];
+			float  SampleVelocityLength[2];
+			float  Weight[2];
+
+			float2 OffsetLength = (float)i + 0.5 + float2( Random - 0.5, 0.5 - Random );
+			float2 OffsetFraction = OffsetLength / StepCount;
+
+			SampleUV[0] = UV + OffsetFraction.x * SearchVector.xy;
+			SampleUV[1] = UV + OffsetFraction.y * SearchVector.zw;
+
+#if CLAMP_UV
+			SampleUV[0] = clamp( SampleUV[0], MinViewportUV, MaxViewportUV );
+			SampleUV[1] = clamp( SampleUV[1], MinViewportUV, MaxViewportUV );
+#endif
+
+			UNROLL
+			for( uint j = 0; j < 2; j++ )
+			{
+				float3 SampleVelocityDepth = PostprocessInput2.SampleLevel( PostprocessInput2Sampler, SampleUV[j], 0 ).xyz;
+				SampleColor[j] = PostprocessInput0.SampleLevel( PostprocessInput0Sampler, SampleUV[j], 0 );
+				SampleDepth[j] = SampleVelocityDepth.z;
+
+				// in pixels
+				SampleVelocityLength[j] = GetVelocityLengthPixels( SampleVelocityDepth.xy );
+
+				Weight[j] = SampleWeight( CenterDepth, SampleDepth[j], OffsetLength.x, CenterVelocityLength, SampleVelocityLength[j], PixelToSampleScale, SOFT_Z_EXTENT );
+			}
+		
+			bool2 Mirror = bool2( SampleDepth[0] > SampleDepth[1], SampleVelocityLength[1] > SampleVelocityLength[0] );
+			Weight[0] = all( Mirror ) ? Weight[1] : Weight[0];
+			Weight[1] = any( Mirror ) ? Weight[1] : Weight[0];
+			
+			ColorAccum += Weight[0] * SampleColor[0] + Weight[1] * SampleColor[1];
+			ColorAccumWeight += Weight[0] + Weight[1];
+		}
+	
+		ColorAccum			*= 0.5 / StepCount;
+		ColorAccumWeight	*= 0.5 / StepCount;
+
+		OutColor = ColorAccum + ( 1 - ColorAccumWeight ) * CenterColor;
+	}
+
+#if !POST_PROCESS_ALPHA
+	OutColor.a = 0;
+#endif
+
+	return OutColor;
+}
+
+void MainPS(
+	in noperspective float4 UVAndScreenPos : TEXCOORD0,
+	in float4 SvPosition : SV_Position,		// after all interpolators
+	out float4 OutColor : SV_Target0
+	)
+{
+	// Screen Quad UV 0..1
+	float2 UV = UVAndScreenPos.xy;
+	// screen position in [-1, 1] screen space
+	float2 ScreenSpacePos = UVAndScreenPos.zw;
+	uint2 PixelPos = SvPosition.xy;
+
+	OutColor = MainMotionBlurCommon(UV, ScreenSpacePos, PixelPos);
+}
+
+#if COMPUTESHADER
+// xy: Unused, zw: ThreadToUVScale
+float4 MotionBlurComputeParams;
+RWTexture2D<float4> RWOutComputeTex;
+
+[numthreads(THREADGROUP_SIZEX, THREADGROUP_SIZEY, 1)]
+void MainCS(uint2 DispatchThreadId : SV_DispatchThreadID)
+{
+	float2 PxPosition = ((float2)DispatchThreadId + View.ViewRectMin.xy + 0.5f);
+	float2 UV = PxPosition.xy * MotionBlurComputeParams.zw;
+	float4 SvPosition = float4(UV*2-1,0,1);
+
+	if (IsComputeUVOutOfBounds(UV))
+	{
+		return;
+	}
+
+	float4 OutColor = MainMotionBlurCommon(UV, SvPosition.xy, (uint2)PxPosition);
+
+	uint2 PixelPos = DispatchThreadId + (uint2)View.ViewRectMin.xy;
+	RWOutComputeTex[PixelPos] = OutColor;
+}
+#endif
+
+// ------------------------------------------
+
+// debug motionblur (very useful, keep)
+// @param ScreenPos -1..1 -1..1 for viewport
+// @param Velocity in -1..1 range for full motionblur
+// @apram Color RGB and depth in alpha
+// @param AvgObject 0:background, 1:foregound
+void OverrideWithTestChart(float2 ScreenPos, inout float2 ObjectVelocity, inout float2 BackgroundVelocity, inout float4 Color, inout float AvgObject)
+{
+#if MOTIONBLUR_TESTCHART == 1
+	// needs to be inside the loop to prevent NVIDIA driver optimizetion (blinking)
+	float2 PixelPos = ScreenPos * ScreenPosToPixel.xy + ScreenPosToPixel.zw + 0.5f - 25;
+	float3 BackgroundColor = lerp(0.0, 0.3f, PseudoRandom(PixelPos)); 
+	float3 ForegroundColor = lerp(float3(1, 0, 0), float3(1, 1, 0), PseudoRandom(PixelPos)); 
+
+	int2 tile = (int2)floor(PixelPos / 12.0f);
+	int2 experiment = (int2)floor(tile / 5.0f);
+
+	if(experiment.x >= 0 && experiment.y >= 0 && experiment.x < 10 && experiment.y < 5)
+	{
+		int2 localtile = uint2(tile) % 5;
+
+		bool bForeground = localtile.x == 2 && localtile.y == 2;
+
+		Color.rgb = bForeground ? ForegroundColor : BackgroundColor;
+
+		// depth
+		Color.a = bForeground ? 100.0f : 1000.0f;
+
+		bool bLeftSide = experiment.x < 5;
+
+		if(!bLeftSide)
+		{
+			experiment.x -= 5;
+		}
+
+		float ForegroundAngle = (experiment.x - 1) * (6.283f / 12);
+		float BackgroundAngle = (experiment.y - 1) * (6.283f / 12) + 3.1415f/2;
+
+		// ForegroundR with very small amounts needs extra testing so we do a non linear scale
+		float ForegroundR = pow(experiment.x / 5.0f, 2);
+		float BackgroundR = pow(experiment.y / 5.0f, 2);
+
+		float2 ForegroundXY = ForegroundR * float2(sin(ForegroundAngle), cos(ForegroundAngle));
+		float2 BackgroundXY = BackgroundR * float2(sin(BackgroundAngle), cos(BackgroundAngle));
+
+		BackgroundVelocity.xy = BackgroundXY;
+
+		if(bLeftSide)
+		{
+			ObjectVelocity.xy = ForegroundXY;
+			AvgObject = bForeground;
+		}
+		else
+		{
+			ObjectVelocity.xy = bForeground ? ForegroundXY : BackgroundXY;
+			AvgObject = 1.0f;
+		}
+	}
+
+#endif
+}
+
+// used to visualize the motion blur
+// @return 0/1
+float Compute3DCheckerBoard(float3 Pos)
+{
+	float3 TiledWorldPos = frac(Pos) > 0.5f;
+	return (float)((uint)dot(float3(1,1,1), TiledWorldPos) % 2);
+}
+
+void VisualizeMotionBlurPS(
+	noperspective float4 UVAndScreenPos : TEXCOORD0,
+	out float4 OutColor : SV_Target0)
+{
+	const float TileSize = 48;
+
+	float2 ScreenSpacePos = UVAndScreenPos.zw;
+	float2 PixelPos = ComputePixelPosCenter(ScreenSpacePos, true);
+	float2 UV = PixelPos * PostprocessInput0Size.zw;
+
+	float2 PixelPosAtTileCenter = PixelPos - (frac(PixelPos / TileSize) - 0.5f) * TileSize;
+	float2 UVAtTileCenter = PixelPosAtTileCenter * PostprocessInput0Size.zw;
+	float2 ScreenPosAtTileCenter = ScreenPosFromPixelPos(PixelPosAtTileCenter, true);
+
+	// World aligned checkerboards
+	{
+		float DeviceZ = LookupDeviceZ(UV);
+		float SceneDepth = ConvertFromDeviceZ(DeviceZ);
+
+		float3 ScreenVector = mul(float4(ScreenSpacePos, 1, 0), View.ScreenToWorld).xyz;
+
+		// world space position of the current pixel
+		float3 OffsetWorldPos = ScreenVector * SceneDepth;
+
+		float3 AbsWorldPos = View.WorldCameraOrigin + OffsetWorldPos;
+		float3 WorldCheckerboard = Compute3DCheckerBoard(AbsWorldPos * 0.02f) * 0.1f + Compute3DCheckerBoard(AbsWorldPos * 0.002f) * 0.3f + Compute3DCheckerBoard(AbsWorldPos * 0.0002f) * 0.6f;
+		OutColor = float4(lerp(WorldCheckerboard, float3(0,0,0), 0.7f), 1);
+	}
+
+	bool bSelectorOpaqueAtTileCenter = PostprocessInput2.SampleLevel(PostprocessInput2Sampler, UVAtTileCenter, 0).x > 0;
+	bool bSelectorOpaque = PostprocessInput2.SampleLevel(PostprocessInput2Sampler, UV, 0).x > 0;
+
+	// relative, in screen space -1...1 -1..1, can be even outside of that range, points into the movement direction
+	float2 VelocityAtTileCenter;
+	{
+		VelocityAtTileCenter = DecodeVelocityFromTexture(PostprocessInput2.SampleLevel(PostprocessInput2Sampler, UVAtTileCenter, 0).xy);
+
+		// reconstruct from camera motion if we don't have velocity data
+		if(!bSelectorOpaqueAtTileCenter)
+		{
+			// UV is per tile
+			float4 ThisClip = float4(ScreenPosAtTileCenter, LookupDeviceZ(UVAtTileCenter), 1);
+			float4 PrevClip = mul( ThisClip, View.ClipToPrevClip );
+			float2 PrevScreen = PrevClip.xy / PrevClip.w;
+
+			// points into the movement direction
+			VelocityAtTileCenter = ScreenPosAtTileCenter - PrevScreen;
+		} 
+	}
+
+	// tint yellow if velocity data is stored in texture
+	{
+		float3 TintColor = bSelectorOpaque ? float3(0.5f, 0.5f, 0.2f) : float3(0.5f, 0.5f, 0.5f);
+	
+		OutColor.rgb = lerp(OutColor.rgb, TintColor, 0.45f);
+	}
+
+	// tile center
+	{
+		float2 Delta = PixelPos - PixelPosAtTileCenter;
+
+		float HMask = lerp(saturate(abs(Delta.y)), 1, saturate(abs(Delta.x) / TileSize * 4));
+		float VMask = lerp(saturate(abs(Delta.x)), 1, saturate(abs(Delta.y) / TileSize * 4));
+
+		float Dist = length(Delta);
+		OutColor.rgb *= lerp(1, 0.3f, saturate(3 - Dist));
+	}
+
+	float3 LineColor = bSelectorOpaqueAtTileCenter ? float3(1,1,0) : float3(0.7,0.7,0.7);
+
+	// points into the movement direction
+	float2 PixelDirection = VelocityAtTileCenter * ScreenPosToPixel.xy;
+
+	// arrow
+	{
+		float2 PerpPixelDirection = float2(PixelDirection.y, -PixelDirection.x);
+		float2 DirectionInTile = PixelPos - PixelPosAtTileCenter;
+
+		float DistOnLine = dot(normalize(-PixelDirection), DirectionInTile) + length(PixelDirection);
+
+		bool bArrowHead = DistOnLine < 8;
+
+//		float LocalThickness = bArrowHead ? (DistOnLine * 0.5f) : 0.9f;
+//		float LocalThickness = bArrowHead ? (DistOnLine * 0.3f) : 1 + (frac(DistOnLine/8)*8)*0.2f;
+		float LocalThickness = 1 + (frac(DistOnLine/8)*8)*0.25f;
+
+		float PerpDirectionMask = saturate(LocalThickness - abs(dot(normalize(PerpPixelDirection), DirectionInTile)));
+		float DirectionMask = saturate(length(PixelDirection) - length(DirectionInTile));
+
+		float3 LineMask = PerpDirectionMask * DirectionMask;
+		OutColor.rgb = lerp(OutColor.rgb, LineColor, LineMask);
+	}
+
+	// previous pos is a dot
+	{
+		float3 DotColor = float3(0,1,0);
+		// PixelPos of the previous position
+		float2 PreviousPixelPos = PixelPosAtTileCenter - PixelDirection;
+		float Dist = length(PreviousPixelPos - PixelPos);
+		OutColor.rgb = lerp(OutColor.rgb, LineColor, saturate(4 - Dist));
+		OutColor.rgb = lerp(OutColor.rgb, 0, saturate(2.5f - Dist));
+	}
+}

@@ -1,0 +1,540 @@
+Availability:Public
+Title: Reflection Environment
+Crumbs: %ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description:System for capturing and displaying local glossy reflections.
+Version: 4.14
+
+[TOC(start:2)]
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:title%](%ROOT%/Engine/Rendering/LightingAndShadows/ReflectionEnvironment/reflection_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+	![](%ROOT%/ue4_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+	%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:title%
+	[/PARAM]
+	[PARAM:description]
+	%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/ReflectionEnvironment]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:title%](%ROOT%/Engine/Rendering/LightingAndShadows/ReflectionEnvironment/reflection_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+	![](%ROOT%/ue4_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+	%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:title%
+	[/PARAM]
+	[PARAM:description]
+	%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/ReflectionEnvironment]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[EXCERPT:ReflectionEnv001]
+The **Reflection Environment** feature provides efficient glossy reflections in every area of the level. Many 
+important materials like metals rely on having reflections in all directions, which the Reflection Environment 
+provides. It is targeted toward consoles and mid spec PC, so it must run very fast.  Support for reflections 
+of dynamic objects or sharp reflections is supported but will require addational memory overhead. 
+[/EXCERPT:ReflectionEnv001]
+
+[REGION:fullwidth]
+![Reflection Environment](reflection_environment.png)
+[/REGION]
+
+## Quick Reflection Environment Setup
+
+To quickly get the Reflection Environment working in your project's levels, you will need to do the following:
+
+1. Add a few lights to your level and build the lighting once as there must be some indirect diffuse lighting for the Reflection Environment to show up at all. 
+
+1. From the **Modes** panel under the **Visual Effects** section, select and drag a **Sphere Reflection Capture** Actor into the level. 
+
+If you fail to see reflections in your level or your reflections are not as strong as you require you can try the following:
+
+* Make sure that your Materials have a noticeable Specular and a low Roughness to better show reflections.
+* Use the Reflection Override view mode to visualize what is being captured to gain a better idea of what values in your Materials need to be adjusted. 
+
+## Setting Up a Level to use the Reflection Environment
+
+The first step toward having good reflections is setting up diffuse lighting including indirect lighting 
+through the use of lightmaps. The [Lightmass](Engine/Rendering/LightingAndShadows/Lightmass/) page contains more info on how to accomplish this if you are unfamiliar with using it. Common errors preventing Lightmass indirect lighting 
+from working after a build include but are not limited to the following:
+* A shadow casting skybox.
+* Lack of a **LightmassImportanceVolume**.
+* Missing or incorrectly setup lightmap UVs
+* Having **Force No Precomputed Lighting** set to **True** in the **World Properties**.
+
+Since the level's diffuse color is what will be reflected through the Reflection Environment you will need to do the following for the best results. 
+* Ensure significant contrast between directly lit and shadowed areas. 
+* Remember that the bright diffuse lit areas are what will show up clearly in reflections.
+* Darker shadowed areas are where the reflections will be most visible. 
+* Use the Lit viewmode together with the Specular show flag disabled to see the level as the reflection captures see it.
+
+It is also extremely important to setup your level's Materials to work well with the Reflection Environment by keeping the following in mind. 
+* A flat, mirror surface will reveal the inaccuracies of combining cubemaps projected onto simple shapes. 
+* Curvy geometry or rough surfaces can both obscure these artifacts and provide convincing results. 
+* It is important to use detail Normal maps and specify some degree of roughness on Materials that will be 
+used in flat areas as this will help them better show off reflections.
+
+[REGION:imagetable]
+| ![Curvy and Sharp](1CurvyAndSharp.png)(w:290) | ![Flat and Rough](1FlatAndRough.png)(w:290) | ![Flat and Sharp](1FlatAndSharp.png)(w:290)|
+| ------ | ------ | ------ |
+| Smooth surface but curvy geometry: Good quality reflections | Rough surface but flat geometry: Good quality reflections |Smooth surface AND flat geometry: Evident that reflections do not match up
+[/REGION]
+
+Place reflection captures in the areas that you want to have reflections. Try to place the sphere captures 
+such that the part of the level you want to reflect is contained just inside their radius since the level will 
+be reprojected onto that sphere shape. Try to avoid placing captures too close to any level geometry, as that 
+nearby geometry will dominate and block important details behind it.
+
+## Glossy Indirect Specular
+
+In technical terms, the Reflection Environment provides indirect specular. We get direct specular through 
+analytical lights, but that only provides reflections in a few bright directions. We also get specular from 
+the sky through a Sky Light, but that does not provide local reflections since the Sky Light cubemap is infinitely far away. Indirect specular allows all parts of the level to reflect on all other parts, which 
+is especially important for Materials like metal which have no diffuse response.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Diffuse Only](DiffuseOnly.png)(w:700)
+	[/PARAM]
+	[PARAM:after]
+	![Reflection Only](ReflectionOnly.png)(w:700)
+	[/PARAM]
+[/OBJECT]
+
+**Full lighting**
+
+[REGION:fullwidth]
+![Full Scene](Complete.png)
+[/REGION]
+
+[EXCERPT:RefEnvIntro]
+The Reflection Environment works by capturing the static level at many points and reprojecting it onto 
+simple shapes like spheres in reflections. Artists choose the capture points by placing **_ReflectionCapture_** 
+Actors. Reflections update in real time during editing to aid in placement but are static at runtime. 
+Projecting the captured level onto simple shapes gives approximate parallax for the reflection. Each pixel 
+blends between multiple cubemaps to get the final result.  Smaller ReflectionCapture Actors override larger ones, so you can refine reflection parallax accuracy in areas as needed.  For 
+example, you might place a capture at the center of a room and then refine the reflection by placing smaller 
+captures at the corners of the room. 
+[/EXCERPT:RefEnvIntro]
+
+Materials with varying glossiness are supported by generating blurry mipmaps from the captured cubemaps.
+  
+![Varying Glossiness](VaryingGlossiness.png)
+
+However, just using the cubemap reflections on a very rough surface results in an overly bright reflection 
+that has significant leaking due to lack of local occlusion. This is solved by reusing the lightmap data 
+generated by Lightmass. The cubemap reflection is mixed together with the lightmap indirect specular based 
+on how rough the material is. A very rough material (fully diffuse) will converge on the lightmap result. 
+This mixing is essentially combining the high detail part of one set of lighting data (cubemaps) with the low-frequency part of another set of lighting data (lightmaps). For this to work correctly, though, only indirect 
+lighting can be in the lightmap. This means that only the indirect lighting from Stationary lights can improve 
+the quality of reflections on rough surfaces. **Static light types should not be used together with the 
+Reflection Environment as they will put direct lighting in the lightmap.**  Note that this mixing with the lightmap 
+also means that the map must have meaningful indirect diffuse lighting and that lighting must already be built 
+to see results.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Reflections on a rough surface with no shadowing](2RoughWithNoShadowing.png)(w:550)
+	[/PARAM]
+	[PARAM:after]
+	![Rough with Shadowing](2RoughWithShadowing.png)(w:550)
+	[/PARAM]
+[/OBJECT]
+
+## Reflection Capture Lightmap Mixing
+
+When you use Reflection Capture Actors, UE4 mixes the indirect Specular from the Reflection Capture with the indirect Diffuse lighting from lightmaps. This helps to reduce leaking since the reflection cubemap was only captured at one point in space, but the lightmaps were computed on all the receiver surfaces and contain local shadowing information.
+
+[OBJECT:ComparisonSlider]
+    [PARAM:before]
+    ![Reduce Lightmap Mixing On Smooth Surfaces Off](ReduceLightmapMixingOnSmoothSurfaces_Off.png)
+    [/PARAM]
+    [PARAM:after]
+    ![Reduce Lightmap Mixing On Smooth Surfaces On.png](ReduceLightmapMixingOnSmoothSurfaces_On.png)
+    [/PARAM]
+[/OBJECT]
+
+While lightmap mixing works well for rough surfaces, this method breaks down on smooth surfaces as reflections from Reflection Capture Actors no longer match reflections from other methods like Screen Space Reflections or Planar Reflections. Because of this, lightmap mixing is no longer applied to very smooth surfaces. A surface with Roughness value of 0.3 will get full lightmap mixing, fading out to no lightmap mixing by Roughness 0.1 and below. This also allows Reflection Captures and Screen Space Reflections to match better and make it harder to spot transitions between the two.
+
+### Lightmap Mixing and Existing Content
+
+By default, lightmap mixing will be enabled which means it will affect existing content. In cases where you had reflections leaking on smooth surfaces, that leaking will be more apparent. To solve this, you can either place additional Reflection Capture Actors around the level to help reduce the leaking. Or you can revert to the old lightmap mixing behavior by going to **Edit** > **Project Settings** >  **Rendering** > **Reflections** and then un-check the **Reduce lightmap mixing on smooth surfaces**.
+
+![](Engine\Rendering\LightingAndShadows\ReflectionEnvironment\Enable_LM_Mixing.png)
+
+You can fine tune the amount of lightmap mixing that will take place by adjusting the following commands via the UE4 console. 
+ 
+* **r.ReflectionEnvironmentBeginMixingRoughness (default = 0.1)**
+* **r.ReflectionEnvironmentEndMixingRoughness (default = 0.3)**
+* ** r.ReflectionEnvironmentLightmapMixBasedOnRoughness (default = 1)**
+* **r.ReflectionEnvironmentLightmapMixLargestWeight (default = 1000)**
+
+## High Quality Reflections
+
+While the default reflection quality settings strike a good balance between performance and visual quality, there could be instances where you want to achieve even higher quality reflections. The following sections describe the available methods for achieving high quality reflections.
+
+### High Precision Static Mesh Vertex Normal and Tangent Encoding
+
+An important factor in achieving high quality reflections is how accurately the vertex normal and tangent can be represented. Very high density meshes may lead to adjacent vertices quantizing to the same vertex normal and tangent values. This can lead to blocky jumps in normal orientation. We added the option to encode normals and tangents as 16 bits per channel vectors which enables developers to make the trade off between higher quality and how much additional memory is used encoding vertex buffers. 
+
+**To enable High Precision Static Mesh Vertex Normal and Tangent Encoding:**
+
+1. In the **Content Browser**, double-click on a Static Mesh to open it up in the **Static Mesh Editor**.
+
+1. In the Static Mesh Editor, go the **Details** panel and expand the **LOD0** option.
+
+	[REGION:lightbox]
+	[![](SM_HP_Vertex_Normals_00.png)(w:400 h:350)](SM_HP_Vertex_Normals_00.png)
+	[/REGION]
+
+1. At the bottom of the **LOD0**, there is a section called **Build Settings**. Click on the small triangle next to Build Settings to expand the Build Settings options.
+
+	[REGION:lightbox]
+	[![](SM_HP_Vertex_Normals_01.png)(w:400 h:350)](SM_HP_Vertex_Normals_01.png)
+	[/REGION]
+
+1. Enable the **Use High Precision Tangent Basis** option by clicking on the check box next to its name and then press the **Apply Changes** button to apply the new settings.
+
+	[REGION:lightbox]
+	[![](SM_HP_Vertex_Normals_02.png)(w:400 h:350)](SM_HP_Vertex_Normals_02.png)
+	[/REGION]
+
+The viewport will automatically update to reflect the changes. 
+
+[REGION:note]
+The quality of the reflection that is viewed is directly related to how densely tessellated the Static Mesh is. Static Meshes that have less tessellation will have more stretching artifacts in the reflection than Static Meshes that have more tessellation.
+[/REGION] 
+
+[OBJECT:ComparisonSlider]
+[PARAM:before]
+![High Precision Vertex Normal Off](SM_HP_Vertex_Normals_Off.png)(h:580)
+[/PARAM]
+[PARAM:after]
+![High Precision Vertex Normal On](SM_HP_Vertex_Normals_On.png)(h:580)
+[/PARAM]
+[/OBJECT]
+
+[REGION:lightbox]
+[![](SM_HP_Vertex_Normals_Wireframe.png)(w:582 h:580)](SM_HP_Vertex_Normals_Wireframe.png)
+[/REGION]
+	
+
+### High Precision GBuffer Normal Encoding
+
+Enabling the High Precision GBuffer Normal Encoding option will allow the GBuffer to use a higher precision Normal encoding. This higher precision GBuffer Normal encoding encodes the Normal vector into three channels with each channel having 16 bits per. Using this higher precision encoding allows techniques like Screen Space Reflections (SSR) to rely on high precision normals. 
+
+**To enable High Precision GBuffer Normal Encoding:**
+
+1. In the **Main Toolbar**, select **Edit** >  **Project Settings** to open the **Project Settings**.
+
+	[REGION:lightbox]
+	[![](ARCS_00.png)(w:400 h:350)](ARCS_00.png)
+	[/REGION]
+
+1. In the Project Settings under the **Engine** section, click on the **Rendering** option and under the **Optimizations** section change the **Gbuffer Format** from **Default** to **High Precision Normals**.
+
+	[REGION:lightbox]
+	[![](HPGBuffer_01.png)(w:400 h:350)](HPGBuffer_01.png)
+	[/REGION]
+
+	[region:warning]
+	Keep in mind that this encoding requires increased GPU memory and enabling this will have a direct impact on your project's performance.
+	[/region]
+
+Since changing the GBuffer format does not require you to restart the Editor, you can quickly change between the different GBuffer formats to see the impact they will have on the reflection visuals. In the image below we can see how changing the GBuffer format from the Default to High Precision Normals changes the look and quality of the reflection.
+
+[OBJECT:ComparisonSlider]
+[PARAM:before]
+![Default GBuffer Format](Default_GBuffer_Format.png)(h:600)
+[/PARAM]
+[PARAM:after]
+![High Precision GBuffer Format](Hight_P_GBuffer_Format.png)(h:600)
+[/PARAM]
+[/OBJECT]
+
+## Reflection capture shapes
+
+[EXCERPT:RefCaptures]
+There are currently two reflection capture shapes: sphere and box. The shape is very important because it 
+controls what part of the level is captured into the cubemap, what shape the level is reprojected onto in 
+reflections, and which part of the level can receive reflections from that cubemap (area of influence).
+[/EXCERPT:RefCaptures]
+
+### Sphere shape
+
+The sphere shape is currently the most useful. It never matches the shape of the geometry being reflected
+but has no discontinuities or corners, therefore, the error is uniform. 
+
+![Sphere Shape](SphereShape.png)(w:720)
+
+The sphere shape has an orange influence radius that controls which pixels can be affected by that cubemap, and the sphere that the level 
+will be reprojected onto. 
+
+Smaller captures will override larger ones, so you can provide refinement by placing smaller captures around the level.
+
+### Box shape
+
+The box shape is very limited in usefulness and generally only works for hallways or rectangular rooms. The 
+reason is that only pixels inside the box can see the reflection, and at the same time all geometry inside the 
+box is projected onto the box shape, creating significant artifacts in many cases.
+
+![Box Shape](BoxShape.png)
+
+The box has an orange preview for the projection shape when selected. It only captures the level within 
+**Box Transition Distance** outside this box. The influence of this capture fades in over the transition 
+distance as well, inside the box. 
+
+## Editing Reflection Probes
+
+When making edits to Reflection Probes there are a number of different things that you must remember to do to ensure that you get the results you are after. In the following section we will cover what these things are and how you can make sure you are getting the best quality reflections in your projects.
+
+### Updating Reflection Probes
+
+It is important to note that Reflection Probes are not automatically kept up to date. Only the following actions will automatically update the Reflection Probes place in a level.
+
+* Loading a map.
+* Directly editing a Reflection Capture Actor properties.
+* Building the levels lighting.
+
+If you make any other kind of edit to the level like change a light's brightness or move around level geometry, you will need to select a Reflection Capture Actor and click the **Update Captures** button to propagate the changes. 
+
+[REGION:lightbox]
+[![](Update_Captures_Button.png)(w:400 h:350)](Update_Captures_Button.png)
+[/REGION]
+
+### Using a Custom HDRI Cubemap in a Reflection Probe
+
+Reflection Probes have the ability to not only specify which cubemap they should be using for reflection data but also what size that cubemap should be. Previously UE4 hard-coded the resolution of the cooked cubemaps reflection probes would use. Now developers can choose the resolution that best suits their needs based on performance, memory, and quality tradeoffs. Below is a comparison image that shows the difference between using the **Captured Scene** option versus the **Specified Cubemap** option. 
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Captured Scene](CC_Capture_Scene.png)(h:500)
+	[/PARAM]
+	[PARAM:after]
+	![Specified Cubemap](CC_Specified_Cubemap.png)(h:500)
+	[/PARAM]
+[/OBJECT]
+
+To specify a custom HDRI Cubemap for your project's Reflection Probes to use you will need to do the following:
+
+1. First, make sure that you have an HDRI Cubemap Texture available for use. If you do not have an HDRI Cubemap Texture in your project, one comes bundled with the Starter Content called **HDRI_Epic_Courtyard_Daylight**.
+
+	[REGION:lightbox]
+	[![](Custom_Cubemap_00.png)(w:400 h:350)](Custom_Cubemap_00.png)
+	[/REGION]
+
+	[region:note]
+	You can move assets from one project to another one using the [Migrate](Engine/Content/Browser/UserGuide/Migrate/) functionality.
+	[/region]
+
+
+1. Select a **Reflection Probe** Actor that has been placed in the level and in the **Details** panel under the **Reflection Capture** section change the **Reflection Source Type** from **Captured Scene** to **Specified Cubemap**
+
+	[REGION:lightbox]
+	[![](Custom_Cubemap_01.png)(w:400 h:350)](Custom_Cubemap_01.png)
+	[/REGION]
+
+1. With the Reflection Probe still selected in the level, go to the Content Browser and select the HDRI Texture you want to use. Then in the Reflection Capture Actor, under the **Reflection Capture** drag the HDRI Texture from the Content Browser to the **Cubemap** input.
+
+	[REGION:lightbox]
+	[![](Custom_Cubemap_02.png)(w:400 h:350)](Custom_Cubemap_02.png)
+	[/REGION]
+
+1. Press the **Update Capture** button to refresh the Reflection Capture Actor to use the new HDRI Cubemap Texture that was just specified. 
+
+	[REGION:lightbox]
+	[![](Custom_Cubemap_03.png)(w:400 h:350)](Custom_Cubemap_03.png)
+	[/REGION]
+
+### Adjusting Reflection Probe Resolution
+
+You can globally adjust the resolution of the HDRI Cubemaps that are used for the Reflection Capture Actors by doing the following: 
+
+1. Open up your **Project settings** by going to the **Main Toolbar** and then selecting **Edit** >  **Project Settings**.
+	
+	[REGION:lightbox]
+	[![](ARCS_00.png)(w:400 h:350)](ARCS_00.png)
+	[/REGION]
+
+1. From the Project Settings menu  go to the **Engine** > **Rendering** section and then look for the **Textures** option.
+	
+	[REGION:lightbox]
+	[![](ARCS_01.png)(w:400 h:350)](ARCS_01.png)
+	[/REGION]
+
+1. By adjusting the **Reflection Capture Resolution** option you can increase or decrease the size of the HDRI Cubemap Texture that was specified.
+
+	![](ARCS_02.png)
+
+	[region:warning]
+	Be extremely careful when using a very high resolution Texture as it can dramatically affect performance due to GPU memory requirements.
+	[/region]
+
+The following images show what how the reflections will look when the Reflection Capture Resolution is set to **1**, **4**, **8**, **16**, **32**, **64**, **128**, **256**, **512** and **1024**.
+[REGION:fullwidth]
+[INCLUDE:Engine\Rendering\LightingAndShadows/ReflectionEnvironment#ReflectionResolution]
+[/REGION]
+
+### Adjusting Skylight Reflection Resolution
+
+Like with the Reflection Probes, Skylights also have the ability to define and adjust the resolution of the HDRI cubemap that they use for reflections. To utlize this functionality in your UE4 project you will need to do the following: 
+
+1. From the **Mode** panel under the **Lights** section, select and then drag a **Skylight** into your level. 
+	
+	[REGION:lightbox]
+	[![](Skylight_Reflection_00.png)(w:500 h:300)](Skylight_Reflection_00.png)
+	[/REGION]
+
+1. Select the Skylight and in the **Details** panel under the **Light** section, change the **Source Type** from **SLS Captured Scene** to **SLS Specified Cubemap**.
+
+	[REGION:lightbox]
+	[![](Skylight_Reflection_01.png)(w:500 h:300)](Skylight_Reflection_01.png)
+	[/REGION]
+
+1. Click on the drop down box in the **Cubemap** section and select an HDRI cube map from the list.
+
+	[REGION:lightbox]
+	[![](Skylight_Reflection_02.png)(w:300 h:300)](Skylight_Reflection_02.png)
+	[/REGION]
+
+1. After the cubemap has been selected you can adjust its resolution by changing the value in the **Cubemap Resolution** input.
+	
+	[REGION:lightbox]
+	[![](Skylight_Reflection_03.png)(w:300 h:300)](Skylight_Reflection_03.png)
+	[/REGION]
+
+	[region:note]
+	Please note that the Cubemap Resolution will only work with numbers that are powers of two like 16,64,128,25,512 and 1024.  
+	[/region]
+
+
+### Blending Multiple Reflection Probe Data
+You can blend between multiple different cubemap reflections by providing the Reflection Capture Actors with different HDRI cubemaps. To accomplish this in your UE4 project all you need to is the following:
+
+1. First, make sure that you have at least one **Reflection Probe** added to your level and that you have changed the **Reflection Source Type** to **Specified Cubemap** and input an HDRI Texture into the **Cubemap** input. 
+
+	[REGION:lightbox]
+	[![](Blend_RFD_00.png)(w:600 h:400)](Blend_RFD_00.png)
+	[/REGION]
+
+1. Duplicate or add a new Reflection Probe to the level and position / adjust its **Influence Radius** it so that part of it's yellow influence radius is intersecting with the first Reflection Probe. 
+
+	[REGION:lightbox]
+	[![](Blend_RFD_01.png)(w:600 h:400)](Blend_RFD_01.png)
+	[/REGION]
+
+1. Select the newly duplicated / created Reflection Probe Actor and in the **Details** panel under the **Cubemap** section change the HDRI cubemap to a different one.
+
+	[REGION:lightbox]
+	[![](Blend_RFD_02.png)(w:600 h:400)](Blend_RFD_02.png)
+	[/REGION]
+
+1. With the Reflection Probe that was added / duplicated still selected, go to the **Details** panel in the **Reflection Capture** section and press the **Update Captures** button to update the reflection to use what was input in the Cubemap input.
+
+	[REGION:lightbox]
+	[![](Blend_RFD_03.png)(w:600 h:400)](Blend_RFD_03.png)
+	[/REGION]
+
+1. If you select and move the Reflection Probe around the level you can get a better idea for how the two HDRI cubemaps will blend together.
+
+	[OBJECT:EmbeddedVideo]
+		[PARAMLITERAL:width]
+		640
+		[/PARAMLITERAL]
+		[PARAMLITERAL:height]
+		360
+		[/PARAMLITERAL]
+		[PARAMLITERAL:videoid]
+		QYbSsYP2Nkk
+		[/PARAMLITERAL]
+	[/OBJECT]
+
+### Visualizing
+
+The Reflection Override viewmode has been added to make it easier to see how well the reflections are set up. 
+This viewmode overrides all normals to be the smooth vertex normal, and makes all surfaces fully specular and 
+completely smooth (mirror like). Limitations and artifacts of the Reflection Environment are also clearly 
+visible in this mode so it is important to switch to Lit periodically to see what the reflections look like in 
+normal conditions (bumpy normals, varying glossiness, dim specular).
+
+![Reflection Override](ReflectionOverride.png)
+
+Some new show flags have been added which are useful for isolating down the components of the lighting:
+
+| Flag | Description |
+| ---- | ----------- |
+| **Lighting Components > Diffuse** | Disabling diffuse will hide diffuse contribution from all lighting methods. |
+| **Lighting Components > Specular** | Disabling specular will hide specular contribution from all reflection methods. |
+| **Lighting Features > ReflectionEnvironment** | This will disable the Reflection Environment feature, but other reflection features will still be active (SSR, analytical specular). |
+
+
+## Performance Considerations
+
+The Reflection Environment cost is only dependent on how many captures influence the pixels on the screen. 
+It is very similar to deferred lighting in this sense. Reflection captures are bounded by their influence 
+radius and therefore they are culled very efficiently. Glossiness is implemented through the cubemap mipmaps 
+so there is little performance difference between sharp or rough reflections.
+
+## Limitations
+
+* Reflections through this method are approximate. Specifically, the reflection of an object will rarely match 
+up with the actual object in the level due to projection onto simple shapes. This tends to create multiple 
+versions of that object in reflections as many cubemaps are being blended together. Flat, smooth surfaces 
+that cause mirror reflections will show the error very noticeably. Use detail normal maps and roughness to help
+break up the reflection and these artifacts.
+* Capturing the level into cubemaps is a slow process which must be done outside of the game session. This 
+means dynamic objects cannot be reflected, although they can receive reflections from the static level.
+* Only the level's diffuse is captured to reduce error. Purely specular surfaces (metals) will have their specular applied as if it were diffuse during the capture.
+* There can be significant leaking when there are different lighting conditions on both sides of a wall. 
+One side can be setup to have correct reflections, but it will always leak into the other side. 
+* Due to DX11 hardware limitations, the cubemaps used to capture the level are all 128 on each side, and 
+the world can have at most 341 reflection captures enabled at one time.
+
+
+<!-----
+[EXCERPT:ReflectionResolution]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:max]
+	10
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	RCR
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	**Drag the slider to see how the different resolutions affect the look of the reflection.**
+	[/PARAM]
+	[PARAM:image_list]
+	![](RCR_1.png)
+	![](RCR_2.png)
+	![](RCR_3.png)
+	![](RCR_4.png)
+	![](RCR_5.png)
+	![](RCR_6.png)
+	![](RCR_7.png)
+	![](RCR_8.png)
+	![](RCR_9.png)
+	![](RCR_10.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:ReflectionResolution]
+-->

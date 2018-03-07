@@ -1,0 +1,190 @@
+﻿INTSourceChangelist:2685237
+Availability:Public
+Title: 环境反射
+Crumbs: %ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description: 获取、显示局部反射的系统
+Version: 4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:title%](%ROOT%/Engine/Rendering/LightingAndShadows/ReflectionEnvironment/reflection_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+	![](%ROOT%/ue4_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+	%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:title%
+	[/PARAM]
+	[PARAM:description]
+	%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/ReflectionEnvironment]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:title%](%ROOT%/Engine/Rendering/LightingAndShadows/ReflectionEnvironment/reflection_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+	![](%ROOT%/ue4_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+	%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:title%
+	[/PARAM]
+	[PARAM:description]
+	%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/ReflectionEnvironment]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[EXCERPT:ReflectionEnv001]
+**环境反射** 功能为场景中的每个地方提供了有效的光滑反射效果。
+一些重要的材质，比如金属，都依靠各个方向反射效果，这正是环境反射提供的功能。
+这个功能是面向游戏主机和中端电脑，因此必须要运行很快才行。它不提供动态物体的反射，反射也不足够清晰，
+这些就都需要其他的反射功能来和环境反射一起工作才能完成，比如屏幕空间反射（Screen Space Reflections）。
+[/EXCERPT:ReflectionEnv001]
+
+[REGION:fullwidth]
+![Reflection Environment](reflection_environment.png)
+[/REGION]
+
+## 快速设置
+
+要使用环境反射的话，先要设置灯光，并编译光照一次。**必须要有某个间接光照来为环境反射工作**，
+然后，从 Mode 面板的 Place Mode 的  Visual 的分页中拖拽一个 *_SphereReflectionCapture_* Actor 放置到关卡中，
+并确认你的材质具有显著的高光，以及较低的粗燥度，然后可以使用反射（Reflection）模式来可视化的观察哪些被捕捉了。
+
+## 光滑的间接高光
+
+在技术术语中，环境反射提供了间接高光。通过分析灯光可以得到直接高光，但这只能为少数明亮的方向提供反射。
+还可以从天光中获得高光反射，但由于天光的立方体球面映射（cubemap）在无限远的地方，因此并不能提供局部区域的反射。
+间接高光能让场景中的所有的部分都具有反射其他部分的能力，这点对于类似金属的材质十分重要，它们都没有漫反射的效果。
+
+[REGION:imagetable]
+| ![Diffuse Only](DiffuseOnly.png)(w:465) | ![Reflection Only](ReflectionOnly.png)(w:465) |
+| ------ | ------ |
+| 仅漫反射 | 仅反射（镜面反射） |
+[/REGION]
+
+**完整光照**
+
+[REGION:fullwidth]
+![Full Scene](Complete.png)
+[/REGION]
+
+[EXCERPT:RefEnvIntro]
+环境反射的工作原理是，在场景中的一些位置上获取静态画面并重新投影到简单形状，比如球型尚。
+美术人员在场景中放置 **_ReflectionCapture_** Actors 确定获取点的位置。在编辑过程中反射的效果是实时更新的，但游戏运行时是静态的。
+将这些获取的场景投影到简单的形状上能够得到大致的反射视差效果。每个像素在不同的 cubemap 之间混合计算得到最终值。
+较小的 ReflectionCapture Actor 将会覆盖较大的，因此可以根据区域来改进反射视差的精度。比如，可以在一个房间的中间放一个捕获点，
+并在房间的角落再放一个较小的捕获点来改善反射效果。
+[/EXCERPT:RefEnvIntro]
+
+具有不同变化光滑度的材质可以通过从捕获的 cubemap 中生成模糊的 mip maps。
+  
+![Varying Glossiness](VaryingGlossiness.png)
+
+然而，在粗糙的表面上，仅仅使用 cubemap 反射会造成过亮的效果，其原因在于缺少局部遮蔽导致严重的光照溢出。
+这里需要通过重用由 Lightmass 生成的 lightmap 的数据来解决。cubemap 的反射将会和 lightmap 间接高光来混合，
+这是由材质的粗糙度来决定的。一个非常粗糙的材质（完全满反射）将在 lightmap 的结果里汇集。
+这种混合最终是组合了一组高细节的光照数据（cubemap），以及另一组低细节的光照数据（lightmap）。
+为了让这种方式能正确的显示，lightmap 中只能包含间接光照。也就是说只有来自于固定灯光（Stationary Light）的间接光照才能改进粗糙表面的反射质量。
+**静态灯光（Static Light）类型不应被用在环境反射的混合方式中，因为它们会在 lightmap 中留下直接光照信息。**
+请注意，这种使用 lightmap 的混合意味着地图中必须包含有意义的间接漫反射光照，并且这个光照必须已经被构建了，这样才能看到结果。
+
+[REGION:imagetable]
+| ![Rough with no Shadowing](2RoughWithNoShadowing.png)(w:465) | ![Rough with Shadowing](2RoughWithShadowing.png)(w:465) |
+| ------ | ------ |
+| 粗糙表面的反射，不带阴影 | lightmap 的阴影并且合并了 SSAO 效果 |
+[/REGION]
+
+## 反射获取形状
+
+[EXCERPT:RefCaptures]
+目前有两种反射获取形状：球型和盒型。形状很重要，它决定了场景中的什么部分会被获取到 cubemap 中，场景会投影到什么样的形状上，
+以及场景中什么部分将会收到来自于这个 cubemap 中的反射效果（影响区域）。
+[/EXCERPT:RefCaptures]
+
+### 球型
+
+球型是目前最有用的，虽然它永远都不会和实际上要反射的形状完全一致，但没有间断，也没有角落，因此它的错误行为也十分一致。
+
+![Sphere Shape](SphereShape.png)(w:720)
+
+球型有一个橙色的范围半径，用于控制那些像素会受到这个 cubemap 影响，还有一个接受场景投影的球体。
+
+较小的捕获体将会覆盖较大的，因此可以通过在场景中摆放较小的捕获体来改进最终效果。
+
+### 盒型
+
+盒型的用途非常有限，通常来说它仅适合走廊门厅或者矩形的房间。这是因为只有在盒型内的像素才能看见反射，
+同时盒型内的场景会被投影到这个盒型上，很多时候都能创建华丽的效果。
+
+![Box Shape](BoxShape.png)
+
+当选中时，盒子会显示一个橙色的投影预览框。它只会捕获在这个盒子之外 **Box Transition Distance** 距离之内的场景。
+在盒子之内受到影响的效果也会受到距离的变化而变弱。
+
+## 编辑
+
+获取的反射并不是自动的更新，这条需要谨记。只有在加载地图、直接编辑捕获体，或者构建光照时才会更新捕获的反射。
+如果在地图上编辑了一些改动，比如调整了灯光的亮度，或者移动了场景的物件，那么就需要选择捕获体并点击 “Update Captures” 来更新改变。
+
+### 可视化
+
+我们在 viewmode 中增加了 Reflection 模式，以便于方便检查场景中反射的设置。这个模式下，覆盖了正常的表面法线，全部替换为平滑的法线，
+并将所有的表面都设置为完全的高光及平滑（像镜面一般）。环境反射的缺陷和物件在这个模式下清晰可见，定期的切换到光照模式（Lit）下也是重要的，
+这样能看看再正常情况下的反射表现（多样的法线、不同的光泽，暗淡的高光设定）。
+
+![Reflection Override](ReflectionOverride.png)
+
+还新增了一些显示标记开关，对光照组件进行单独工作并解决问题会很有帮助：
+
+| 标记 | 描述 |
+| ---- | ----------- |
+| **光照组件 > 漫反射** | 禁用漫反射将会给关闭所有漫反射对光照的影响。 |
+| **光照组件 > 镜面反射** | 禁用镜面反射将会关闭所有高光对光照的影响。 |
+| **光照功能 > 环境反射** | 这会禁用环境反射功能，但其他反射功能将不受影响（SSR，Analytical Sepcular）。 |
+
+## 为环境反射设置关卡
+
+1. 要得到好的反射效果，第一步是设置漫反射的光照，包括在 lightmap 中的间接光。Lightmass 的页面有更多信息。
+常见的 Lightmass 无法得到正确的间接光照的错误包括一个会造成阴影的天光设置，缺少 **_LightmassImportanceVolume_** 设置，
+缺少 lightmap 的 UV 设置或者设置不正确，或者在世界属性中强制不做光照预计算。
+
+	场景的慢反射就是那些会被环境反射系统所反射的内容。要效果好看的话，将直接光照和阴影区域做的高对比度则较佳。
+	明亮的光照区域将会在反射中清晰显示，较暗的阴影区域则是反射最明显的地方。通过光照模式（Lit）并配合禁用高光的标记（Specular show flag）来观察场景，反射捕获也会使用类似的场景显示。
+
+1. 在场景中材质配合环境反射的使用也是极为重要的。一块平整的镜面将会暴露通过简单形状获取的 cubemap 投影的不准确性。
+然而曲面或者粗糙的表面都能模糊显示并展示令人信服的画面。因此，在平整的区域，使用一些细致的法线贴图，并定义一定的粗糙度是有必要的。
+
+	[REGION:imagetable]
+	| ![Curvy and Sharp](1CurvyAndSharp.png)(w:290) | ![Flat and Rough](1FlatAndRough.png)(w:290) | ![Flat and Sharp](1FlatAndSharp.png)(w:290) |
+	| ------ | ------ | ------ |
+	| 光滑的曲面：优秀的反射质量 | 平整但粗糙的平面：优秀的反射质量 | 光滑且平整的面：暴露了不真实的反射
+	[/REGION]
+
+1. 在你希望展示反射的区域放置捕获体。可以尝试在希望有反射效果的场景中间放置球型捕获体，以便于场景能投射到球面上。
+应该避免将捕获体放置于过分的接近场景的表面，那样会使得离捕获体近的表面影响反射效果，并遮蔽了其他的重要细节。
+
+## 性能的考量
+
+环境反射的代价只取决于屏幕上有多少受影响的像素。和场景中的延迟光照很相似。反射捕获体受它们各自的半径限制，
+因此能够被很有效的裁剪。光滑度是通过 cubemap 中的 mipmaps 来实现，因此在清晰的反射和模糊粗糙的反射之间几乎没有性能区别。
+
+## 局限
+
+* 这个方式下的反射是近似效果。更明确的说，某个物体的反射几乎和实际物体都不匹配，因为是依赖于简单形状的投影。
+当多个 cubemap 混合使用的时候，效果趋近于创建了一个物体的多个版本。平整光滑的表面会导致镜面反射很明显的显示出这样的问题，
+采用细致的法线贴图和粗糙度的结合来打破这个可能的问题。
+* 将场景获取到 cubemaps 中是一个缓慢的过程，这必须在实际游戏过程以外完成。这意味着动态物体无法参与反射，但它们还是可以收到静态场景的反射影响。
+* 只有场景的漫反射才会被捕获，这样可以减少错误。在捕获的过程中，纯镜面表面（金属）会将他们的高光作为漫反射来参与捕获的收集过程。
+* 当一面墙两边具有不同的光照环境时，可能会有严重的光线泄露问题。一边可以被设置为正确的显示，但总会影响到另外一边。
+* 由于 DX11 的硬件限制，用于获取场景的 cubemap 没边一共有 128 个，并且同一时刻最多只能有 341 个反射捕获体被激活。

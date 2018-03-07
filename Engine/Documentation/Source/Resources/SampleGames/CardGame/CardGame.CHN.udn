@@ -1,0 +1,291 @@
+﻿INTSourceChangelist:2465567
+Availability: Public
+Title:记忆游戏 
+Crumbs:%ROOT%, Resources
+Description:
+Related: Gameplay/HowTo/UsingCameras/Blueprints
+Related: Engine/Blueprints/Editor
+Related: Engine/Animation/AnimBlueprints/EventGraph
+Related: Gameplay/Input
+Related: Gameplay/Framework
+Related: Engine/Content/Types/StaticMeshes
+
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Resources/SampleGames/CardGame:title%](CardGame_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%\anim_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/CardGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/CardGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/CardGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Resources/SampleGames/CardGame:title%](CardGame_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%\anim_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/CardGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/CardGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/CardGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+
+[REGION:fullwidth]
+![](CardGame_Board.png)
+[/REGION:fullwidth]
+
+[TOC(start:2)]
+
+
+
+
+## 概述
+
+记忆游戏示例是在PC/移动平台上的简单逻辑游戏示例。 它仅使用 _蓝图_ 构建，无需额外的代码支持。
+
+
+
+
+## 游戏逻辑
+
+**BP_LogicMem** _蓝图_ 衍生于 _游戏模式_ _类_ 。您可以在 _蓝图_ 中设置默认Pawn类，HUD类，玩家控制器类，观察者类以及GameReplicationInfo类。
+
+在 **BP_LogicMem** _蓝图_ 中还存在两种 _图表_ 。**EventGraph** 包含了游戏的初始设置，游戏所需的必要逻辑测试，以及额外的功能，诸如移动回菜单并显示具有 **提示** 按钮的所有卡牌。 **FinishGame** 处理玩家是赢还是输，奖励玩家的星星数量，以及必要的游戏结束清理。 
+
+**BP_Counter** 由 **BP_LogicMem** 调用，使用 _蓝图接口_ 来变更显示的步数，并在可走步数低于3步时对可走步数的文本颜色进行变更。
+
+## 卡牌处理
+
+**BP_DeckMem** 和 **BP_CardMem** _蓝图_ 是管理如何在游戏中定义并展示卡牌的主要 _蓝图_ 。 **BP_DeckMem** 的一个实例被放置在游戏关卡中，并且其处理 **BP_CardMem** 的生成。
+
+**BP_DeckMem** 包含创建并拖曳卡牌组，生成卡牌，在板上放置卡牌并在按下 **提示** 按钮时显示所有卡牌的逻辑。 拖曳卡牌组的网络被存储在 **Shuffle** （拖曳）函数中，它在准备新游戏时在主 **EventGraph** （事件图表）中进行调用。在拖曳了卡牌组后， **BP_DeckMem** 生成卡牌，卡牌基于卡牌的总体数量在不同的位置进行放置。板上的每个位置都有索引： **CardDeckObjects** 数组包含索引中的 **BP_CardMem** _蓝图_ ，而 **CardDeckShuffled** 数组存储该索引的卡牌类型的信息。 **BP_DeckMem** 中的 **旋转** 事件会在按下 **提示** 按钮时翻转所有的卡牌。
+
+**BP_CardMem** 定义了每张卡牌的图像，定义了放置，翻转和移除卡牌的动画，并设置了在比较卡牌时使用的 _粒子特效_ 和声音。
+
+[REGION:fullwidth]
+![](CardGame_ParticleEffects_Right.png)
+[/REGION:fullwidth]
+
+## 点击输入
+
+**BP_PlayerControllerMem** _蓝图_ 启用了鼠标接口。点击事件被启用，而鼠标移动事件则没有。包含点击事件的 _蓝图_ 为 **BP_MenuMem**, **BP_CardMem** 和 **BP_Scoreboard** 。这些 **Assign OnClicked** （点击后指派） _节点_ 都从 **ReceivedBeginPlay** （获取后开始播放）事件中激活，这些事件会在玩家开始游戏后进行触发。 
+
+**Assign OnClicked** _节点_ 创建绑定于代理OnClicked的事件。 代理是让 _蓝图_ 组件报告其状态并基于其状态变更而触发事件的方式。 例如，当我们在游戏中点击 **提示按钮** 后，它会报告该点击，并且会触发 **提示按钮** 的OnClicked代理，从而激活会导致所有放置的卡牌翻转的节点序列。
+
+变量 **BlockClick** （阻止点击）旨在防止玩家在卡牌已经翻转或卡牌正在翻转的过程中对卡牌进行点击。
+
+## 固定相机
+**BP_LogicMem** _蓝图_ 将 **SpectatorPawn** 定义为默认的Pawn类。记忆游戏的 _关卡蓝图_ 在PlayerStart（玩家起始外置处）放置 **SpectatorPawn** （观察Pawn），并且 **SpectatorPawn** 的属性使得相机在整个游戏中保持不动。 
+
+## 菜单
+**Memory Game** （记忆游戏）起始菜单在 **BP_MenuMem** _蓝图_ 中使用简单的 _StaticMeshComponents_ （静态网格物体组件）进行设置。 _TextRenderComponents_ 被用于文本和数字，而 **Timeline** （时间轴）被用来将菜单移出游戏窗口。
+使用菜单来对使用的卡牌数量以及是否应使用在成对时会终止游戏的黑牌进行变量设置。	这些变量和 **BPI_Communication** _蓝图接口_ 一起被发送到 **BP_LogicMem** 以及 **BP_DeckMem** _蓝图_ 。 
+
+[REGION:fullwidth]
+![](CardGameMenu.png)
+[/REGION:fullwidth]
+
+**BP_Scoreboard** _蓝图_ 使用 _StaticMeshComponents_ （静态网格物体组件）和 _TextRenderComponents_ （文本渲染器组件）的组合来创建出现在游戏结束处的摘要菜单。
+
+[REGION:fullwidth]
+![](CardGameEndMenu.png)
+[/REGION:fullwidth]
+
+<!--
+## Overview
+
+The ShooterGame sample is an example of PC multiplayer first person shooter. It includes basic implementations of 
+weapons and gametypes along with a simple front end menu system.
+
+A complete list of the featured concepts:
+
+* Instant hit weapon (ShooterWeapon_Instant)
+* Projectile based weapon (ShooterWeapon_Projectile + ShooterProjectile)
+* Non-Team game mode (ShooterGame_FreeForAll)
+* Team-based game mode (ShooterGame_TeamDeathMatch)
+* Pickups (ShooterPickup)
+* Main menu (ShooterHUD_Menu)
+
+
+## Weapon Fire System
+
+The base firing functionality for the weapons - such as ammo management, reloading, and replication - is implemented 
+in the `AShooterWeapon` class.
+
+The weapon is switched to its firing state on the local client and server (via RPC calls). `DetermineWeaponState()` 
+is called in `StartFire()`/`StopFire()` which performs some logic to decide which state the weapon should be in and then 
+calls `SetWeaponState()` to place the weapon into the appropriate state. Once in firing state, the local client will 
+repeatedly call `HandleFiring()` which, in turn, calls `FireWeapon()`. Then it updates ammo and calls `ServerHandleFiring()` 
+to do the same on the server. The server version is also responsible for notifying remote clients about each fired round via the 
+`BurstCounter` variable.
+
+Actions performed on the remote clients are purely cosmetic. Weapon fire is replicated using the `BurstCounter` 
+property so that the remote clients can play animations and spawn effects - perform all of the visual aspects of the 
+weapon firing.
+
+### Instant-Hit Weapon Fire
+
+Instant-hit detection is used for fast firing weapons, such as rifles or laser guns. The basic concept is that when the player 
+fires the weapon, a line check is performed in the direction the weapon is aimed at that instant to see if anything would be hit.
+
+This method allows high precision and works with actors that don't exist on server side (e.g., cosmetic or torn off). The 
+local client performs the calculations and informs the server of what was hit. Then, the server verifies the hit and replicates 
+it if necessary.
+
+In `FireWeapon()`, the local client does a trace from the camera location to find the first blocking hit under the crosshair 
+and passes it to `ProcessInstantHit()`. From there, one of three things happens:
+
+* The hit is sent to the server for verification (`ServerNotifyHit()` - `ProcessInstantHit_Confirmed()`)
+* If the hit actor doesn't exist on server, the hit is processed locally (`ProcessInstantHit_Confirmed()`)
+* If nothing was hit the server is notified (`ServerNotifyMiss()`)
+
+
+Confirmed hits apply damage to the hit actors, spawn trail and impact effects, and notify remote clients by setting data 
+about the hit in the `HitNotify` variable. Misses just spawn trails and set `HitNotify` for remote clients, which look 
+for `HitNotify` changes and perform the same trace as the local client, spawning trails and impacts as needed.
+
+The instant-hit implementation also features weapon spread. For trace/verification consistency, local client picks a random 
+seed each time `FireWeapon()` is executed and passes it in every RPC and `HitNotify` pack.
+
+### Projectile Weapon Fire
+
+Projectile fire is used to simulate weapons that fire rounds which are slower moving, explode on impact, affected by gravity, 
+etc. These are cases where the outcome of the weapon fire can't be determined at the exact instant the weapon is fired, such 
+as launching a grenade. For this type of weapon, an actual physical object, or _projectile_, is spawned and sent moving in the 
+direction the weapon is aimed. A hit is determined by the projectile colliding with another object in the world.
+
+For projectile fire, the local client does a trace from camera to check what actor is under the crosshair 
+in `FireWeapon()`, similar to the instant-hit implementation. If the player is aiming at something, it adjusts the fire direction 
+to hit that spot and calls `ServerFireProjectile()` on the server to spawn a projectile actor in the direction the weapon was aimed.
+
+When the movement component of the projectile detects a hit on the server, it explodes dealing damage, spawning effects, and 
+tears off from replication to notify the client about that event. Then, the projectile turns off collision, movement, and visibility 
+and destroys itself after one second to give client time for replication update.
+
+On clients, explosion effects are spawned in the `TornOff()` event.
+
+## Player Inventory
+
+The player's inventory is an array of `AShooterWeapon` references stored in the `Inventory` property of the player's 
+Pawn (`AShooterCharacter`). The currently equipped weapon is replicated from the server, and additionally, `AShooterCharacter` 
+stores its current weapon locally in `LocalCurrentWeapon` property, which allows the previous weapon to be un-equipped 
+when a new weapon is equipped.
+
+When the player equips a weapon, the appropriate weapon mesh - first-person for local, third-person for others - is attached
+to the Pawn and an animation is played on the weapon. The weapon is switched to the equipping state for duration of the 
+animation.
+
+## Player Camera
+
+In first-person mode, the Pawn's mesh is hard-attached to camera so that the arms always appear relative to the player's view. 
+The downside of this approach is that it means the legs are not visible in the player's view, since the entire mesh rotates 
+to match camera yaw and pitch.
+
+The basic flow of the camera update is:
+
+* `AShooterCamera::UpdateCamera()` is executed each tick
+* `APayerCamera::UpdateCamera()` is called to update the camera rotation based on the player's input
+* `AShooterCharacter::OnCameraUpdate()` is called to perform the calculations necessary to rotate the first person mesh to match the camera
+
+
+When the player dies, it switches to a _death_ camera that has fixed location and rotation set in the `AShooterPlayerController::PawnDied()` 
+handler. This function calls `AShooterPlayerController::FindDeathCameraSpot()` which cycles through several different 
+locations and uses the first one not obstructed by level's geometry.
+
+## Online Multiplayer
+
+Online multiplayer matches are divided into 3 stages: 
+
+* Warm up
+* Match play
+* Game over
+
+
+Players join the game via the _login_ process handled by the `PreLogin()`, `Login()`, and `PostLogin()` functions in 
+`AShooterGameMode`. `Login()` spawns the PlayerController for each player, sets their starting spot (e.g. the PlayerStart they 
+will start at), and also calls `InitNewPlayer()` to allow for customizing the player based on the map URl options or other factors. 
+for team-based games, this is where the players are assigned to teams. 
+
+When the first player joins the game, the **warm up** stage begins. This is a short period, marked by a 
+countdown timer, that gives other players a chance to join. During this period, the players are in _spectator_ mode allowing them 
+to fly around the map. When the countdown timer expires, `StartMatch()` is called to restart all of the players and spawn their 
+Pawns. 
+
+Matches are timed, with the game time being calculated on server side in the `AShooterGameMode::DefaultTimer()` function, 
+which is executed using a looping timer with a rate equal to the current time dilation that equates to once every _game_ second. 
+This is stored in the `RemainingTime` property of the game replication info class (`AShooterGRI`), which is then replicated 
+to clients. When the time remaining reaches zero, `FinishMatch()` is called to end the game session. This notifies all players 
+the match has ended and disables movement and health.
+
+## Menu System
+
+The menu system is created using the [Slate UI framework](Programming/Slate). It consists of **menus**, **menu widgets**, and **menu items**. 
+Each menu has a single menu widget (`SSHooterMenuWidget`) that is responsible for layout, internal even handling, and animations 
+for all of the menu items. Menu items (`SSHooterMenuItem`) are compound objects that can perform actions and contain any number 
+of other menu items. These can be as simple as a label or button or "tabs" that contain complete submenus made up of other menu items. 
+This menu can be operated using keyboard or controller, but there is only limited mouse support at this time.
+
+Each menu is _constructed_ via the `Construct()` function, which adds all of the necessary menu items, including sub-items, 
+and attaches delegates to them where necessary. this is done using the helper methods - `AddMenuItem()`, `AddMenuItemSP()`, etc. - 
+defined in the `MenuHelper` namespace in the `SShooterMenuWidget.h` file.
+
+Navigation to previous menus is done using an array of shared pointers to menus and is stored in the `MenuHistory` variable of 
+the menu widget. `MenuHistory` acts like stack to hold previously entered menus and makes it easy to go back. By using this method, 
+no direct relationship is created between menus and the same menu can be reused in different places if necessary.
+
+Animations are performed using interpolation curves defined in `SShooterMenuWidget::SetupAnimations()`. Each curve has start time, 
+duration, and interpolation method. Animations can be played forward and in reverse and their attributes can be animated at specific time 
+using `GetLerp()`, which returns a value from 0.0f to 1.0f. There are several different interpolation methods available defined in 
+`ECurveEaseFunction::Type` in `SlateAnimation.h`.
+
+
+### Main Menu
+
+
+
+The main menu is opened automatically when the game starts by specifying the _ShooterEntry_ map as the default. It loads a special 
+GameMode, `AShooterGameMode`, that uses the `AShooterPlayerController_Menu` class which opens the main menu by creating a new 
+instance of the `FShooterMainMenu` class in its `PostbeginPlay()` function.
+
+### In-game Menu
+
+
+The in-game menu is created in the `PostInitializeComponents()` function of the `AShooterPlayerController` class, and opened or closed 
+via the `OnToggleInGameMenu()` function.
+
+### Options Menu
+
+The options menu is available as a submenu of both the main menu and in-game menu. The only difference is how changes are applied:
+
+* Accessed from the main menu, changes are applied when the player starts the game. 
+* Accessed from the in-game menu, changes are applied immediately when the menu is closed.
+
+
+The settings in the options menu are saved to `GameUserSettings.ini`, and loaded automatically at startup.
+
+-->

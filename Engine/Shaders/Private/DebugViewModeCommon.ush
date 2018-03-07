@@ -1,0 +1,82 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	DebugViewModeCommon.hlsl: Debug pixel shader interpolants.
+=============================================================================*/
+
+// This define the interpolant needed by the pixel shader used for debug viewmode.
+// Those use a global shader that must have exactly the same inputs as the VS outputs.
+// This is also compatible with shaders that modify the mesh position (like tesselation).
+// Which is better in the end than simply defining a material override.
+
+struct FDebugVSToPS
+{
+	// TexCoords must first in order to be compatible with viewmode requiring using only SV_Position
+	float4 Position : SV_POSITION;
+	float4 VertexColor : TEXCOORD0;
+	float4 TexCoord01 : TEXCOORD1;
+	float4 TexCoord23 : TEXCOORD2;
+	float3 TangentToWorld0 : TEXCOORD3;
+	float3 TangentToWorld1 : TEXCOORD4;
+	float3 TangentToWorld2 : TEXCOORD5;
+#if INSTANCED_STEREO
+	nointerpolation uint PackedEyeIndex : PACKED_EYE_INDEX;
+#endif
+};
+
+struct FDebugPSIn
+{
+	float4 SvPosition : SV_POSITION;
+	float4 VertexColor : TEXCOORD0;
+	float4 TexCoord01 : TEXCOORD1;
+	float4 TexCoord23 : TEXCOORD2;
+	float3 TangentToWorld0 : TEXCOORD3;
+	float3 TangentToWorld1 : TEXCOORD4;
+	float3 TangentToWorld2 : TEXCOORD5;
+#if INSTANCED_STEREO
+	nointerpolation uint PackedEyeIndex : PACKED_EYE_INDEX;
+#endif
+	uint SvPrimitiveID : SV_PrimitiveID;
+};
+
+// This one is only compatible if no previous stage outputed SV_PrimitiveID (i.e. geometry shader)
+struct FDebugPSInLean
+{
+	float4 SvPosition : SV_POSITION;
+	uint PrimitiveID : SV_PrimitiveID;
+};
+
+#if DEBUG_MATERIAL_PARAMETERS
+/** Converts from vertex factory specific interpolants to a FMaterialPixelParameters, which is used by material inputs. */
+FMaterialPixelParameters GetMaterialPixelParameters(FDebugPSIn DebugInputs, float4 SvPosition)
+{
+	// GetMaterialPixelParameters is responsible for fully initializing the result
+	FMaterialPixelParameters Result = MakeInitializedMaterialPixelParameters();
+
+	Result.VertexColor = DebugInputs.VertexColor;
+
+	Result.TangentToWorld = half3x3(half3(DebugInputs.TangentToWorld0), half3(DebugInputs.TangentToWorld1), half3(DebugInputs.TangentToWorld2));
+
+#if NUM_MATERIAL_TEXCOORDS > 0
+	Result.TexCoords[0].xy = DebugInputs.TexCoord01.xy;
+#endif
+#if NUM_MATERIAL_TEXCOORDS > 1
+	Result.TexCoords[1].xy = DebugInputs.TexCoord01.zw;
+#endif
+#if NUM_MATERIAL_TEXCOORDS > 2
+	Result.TexCoords[2].xy = DebugInputs.TexCoord23.xy;
+#endif
+#if NUM_MATERIAL_TEXCOORDS > 3
+	Result.TexCoords[3].xy = DebugInputs.TexCoord23.zw;
+#endif
+#if NUM_MATERIAL_TEXCOORDS > 4
+	for(int CoordinateIndex = 4; CoordinateIndex < NUM_MATERIAL_TEXCOORDS; CoordinateIndex++)
+	{
+		Result.TexCoords[CoordinateIndex] = DebugInputs.TexCoord01.xy;
+	}
+#endif
+
+	Result.TwoSidedSign = 1;
+	return Result;
+}
+#endif

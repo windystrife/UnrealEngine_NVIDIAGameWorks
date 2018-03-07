@@ -1,0 +1,383 @@
+// NVCHANGE_BEGIN: Add VXGI
+
+/*=============================================================================
+	VXGIVoxelizationPixelShader.usf: Used to VXGI opacity & emittance voxelization
+	Based on BasePassForForwardShadingPixelShader.usf & TiledDeferredShading.usf
+=============================================================================*/
+
+#define SUPPORT_CONTACT_SHADOWS 1
+
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/SHCommon.ush"
+#include "/Engine/Private/MobileBasePassCommon.ush"
+#include "/Engine/Generated/Material.ush"
+#include "/Engine/Generated/VertexFactory.ush"
+#include "/Engine/Private/LightmapCommon.ush"  
+#include "/Engine/Private/DeferredLightingCommon.ush"
+#include "/Engine/Private/ReflectionEnvironmentShared.ush"
+#include "/Engine/Private/ShadowProjectionCommon.ush"
+
+int EmittanceShadingMode;
+int EmittanceShadowQuality;
+bool IsInverseSquared;
+bool IsRadialLight;
+bool IsSpotLight;
+bool IsPointLight;
+bool EnableEmissive;
+bool EnableIndirectIrradiance;
+bool EnableSkyLight;
+
+int NumCascades;
+float4x4 WorldToShadowMatrices[NUM_SHADOW_CASCADE_SURFACES];
+float SoftTransitionScale0;
+float SoftTransitionScale1;
+float SoftTransitionScale2;
+float SoftTransitionScale3;
+float SoftTransitionScale4;
+float SoftTransitionScale5;
+float SoftTransitionScale6;
+float SoftTransitionScale7;
+Texture2D ShadowDepthTexture0;
+Texture2D ShadowDepthTexture1;
+Texture2D ShadowDepthTexture2;
+Texture2D ShadowDepthTexture3;
+Texture2D ShadowDepthTexture4;
+Texture2D ShadowDepthTexture5;
+Texture2D ShadowDepthTexture6;
+Texture2D ShadowDepthTexture7;
+
+float2 PointLightDepthBiasParameters;
+
+// Keep these two constants last.
+// Otherwise, when rendering emissive materials without light info, UE detects that only the first 300-something bytes of the CB are modified, 
+// and uses a smaller constant buffer, which makes D3D runtime issue a warning about a small CB.
+int NumShadows;
+int NumLights;
+
+float CalculateOcclusion(float ShadowmapDepth, float SceneDepth, float TransitionScale)
+{
+	// The standard comparison is SceneDepth < ShadowmapDepth
+	// Using a soft transition based on depth difference
+	// Offsets shadows a bit but reduces self shadowing artifacts considerably
+	return saturate((ShadowmapDepth - SceneDepth) * TransitionScale + 1);
+}
+
+float4 CalculateOcclusion(float4 ShadowmapDepth, float SceneDepth, float TransitionScale)
+{
+	return saturate((ShadowmapDepth - SceneDepth) * TransitionScale + 1);
+}
+
+float PCF1x1(float2 Fraction, float4 Values00)
+{
+	float2 HorizontalLerp00 = lerp(Values00.wx, Values00.zy, Fraction.xx);
+	return lerp(HorizontalLerp00.x, HorizontalLerp00.y, Fraction.y);
+}
+
+float GetVxgiPointLightShadow(float3 WorldPosition, float3 LightPosition, float LightInvRadius, float DepthBias)
+{
+	float Shadow = 1;
+
+	float3 LightVector = LightPosition - WorldPosition.xyz;
+	float Distance = length(LightVector);
+
+	BRANCH
+	// Skip pixels outside of the light's influence
+	if (Distance * LightInvRadius < 1.0f)
+	{
+		float3 NormalizedLightVector = LightVector / Distance;
+		float3 SideVector = normalize(cross(NormalizedLightVector, float3(0, 0, 1)));
+		float3 UpVector = cross(SideVector, NormalizedLightVector);
+
+		SideVector *= InvShadowmapResolution;
+		UpVector *= InvShadowmapResolution;
+
+		// Figure out which cube face we're sampling from
+		int CubeFaceIndex = 0;
+		float3 AbsLightVector = abs(LightVector);
+		float MaxCoordinate = max(AbsLightVector.x, max(AbsLightVector.y, AbsLightVector.z));
+		if (MaxCoordinate == AbsLightVector.x)
+		{
+			CubeFaceIndex = AbsLightVector.x == LightVector.x ? 0 : 1;
+		}
+		else if (MaxCoordinate == AbsLightVector.y)
+		{
+			CubeFaceIndex = AbsLightVector.y == LightVector.y ? 2 : 3;
+		}
+		else
+		{
+			CubeFaceIndex = AbsLightVector.z == LightVector.z ? 4 : 5;
+		}
+
+		// Transform the position into shadow space
+		float4 ShadowPosition = mul(float4(WorldPosition.xyz, 1), ShadowViewProjectionMatrices[CubeFaceIndex]);
+		// Calculate the Z buffer value that would have been stored for this position in the shadow map
+		float CompareDistance = ShadowPosition.z / ShadowPosition.w;
+		float ShadowDepthBias = - DepthBias / ShadowPosition.w;
+
+		Shadow = ShadowDepthCubeTexture.SampleCmpLevelZero(ShadowDepthCubeTextureSampler, NormalizedLightVector, CompareDistance + ShadowDepthBias);
+	}
+
+	return Shadow;
+}
+
+float GetVxgiSingleLightShadow(float3 WorldPosition)
+{
+	float DynamicShadow = 0;
+	float TotalWeight = 0;
+
+	Texture2D ShadowDepthTextures[] = 
+	{
+		ShadowDepthTexture0,
+		ShadowDepthTexture1,
+		ShadowDepthTexture2,
+		ShadowDepthTexture3,
+		ShadowDepthTexture4,
+		ShadowDepthTexture5,
+		ShadowDepthTexture6,
+		ShadowDepthTexture7,
+	};
+
+	float SoftTransitionScales[] =
+	{
+		SoftTransitionScale0,
+		SoftTransitionScale1,
+		SoftTransitionScale2,
+		SoftTransitionScale3,
+		SoftTransitionScale4,
+		SoftTransitionScale5,
+		SoftTransitionScale6,
+		SoftTransitionScale7,
+	};
+
+	UNROLL
+	for (int ShadowIndex = 0; ShadowIndex < NUM_SHADOW_CASCADE_SURFACES; ++ShadowIndex)
+	{
+		if (TotalWeight < 1.0 && ShadowIndex < NumCascades)
+		{
+			float4 ShadowPosition = mul(float4(WorldPosition.xyz, 1), WorldToShadowMatrices[ShadowIndex]);
+			ShadowPosition.xy /= ShadowPosition.w;
+
+			if (ShadowPosition.x >= ShadowBufferSize.z * 0.5 && ShadowPosition.x <= 1.0 - ShadowBufferSize.z * 0.5 
+			 && ShadowPosition.y >= ShadowBufferSize.w * 0.5 && ShadowPosition.y <= 1.0 - ShadowBufferSize.w * 0.5)
+			{
+				// Clamp pixel depth in light space for shadowing opaque, because areas of the shadow depth buffer that weren't rendered to will have been cleared to 1
+				// We want to force the shadow comparison to result in 'unshadowed' in that case, regardless of whether the pixel being shaded is in front or behind that plane
+				float SceneDepth = min(ShadowPosition.z, 0.99999f);
+				float TransitionScale = SoftTransitionScales[ShadowIndex];
+				float CascadeShadow;
+				
+				float2 Weights = saturate(10.0 - 20.0 * abs(ShadowPosition.xy - 0.5));
+				float Weight = Weights.x * Weights.y * (1 - TotalWeight);
+					
+				float2 TexelPos = ShadowPosition.xy * ShadowBufferSize.xy - 0.5f;	// bias to be consistent with texture filtering hardware
+
+				// Compute the derivatives and make sure we don't sample too fine shadow map level
+				float2 TexelPosDeriv = max(ddx(TexelPos), ddy(TexelPos));
+				if(max(TexelPosDeriv.x, TexelPosDeriv.y) > 2.0 && ShadowIndex < NumCascades - 1)
+					Weight = 0;
+
+				if(Weight > 0)
+				{
+					if (EmittanceShadowQuality == 0)
+					{
+						float ShadowmapDepth = Texture2DSampleLevel(ShadowDepthTextures[ShadowIndex], ShadowDepthTextureSampler, ShadowPosition.xy, 0).r;
+						CascadeShadow = CalculateOcclusion(ShadowmapDepth, SceneDepth, TransitionScale);
+					}
+					else
+					{
+						float2 Fraction = frac(TexelPos);
+						float2 TexelCenter = floor(TexelPos) + 0.5f;	// bias to get reliable texel center content
+
+						// using Gather: xyzw in counter clockwise order starting with the sample to the lower left of the queried location
+						float4 Samples = ShadowDepthTextures[ShadowIndex].Gather(ShadowDepthTextureSampler, TexelCenter * ShadowBufferSize.zw);
+
+						float4 Values00 = CalculateOcclusion(Samples, SceneDepth, TransitionScale);
+						CascadeShadow = PCF1x1(Fraction, Values00);
+					}
+
+					DynamicShadow += Weight * CascadeShadow;
+					TotalWeight += Weight;
+				}
+			}
+		}
+	}
+
+	if(TotalWeight > 0)
+		return DynamicShadow / TotalWeight;
+
+	return 1;
+}
+
+float GetForwardDynamicShadow(float3 WorldPosition)
+{
+	// Treat as unshadowed if the voxel is outside of the shadow map
+	float DynamicShadow = 1;
+
+	BRANCH
+	if (NumShadows == 1)
+	{
+		BRANCH
+		if (IsPointLight)
+		{
+			DynamicShadow = GetVxgiPointLightShadow(WorldPosition, DeferredLightUniforms.LightPosition, DeferredLightUniforms.LightInvRadius, PointLightDepthBiasParameters.x);
+		}
+		else
+		{
+			DynamicShadow = GetVxgiSingleLightShadow(WorldPosition);
+		}
+	}
+
+	return DynamicShadow;
+}
+
+FDeferredLightData SetupLightData()
+{
+	// Build the light data struct using the DeferredLightUniforms and light defines
+	// We are heavily relying on the shader compiler to optimize out constant subexpressions in GetDynamicLighting()
+	FDeferredLightData LightData;
+	LightData.LightPositionAndInvRadius = float4(DeferredLightUniforms.LightPosition, DeferredLightUniforms.LightInvRadius);
+	LightData.LightColorAndFalloffExponent = float4(DeferredLightUniforms.LightColor, DeferredLightUniforms.LightFalloffExponent);
+	LightData.LightDirection = DeferredLightUniforms.NormalizedLightDirection;
+	LightData.LightTangent = DeferredLightUniforms.NormalizedLightTangent;
+	LightData.SpotAnglesAndSourceRadius = float4(DeferredLightUniforms.SpotAngles, DeferredLightUniforms.SourceRadius, DeferredLightUniforms.SourceLength);
+	LightData.SoftSourceRadius = DeferredLightUniforms.SoftSourceRadius;
+	LightData.MinRoughness = DeferredLightUniforms.MinRoughness;
+	LightData.ContactShadowLength = DeferredLightUniforms.ContactShadowLength;
+	LightData.DistanceFadeMAD = DeferredLightUniforms.DistanceFadeMAD;
+	LightData.ShadowMapChannelMask = 0;//DeferredLightUniforms.ShadowMapChannelMask;
+
+	LightData.bInverseSquared = IsInverseSquared;
+	LightData.bRadialLight = IsRadialLight;
+	LightData.bSpotLight = IsSpotLight;
+	LightData.ShadowedBits = DeferredLightUniforms.ShadowedBits;
+
+	return LightData;
+}
+
+float3 GetVxgiDynamicLighting(float3 DiffuseColor, FMaterialPixelParameters MaterialParameters)
+{
+	uint ShadingModelID = SHADINGMODELID_DEFAULT_LIT;
+	FScreenSpaceData ScreenSpaceData = (FScreenSpaceData)0;
+	ScreenSpaceData.GBuffer.WorldNormal = MaterialParameters.WorldNormal;
+	ScreenSpaceData.GBuffer.Roughness = 1.f;
+	ScreenSpaceData.GBuffer.ShadingModelID = ShadingModelID;
+	ScreenSpaceData.GBuffer.DiffuseColor = DiffuseColor;
+	ScreenSpaceData.AmbientOcclusion = 1.f;
+
+	FDeferredLightData LightData = SetupLightData();
+	float3 WorldPosition = MaterialParameters.AbsoluteWorldPosition.xyz;
+	float3 CameraVector = MaterialParameters.WorldNormal;
+	float2 InUV = float2(0,0);
+	float4 LightAttenuation = float4(1,1,1,1);
+	uint2 Random = uint2(0,0);
+
+	
+	if (LightData.ShadowedBits)
+	{
+		if (IsRadialLight)
+		{
+			//Pretend like we read these from the light projection buffer
+			LightAttenuation.z = GetForwardDynamicShadow(WorldPosition);
+			//Don't handle Subsurface make it the same as hard shadows
+			LightAttenuation.w = LightAttenuation.z;
+		}
+		else
+		{
+			LightAttenuation.x = GetForwardDynamicShadow(WorldPosition);
+			//Don't handle Subsurface make it the same as hard shadows
+			LightAttenuation.y = LightAttenuation.x;
+		}
+	}
+
+	float4 LitColor = GetDynamicLighting(WorldPosition, CameraVector, ScreenSpaceData.GBuffer, ScreenSpaceData.AmbientOcclusion, ScreenSpaceData.GBuffer.ShadingModelID, LightData, LightAttenuation, 0.5, Random);
+	return LitColor.rgb;
+}
+
+#if DIFFUSE_SPEC_INPUTS
+
+half3 GetVxgiDiffuseColor(FPixelMaterialInputs PixelMaterialInputs)
+{
+	return GetMaterialDiffuseColor( PixelMaterialInputs );
+}
+
+#else // DIFFUSE_SPEC_INPUTS
+
+half3 GetVxgiDiffuseColor(FPixelMaterialInputs PixelMaterialInputs)
+{
+	half3 BaseColor = GetMaterialBaseColor( PixelMaterialInputs );
+	half  Metallic = (EmittanceShadingMode == 0) ? GetMaterialMetallic( PixelMaterialInputs ) : 0.f;
+
+#if MATERIAL_NONMETAL
+	return BaseColor;
+#else
+	return BaseColor - BaseColor * Metallic;
+#endif
+}
+
+#endif // DIFFUSE_SPEC_INPUTS
+
+void Main( 
+	FVertexFactoryInterpolantsVSToPS Interpolants,
+	FMobileBasePassInterpolantsVSToPS BasePassInterpolants,
+	in half4 SvPosition	: SV_Position,
+	in VxgiVoxelizationPSInputData VxgiPSInputData
+	OPTIONAL_IsFrontFace // VxgiVoxelizationPSInputData contains SV_IsFrontFace so the compiler wants this later for some reason
+	)
+{
+	ResolvedView = ResolveView();
+
+#if PACK_INTERPOLANTS
+	float4 PackedInterpolants[NUM_VF_PACKED_INTERPOLANTS];
+	VertexFactoryUnpackInterpolants(Interpolants, PackedInterpolants);
+#endif
+	FMaterialPixelParameters MaterialParameters = GetMaterialPixelParameters(Interpolants, SvPosition);
+
+	FPixelMaterialInputs PixelMaterialInputs;
+	
+	float4 ScreenPosition = SvPositionToResolvedScreenPosition(SvPosition);
+	
+	// Get WorldPosition from attributes because normally it's reconstructed from SvPosition,
+	// which doesn't (easily) work for voxelization
+	float3 TranslatedWorldPosition = BasePassInterpolants.PixelPosition + ResolvedView.PreViewTranslation.xyz;
+	CalcMaterialParametersEx(MaterialParameters, PixelMaterialInputs, SvPosition, ScreenPosition, bIsFrontFace, TranslatedWorldPosition, TranslatedWorldPosition);
+	
+	//Clip if the blend mode requires it.
+	GetMaterialCoverageAndClipping(MaterialParameters, PixelMaterialInputs);
+
+#if !MATERIAL_SHADINGMODEL_UNLIT
+	half3 DiffuseColor = GetVxgiDiffuseColor(PixelMaterialInputs);
+#endif
+
+	half3 Color = 0;
+
+	if (VxgiIsEmissiveVoxelizationPass)
+	{
+		if (EnableEmissive)
+		{
+			Color += GetMaterialEmissive(PixelMaterialInputs);
+		}
+
+		if (EnableIndirectIrradiance)
+		{
+#if !MATERIAL_SHADINGMODEL_UNLIT
+			Color += DiffuseColor * VxgiGetIndirectIrradiance(MaterialParameters.AbsoluteWorldPosition, MaterialParameters.WorldNormal) / PI;
+#endif
+		}
+
+		if(EnableSkyLight)
+		{
+#if !MATERIAL_SHADINGMODEL_UNLIT
+			Color += DiffuseColor * GetSkySHDiffuse(MaterialParameters.WorldNormal) * View.SkyLightColor.rgb;
+#endif
+		}
+
+		if (NumLights != 0)
+		{
+#if !MATERIAL_SHADINGMODEL_UNLIT
+			Color += GetVxgiDynamicLighting(DiffuseColor, MaterialParameters);
+#endif
+		}
+	}
+
+	VxgiStoreVoxelizationData(VxgiPSInputData, Color);
+}

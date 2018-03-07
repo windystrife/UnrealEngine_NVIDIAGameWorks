@@ -1,0 +1,128 @@
+﻿INTSourceChangelist:3196518
+Availability:Public
+Title:Clear Coat マテリアルで 2 つ目の法線マップを使用する方法
+Description:Clear Coat マテリアルに 2 つ目の法線マップを使用するための操作ガイド
+Crumbs: %ROOT%, Engine, Engine/Rendering/Materials, Engine/Rendering/Materials/HowTo
+Version:4.12
+SkillLevel:Intermediate
+
+[TOC(start:2)]
+
+クリアコート レイヤーの下のサーフェスに 2 つ目の法線マップを追加するオプションがクリアコート シェーディング モデルに追加されました。このオプションを使うと、クリアコート レイヤーとは異なるジオメトリ サーフェスを持つカーボン ファイバーなどの複雑なマテリアルも正確にモデル化ができるようになります。以下の操作ガイドでは、UE4 でこの機能を有効にして使用する方法について説明します。
+
+## 2 つ目の法線の効果
+操作の説明を始める前に、2 つ目の法線マップを追加すると、クリアコート シェーディング モデルにどんな効果があるのか見てみましょう。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Clear Coat Bottom Normal Off](Dual_CC_Off.png)(w:700 h:700)
+	[/PARAM]
+	[PARAM:after]
+	![Clear Coat Bottom Normal On](Dual_CC_On.png)(w:700 h:700)
+	[/PARAM]
+[/OBJECT]
+
+上の画像では、クリアコートの下のサーフェスが照らされている途中まで 2 つ目の法線マップを追加した効果が分かります。画像の左側は Clear Coat Bottom Normal がオフにされています。クリアコートの下のサーフェスがライティングと交わっていますが、ライトがサーフェスに与える影響は 1 方向のみなので、ライティングが少しフラットに見えてしまいます。一方、右側は Clear Coat Bottom Normal がオンにされています。ライトはサーフェス上で複数方向に影響を与えようとしています。それではこの操作を行ってみましょう。
+
+## 必要なファイル
+操作ガイドに従って作業するために、まず以下のテクスチャ ファイルをダウンロード、展開して UE4 にインポートしてください。テクスチャ ファイルの操作については [テクスチャ インポート ガイド](https://docs.unrealengine.com/latest/INT/Engine/Content/Types/Textures/Importing/) で詳しく説明をご覧いただけます。
+
+**[必要なテクスチャのダウンロード](ClearCoatDualNormalTextures.zip)** (名前をつけて保存するには右クリック)
+
+## Dual - Normal Clear Coat オプションを有効にする
+2 つ目の法線を使う前に、以下の手順に従って機能を有効にします。
+
+1. **メイン ツールバー** から **[Edit (編集)]** > **[Project Settings (プロジェクト設定)]** を選びます。
+
+	![](Dual_CC_Enable_Option_00.png)
+
+1. [Project Settings (プロジェクト設定)] で **[Rendering]** > **[Materials]** を選び、**[Clear Coat Enable Second Normal]** オプションの横にあるボックスにチェックを入れて有効にします。
+
+	![](Dual_CC_Enable_Option_01.png)
+
+1. Clear Coat Enable Second Normal 機能を有効にしたら、**[Restart Now (再起動する)]** オプションをクリックして UE4 エディタを再起動します。
+
+	![](Dual_CC_Restart_Editor.png)
+
+## Dual - Normal Clear Coat オプションの使用方法
+
+Dual - Normal Clear Coat オプションを有効にしたら、使用するマテリアルを新規作成して設定します。作成および設定は以下の手順に従います。
+
+1. **コンテンツ ブラウザ** に **Dual_Normal_Clear_Coat** という名前の新しいマテリアルを作成し、ダブルクリックして開きます。
+
+	![](Dual_CC_Create_Material.png)
+
+1. **Main Material Node** を選んで **[Details (詳細)]** パネルの **[Material]** セクションで以下のオプションを変更します。
+	* **[Shading Model]:** [Clear Coat]
+
+	![](Dual_CC_Change_Shading_Model.png)
+
+1. マテリアル グラフに **Scalar Parameter Expression** ノードを 4 つ追加し、以下の名前と値を入れて接続すると、以下の画像と同じになります。
+
+	|マテリアル表現式のタイプ| 名前| デフォルト値|
+	|--------------------------------|---------|---------|
+	|Scalar Parameter| Base Color|0.1225|
+	|Scalar Parameter| Metallic|0.5|
+	|Scalar Parameter|Clear Coat|1.0|
+	|Scalar Parameter| Clear Coat Roughness|0.1225|
+
+	[REGION:lightbox]
+	[![](Dual_CC_Base_Nodes_Setup.png)(w:200 h:250)](Dual_CC_Base_Nodes_Setup.png)
+	[/REGION]
+
+1. 設定するには、マテリアルの **[Roughness]** セクションで、次のマテリアル表現式ノードをマテリアル グラフに追加して、次の値と名前を付けます。追加されたマテリアル表現式ノードを接続すると、以下の画像のようになります。
+
+	|マテリアル表現式のタイプ| 名前| デフォルト値|
+	|--------------------------------|---------|---------|
+	|Scalar Parameter| Roughness Scaling|30.0|
+	|Scalar Parameter| Roughness Min|0.1|
+	|Scalar Parameter| Roughness Max|3.0|
+	|Texture Sample| N/A|T_CarbonFiber_R_00|
+	|Texture Coordinate| N/A|N/A|
+	|Linear Interpolate| N/A|N/A|
+
+	![](Dual_CC_Roughness_Setup.png)
+
+1. このマテリアルは法線マップを 2 つ使っているので、このマテリアルに対して異なる 2 つの **Normal** マップ セクションを設定する必要があります。まず 1 つ目の [Normal] マップ セクションは Clear Coat サーフェス用です。以下のマテリアル表現式ノードが必要です。追加されたマテリアル表現式ノードを接続すると、以下の画像のようになります。
+
+	|マテリアル表現式のタイプ| 名前| デフォルト値|
+	|--------------------------------|---------|---------|
+	|Scalar Parameter|Surface Normal Strength|0.98|
+	|Scalar Parameter| Surface Normal Scaling|30.0|
+	|Texture Sample|N/A|T_CarPaint_N_00|
+	|Texture Coordinate| N/A|N/A|
+	|Multiply| N/A|N/A|
+	|FlattenNormal| N/A|N/A|
+
+	![](Dual_CC_Normal_Setup.png)
+
+1. この **Normal** マップはマテリアルの [Clear Coat] セクションにあるサーフェス用で、以下のマテリアル表現式ノードにそれぞれの値と名前を付けてマテリアル グラフに追加する必要があります。追加されたマテリアル表現式ノードを接続すると、以下の画像のようになります。
+
+	|マテリアル表現式のタイプ| 名前| デフォルト値|
+	|--------------------------------|---------|---------|
+	|Scalar Parameter| Clear Coat Scaling|30.0|
+	|Scalar Parameter|Fiber Strength|0.98|
+	|Texture Sample|N/A|T_CarbonFiber_N_00'|
+	|Texture Coordinate| N/A|N/A|
+	|Multiply| N/A|N/A|
+	|FlattenNormal| N/A|N/A|
+	|ClearCoatBottomNormal (ClearCoatNormalCustomOutput)| N/A|N/A|
+
+	![](Dual_CC_Normal_ClearCoat_Setup.png)
+
+	[region:note]
+	**ClearCoatBottomNormal** マテリアル式ノードを必ずマテリアル グラフに追加して、使用したい Normal マップを入力に接続しておいてください。そうしておかないと、マテリアルの中で 2 つ目の法線マップを見ることができません。
+	[/region]
+
+1. マテリアルの各セクションがすべて設定して、Main Material ノードを接続すると、以下の画像と同じ設定になります。
+
+	[REGION:lightbox]
+	[![](Dual_CC_Final_Setup.png)(w:500 h:350)](Dual_CC_Final_Setup.png)
+	[/REGION]
+
+1. 最後に、マテリアルの各セクションを Main Material ノードの適切な場所にすべて接続したら、**[Apply (適用)]** ボタンを押してマテリアルをコンパイルしてマテリアル エディタを終了します。 
+
+	![](Dual_CC_Apply_Material.png)
+
+
+

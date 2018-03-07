@@ -1,0 +1,63 @@
+﻿INTSourceChangelist:3467293
+Availability:Public
+Title: 물리 기반 애니메이션
+Crumbs: %ROOT%, Engine, Engine/Animation
+Description:물리 기반 애니메이션 결과를 블렌딩하여 캐릭터에 래그돌 효과를 낼 수 있습니다.
+Related: Engine/Content/FBX/Animations
+Related: Engine/Content/Types/SkeletalMeshes
+Related: Engine/Animation/StateMachines
+Related: Gameplay/AI
+Related: Engine/Content/Tools/MayaRiggingTool
+version: 4.9
+topic-image:PhysicsBasedAnimation_topic.png
+
+[REGION:fullwidth]
+![](PhysicsBlend.png)
+
+
+
+이 문서에서는 캐릭터와 스켈레탈 메시에 물리 기반 애니메이션을 적용하는 방법을 다룹니다. 개념적으로는 키프레임 애니메이션에 시뮬레이션 결과를 접목시켜 "래그돌" 효과를 낼 필요가 있는 캐릭터에 자연스러운 시뮬레이션 느낌을 줄 수 있습니다.
+
+이러한 개념의 실제 사례는 [콘텐츠 예제](Resources\ContentExamples\Animation) 프로젝트의 _PhysicalAnimation.umap_ 라는 이름의 맵에서 확인할 수 있습니다. 이 맵에는 애니메이션이 적용된 스켈레탈 메시 시리즈가 있습니다. 이들 각각에 일정한 방식으로 상호작용하여 기존 모션에 피직스 애니메이션이 일어나는 것을 확인할 수도 있습니다.
+
+유의할 점은, 스켈레탈 메시에 어떠한 형태로든 피직스를 적용시키려면, 메시에 피직스 애셋을 셋업하여 적용해야 한다는 점입니다. 그에 대한 부분은 [피직스 애셋 툴(PhAT)](Engine/Physics\PhAT) 관련 문서를 참고해 주시기 바랍니다.
+
+[REGION:note]
+이 예제에 사용된 스켈레탈 메시는 전체적으로 간단합니다. 이 예제에서처럼 블루프린트 액터의 이벤트 그래프에 간단히 사용한 방법 말고도, 애니메이션 블루프린틔 이벤트 그래프 안에서 간단히 **Set All Bodies Simulate Physics** 와 **Set All Bodies Below Physics Blend Weight** 노드를 활용하는 것으로, 같은 기법을 캐릭터나 폰에도 적용할 수 있습니다.
+[/REGION]
+
+
+## 셋업
+
+캐릭터에 피직스를 적용하는 방법은 여러가지이며, 예제에서는 몇 가지만 소개합니다. 여기서 주로 사용하게 될 두 가지 툴은 **Set All Bodies Simulate Physics** 와 **Set All Bodies Below Physics Blend Weight** 노드로, 일반적으로는 캐릭터의 애니메이션 블루프린트 이벤트 그래프 안에 배치됩니다.
+
+![](PhysicsWeghtNodes.png)
+
+### Set All Bodies Below Simulate Physics
+
+**Set All Bodies Below Simulate Physics** 노드의 목적은 스켈레탈 메시의 피직스 애셋 바디를 재귀적으로 활성화시켜, 주어진 본 위치를 시작으로 본 체인을 따라내려가면서 물리 시뮬레이션을 시작하도록 만드는 것입니다. 예를 들어 왼쪽 쇄골에 시뮬레이션을 시작하라고 한다면, 스켈레탈 계층구조상 그 이하의 모든 본 역시도 시뮬레이션이 시작되어, 팔이 흐느적거리거나 래그돌처럼 작동하기 시작합니다. 간단히 말해서, 이 노드는 주어진 본에서부터 물리 시뮬레이션을 시작 또는 중지시키는 똑딱이 스위치로 생각하면 됩니다.
+
+### Set All Bodies Below Physics Blend Weight
+
+이 노드는 간단히, 애니메이션중인 스켈레탈 메시에 대해 피직스 애셋이 얼마만큼 영향을 끼치도록 할 것인지를 제어합니다. 값이 1.0 이면, 주어진 본 이하 모든 본은 완전히 물리 법칙에 의해 구동됩니다. 값이 0.0 이면, 스켈레탈 메시는 원래 키프레임 애니메이션으로 돌아갑니다. 보통 Physics Blend Weight 값의 부드러운 애니메이션이 가능하도록 이 노드는 매 틱마다 돌려주는 것이 좋을 것입니다.
+
+
+## 적중 기반 반응 개요
+
+적중 기반 물리 반응은 캐릭터 시뮬레이션에 흔히 사용되는 경우로, 이를테면 캐릭터가 프로젝타일에 적중하는 경우입니다. 하이 레벨 관점에서 보면, 다음과 같은 작업이 필요합니다:
+
+* 적중된 본 이름을 구합니다. 즉시적중 무기의 경우 트레이스를 통해, 가능하다면 프로젝타일 클래스 안에서 해결 가능합니다.
+* 그 본 이름을 캐릭터 애니메이션 블루프린트의 이벤트 그래프에 전송합니다. 그 안에서 보통 **Set All Bodies Below Simulate Physics** 노드를 통해 물리 시뮬레이션을 활성화시킵니다.
+* **Set All Below Physics Blend Weight** 노드를 통해 Physics Blend Weight 를 제어합니다. 일반적으로 이 값은 빠르게 1.0 까지 오른 다음 0.0 으로 내려가도록 애니메이션을 적용하여, 물리 반응을 접목시켰다가 원래대로 돌아가도록 만드는 것이 좋습니다. 이 작업은 보통 애니메이션 블루프린트의 이벤트 그래프 안에서 처리됩니다.
+* 반응이 완료되고 Physics Blend Weight 가 0 으로 돌아가면, **Set All Bodies Below Simulate Physics** 노드를 한 번 더 사용하여 시뮬레이션을 비활성화시켜 줍니다.
+
+[REGION:note]
+Content Examples 프로젝트에서 찾을 수 있는 PhysicalAnimation.umap 레벨의 예제 1.2 에서 이 기법의 예제를 확인할 수 있습니다.
+[/REGION]
+
+
+
+
+
+
+[/REGION]

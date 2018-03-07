@@ -1,0 +1,53 @@
+﻿INTSourceChangelist:2721645
+Title:ブループリント関数ライブラリ
+Crumbs:
+Description:
+Availability:Public
+Version:4.9
+
+開発中に、プロジェクトの開発がもっとしやすくなる関数の必要性を頻繁に感じます。そのような関数は、たいていの場合、ステートレスで、様々なゲームプレイ コード間で利用されます。ブループリントでビルドをする際も、同じことが必要になります。前のセクションで、ゲーム オブジェクトの関数とプロパティをブループリントに公開する方法を説明しました。ただし、シェアード ユーティリティ関数を公開したい場合は、必ずしもそれらを特定のゲームプレイ オブジェクトに結びつける必要はありません。そのようなケースには、**ブループリント関数ライブラリ**を使います。
+
+ブループリント関数ライブラリは、特定のゲームプレイ オブジェクトに結びついていないユーティリティ機能を提供する静的関数のコレクションです。これらのライブラリは、 AI ブループリント ライブラリなど、ロジックごとの関数セットにグループ化したり、あるいは システム ブループリント ライブラリなど、様々な関数領域へのアクセスを提供するユーティリティ関数を含むことができます。
+
+ブループリント関数ライブラリの作成方法は、 UFUNCTION() マクロを使って関数をブループリントに公開する方法とよく似ています。アクタあるいは UObject から直接派生するのではなく、すべてのブループリント ライブラリは UBlueprintFunctionLibrary から派生しています。また、静的な手法のみが含まれることになります。以下はアナリティクス ブループリント ライブラリのコードの一部です。ライブラリ クラスの設定方法が分かります。
+
+	UCLASS()
+	class UAnalyticsBlueprintLibrary :
+		public UBlueprintFunctionLibrary
+	{
+		GENERATED_UCLASS_BODY()
+		/** Starts an analytics session without any custom attributes specified */
+		UFUNCTION(BlueprintCallable, Category="Analytics")
+		static bool StartSession();
+
+上の例で分かるように、ブループリント関数ライブラリは間接的に UObject から派生しているので、標準の UCLASS() マクロと GENERATED_UCLASS_BODY() マクロが必要です。UFUNCTION() マクロを使って、ブループリントから呼び出すことができる関数を装飾します。ブループリント関数ライブラリの関数は、呼び出しに副作用があるかどうかに応じて、 BlueprintCallable あるいは BlueprintPure と指定することができます。フル・ソース・コードについては、/UE4/Engine/Plugins/Runtime/Analytics/AnalyticsBlueprintLibrary をご覧ください。以下は、StartSession() 関数のインプリメンテーションです。
+	bool UAnalyticsBlueprintLibrary::StartSession()
+	{
+		TSharedPtr<IAnalyticsProvider> Provider = FAnalytics::Get().GetDefaultConfiguredProvider();
+		if (Provider.IsValid())
+		{
+			return Provider->StartSession();
+		}
+		else
+		{
+			UE_LOG(LogAnalyticsBPLib, Warning, TEXT("StartSession:Failed to get the default analytics provider.Double check your [Analytics] configuration in your INI"));
+		}
+		return false;
+	}
+
+上記のインプリメンテーションは、存在しない UObject から派生したシングルトン オブジェクトであることに注目してください。この方法は、サードパーティのライブラリ関数をブループリントに公開したり、UObject をサポートしない C++ クラスとインタラクションする場合に最適の方法です。次のコードは、制御されたアクタの AIController を見つけるための一般的な操作を実行するブループリント関数ライブラリの手法の例です。
+
+	AAIController* UAIBlueprintHelperLibrary::GetAIController(AActor* ControlledActor)
+	{
+		APawn* AsPawn = Cast<APawn>(ControlledActor);
+		if (AsPawn != nullptr)
+		{
+			return Cast<AAIController>(AsPawn->GetController());
+		}
+		return Cast<AAIController>(ControlledActor);
+	}
+
+この関数は複数の Blueprint ノードとなるものを受け取り、それを単一のノードにロールします。もちろん、このためにブループリントに関数を作成することもできますが、頻繁に呼び出すのであれば C++ 版の方がパフォーマンスが良いです。
+
+ 
+

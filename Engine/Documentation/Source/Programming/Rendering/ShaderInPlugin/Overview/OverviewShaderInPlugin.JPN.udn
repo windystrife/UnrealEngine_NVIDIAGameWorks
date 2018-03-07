@@ -1,0 +1,307 @@
+﻿INTSourceChangelist:3590614
+Availability:Docs
+Crumbs: %ROOT%
+Title:Shader In Plugins の概要
+Description:プラグインでのシェーダー作成方法の概要
+Type:Overview
+SkillLevel:Advanced
+Version:4.17
+Parent:Programming/Rendering/ShaderInPlugIn
+Order:1
+tags:Rendering
+
+[TOC(start:1 end:3)]
+
+[region:warning]
+この文書は HLSL コードまたは GPU に効率のよいシェーダーを書くためのガイド **ではありません**。Plugin システムを使ってシェーダーを新規作成する方法の説明のみになります。
+[/region]
+
+アンリアル エンジン 4 (UE4) で使用するシェーダーの追加は、プラグイン システムによって実現できます。プラグイン システムを使ってシェーダーを作成すると、好きなもので作成したものを迅速かつ簡単に共有することができます。この文書では、EU4 のプラグインにシェーダーを作成するために必要なことの概要を説明します。
+
+[region:note]
+**//Engine/Plugins/Compositing/LensDistortion's** プラグインを直接見ると、さらに分かりやすくなります。
+[/region]
+
+## プラグイン作成のコツ
+
+プラグインを新規作成する場合、以下の点に注意してください。
+
+* プラグイン ウィザードを使って、プラグインに必要なファイルとフォルダをすべて簡単に作成することができます。
+
+* 現段階では、新たなシェーダーモデルの追加などの劇的な変更をプラグイン経由でマテリアル エディタに加えることはできません。
+
+* 必ず必要な場所にファイルとフォルダをすべて追加し、Visual Studio ソリューション ファイルを再生成します。
+
+* ProjectName.uplugin で、モジュールの LoadingPhase to PostConfigInit (シェーダーが実装されるモジュールのみ) が以下のようになるようにしてください。 
+
+        {
+            "FileVersion" :3,
+            "Version" :1,
+            "VersionName" :"1.0",
+            "FriendlyName" :"Foo",
+            "Description" :"Plugin to play around with shaders.",
+            "Category" :"Sandbox",
+            "CreatedBy" :"Epic Games, Inc.",
+            "CreatedByURL" : "http://epicgames.com",
+            "DocsURL" : "",
+            "MarketplaceURL" : "",
+            "SupportURL" : "",
+            "EnabledByDefault" : false,
+            "CanContainContent" : true,
+            "IsBetaVersion" : false,
+            "Installed" : false,
+            "Modules" :
+            [
+                {
+                    "Name" :"Foo",
+                    "Type" :"Developer",
+                    "LoadingPhase" :"PostConfigInit"
+                }
+            ]
+        }
+
+<!--
+次のセクションでは、シェーダーに対応しているプラグインの新規作成方法を説明します。 
+
+1. まず **//Engine/Plugins/Developer/BlankPlugin** をコピーして **「FooPlugin」** と名前を付けます。
+
+1. 「FooPlugin」 フォルダの中に **「Shaders」** という名前の新規フォルダを作成し、その中に **「Private」** という名前の新規フォルダを作成します。
+
+    [region:note]
+    **"/Plugin/Foo/�"** はプラグインを Engine/Shaders ディレクトリではなく、**Foo Shaders/** ディレクトリにマップします。
+    [/region]
+
+1. 新規に作成した「Private」フォルダの中に **「MyShader.usf」** という名前の新規ファイルを作成します。
+
+1. 作成したら、**GenerateProjectFiles.bat** ファイルを再度実行して新規シェーダー ファイルをインクルードするためのプロジェクト ファイルを再生成します。
+
+1. **.../BlankPlugin/BlankPlugin.uplugin** で、モジュールの LoadingPhase を以下のように PostConfigInit (シェーダーが実装されるモジュールのみ) に変更します。
+
+        {
+            "FileVersion" :3,
+            "Version" :1,
+            "VersionName" :"1.0",
+            "FriendlyName" :"Foo",
+            "Description" :"Plugin to play around with shaders.",
+            "Category" :"Sandbox",
+            "CreatedBy" :"Epic Games, Inc.",
+            "CreatedByURL" : "http://epicgames.com",
+            "DocsURL" : "",
+            "MarketplaceURL" : "",
+            "SupportURL" : "",
+            "EnabledByDefault" : false,
+            "CanContainContent" : true,
+            "IsBetaVersion" : false,
+            "Installed" : false,
+            "Modules" :
+            [
+                {
+                    "Name" :"Foo",
+                    "Type" :"Developer",
+                    "LoadingPhase" :"PostConfigInit"
+                }
+            ]
+        }
+-->
+## レンダリング スレッド
+
+ゲーム側の API とは対照的に、RHI レンダー コマンドは専用スレッドのレンダリング スレッドによってキューに加えられます。レンダリング スレッドはゲーム スレッドの従スレッドです。RHI は ENQUEUE_RENDER_COMMAND 経由で API に FIFO コマンドをキューに追加します。レンダリング スレッドは 0 またはゲーム スレッドより 1 フレーム遅くなります。CPU パフォーマンスは、API と RHI 間の同期はプロダクション ランタイムにおいては絶対に避けなければなりません。プラグインの C++ 関数を正しいスレッドで呼び出すために、check (IsInGameThread()); や check (IsInRenderingThread()); などの複数のアサートを追加して、スレッドのロバスト性を改善することができます。
+
+## アンリアル シェーダー ファイル
+
+シェーダー ファイルは異なる 2 種類のファイル タイプがあります。UE4 で使用するシェーダーを開発する際に気を付けなければならないことがあります。それぞれのファイルは、以下のように別の用途があります。
+
+* **アンリアル シェーダー ヘッダ (.USH)**
+    * 他の USH または USF ファイルでのみインクルードされます。
+
+* **アンリアル シェーダー フォーマット (.USF)**
+    * プライベート データのみです。
+        * Private ディレクトリでの下位互換性が保証されます。
+    * シェーダー エントリー ポイントが含まれます。
+
+
+## シェーダー ファイル プリプロセシングと仮想ファイル パス
+
+HLSL 言語をベースにした USF シェーダー ファイルは、アンリアル エンジン シェーダー ファイル フォーマットは、マルチプラットフォーム シェーダー コードを含みます。このマルチプラットフォーム サポートを実現するために、エンジンのシェーダー コンパイラはプラットフォーム固有のシェーダー コンパイラの前にプラットフォームに依存しないソースファイル プリプロセシング パス (FXC、GLSL クロス コンパイル用 HLSLCC など) を追加しました。結果として、すべての #define と#if は、この一番最初のプリプロセシングで解決されます。もちろん、各プラットフォームには、シェーダー プリプロセッシング時に VULKAN_PROFILE などターゲットとするプラットフォームが分かるように、ビルトインされた #define がビルトインされています。
+
+C/C++ ファイルと同じように、HelloWorld.usf を #includeでインクルードすることができます。これにより、#include を書き込んだ USF ファイルと同じディレクトリに格納された HelloWorld.usf という名前のファイルもインクルードされます。同じファイルを複数インクルードしないように、既にプリプロセシングしたディレクティブ#pragma をファイルの最上部に追加することができます。例えば、以下があります。
+
+* FooCommon.usf 
+        // File shared across all plugin's shaders (すべてのプラグインのシェーダーで共有するファイル)
+        #pragma once
+
+        #include "/Engine/Public/Platform.ush"
+
+        // ...
+
+* FooBar.usf 
+        // File containing all foobar-related functions and structures.(foobar に関係するすべての関数と構造体を含むファイル)
+        #pragma once
+
+        #include "FooCommon.usf"
+
+        // ...
+
+* FooBarComputeShader.usf 
+        // Compute shader that does foobar on the GPU (GPU 上で foobar を実行するシェーダーを計算する)
+
+        #include "FooCommon.usf"
+        #include "FooBar.usf"
+
+        // ...
+以下のいずれかの方法で、プラグインまたはプロジェクト モジュールのシェーダーから USF ファイルをインクルードすることができます。
+
+* 「#include "/Engine/＜FilePath＞"」のあるエンジン内 (<FilePath> は //Engine/Shaders/ directory; に相当するファイル パス)。
+
+* または「#include "/Plugin/＜PluginName＞/＜PluginFilePath＞"」のある別のプラグイン。PluginName は **アクティベートされた** プラグインの名前、<PluginFilePath> はプラグインの Shaders/ directory に相当するファイル パス。 .uplugin の正しいプラグインに依存関係を追加するのはデベロッパーの役割です。
+
+
+## First Global Shader
+
+以下の方法で FGlobalShader から継承したグローバル シェーダー
+
+
+	class FLensDistortionUVGenerationShader : public FGlobalShader
+	{
+	public:
+		// This function determines whether or not the shader should be compiled for a given platform.
+		// In this case, the shader will not be usable without SM4 support.
+		static bool ShouldCache(EShaderPlatform Platform)
+		{
+			return IsFeatureLevelSupported(Platform, ERHIFeatureLevel::SM4);
+		}
+
+		// Compile-time constants for shader can be defined in this function:
+		static void ModifyCompilationEnvironment(EShaderPlatform Platform, FShaderCompilerEnvironment& OutEnvironment)
+		{
+			FGlobalShader::ModifyCompilationEnvironment(Platform, OutEnvironment);
+			OutEnvironment.SetDefine(TEXT("GRID_SUBDIVISION_X"), kGridSubdivisionX);
+			OutEnvironment.SetDefine(TEXT("GRID_SUBDIVISION_Y"), kGridSubdivisionY);
+		}
+
+		// Default constructor.
+		FLensDistortionUVGenerationShader() {}
+
+		// Constructor using an initializer object.We can bind parameters here so that our C++ code
+		// can interface with USF, enabling us to set shader parameters from code.
+		FLensDistortionUVGenerationShader(const ShaderMetaType::CompiledShaderInitializerType& Initializer)
+			:FGlobalShader(Initializer)
+		{
+			PixelUVSize.Bind(Initializer.ParameterMap, TEXT("PixelUVSize"));
+			RadialDistortionCoefs.Bind(Initializer.ParameterMap, TEXT("RadialDistortionCoefs"));
+			TangentialDistortionCoefs.Bind(Initializer.ParameterMap, TEXT("TangentialDistortionCoefs"));
+			DistortedCameraMatrix.Bind(Initializer.ParameterMap, TEXT("DistortedCameraMatrix"));
+			UndistortedCameraMatrix.Bind(Initializer.ParameterMap, TEXT("UndistortedCameraMatrix"));
+			OutputMultiplyAndAdd.Bind(Initializer.ParameterMap, TEXT("OutputMultiplyAndAdd"));
+		}
+
+		// All members must be serialized here.This function is run at load and save time, and is used
+		// to put the shader into the DDC and pak files.
+		virtual bool Serialize(FArchive& Ar) override
+		{
+			bool bShaderHasOutdatedParameters = FGlobalShader::Serialize(Ar);
+			Ar << PixelUVSize << RadialDistortionCoefs << TangentialDistortionCoefs << DistortedCameraMatrix << UndistortedCameraMatrix << OutputMultiplyAndAdd;
+			return bShaderHasOutdatedParameters;
+		}
+
+		// This function is an example of how shader parameters can be precomputed based on data specific
+		// to the shader.In this case, the shader requires several matrices that can be computed from
+		// a few parameters, and that would be inefficient to compute inside the shader itself.Note that
+		// this function is not an override; it is custom to this class, and is called when this feature's
+		// specific implementation requires it.
+		template<typename TShaderRHIParamRef>
+		void SetParameters(
+			FRHICommandListImmediate& RHICmdList,
+			const TShaderRHIParamRef ShaderRHI,
+			const FCompiledCameraModel& CompiledCameraModel,
+			const FIntPoint& DisplacementMapResolution)
+		{
+			FVector2D PixelUVSizeValue(
+				1.f / float(DisplacementMapResolution.X), 1.f / float(DisplacementMapResolution.Y));
+			FVector RadialDistortionCoefsValue(
+				CompiledCameraModel.OriginalCameraModel.K1,
+				CompiledCameraModel.OriginalCameraModel.K2,
+				CompiledCameraModel.OriginalCameraModel.K3);
+			FVector2D TangentialDistortionCoefsValue(
+				CompiledCameraModel.OriginalCameraModel.P1,
+				CompiledCameraModel.OriginalCameraModel.P2);
+
+			SetShaderValue(RHICmdList, ShaderRHI, PixelUVSize, PixelUVSizeValue);
+			SetShaderValue(RHICmdList, ShaderRHI, DistortedCameraMatrix, CompiledCameraModel.DistortedCameraMatrix);
+			SetShaderValue(RHICmdList, ShaderRHI, UndistortedCameraMatrix, CompiledCameraModel.UndistortedCameraMatrix);
+			SetShaderValue(RHICmdList, ShaderRHI, RadialDistortionCoefs, RadialDistortionCoefsValue);
+			SetShaderValue(RHICmdList, ShaderRHI, TangentialDistortionCoefs, TangentialDistortionCoefsValue);
+			SetShaderValue(RHICmdList, ShaderRHI, OutputMultiplyAndAdd, CompiledCameraModel.OutputMultiplyAndAdd);
+		}
+
+	private:
+		// Shader parameters.
+		FShaderParameter PixelUVSize;
+		FShaderParameter RadialDistortionCoefs;
+		FShaderParameter TangentialDistortionCoefs;
+		FShaderParameter DistortedCameraMatrix;
+		FShaderParameter UndistortedCameraMatrix;
+		FShaderParameter OutputMultiplyAndAdd;
+	};
+
+	// This macro exposes the shader to the Engine.Note the absolute virtual source file path.
+	IMPLEMENT_SHADER_TYPE(, FLensDistortionUVGenerationVS, TEXT("/Plugin/LensDistortion/Private/UVGeneration.usf"), TEXT("MainVS"), SF_Vertex)
+
+
+### Engine/Public/Platform.usf
+
+シェーダーをすべての UE4 プラットフォームにコンパイルするには、すべてのシェーダー ファイルに (直接または間接的に) /Engine/Public/Platform.usf を含む必要があります。
+
+## シェーダー開発のコツ
+
+ConsoleVariables.ini をローカルでカスタマイズしてレンダラーの設定を一部変更して、シェーダーの書き出し時のイタレーション処理を速めることができます。例えば、以下の ConsoleVariables は、シェーダーの動作に関する詳細なデバッグ情報の取得に役立ちます。
+
+* **r.ShaderDevelopmentMode = 1** シェーダー コンパイルの詳細ログおよびエラー時のリトライの機会を取得します。
+
+* **r.DumpShaderDebugInfo = 1** 「Saved」フォルダのプリプロセスされたシェーダーをダンプします。 
+
+    [region:warning]
+    警告：しばらくの間この状態のままにすると、小さなファイルとフォルダでハードドライブが一杯になってしまうので、完了したら必ず無効にしてください。
+    [/region]
+    
+
+
+## トラブルシューティング 
+
+シェーダーのコンパイルまたは UE4 エディタでの表示に問題がある場合は、以下の操作を試してください。
+
+*  **Can't compile:** `/Plugin/<MyPluginName>/<MyFile>` **not found** というエラーが出る場合: ** プラグインのモジュールの LoadingPhase が PostConfigInit に設定されていること、およびプラグインのシェーダー / ディレクトリ名にタイポがないことを確認してください。
+
+*  **Can't #include** `"/Plugin/<ParentPluginName>/<MyFile>":` というエラーが出る場合: 親プラグインがアクティベートしていることを確認してください。また、このエラーは .uplugin または .uproject のプラグイン依存の欠如を意味するので、プラグインの依存も確認してください。
+
+
+## 既存レンダラの規則
+
+レンダラでは、シェーダー クラスとシェーダー エントリー ポイントに命名規則があります。シェーダー ドメインの接尾辞は以下のようになります。
+
+|シェーダー ドメイン  | 接尾辞 |
+|-------------- |--------|
+|**Vertex Shader**  |VS|
+|**Hull Shader **   |HS|
+|**Domain Shader**  |DS|
+|**Geometry Shader**|GS|
+|**Pixel Shader  ** |PS|
+|**Compute Shader **|CS|
+
+例えば、C++ ファイルで **FLensDistortionUVGenerationVS** へのコールには最後に頂点シェーダーの VS シグナルが付きます。USF ファイル内では **void MainVS(...)** は VS シグナルで終わります。HLSL で構造体を処理する場合、構造体名は、例えば FBasePassInterpolators のように **F** で始めます。
+
+[region:note]
+UE4 のコーディング基準についての詳細は、[UE4 コーディング基準のドキュメント](https://docs.unrealengine.com/latest/INT/Programming/Development/CodingStandard/) を参照してください。 
+[/region]
+
+## 追加のリンク
+
+以下のリンクでは、UE4 を使ったグローバル シェーダー開発に関する詳細が提供されています。
+
+*  [FGlobalShader Base Class](https://docs.unrealengine.com/latest/INT/API/Runtime/ShaderCore/FGlobalShader/index.html)
+*  [Debugging the Shader Compiling Process](https://www.unrealengine.com/en-US/blog/debugging-the-shader-compiling-process)
+*  [Adding Global Sjaders to UE4](https://rcaloca.blogspot.com/2017/05/adding-global-shaders-to-ue4.html)
+
+
+
+

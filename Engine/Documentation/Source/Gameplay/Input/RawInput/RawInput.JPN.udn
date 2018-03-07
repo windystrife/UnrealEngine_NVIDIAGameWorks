@@ -1,0 +1,73 @@
+﻿INTSourceChangelist:3413921
+Availability:Docs
+Title:RawInput プラグイン
+Crumbs:%ROOT%
+Description:RawInput プラグインは、XInput に対応しない特定のデバイスを読み込むことができます。
+version:4.16
+skilllevel:Intermediate
+Parent:Engine/Gameplay/Input
+Order: 
+type:overview
+tags:Input
+
+[TOC (start:2 end:4)]
+
+[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:videoid]
+	QMD-OQ2Q-dI
+	[/PARAMLITERAL]
+	[PARAMLITERAL:width]
+	100
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	56.25
+	[/PARAMLITERAL]
+	[PARAMLITERAL:units]
+	%
+	[/PARAMLITERAL]
+	[PARAMLITERAL:type]
+	simple
+	[/PARAMLITERAL]
+[/OBJECT]
+
+***RawInput** プラグインは、通常、フライト スティックやハンドルなどの Microsoft の XInput API が適切に処理しない特定のユーザー定義のデバイスをサポートします。入力デバイスのボタンと軸は、プラグイン自体で作成された新規入力も含むゲームプレイ入力にカスタム マッピングすることができます。
+
+## RawInput を有効にする
+
+デフォルトでプラグインは無効になっています。**[Plugins]** メニューの **[Input Devices]** セクションで有効にすることができます。
+
+![RawInput plugin](RawInputPlugin.png)
+
+プラグインが有効になったら、**[Project Settings]** メニューに **[Raw Input]** セクションが表示されます。
+
+![RawInput location in Project Settings menu](RawInput.png)
+
+## デバイスの設定
+
+このセクションでは新規デバイスを追加します。各デバイスはベンダー ID とプロダクト ID によって特定されます。これらは、16 進数値であり、デバイスのドライバーのプロパティにあります。軸 (デフォルトで 8) とボタン (デフォルトで 12) の配列がコントローラーの設定に加えられます。これにより、任意のコントローラーの軸やボタン (配列のインデックスで示されるもの) を **アンリアル エンジン** の軸やキーにマッピングすることができます。このプラグインには 8 個の新しい軸 ("Generic USB Controller Axis 1" から "Generic USB Controller Axis 8" まで) と 20 個の新しいボタン ("Generic USB Controller Button 1" から "Generic USB Controller Button 20" まで) があります。それぞれの軸やボタンを有効または無効にすることができます。軸も反転、オフセットすることができます。
+
+![Windows Device Settings](WindowsSettings.png)
+
+[REGION:caption]
+上の図は、Logitech G920 の Windows のコントロール パネルのデバイス マネージャのハードウェア ID 情報です。Vendor ID は、 "VID\_" に続く 4 つの文字列です (046D) 。Product ID は "PID\_" に続く 4 つの文字列です(C262)。この情報は、RawInput でデバイスを設定する場合に必要になります。
+[/REGION]
+
+## サンプル (Vehicle テンプレート)
+例として、**アンリアル エンジン** に同梱される Vehicle テンプレートが **Logitech G920** で機能するように設定しました。Logitech G920 は、ハンドルとアクセル ペダルとブレーキ ペダルを備えたドライブ ゲーム コントローラーです。
+
+### RawInput でデバイスを設定する
+ハンドルはデバイス ドライバーで Axis 1、ブレーキは Axis 3、アクセルは Axis 4 になります。RawInput プラグイン設定では、各入力はデバイス ドライバーからの対応する軸の配列に入力しなければなりません。つまりハンドルのデータは配列要素 1 に、ブレーキのデータは配列要素 3 にアクセル ペダルのデータは配列要素 4 に入れなければなりません。他のエントリは取り除くか、無効にします。
+
+[REGION:note]入力の配列インデックスは、"Generic USB Controller Axis" や "Generic USB Controller Input" の値に対応する必要はありません。例えば、ブレーキが配列の位置 3 にあっても、"Generic USB Controller Axis 2" にバインドされます。これは異なるコントローラーが異なる入力軸を使用している場合であっても同様に機能するように設定するうえで必要です。[/REGION]
+
+![RawInput settings](RawInputData.png)
+
+デバイスの出力範囲は標準コントローラーで想定されるものとは一致しないため、入力範囲を再マッピングします。車輪が 0.0 (左) から 1.0 (右) の値を戻しますが、 0.0 を中心に入力範囲を設定します。そのため、オフセット -0.5 としました。ブレーキとアクセルも 0.0 から 1.0 の範囲の値を戻します。このデバイスは 0.0 を使用して、そのペダルが押されていることを示します。1.0 の値は、ペダルが上がっていることを示しますが、このプロジェクトでは逆を想定しています。この調整をするために、軸の値を反転するように設定し、1.0 のオフセットを追加します。
+
+### RawInput の軸を入力バインディングにマッピングする
+
+![Input settings](RawInputData.png)
+
+次に新しい軸をゲームの入力バインディングにマッピングします。車輪 ("Generic USB Controller Axis 1") は、範囲 [-0.5、0.5] にマッピングされますが、さらに感度を上げて、3.0 の係数でスケールアップできるようにします。同様にブレーキ ("Generic USB Controller Axis 2") を負の方向に行くようにし、アクセルよりも強力になるようにします。そのため、-2.0 でスケーリングされるようにします。アクセル ("Generic USB Controller Axis 3") は修正が不要です。適切な入力バインディングに追加するだけです。RawInput を使ってこうした入力バインディングを加えることで、新しい入力バインディングを必要とせずに、プロジェクトのコードまたはブループリントに変更を加えることなく、Logitech G920 をサポートします。
+
+[REGION:tip]デバイスを標準のゲームパッド スティック入力に設定する代わりに、このようなスケーリングを使うと "Generic USB Controller" 軸を使った適切な引数になります。[/REGION]

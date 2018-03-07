@@ -1,0 +1,120 @@
+/*=============================================================================
+	FlexFluidSurfaceRendering.cpp: fluid rendering
+	Copyright (c) 2012 NVIDIA Corporation. All rights reserved.
+=============================================================================*/
+
+#include "Common.ush"
+
+Texture2D DownsampledDepthTex;
+SamplerState DownsampledDepthTexSamplerNearest;
+SamplerState DownsampledDepthTexSamplerBilinear;
+float TexResScale;
+
+// use this to debug upsampled output in split screen
+float returnDepth(FScreenVertexOutput Input, float depthLeft, float depthRight)
+{
+	return depthLeft;
+	//return (Input.Position.x-View.ViewRectMin.x)*View.ViewSizeAndInvSize.zw > 0.5 ? depthRight : depthLeft;
+}
+
+void UpSampleMainPS(
+	FScreenVertexOutput Input,
+	out float OutDepth : SV_Target0
+	)
+{
+	ResolvedView = ResolveView();
+
+	float resScale = TexResScale;
+	float invResScale = 1.0/TexResScale;
+	float2 TexPos2UV = View.BufferSizeAndInvSize.zw;
+	float2 PositionInView = Input.Position.xy /*- View.ViewRectMin.xy*/;
+	float2 PositionInViewUV = PositionInView*TexPos2UV;	
+
+	float DepthNearest = Texture2DSampleLevel(DownsampledDepthTex, DownsampledDepthTexSamplerNearest, PositionInViewUV, 0).x;
+
+	// background, do not interpolate with surface
+	if(DepthNearest > 65000)
+	{
+		OutDepth = returnDepth(Input, DepthNearest, DepthNearest);
+		return;
+	}
+	
+	// go to low res texture coords and clamp to 0
+	// low res => 1 unit = 1 texel
+	float2 P0_lowRes = PositionInView*resScale;
+	float2 P0 = max(P0_lowRes-0.5, 0.0);
+	float2 P0Floor = floor(P0);
+	
+	// compute the location of the 4 interpolation points in full res
+	// move to the centre of the low res texel and use upscaled coords again
+	float2 P00 = (P0Floor + 0.5) * invResScale; 
+	float2 P10 = P00 + float2(invResScale, 0);
+	float2 P01 = P00 + float2(0, invResScale);
+	float2 P11 = P00 + float2(invResScale, invResScale);
+
+	// compute weight in full res and normalize
+	float2 W = (PositionInView-P00)*resScale;
+
+	// get depth at the 4 sampling locations
+	float sampleDepth[4];
+	sampleDepth[0] = Texture2DSampleLevel(DownsampledDepthTex, DownsampledDepthTexSamplerNearest, P00*TexPos2UV, 0).x;
+	sampleDepth[1] = Texture2DSampleLevel(DownsampledDepthTex, DownsampledDepthTexSamplerNearest, P10*TexPos2UV, 0).x;
+	sampleDepth[2] = Texture2DSampleLevel(DownsampledDepthTex, DownsampledDepthTexSamplerNearest, P01*TexPos2UV, 0).x;
+	sampleDepth[3] = Texture2DSampleLevel(DownsampledDepthTex, DownsampledDepthTexSamplerNearest, P11*TexPos2UV, 0).x;
+
+	bool isFluid00 = sampleDepth[0] < 65000;
+	bool isFluid10 = sampleDepth[1] < 65000;
+	bool isFluid01 = sampleDepth[2] < 65000;
+	bool isFluid11 = sampleDepth[3] < 65000;
+	int isFluidBits = (isFluid00<<0) | (isFluid01<<1) | (isFluid10<<2) | (isFluid11<<3);
+
+	// less than 3 sampling points in surface -> return background
+	if(countbits(isFluidBits)<3)
+	{
+		OutDepth = returnDepth(Input, 65535, DepthNearest);
+		return;
+	}
+	
+	// all sample points in surface
+	if(isFluidBits == 15)
+	{
+		// use only HW bilinear interpolation if sample points are similar
+		// else edges of inner silouettes become very visible
+
+		float DepthBilinear = Texture2DSampleLevel(DownsampledDepthTex, DownsampledDepthTexSamplerBilinear, PositionInViewUV, 0).x;
+		float similarity = min(DepthBilinear, DepthNearest)/max(DepthBilinear, DepthNearest);
+		const float similarThreshold = 0.99;
+		int useBilinear = (similarity >= similarThreshold);
+		float retDepth = useBilinear ? DepthBilinear : DepthNearest;
+		OutDepth = returnDepth(Input, retDepth, DepthNearest);
+		return;
+	}
+
+	// solves for W for edges e0, e1 of a triangle and a known point inside it.
+	// P = pA + w0*e0 + w1* e1;
+	// W = inv(E)*(P-pA)
+	// create array with valid positions in index 0 to 2
+	float2 samplePos[3];
+	samplePos[0] = isFluid00 ? P00 : P11;
+	samplePos[1] = isFluid10 ? P10 : P11;
+	samplePos[2] = isFluid01 ? P01 : P11;
+
+	sampleDepth[0] = isFluid00 ? sampleDepth[0] : sampleDepth[3];
+	sampleDepth[1] = isFluid10 ? sampleDepth[1] : sampleDepth[3];
+	sampleDepth[2] = isFluid01 ? sampleDepth[2] : sampleDepth[3];
+
+	// edges in triangle
+	float2 e0 = samplePos[1]-samplePos[0];
+	float2 e1 = samplePos[2]-samplePos[0];
+
+	float det = 1.0/(e0.x*e1.y - e0.y*e1.x);
+	float2 weight;
+	float2 startPos = PositionInView - samplePos[0];
+	weight.x = (startPos.x*e1.y - startPos.y*e1.x) * det;
+	weight.y = (startPos.y*e0.x - startPos.x*e0.y) * det;
+	
+	// now use the same weight to compute a depth for PositionInView
+	float wDepth = sampleDepth[0] + weight.x*(sampleDepth[1]-sampleDepth[0]) + weight.y*(sampleDepth[2]-sampleDepth[0]);
+
+	OutDepth = returnDepth(Input, wDepth, DepthNearest);
+}

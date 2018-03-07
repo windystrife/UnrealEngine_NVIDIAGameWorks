@@ -1,0 +1,146 @@
+﻿INTSourceChangelist:3467293
+Availability:Public
+Title: 애니메이션 리타게팅
+Crumbs: %ROOT%, Engine, Engine/Animation
+Description:리타게팅된 애니메이션을 여러 스켈레탈 메시에 사용하여, 애니메이션을 공유하는 법입니다.
+version:4.14
+topic-image:AnimationgRetargeting_topic.png
+
+[REGION:fullwidth]
+![](RetargetingHeader.png)
+[/REGION]
+
+**애니메이션 리타게팅** 은 같은 [스켈레톤](Engine/Animation/Skeleton) 애셋을 공유하나 비율이 크게 다른 캐릭터간에 애니메이션을 재사용할 수 있도록 해 주는 기능입니다. 리타게팅을 통해 애니메이션이 적용될 스켈레톤에 모양이 다른 캐릭터의 애니메이션을 사용할 경우, 일부분이 손실되거나 불필요하게 변형되지 않도록 할 수 있습니다.
+또한 **다른 스켈레톤** 을 사용하는 캐릭터끼리도 특정 조건 하에 애니메이션을 공유할 수 있습니다. 비슷한 본 계층구조를 공유하고, 한 스켈레톤에서 다른 스켈레톤으로 애니메이션 데이터를 전달하는 데 쓰이는 **릭** 이란 공유 애셋을 사용해야 합니다.
+
+[TOC(start:2 end:2)]
+
+## 리타게팅을 사용하는 이유?
+
+애니메이션을 공유하고픈 캐릭터가 셋 있다고 칩시다. 표준 캐릭터, 작고 다부진 버전, 크고 홀쭉한 버전으로요.
+
+[VAR:Chars]w:300[/VAR]
+
+[REGION:imagetable]
+|![](BaseCharacter.png)(%chars%)|![](ShortStocky.png)(%chars%)|![](TallSkinny.png)(%chars%)|
+|---|---|---|
+|표준 캐릭터|작고 다부진 캐릭터|크고 홀쭉한 캐릭터|
+[/REGION]
+
+
+### 리타게팅 이전 결과
+
+리타게팅을 적용하지 않아도, 같은 스켈레톤 애셋을 공유하는 스켈레탈 메시에는 이미 같은 애니메이션을 사용할 수 있습니다. 그러나 위와 같이 비율이 다른 경우, 보기 흉한 결과가 날 수 있습니다. 둘 다 표준 캐릭터의 스켈레탈 비율에 맞추다 보니까 작은 캐릭터는 불필요하게 늘어나고 큰 캐릭터는 줄어들었습니다.
+
+
+[REGION:imagetable]
+|![](BaseCharacterRunning.png)(%chars%)|![](ShortStockyRunning.png)(%chars%)|![](TallSkinnyRunning.png)(%chars%)|
+|---|---|---|
+|표준 캐릭터|작고 다부진 캐릭터|크고 홀쭉한 캐릭터|
+[/REGION]
+
+### 리타게팅 이후 결과
+
+캐릭터에 리타게팅을 적용했더니, 방정식을 통해 비율 차이를 계산하여 캐릭터에 애니메이션이 제대로 플레이되는 것을 볼 수 있습니다. 
+**뷰포트** 옵션 중 **표시 > 리타게팅되지않은 애니메이션** 으로 (살색) 원래 스켈레톤과 (흰색) 현재 스켈레톤의 차이를 확인할 수 있습니다. 표준 캐릭터에 보면 베이지색 리타게팅되지않은 본이 스켈레톤에 완벽히 일치하는 것이 보입니다.
+
+[EXCERPT:AfterTable]
+[REGION:imagetable]
+|![](BaseCharacterRunningRetargetedBones.png)(%chars%)|![](ShortStockyRunningRetargetedBones.png)(%chars%)|![](TallSkinnyRunningRetargetedBones.png)(%chars%)|
+|---|---|---|
+|표준 캐릭터|작고 다부진 캐릭터|크고 홀쭉한 캐릭터|
+[/REGION]
+[/EXCERPT:AfterTable]
+
+## 리타게팅 작동 원리
+
+애니메이션은 [스켈레톤 애셋](Engine/Animation\Skeleton) 에 바인딩됩니다. 스켈레톤 애셋은 그저 본 이름과 계층구조 데이터로 된 리스트일 뿐이지만, 스켈레톤 애셋의 정의에 사용되는 원본 스켈레탈 메시의 초기 비율도 저장합니다. 참고로 중요한 내용은, 리타게팅 시스템에서 타겟을 새로 잡는 것은 본의 트랜슬레이션 컴포넌트 뿐입니다. 본의 로테이션은 항상 애니메이션 데이터에서 옵니다.
+
+스켈레톤 애셋의 비율을 정의하는 데는 원본 스켈레탈 메시가 사용되기에, 그 스켈레톤 애셋을 사용하면서 비율이 다른 (이를테면 원본보다 훨씬 작은) 스켈레탈 메시는 리타게팅을 해 줘야 정상 작동합니다. 그렇지 않고서는 비율이 다른 스켈레탈 메시가 원본 메시의 트랜슬레이션 데이터를 사용하려 할 것이고, 이 문서 도입부에서 본 것과 같은 유형의 오류가 발생할 것입니다.
+
+이 문제를 해결하기 위해서, **스켈레톤 에디터** 의 스켈레톤 트리에는 본 사이의 트랜슬레이션 리타게팅 처리 방식을 바꾸기 위한 세팅이 몇 가지 제공됩니다. 본 트랜슬레이션 리타게팅용 세팅은 세 가지입니다.
+
+![](RetargetingSettings.png)
+
+-	**애니메이션** - 본 트랜슬레이션은 애니메이션 데이터에서 오며, 변경되지 않습니다.
+-	**스켈레톤** - 본 트랜슬레이션은 타겟 스켈레톤의 바인드 포즈에서 옵니다.
+-	**스케일적용 애니메이션** - 본 트랜슬레이션은 애니메이션 데이터에서 오나, 스켈레톤의 비율대로 스케일을 조절합니다. 그 비율은, (애니메이션을 재생하고 있는) 타겟 스켈레톤과 (애니메이션 저작의 기반이 된) 원본 스켈레톤의 본 길이 비율입니다.
+
+애니메이션 리타게팅 관련해서 또 한가지, 리타게팅이 된 애니메이션과 되지 않은 애니메이션을 사용하는 데 있어서 큰 퍼포먼스 차이는 없습니다. 애니메이션 리타게팅의 장점은, 고유 캐릭터가 여럿 있는 경우에도 별도의 애니메이션을 완전히 새로 만들 필요가 없어 애니메이션 메모리 예산을 크게 줄일 수 있다는 점입니다.
+
+### 다른 스켈레톤에 대한 애니메이션 리타게팅
+
+같은 스켈레톤 애셋을 공유하지 않는 캐릭터의 애니메이션 리타게팅 처리 프로세스에는, 한 스켈레톤에서 다른 스켈레톤으로 애니메이션 데이터를 전달하는 데 쓰이는 특수 애셋 **릭** 을 할당하는 작업이 필요합니다.
+각 캐릭터에 할당된 스켈레톤 애셋은 공유된 **릭** 애셋을 활용하여 소스에서 의도된 타겟으로 데이터를 올바르게 전송합니다.
+
+**릭** 할당은 **스켈레톤 에디터** 의 [리타겟 매니저[(#리타겟매니저사용법) 에서 하며, 같은 릭을 양쪽 스켈레톤 애셋에 할당해야 합니다.
+
+[REGION:note]
+단계별 안내는 [](Engine\Animation\AnimHowTo\Retargeting) 문서를 참고하세요.
+[/REGION]
+
+
+
+## 리타게팅시 엔드 이펙터는 어떻게 처리되나요?
+
+큰 캐릭터는 더 빨리 달리는가, 같은 소품을 계속 들고 있을 수 있는가, 리타게팅 작업시 들 수 있는 의문입니다. 짧게 말해, 자동으로 해결되는 일은 없으며, 어떻게 하고 싶은지는 사용자에게 달린 일입니다.
+
+소품을 드는 것에 대해서 취할 수 있는 한 가지 방법은, 원본 애니메이션에서 손을 따르는 별도의 본 체인을 만드는 것으로, 이를 "핸드 IK 본" 이라 합니다. 그런 다음 몸과 팔만 리타게팅하고 "핸드 IK 본" 은 리타게팅 이후 동일하게 유지되도록 놔둡니다. 그러면 비율이 다른 캐릭터도 같은 소품을 조작(예를 들면 라이플 재장전)할 수 있게 됩니다.
+
+본 체인을 별도로 두면 원하는 때 쉽게 FK 와 IK 사이를 부드럽게 전환할 수 있습니다 (예를 들어 무기 재장전시 Hand IK 를 켜고, 주머니의 탄창을 집을 때는 끕니다).
+
+이 시스템은 매우 유연하여 요구에 맞게끔 특화시킬 수 있습니다. 왼 손만 IK 로 하고 오른손은 FK 위치를 사용하면서 IK 로테이션을 사용할 수도 있습니다. 발은 가끔 이렇게, 가끔은 다르게 처리합니다. 매우 정교한 소품에 발을 디딜 때는 IK 를 켜는 것이 좋을 것이고, 그냥 돌아다닐 때는 FK 를 사용하여 오다리 (안짱다리) 캐릭터가 되지 않도록 하면 되겠습니다.
+
+
+## 리타게팅 셋업하기
+
+<!---Establishing animation retargeting on your --->
+
+위의 _리타게팅 작동 방식_ 부분에서 언급했듯이, 먼저 해 줘야 하는 작업은 스켈레톤 내 본에 대해서 **본 트랜슬레이션 리타게팅** 모드 구성을 해 주는 것입니다.
+
+전형적인 바이페드 설정은 다음과 같습니다:
+
+* 루트 본, IK 본, 웨폰 본과 어떤 종류의 마커도 `애니메이션` 모드를 사용합니다.
+* Pelvis (골반)은 `AnimationScaled` (스케일적용 애니메이션)을 사용, 올바른 위치에 앉을 수 있으면서 애니메이션도 적용되게끔 합니다. 
+	* 다른 본 중 트랜슬레이션에 애니메이션 적용 및 리타게팅도 해 주려는 것도 `스케일적용 애니메이션` 을 사용해야 합니다.
+* 다른 모든 본은 `Skeleton` 을 사용합니다. 타겟 스켈레톤의 정적인 트랜슬레이션을 사용합니다.
+
+신속한 작업방식은 다음과 같습니다:
+
+![](RecursivelySet.png)
+
+1. 루트 본에 우클릭하고 **Recursively Set Translation Retargeting Skeleton** (스켈레톤의 트랜슬레이션 리타게팅 재귀적 설정)을 선택하여 모든 본을 스켈레톤으로 설정합니다.
+1. Pelvis 또는 그에 상응하는 본을 찾아서 **Animation Scaled** 로 설정합니다.
+1. 루트 본, IK 본, 웨폰 본, 기타 마커 스타일 본을 찾아 **Animation** 을 사용하도록 설정합니다.
+
+[REGION:note]
+이제 같은 스켈레톤 애셋을 공유하는 캐릭터에 대해 애니메이션을 리타게팅하는 경우, 그 애니메이션은 애니메이션 리타게팅 영향을 받습니다.
+같은 스켈레톤 애셋을 공유하지 않는 캐릭터에 대해 애니메이션을 리타게팅하려는 경우, 애니메이션이 제대로 리타게팅되도록 하기 위해서는 몇 가지 확인해야 할 것이 있습니다.
+자세한 정보는 [](Engine\Animation\AnimHowTo\Retargeting) 문서를 확인하세요.
+[/REGION]
+
+
+## 리타겟 매니저 사용법
+
+![](BasePoseManager.png)
+
+애니메이션 리타게팅 관련해서 사용할 수 있는 툴이 하나 더, **리타겟 매니저** 라고 있습니다. 여기서 할 수 있는 작업은:
+
+* **리타겟 소스 애셋 관리** - 스켈레톤마다 메시 비율이 다른 경우에 좋습니다. 이 세팅을 사용하여 소스와 다른 애니메이션을 지정할 수 있습니다.
+* **릭 구성** - 같은 릭을 사용하는 다른 스켈레톤에 애니메이션을 리타게팅할 수 있습니다.
+* **리타겟 베이스 포즈 관리** - 다른 스켈레톤에 애셋을 리타게팅할 때 사용되며, 타겟의 베이스 포즈를 변경하여 소스의 베이스 포즈와 맞게, 리타게팅된 애니메이션의 정확도를 높일 수 있게 해줍니다.
+
+[REGION:note]
+자세한 정보는 [](Engine\Animation\Persona\BasePoseManager) 문서를 확인하세요.
+[/REGION]
+
+
+<!----
+
+If you are creating all of your animations for a single Skeletal Mesh and retargeting them to some other variations, then the information presented so far will get you a nice retargeted result. The reason it works is that using just one original Skeletal Mesh as the base is like a one-way connection, from the original to all the variations. But what happens if you need special animations just for the variants?
+
+Consider if we needed a special set of animations for our tall character, such as a different idle animation. An animator could take that Skeletal Mesh, create the necessary animation, then import it using the same Skeleton asset as before, but there is now a problem. Since the original proportions of the Skeleton asset were based off the Base Character's proportions, the animation will be distorted.
+
+--->
+
+

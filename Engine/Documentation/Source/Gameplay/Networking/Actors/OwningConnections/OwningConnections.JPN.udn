@@ -1,0 +1,30 @@
+﻿INTSourceChangelist:2713387
+Availability:Public
+Title:アクタとアクタが所有する接続先
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking, Gameplay/Networking/Actors
+Description:マルチプレイヤーゲームにおけるサーバーの役割
+Related:Gameplay/Networking/Actors
+Related:Gameplay/Networking/Actors/RPCs
+Related:Gameplay/Networking/Server
+version:4.9
+
+アクタが所有する接続先についてこれからたくさん耳にすることになると思います。最終的に各接続には、それぞれの接続に特別に作成された PlayerController があります (クライアント接続フローの詳細をご覧ください)。このため作成される各 PlayerController は対象となる接続に所有されます。一般的に接続がアクタを所有しているかを判断するには、アクタの一番外側のオーナーをクエリして、 PlayerController がオーナーの場合は、アクタも PlayerController を所有する接続と同じ接続に所有されていることになります。
+
+1 つの例としてPawn アクタが PlayerController に所有されている時が挙げられます。オーナーはアクタが所有されている PlayerController になります。この間のアクタは Playercontroller の接続先に所有されます。PlayerController によって所有されている間もポーンは、この接続のみに所有されます。PlayerController によるポーンの所有が終了すると、接続によるポーンの所有も終了します。
+
+その他の例に、ポーンが所有するインベントリアイテムが挙げられます。インベントリアイテムは、ポーンを所有している可能性がある接続と同じ接続 (もしあれば) に所有されます。
+
+コンポーネントは、所有している接続先の判断方法がちょっと特殊です。この場合は、所有するアクタが見つかるまでコンポーネントのアウターチェーンを歩いてコンポーネントのオーナーを判断します。その後、このアクタが所有する接続を判断するために上記の動作を継続します。
+
+接続のオーナーシップにはいくつか重要な点があります。
+* RPC が run-on-client (クライアントで実行) RPCを実行するクライアントを判断
+* アクタのレプリケーションと接続の関連性
+* オーナーが関係している時の Actor プロパティのレプリケーション条件
+
+アクタに RPC 関数を呼び出す時 (RPC がマルチキャストとマーク付けされていない限り)、RPC を実行するクライアントを知る必要があるため、接続のオーナーシップは重要となります。所有する接続を検索して、RPC を送信する接続先を判断します。
+
+接続のオーナーシップはアクタをレプリケーション中に使用して、それぞれのアクタに対し更新される接続先を判断します。bOnlyRelevantToOwner が true に設定されたアクタは、アクタを所有する接続のみがこのアクタに対するプロパティ更新を受け取ります。すべての PlayerController にこのフラグがデフォルトで設定されているため、クライアントが所有する PlayerController に対する更新のみを各クライアントは受け取ります。さまざまな理由にあてはまりますが、主な理由はプレイヤーのチート行為などを防ぐためです。
+
+接続のオーナーシップは、オーナーを利用する [条件付きのプロパティレプリケーション](Gameplay/Networking/Actors/Properties/Conditions) 中に重要です。例：`COND_OnlyOwner` を使用すると、このアクタのオーナーのみがプロパティ更新を受け取ります。
+
+最後に、所有する接続は自律的なプロキシのアクタに重要です (役割は `ROLE_AutonomousProxy`)。これらのアクタは、アクタを所有しない接続先にプロパティがレプリケートされる間は、役割が `ROLE_SimulatedProxy` に格下げとなります。

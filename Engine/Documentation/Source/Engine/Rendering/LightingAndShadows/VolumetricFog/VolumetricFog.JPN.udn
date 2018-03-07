@@ -1,0 +1,171 @@
+﻿INTSourceChecklist:3520085
+Availability:Public
+Crumbs:%ROOT%
+Title:Volumetric Fog
+Description:指数関数的高さフォグ (Exponential Height Fog) の Volumetric Fog 機能の概要 
+Type:Overview
+Version:4.16
+Parent:Engine/Rendering/LightingAndShadows
+Order:
+Tags:Rendering
+Tags:Lighting
+Topic-Image:VolumetricFog_Topic.png
+Social-Image:VolumetricFog_Social.png
+SkillLevel:Advanced
+
+[TOC(start:1 end:2)]
+
+アンリアル エンジン 4.16 で Volumetric Fog がサポートされるようになりました。このメソッドは、カメラ錐台の各ポイントにおける散乱媒体の密度とライティングを計算し、 
+その密度とライト数を調整してフォグに効果を与えます。 
+
+[REGION:fullwidth raw]
+![](VolumetricFog.png)(w:1339)
+[/REGION]
+[REGION:caption] このシーンでは、Volumetric Fog は画面の外にある指向性ライトソースからアーチとその周りを通過して、シャドウのかかったフォグが作成されています。[/REGION]
+
+
+## Volumetric Fog を調節する
+
+Volumetric Fog を設定および調節する場合、シーン内でグローバルまたはローカルに調節することができます。グローバル制御は、指数関数的高さフォグ (Exponential Height Fog) コンポーネントを使って、シーン全体のフォグの調節を可能にします。 
+ローカル制御は、パーティクルがスポーン可能な領域のパーティクル システムを使ったフォグの調節を可能にします。
+
+### グローバル コントロール
+
+Volumetric Fog は、**Exponential Height Fog** と各 **ライト** を使ってライト効果の強さを調節します。 
+
+
+#### 指数関数的高さフォグ (Exponential Height Fog)
+
+Volumetric Fog の調節機能は **[Volumetric Fog]** セクションの [Exponential Height Fog] コンポーネントにあります。Exponential Height は Volumetric Fog にグローバル密度を追加します。
+
+![](VolumetricFogProperties.png)
+
+| プロパティ | 説明 |
+| --- | --- |
+| **Scattering Distribution** | ボリュメトリック スキャタリングに与える指向性を設定します。値が 0 の場合、ライトはすべての方向に均等に拡散し、1 に近づくにつれてライトよりに拡散します (拡散を確認するためにはライトを見ていなければなりません)。 |
+| **Albedo** | 散乱媒体全体の反射性です。水のパーティクルがベースになっている雲、フォグ、もやの場合、Albedo は 1 に近づきます。 |
+| **Extinction Scale** | 散乱媒体でブロックするライト量を調節します。 |
+| **View Distance** | Volumetric Fog の計算に使うカメラからの距離です。フォグ用に作成されたボリューム テクスチャでは、この距離に応じて Z スライス数が制限されます。距離が長くなるとアンダーサンプリングとなり、アーティファクトが生じる原因になります。Z スライス数は r.VolumetricFog.GridSizeZ を使って調節することができます。値が高いほど質は良くなりますが、負荷が高くなります。
+| **Override Light Colors with Fog Inscattering Colors** | 有効の場合、**Fog Inscattering Color**、**Directional Inscattering Color**、**Inscattering Texture** プロパティを使って Volumetric Fog でライト カラーをオーバーライドします。 |
+
+
+#### ライトの調節
+
+ライトがシーンへ及ぼす効果量 (およびフォグへのシャドウイング有無) を各ライトの [Details (詳細)] パネルの **[Light]** セクションにある以下のプロパティで調節することができます。
+
+![](VolumetricFogLightProperties.png)
+
+| プロパティ | 説明 |
+| --- | --- |
+| **Volumetric Scattering Intensity** | Volumetric Fog へのライトの量を調節します。0 にすると、まったく影響しません。 |
+| **Cast Volumetric Shadow** | Volumetric Fog に影響を及ぼすライトへのボリュメトリック シャドウのキャスト有無を切り替えます。シャドウ キャストを有効にすると、ボリューム テクスチャ シャドウイングに影響を与えるので、ポイントライトとスポットライトの負荷は、シャドウへのキャストを無効にしてシャドウではなくフォグのみに影響を与える場合の約 3 倍になります。 |
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Volumetric Scattering Intensity: 1 (Default)](VolumetricFogEnabled.png)(w:950)
+	[/PARAM]
+	[PARAM:after]
+	![Volumetric Scattering Intensity: 0 ](VolumetricFogDisabled.png)(w:950)
+	[/PARAM]
+[/OBJECT]
+
+この例では、**[Volumetric Scattering Intensity]** を 0 にして Volumetric Fog に対するスポットライトの効果を無効にしています。
+
+
+
+### ローカル制御
+
+**Volume** ドメインを使うマテリアルは、空間の任意のポイントでの Albedo、Emissive、Extinction を表現します。Emissive と Extinction は 0 より大きいすべての値がワールド空間密度となりますが、
+Albedo の範囲は [0-1] です。 
+
+
+![](VolumetricFogParticleMaterial.png)(w:700)
+[REGION:caption]
+これは、最もシンプルなパーティクル システムの Volumen マテリアルのサンプルです。
+[/REGION]
+
+[REGION:note]
+Volume マテリアルは現在パーティクル上でのみ機能し、パーティクル半径内部の位置でのみ有効です。これは通常 SphereMask によって処理されます。
+[/REGION]
+
+
+単一のパーティクル システムをマテリアルで配置すると、密度の球体が Volumetric Fog に追加されます。エフェクトは、ビルボードをまったく含まない完全な 3D です。 
+
+![](VF_ParticleInGame.png)(w:900)
+
+その次のステップとして、テクスチャからのノイズのある複数の球体フォグ パーティクルを使用して、フォグをシーンの任意の場所に制限することができます。 
+
+![](FogParticles.png)(w:900)
+
+このシーンでは、フォグ パーティクルは低く並んだ領域を追加して、Voluemtric Fog を使ってシャドウのある、ローカライズされたフォグ エフェクトを作成しています。 
+
+## Temporal Reprojection
+
+Volumetric Fog に使用されるボリューム テクスチャ (voxels) はかなり低解像で、カメラ錐体にそって並びます。Volumetric Fog は、フレームごとにサブボクセル ジッターが異なる
+負荷の高いテンポラル リプロジェクション フィルタを使用します。懐中電灯や火光のように高速で変化するライトは、副次的影響としてライティング トレイルが残ってしまいます。これらのライトの効果を無効にするには、**[Volumetric Scattering Intensity]** を 0 に設定します。
+
+## パフォーマンス
+
+Volumetric Fog の GPU 負荷は、Engine Shadow Scalability (Engine/Performance/Scalability/ScalabilityReference) から設定するボリューム テクスチャ解像度によって主に制御されます。Volumetric Fog の負荷は、**High** に設定した PlayStation 4 で 1 ミリ秒、
+**Epic** 設定の Nvidia 970 GTX で 3 ミリ秒、そしてボクセルは 8 倍になります。
+
+* **Volume** ドメインを使っているパーティクルは、3D オーバードロー と命令数によってはかなり高い GPU 負荷を追加する場合があります。負荷は、コンソールコマンド `profilegpu` を使って調べます。
+* ポイントライトとスポットライトの **[Cast Volumetric Shadow]** を有効にすると、シャドウがない場合と比べて約 3 倍の負荷がかかります。 
+
+## 現在サポート対象の機能
+
+Volumetric Fog が現在サポートする機能は以下のとおりです。
+
+* カスケード シャドウ マップからのシャドウイングまたは静的シャドウイング、もしくは Light 関数のある単一の指向性ライト。
+* 動的または静的シャドウイングが付いた任意の数のポイントライトおよびスポットライト (**Cast Volumetric Shadowing** が有効の場合)。
+* ディスタンス フィールド アンビエント オクルージョン (有効の場合) からのシャドウイングが付いた単一のスカイライト。 
+* パーティクル ライト (**Volumetric Scattering Intensity** が 0 より大きい場合)。
+
+さらに、シーンの位置に合わせて、透過性も Volumetric Fog によって正しく反映されます。デフォルトでは、透過性は頂点でフォグを計算するため、 
+テセレーションの低い水面ではアーティファクトが発生する可能性があります。[Material Details] で **[Compute Fog Per-Pixel]** を有効にして、フォグ処理をピクセル単位で計算する設定にすると、この問題は解決されます。
+
+## 既知の問題
+
+以下は、Volumetric Fog の使用中は **サポートされない機能** です。
+
+* 事前計算されたグローバル イルミネーション
+* Stationary Skylight (固定スカイライト) のシャドウイング
+* ポイントライトおよびスポットライト上での IES プロファイルと Light 関数 
+* レイトレース ディスタンス フィールドシャドウからのシャドウイング
+* Volumetric Fog (そのもの) からのシャドウイング
+* ポイントライトとスポットライト上での Source Radius
+* Fog Cutoff Distance、Start Distance、Fog Max Opacity など、 Exponential Height Fog のいくつかの設定
+
+### 一般的な質問
+
+以下は、Volumetric Fog の使用に関する一般的な質問 / 問題点です。 
+
+* **グローバル フォグの密度を上げずにライト シャフトを強める方法はありますか？**
+	* フォグのグローバル密度が増加するとフォグの密度も増加します。従って、フォグがかかるに十分な場合、ライト シャフト (ライトのシャドウ) のみに注目します。フォグ密度を上げずにライト シャフトを強める方法は 2 通りあります。
+		1. グローバル フォグ密度は低くしたまま、指向性ライトの **Volumetric Scattering Intensity** を高くします。さらに、Exponential Height Fog アクタの **[Scattering Distritbution]** を **0.9** に近づけます。
+		1. グローバル フォグ密度は低くしたまま、Volume パーティクルを使ってある領域の密度を高くします。
+* **Exponential Height Fog と Volumetric Fog は同時に使用できますか？** 
+	* 現在、Volumetric Fog は Volumetric Fog **[View Distance]** の **[Fog Inscattering Color]** の役目をします。Volumetric Fog は物理ベースですが Exponential Height Fog はそうでないため、 
+	2 つのシステムを遠方でぴったり一致させることは不可能です。つまり、Exponential Height Fog コンポーネントの設定には Volumetric Fog には効果がでないものもあるということです。 
+* **トップダウン ゲームで使いやすくするために、Volumetric Fog の中心をカメラから切り離すことはできますか？**
+	* 今はできませんが、スタンドアローン ボリュームを使うと良いと思います。ただし、透過性と効率よく統合させることは難しいです。
+
+## トレーニング ストリーム
+
+[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:videoid]
+	N4mkgbwLg7U
+	[/PARAMLITERAL]
+	[PARAMLITERAL:width]
+	50
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	56.25
+	[/PARAMLITERAL]
+	[PARAMLITERAL:units]
+	%
+	[/PARAMLITERAL]
+	[PARAMLITERAL:type]
+	simple
+	[/PARAMLITERAL]
+[/OBJECT]

@@ -1,0 +1,671 @@
+﻿INTSourceChangelist:3507208
+Availability:Public
+Crumbs: %ROOT%
+Title:Utility 表現式
+Description: 1 つ以上の入力で様々なユーティリティ演算を行うための表現式。
+Type:Reference
+Version:4.16
+Parent:Engine/Rendering/Materials/ExpressionReference
+Order:
+Tags:Materials
+Topic-image:Utility_topic.png
+
+
+[EXCERPT:TOC]
+[TOC(start:2 end:2)]
+[/EXCERPT:TOC]
+
+
+このページでは、マテリアルの出力値を変更するために値の入力を可能にする Utility 表現式を紹介します。
+例えば、GIReplace ノードは、アルファ値で量を調節しながら、オブジェクトの間接バウンス カラーを置き換えます。LinearInterpolate ノードはアルファ値で量を調節しながら 2 つの入力をブレンドします。
+
+マテリアルを調節するための表現式は他にもたくさんあります。以下の例で詳細を説明します。 
+
+
+## A - H
+
+
+[EXCERPT:AntialiasedTextureMask]
+### AntialiasedTextureMask
+
+**AntialiasedTextureMask** 表現式は、ソフト (アンチエイリアス化) 遷移マスクを使用したマテリアルを作成します。マスクは 2 つの複雑なマテリアル プロパティのブレンドや、アルファブレンドされたマテリアル (SoftMasked と相性が良い) のフェードアウトに使用します。Simple はあるチャンネル (赤、緑、青、アルファ) で特定されたマスクと共にテクスチャを指定し、使用チャンネルを表現式に設定し、比較値を特定します。チャンネルが 0＝黒から 1＝白の範囲でグレースケール値を格納するとすれば、比較機能はマスクが 0 か 1 かを決定します。表現式はパラメータなので、**Texture** プロパティは子の MaterialInstances によってオーバーライドされます。
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]プロパティ[/REGION] ||
+| **Threshold** | ピクセルの範囲内でカットオフ ポイントとして使用した値を指定します。ピクセル範囲の値がカットオフ ポイントより下なら黒、上なら白表示となります。 |
+| **Channel** | マスクとして使用するテクスチャのチャンネルを特定します。 |
+| **Texture** | 使用するマスク テクスチャを特定します。 |
+| [REGION:tablesection]入力[/REGION] ||
+| **UVs** | テクスチャ マスクに適用するテクスチャ座標を受け取ります。 |
+
+
+**Pseudo code:**
+
+    Result = 1
+    if TextureLookup < Threshold then Result = 0
+    
+実際の実装は、エイリアスを避けるため、ピクセル範囲に応じて戻り値が 0 から 1 の間になるので非常に複雑です。 
+
+例 (この小さな 128 x 128 テクスチャは最高のクオリティを保つため圧縮されていません): 
+
+![ULogoLowBlurred.png](ULogoLowBlurred.png)
+
+ノーマル テクスチャとして使用 (左上)、説明したマテリアル式で使用 (右下)
+
+![AAMasked_Demo.png](AAMasked_Demo.png)
+
+この技術は、拡大やブラー コンテンツの入力に最適です。圧縮すると品質が悪くなるので、非圧縮低解像度のテクスチャを使用してください。
+
+[/EXCERPT:AntialiasedTextureMask]
+
+
+<!--------------------------------------------------------->
+
+
+### BlackBody
+
+**BlackBody** の式は、マテリアル内の [black body radiation](http://en.wikipedia.org/wiki/Black-body_radiation) のエフェクトをシミュレーションする式です。ユーザーが温度 (ケルビン単位) を入力すると、その結果得られるカラーと強度を使用して Base Color (基本色) と Emissive (発光色) の値を操作し、物理的に正確な結果を得ることができます。 
+
+[REGION:fullwidth]
+![](BlackBody.png)
+[/REGION]
+
+
+<!--------------------------------------------------------->
+
+### BumpOffset
+
+[EXCERPT:BumpOffset]
+**BumpOffset** はアンリアル エンジン 4 用語であり、一般的に知られている「視差マッピング」のことを指します。Bump Offset 表現式は、ジオメトリを追加することなく深度の錯覚を与えることができます。BumpOffset マテリアルは、グレースケールの _高さマップ_ を使用して深度情報を与えます。高さマップの値が明るいほどマテリアルが「飛び出し」、カメラがサーフェスを移動するとその領域は視差 (シフト) します。高さマップの暗い領域は「遠く離れた」部分で、ほとんどシフトしません。
+[/EXCERPT:BumpOffset]
+
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]プロパティ[/REGION] ||
+| **HeightRatio** | _高さマップ_ から渡された深度の乗数です。値が大きいほど、深度が極端になります。通常は 0.02 から 0.1 の範囲です。|
+| **ReferencePlane** | エフェクトを与えるために、テクスチャ領域の高さの概算を指定します。値を 0 にするとテクスチャが完全に表面から離れて歪んだ表示となり、0.5 (デフォルト値) にすると表面に部分的な凹凸が発生します。 |
+| [REGION:tablesection]入力[/REGION] ||
+| **Coordinate (座標) ** | 表現式で変更するベースのテクスチャ座標を受け取ります。 |
+| **Height (高さ) ** | 高さマップとして使用するテクスチャ (または値) を受け取ります。 |
+| **HeightRatioInput** |  _高さマップ_ から渡された深度の乗数です。値が大きいほど、深度が極端になります。通常は 0.02 から 0.1 の範囲です。この入力を使用すると、Height Ratio プロパティのすべての値に置き換わります。 |
+
+[REGION:fullwidth]
+![BumpOffsetExample.png](BumpOffsetExample.png)
+[/REGION]
+
+
+<!--------------------------------------------------------->
+
+
+### ConstantBiasScale
+
+**ConstantBiasScale** 表現式は入力値を受け取り、バイアス値を加算して、スケーリング係数を掛けて結果を出力します。例えば入力データを [-1,1] から [0,1] へ変換する場合、バイアス値に 1.0 、スケーリング係数に 0.5 を使います。
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]プロパティ[/REGION] ||
+| **Bias (バイアス) ** | 入力に加算される値を特定します。 |
+| **Scale (スケール) ** | バイアスがかかった結果の乗数を特定します。 |
+
+
+![ConstantBiasScaleExample.png](ConstantBiasScaleExample.png)
+
+
+<!--------------------------------------------------------->
+
+
+### DDX
+
+**DDX** 表現式は DDX 派生の計算を公開します。ピクセル シェーダーの計算で使用される GPU ハードウェア機能です。
+
+
+<!--------------------------------------------------------->
+
+
+### DDY
+
+**DDY** 表現式は DDY 微分係数の計算を公開します。ピクセル シェーダーの計算で使用される GPU ハードウェア機能です。
+
+
+<!--------------------------------------------------------->
+
+
+### DepthFade
+
+**DepthFade** 表現式は、半透明オブジェクトが不透明なオブジェクトと交わった時に生じる目障りな継ぎ目を非表示にする際に使用します。 
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]プロパティ[/REGION] ||
+| **Fade Distance** | フェードが発生するワールド空間です。FadeDistance 入力が非接続時に使用されます。 | 
+| [REGION:tablesection]入力[/REGION] ||
+| **Opacity** | 深度がフェードする前にオブジェクトに対して既存のオパシティを受け取ります。 |
+| **FadeDistance** | フェードが発生するワールド空間の距離です。  |
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Before Depth Fade](Engine\Rendering\Materials\ExpressionReference\Depth\DepthFade0.png)(w:340)
+	[/PARAM]
+	[PARAM:after]
+	![After Depth Fade](Engine\Rendering\Materials\ExpressionReference\Depth\DepthFade1.png)(w:340)
+	[/PARAM]
+[/OBJECT]
+
+[REGION:lightbox]
+[![](Engine\Rendering\Materials\ExpressionReference\Depth\DepthFadeNetwork.png)(h:340)](Engine\Rendering\Materials\ExpressionReference\Depth\DepthFadeNetwork.png)
+[/REGION]
+[REGION:caption]
+画像をクリックしてフルサイズで表示 
+[/REGION]
+
+
+<!--------------------------------------------------------->
+
+
+### DepthOfFieldFunction
+
+**Depth of Field Function** 表現式によって、被写界深度によってぼやけたマテリアルをアーティストが調節することができます。0 から 1 の値を出力します。0 は「ピントがあっている」、1 は「完全にぼやけている」ことを表します。例えば、テクスチャーの鮮明なバージョンとぼやけているバージョンでの補間に役立ちます。深度の入力によって、シーンの被写界深度の既存の計算結果を他の計算でオーバーライドすることができます。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Blended Colors](DepthOfFieldFunction_Color.png)(w:350)
+	[/PARAM]
+	[PARAM:after]
+	![Blending regular and blurred textures](DepthOfFieldFunction_Texture.png)(w:350)
+	[/PARAM]
+[/OBJECT]
+
+[REGION:lightbox]
+[![](DepthOfFieldFunctionNetwork.png)(w:350)](DepthOfFieldFunctionNetwork.png)
+[/REGION]
+[REGION:caption]
+画像をクリックしてフルサイズで表示 
+[/REGION]
+
+
+<!--------------------------------------------------------->
+
+
+[EXCERPT:Desaturation]
+### Desaturation
+
+**Desaturation** 表現式は入力をデサチュレート (非飽和) にする、または入力されたカラーを一定のパーセンテージに基づいてグレーの影へ変換します。
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]プロパティ[/REGION] ||
+| **Luminance Factors  (ルミナンス ファクター) ** | 各チャンネルがカラーをデサチュレートするのに寄与する量を特定します。これによって、彩度を落とした場合は、緑は赤よりも明るく、またブルーよりも赤のほうが明るくなるように制御されます。 |
+| [REGION:tablesection]入力[/REGION] ||
+| **Fraction  (割合) ** | 入力に適用するデサチュレーション量を特定します。割合の範囲は 0.0 (完全に彩度を落とす) から 1.0 (完全なオリジナルカラー、彩度は全く落とさない) です。 |
+
+
+![DesaturationExample.png](DesaturationExample.png)
+
+[REGION:note]
+**プログラマー:** デサチュレートされたカラー `D`、入力カラー `I`、および輝度係数 `L` を定義します。次の出力が得られます。 `O = (1-Percent)*(D.dot(I)) + Percent*I`
+[/REGION]
+[/EXCERPT:Desaturation]
+
+
+<!--------------------------------------------------------->
+
+
+[EXCERPT:Distance]
+### Distance
+
+**Distance** 表現式は 2 つのポイント、カラー、位置、ベクターの (ユークリッド) 距離間を計算し、その結果の値を出力します。これは 1、 2、 3、 4 つのコンポーネントベクターに機能しますが、表現式への両入力値が同数のチャンネルを持っていなくてはいけません。 
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]入力[/REGION] ||
+| **A** | 任意の長さの値またはベクターを受け取ります。 |
+| **B** | 任意の長さの値またはベクターを受け取ります。 |
+
+[REGION:fullwidth]
+![DistanceExample.png](DistanceExample.png)
+[/REGION]
+
+**Pseudo code:**
+
+	Result = length(A - B)
+
+**Low level HLSL code:**
+
+	float Result = sqrt(dot(A-B, A-B))
+
+	[/EXCERPT:Distance]
+
+
+<!--------------------------------------------------------->
+
+
+### DistanceFieldGradient
+
+**DistanceFieldGradient** 表現式ノードは、ノーマライズされるとオブジェクトが距離フィールドを移動する X、Y、Z 方向を出力します。 
+このような理由で、Distance Field Gradient マテリアル表現式ノードは液体の流れのシミュレーションが必要なマテリアルに最適です。
+
+[region:note]
+この表現式を正しく使うためには、**Project Settings (プロジェクト設定)]** の **[Rendering (レンダリング)]** の **[Generate Mesh Distance Fields (メッシュ ディスタンス フィールドを生成)]** を有効にする必要があります。 
+[/region]
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| **Position**  | 何も入力がない場合は現在のワールド位置がデフォルトになります。  |
+
+これは、マテリアル内で **DistanceFieldGradient** マテリアル表現式を使う方法の例です。
+下の例では、DistanceFieldGradient が最初にノーマルライズされて、その後に Mask Channel ノードにつながれていることに注目してください。
+最初に DistanceFieldGradient をノーマライズしないと指向性データを取得できないためです。 
+マテリアル インスタンス内で RGB チャネル スイッチを簡単に切り替えられるように Mask Channel パラメータが追加されています。
+
+[Region:lightbox]
+[![](DistanceFieldGradient_Material.png)](DistanceFieldGradient_Material.png)
+[/Region]
+[REGION:caption]
+画像をクリックしてフルサイズで表示 
+[/REGION]
+
+これは動作中の DistanceFieldGradient の例です。 
+下の画像は、各種 RGB が有効にされている時に DistanceFieldGradient が使用するデータを表しています。
+
+[Region:lightbox]
+[![](DistanceFieldGradient_Example.png)(w:960)](DistanceFieldGradient_Example.png)
+[/Region]
+[REGION:caption]
+画像をクリックしてフルサイズで表示 
+[/REGION]
+
+<!---
+![](DistanceFieldGradient_Example.png)
+--->
+
+| 番号 | 説明 |
+| -------- | ----------- |
+| **1**  | R チャンネルが有効、その他のすべてのチャンネルは無効。 |
+| **2**  | G チャンネルが有効、その他のすべてのチャンネルは無効。 |
+| **3**  | B チャンネルが有効、その他のすべてのチャンネルは無効。 |
+
+
+<!--------------------------------------------------------->
+
+
+### DistanceToNearestSurface
+
+**Distance To Nearest Surface** マテリアル表現式ノードは、マテリアルがレベルのどのポイントでも Global Distance Field のサンプリングができるようにします。 
+DistanceToNearestSurface は、ワールド スペース単位で符号付きで距離を距離フィールドからシーンの中で最短距離にあるオクルーダへ出力することで機能します。
+
+[region:note]
+この表現式を正しく使うためには、**Project Settings (プロジェクト設定)]** の **[Rendering (レンダリング)]** の **[Generate Mesh Distance Fields (メッシュ ディスタンス フィールドを生成)]** を有効にする必要があります。
+[/region]
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| **Position**  | 何も入力がない場合は現在のワールド位置がデフォルトになります。  |
+
+これは動作中の **Distance To Nearest Surface (最も近いサーフェスまでの距離)]** の例です。 
+
+
+[Region:lightbox]
+[![](DistanceNearSurface_01.png)(w:960)](DistanceNearSurface_01.png)
+[/Region]
+[REGION:caption]
+画像をクリックしてフルサイズで表示 
+[/REGION]
+
+![](DistanceNearSurface_02.png)(w:550)
+
+この例では、Distance To Nearest Surface はマテリアル上の Opacity 入力へ接続され、そのマテリアルはレベルフロアの真上に配置されているスタティック メッシュ プレーンに適用されます。 
+Distance To Nearest Surface は、カラー領域に対してのみシーンに配置された他のスタティック メッシュと交差を開することをマテリアルに命令します。
+
+
+<!--------------------------------------------------------->
+
+
+[EXCERPT:FeatureLevelSwitch]
+### FeatureLevelSwitch
+
+**Feature Level Switch** ノードで、性能が低めのデバイス向けに単純化したマテリアルを作成することができます。 
+
+**使用例：**10 個のテクスチャがオーバーラップしている複雑な演算のマテリアルもありますが、モバイルの場合は静的なテクスチャが 1 つだけです (機能レベル ES2)。 
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]入力[/REGION] ||
+| **Default** | デフォルトの Feature Level です。 |
+| **ES2** | コア性能が OpenGL ES2 で定義された Feature Level です。 |
+| **ES3.1** | コア性能が Metal-level デバイスで定義された Feature Level です。 |
+| **SM4** | コア性能が DX10 Shader Model 4 で定義された Feature Level です。 |
+| **SM5** | コア性能が DX11 Shader Model 5 で定義された Feature Level です。 |
+
+[/EXCERPT:FeatureLevelSwitch]
+
+
+<!--------------------------------------------------------->
+
+
+### Fresnel
+
+**Fresnel** は、表面法線の内積とカメラの方向に基づいてフォールオフを計算します。表面法線が直接カメラに向いている時、0 の値が出力されます。表面法線がカメラに垂直に向き合っている時は、1 の値が出力されます。結果は [0,1] にクランプされるため、真ん中にネガティブカラーを持ちません。
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]プロパティ[/REGION] ||
+| **Exponent ** | 出力値がどれくらいの速さでフォールオフするかを特定します。値が大きいと、ぴんと張った、または素早いフォールオフになります。|
+| **Base Reflect Fraction** | 表面をまっすぐ見た場合のスペキュラ反射の割合を特定します。値 1 で Fresnel  エフェクトを事実上無効にします。 |
+| [REGION:tablesection]入力[/REGION] ||
+| **ExponentIn** | 出力値がどれくらいの速さでフォールオフするかを特定します。大きな値はぴんと張った、または素早いフォールオフを意味します。使用すると、値は常に Exponent のプロパティ値にとって代わります。 |
+| **Base Reflect Fraction** | 表面をまっすぐ見た場合のスペキュラ反射の割合を特定します。値 1 で Fresnel エフェクトを事実上無効にします。使用すると、値は常に Exponent のプロパティ値にとって代わります。 |
+| **Normal** | ワールド空間でサーフェスの法線を表す 3 チャンネルのベクター値を受け取ります。Fresnel オブジェクトの表面に適用された法線マップの結果を見るには、法線マップをマテリアルの Normal の入力に接続し、次に以下の表現式を Fresnel のこの [PixelNormalWS](Engine/Rendering/Materials/ExpressionReference/Vector#PixelNormalWS) 入力に接続します。法線が何も指定されないと、メッシュのタンジェント法線が使用されます。 |
+
+
+![FresnelExample.png](FresnelExample.png)
+
+
+<!--------------------------------------------------------->
+
+
+[EXCERPT:GIReplace]
+### GIReplace
+
+**GIReplace** によりアーティストは、マテリアルを GI に使用中に、通常はより単純な別の表現式チェーンを指定することができます。  
+
+**使用例：**Lightmass スタティック GI と LPV ダイナミック GI が使用します。
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]入力[/REGION] ||
+| **Default** | デフォルトの GI です。 |
+| **StaticIndirect** | 焼き付けられた間接ライティングに使用します。 |
+| **DynamicIndirect** | 焼き付けられた動的な間接ライティングに使用します。 |
+
+[INCLUDE:Engine\Rendering\LightingAndShadows\LightPropagationVolumes#gireplaceexample]
+
+
+[/EXCERPT:GIReplace]
+
+
+<!--------------------------------------------------------->
+
+
+## I - P
+
+
+<!--------------------------------------------------------->
+
+
+### LightmassReplace
+
+**LightmassReplace** 表現式は、通常のレンダリング目的のマテリアル コンパイル時に Realtime 入力を通過し、グローバル イルミネーション処理の際にマテリアルを Lightmass へエクスポートする時、 Lightmass 入力を通過します。これは、WorldPosition のようなエクスポートされたバージョンが正常に処理されない際など回避策として有益です。
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]入力[/REGION] ||
+| **Realtime** | 通常のレンダリング処理のため通過する値を受け取ります。 |
+| **Lightmass** | マテリアルを Lightmass へエクスポートする際に通過する値を受け取ります。 |
+
+
+<!--------------------------------------------------------->
+
+
+[EXCERPT:LinearInterpolate]
+### LinearInterpolate
+
+**LinearInterpolate** 表現式はマスクに使用された第 3 の入力値に基づいて 2 つの入力値をブレンドします。これは Photoshop のレイヤーマスクのように、2 つのテクスチャ間のトランジションを定義するマスクのようなものです。マスク アルファの輝度は、二つの入力値から受け取るカラーの割合を決定します。アルファ値が 0.0/black (黒) の場合は最初の入力値が使用されます。アルファ値が 1.0/white (白) の場合は 2 番目の入力値が使用されます。アルファ値がグレー (0.0 と 1.0 の間にある値) の場合、出力値は 2 つの入力値のブレンドになります。ブレンドはチャンネル毎に処理されることにご注意ください。アルファ値が RGB カラーの時、アルファの赤のチャンネル値によって A と B の赤のチャンネル間のブレンドが定義されます。これは、 A と B の緑のチャンネルの間のブレンドを定義する、アルファの緑のチャンネルとは **別になります** 。
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]プロパティ[/REGION] ||
+| **Const A** | この値は黒 (0.0) にマッピングされます。この A の入力が未接続の場合に限り使用されます。 |
+| **Const B** | この値は白 (1.0) にマッピングされます。 B の入力が未接続の場合に限り使用されます。 |
+| **Const Alpha** | マスク アルファとして使用する値を受け取ります。アルファ入力が未接続の場合に限り使用されます。 |
+| [REGION:tablesection]入力[/REGION] ||
+| **A** | 黒 (0.0) にマッピングされた値を受け取ります。 |
+| **B** | 白 (1.0) にマッピングされた値を受け取ります。 |
+| **Alpha** | マスク アルファとして使用する値を受け取ります。 |
+
+
+**プログラマー:** LinearInterpolate はパラメータのアルファ値に基づいて A と B の間の各チャンネルの lerp (Linear Interpolate 線形補間) を実行します。
+
+![LerpExample.png](LerpExample.png)(w:900)
+[/EXCERPT:LinearInterpolate]
+
+
+<!--------------------------------------------------------->
+
+
+### Noise
+
+**Noise** 表現式は、生成方法について制御できるプロシージャルなノイズ フィールドを作成します。
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]プロパティ[/REGION] ||
+| **Scale** | ノイズ セルの全体的なサイズを変更します。値が低いほどノイズは大きくなります。|
+| **Quality** | 外観、パフォーマンスの設定。値が低いほど早くなりますが見た目が悪くなり、値が高いほど遅くなりますが、見た目は良くなります。 |
+| **Function** | [INCLUDE:#NoiseFunctions] |
+| **Turbulence** | オンにるすと、各ノイズのオクターブは絶対値のみ結果に追加します。視覚的な特徴を変更し、形状を山の背のようにすることができます。 |
+| **Levels** | 異なるスケールで結合する異なるレベル数です。演算負荷にレベル数を乗算します。 |
+| **Output Min** | ノイズ計算によって出力される最低値です。 |
+| **Output Max** | ノイズ計算によって出力される最高値です。 |
+| **Level Scale** |  常にアクティブで、それぞれの新規のオクターブのスケール変更量を決定します。 |
+| **Tiling** | サポート対象のノイズ関数の場合、ノイズにタイル処理ができるようにします。これは負荷がさらにかかりますが、ノイズをシームレスにラップするテクスチャにベイクする場合に便利です。 |
+| **Repeat Size** | タイリングの際のノイズの繰り返し回数です。 |
+|| [REGION:tablesection]入力値[/REGION] ||
+| **Position** | 3D ベクターを介してテクスチャ サイズを調整できます。 |
+| **FilterWidth** | 実際にノイズ テクスチャにどの程度のブラーを適用するかを制御します。 |
+
+![NoiseExample.png](NoiseExample.png)
+
+<!--
+[EXCERPT:NoiseFunctions]
+
+| 関数 |     | 説明|
+| -------- | --- | ----------- |
+|Simplex | Texture Based| 直接使用およびバンプ処理で高い品質。1 レベルあたりの命令数 約 77、テクスチャ ルックアップ数 4、タイル処理は不可。|
+|Gradient | Texture Based| 直接使用およびバンプで高い品質。タイル処理なしモード (Non-tiled): 1 レベルあたりの命令数は約 61、テクスチャ ルックアップは 8。タイル処理モード (Tiling): 1 レベルあたりの命令数は約 74、テクスチャ ルックアップは 8。「タイル処理なし」モードにしても、繰り返し数は 128。繰り返すと便利な回数 <= 128。以前は Perlin Noise とラベルされていました。|
+|Fast Gradient | 3D Texture | 直接使用では高品質、バンプには **向きません**。常に繰り返し数 16 のタイル処理なので、Fast Gradient ノイズのオプションに "Tiling" モードはありません。|
+| Gradient | Computational | 直接使用およびバンプで高品質。タイル処理なしモード (Non-tiled): 1 レベルあたりの命令数は約 80、テクスチャなし。タイル処理モード (Tiling): 1 レベルあたりの命令数は約 143、テクスチャなし。|
+| Value | Computational | 低品質、ただし純粋演算処理。タイル処理なしモード (Non-tiled): 1 レベルあたりの命令数は約 53、テクスチャなし。タイル処理モード (Tiling): 1 レベルあたりの命令数は約 118、テクスチャなし。以前は間違えて Gradient ノイズとラベルされていました。 |
+| Voronoi | | Worley あるいは Cellular ノイズとも呼ばれています。Quality=1 で 8 セルを検索、Quality=2 で 16 セルを検索、Quality=3 で 27 セルを検索、Quality=4 で 32 セルを検索検索された 1 つのセルの命令数は 20。 |
+[/EXCERPT:NoiseFunctions]
+-->
+
+
+<!--------------------------------------------------------->
+
+
+### Previous Frame Switch
+
+**Previous Frame Switch** マテリアル表現式は、テンポラル アンチエイリアシングおよびモーション ブラーと正しく動作するように正確なモーション ベクターを生成するために、マテリアルで実装されている複雑な [頂点アニメーション](Engine/Animation/Tools/VertexAnimationTool/) をサポートします。 
+
+時間の関数だけのマテリアルは修正せずに既に機能していますが、マテリアル パラメータなどアニメーションに影響を与える他の変数を構成するこはできません。Previous Frame Switch マテリアル表現式は、例えば、ブループリントでこうしたパラメータがどのように変化するかを追跡できれば、アーティストはこの問題を手動で解決できます。手動でフレーム間の World Position Offset を変えると発生するワールドモーション ベクター生成の表現式を与えることができます。 
+
+[REGION:note]
+この表現式を正しく使うためには、**Project Settings (プロジェクト設定)]** の **[Rendering (レンダリング)]** の **[Accurate Velocities from Vertex Deformations]** を有効にする必要があります。 
+[/REGION]
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| Current Frame | 開始位置の参照として使用する指向性ベクターです。 |
+| Previous Frame | ブラーの追加量の XYZ 参照として使用する指向性ベクターです。 |
+
+これは、マテリアルにおける **Previous Frame Switch** マテリアル表現式の使用例です。
+
+![](PreviousFrameSwitch.png)(w:900)
+
+この例では、Previous Frame Switch が Multiply ノード経由で定数値を使って指向性ブラーを調節しています。 
+
+[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:videoid]
+	YbjqiNZr4K4
+	[/PARAMLITERAL]
+	[PARAMLITERAL:width]
+	50
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	56.25
+	[/PARAMLITERAL]
+	[PARAMLITERAL:units]
+	%
+	[/PARAMLITERAL]
+	[PARAMLITERAL:type]
+	simple
+	[/PARAMLITERAL]
+[/OBJECT]
+
+この例をみると、エピックの開発した Fortnite などのゲームにおいて、オンスクリーンで集まった頂点アニメーションでモーション ブラーをこの表現式でどのように調節しているかが分かります。 
+右側のアニメーションは Previous Frame Switch を使ってモーション ブラーを追加しています。左側は使っていません。
+
+
+<!--------------------------------------------------------->
+
+
+## Q - Z
+
+
+<!--------------------------------------------------------->
+
+
+### QualitySwitch
+
+**QualitySwitch** 表現式は、よりローエンドのデバイス上で低いクオリティを使用するなどエンジンが異なるクオリティ レベルで切り替わった場合に、異なる表現式ネットワークを使用できるようにします。
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]入力[/REGION] ||
+| Default | デフォルトのビジュアル クオリティ用にデザインされたネットワークに対して使用される入力です。 |
+| Low | ビジュアル品質設定が低めのネットワークに使用する入力です。 |
+| High | ビジュアル品質設定が高めのネットワークに使用する入力です。 |
+
+
+<!--------------------------------------------------------->
+
+
+[EXCERPT:RotateAboutAxis]
+### RotateAboutAxis
+
+**RotateAboutAxis** 表現式は回転軸、軸の点、回転角度に与えられた 3 チャンネルのベクター入力値を回転させます。簡素なシアよりも高い品質の WorldPositionOffset を使用しているアニメーションで役立ちます。
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]入力[/REGION] ||
+| **NormalizedRotationAxis** | オブジェクトが回転する軸を表す正規化された (0-1) ベクターを受け取ります。|
+| **RotationAngle** | 回転の角度。値 1 は 360 度全体の回転角度を表します。
+| **PivotPoint** | オブジェクトが回転する回転軸を表す 3 チャンネルのベクターを受け取ります。 |
+| **Position** | オブジェクトの位置を表す 3 チャンネルのベクターを受け取ります。RotateAboutAxis 表現式が作成されると、 WorldPosition 表現式が自動的に作成され、この入力に接続されます。 |
+
+[REGION:fullwidth]
+![RotateAboutAxisExample.png](RotateAboutAxisExample.png)
+[/REGION]
+
+上記の例ではプレビューの平面が表示され、垂直軸上での回転のように見えます。
+
+[/EXCERPT:RotateAboutAxis]
+
+
+<!--------------------------------------------------------->
+
+
+### SphereMask
+
+**SphereMask** 表現式は、距離計算に基づきマスク値を出力します。ある入力が点の位置で、その他の入力がある範囲を伴う球のセンターの場合、マスク値はトランジションエリア内の外側に 0 で内側に 1 となります。これは 1、 2、3、4 つのコンポーネントを持つベクターで機能します。
+
+| アイテム | 説明 |
+| -------- | ----------- |
+| [REGION:tablesection]プロパティ[/REGION] ||
+| **Attenuation  (減衰) Radius** | 距離の計算に使用する半径を指定します。 |
+| **Hardness (硬化) Percent** | トランジション エリアのサイズを指定します。これは Photoshop のブラシの硬さの値のような働きをします。0 は遷移が硬いことを表し、 100 は遷移エリアが最大限 (柔らかい) ことを意味します。 |
+| [REGION:tablesection]入力[/REGION] ||
+| **A** | チェックするポイントの位置を表す値を受け取ります。|
+| **B** | 球の真ん中を表す値を受け取ります。|
+
+[REGION:fullwidth]
+![SphereMaskExample.png](SphereMaskExample.png)
+[/REGION]
+[REGION:caption] この例では、カメラがプレビュー オブジェクトから 256 ユニット以上離れると、プレビュー オブジェクトがスムーズにブラックにフェードします。 [/REGION]
+
+
+<!--------------------------------------------------------->
+
+
+### Vector Noise
+
+[INCLUDE:Engine\Rendering\Materials\ExpressionReference\Vector#VectorNoiseTest]
+
+
+<!--
+[EXCERPT:VectorNoiseFunctions]
+
+|関数| 説明|
+|---------|-----------|
+| Cellnoise | 3D 空間にあるそれぞれの整数グリッドのランダムな色です。命令数は約 10 です。 |
+| Perlin 3D Noise | Perlin ノイズの計算結果を 3D で出力します。各チャンネルの出力は -1 から 1 までです。赤チャンネルのみを使用した場合の命令数は約 83、3 つのチャンネルをすべて使った場合は 125 です。|
+| Perlin Gradient | Perlin Noise 関数の勾配を計算します。RGB 出力には勾配ベクターが含まれています。A が Scalar Noise です。命令数は約 106 です。 |
+| Perlin Curl | 3D Curl Noise を計算します。Perlin 3D Noise に Curl Noise を計算して出力します。命令数は約 162 です。 |
+| Voronoi | アルゴリズムと命令数は *Noise* 表現式の Voronoi 関数と同じです。ただし、RGB はそれぞれの Voronoi セル内で最も近いシード ポイントの位置になり、そのシード ポイントまでの距離が A となります。 |
+[/EXCERPT]
+-->
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

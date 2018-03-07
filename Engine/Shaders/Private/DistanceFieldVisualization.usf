@@ -1,0 +1,295 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	DistanceFieldVisualization.usf
+=============================================================================*/
+
+#include "Common.ush"
+#include "DeferredShadingCommon.ush"
+#include "DistanceFieldLightingShared.ush"
+#include "DistanceFieldAOShared.ush"
+#include "GlobalDistanceFieldShared.ush"
+
+RWTexture2D<float4> RWVisualizeMeshDistanceFields;
+
+#define MAX_INTERSECTING_OBJECTS 1024
+groupshared uint IntersectingObjectIndices[MAX_INTERSECTING_OBJECTS];
+
+groupshared uint NumIntersectingObjects;
+
+void RayTraceThroughTileCulledDistanceFields(float3 WorldRayStart, float3 WorldRayEnd, float MaxRayTime, out float MinRayTime, out float TotalStepsTaken)
+{
+	MinRayTime = MaxRayTime;
+	TotalStepsTaken = 0;
+
+	LOOP
+	for (uint ListObjectIndex = 0; ListObjectIndex < min(NumIntersectingObjects, (uint)MAX_INTERSECTING_OBJECTS); ListObjectIndex++)
+	{
+		uint ObjectIndex = IntersectingObjectIndices[ListObjectIndex];
+		float4 SphereCenterAndRadius = LoadObjectPositionAndRadius(ObjectIndex);
+
+		float3 LocalPositionExtent = LoadObjectLocalPositionExtent(ObjectIndex);
+		float4x4 WorldToVolume = LoadObjectWorldToVolume(ObjectIndex);
+		float4 UVScaleAndVolumeScale = LoadObjectUVScale(ObjectIndex);
+		float3 UVAdd = LoadObjectUVAddAndSelfShadowBias(ObjectIndex).xyz;
+		float2 DistanceFieldMAD = LoadObjectDistanceFieldMAD(ObjectIndex);
+
+		float3 VolumeRayStart = mul(float4(WorldRayStart, 1), WorldToVolume).xyz;
+		float3 VolumeRayEnd = mul(float4(WorldRayEnd, 1), WorldToVolume).xyz;
+		float3 VolumeRayDirection = VolumeRayEnd - VolumeRayStart;
+		float VolumeRayLength = length(VolumeRayDirection);
+		VolumeRayDirection /= VolumeRayLength;
+
+		float2 IntersectionTimes = LineBoxIntersect(VolumeRayStart, VolumeRayEnd, -LocalPositionExtent, LocalPositionExtent);
+
+		if (IntersectionTimes.x < IntersectionTimes.y && IntersectionTimes.x < 1)
+		{
+			float SampleRayTime = IntersectionTimes.x * VolumeRayLength;
+
+			float MinDistance = 1000000;
+
+			uint StepIndex = 0;
+			uint MaxSteps = 256;
+
+			LOOP
+			for (; StepIndex < MaxSteps; StepIndex++)
+			{
+				float3 SampleVolumePosition = VolumeRayStart + VolumeRayDirection * SampleRayTime;
+				float3 ClampedSamplePosition = clamp(SampleVolumePosition, -LocalPositionExtent, LocalPositionExtent);
+				float3 VolumeUV = DistanceFieldVolumePositionToUV(ClampedSamplePosition, UVScaleAndVolumeScale.xyz, UVAdd);
+				float DistanceField = SampleMeshDistanceField(VolumeUV, DistanceFieldMAD).x;
+				MinDistance = min(MinDistance, DistanceField);
+
+				float MinStepSize = 1.0f / (4 * MaxSteps);
+				float StepDistance = max(DistanceField, MinStepSize);
+				SampleRayTime += StepDistance;
+
+				// Terminate the trace if we reached a negative area or went past the end of the ray
+				if (DistanceField < 0 
+					|| SampleRayTime > IntersectionTimes.y * VolumeRayLength)
+				{
+					break;
+				}
+			}
+
+			//Result = max(Result, StepIndex / (float)MaxSteps);
+
+			if (MinDistance * UVScaleAndVolumeScale.w < 0 || StepIndex == MaxSteps)
+			{
+				MinRayTime = min(MinRayTime, SampleRayTime * UVScaleAndVolumeScale.w);
+			}
+
+			TotalStepsTaken += StepIndex;
+		}
+	}
+}
+
+void RayTraceThroughGlobalDistanceField(
+	uniform uint ClipmapIndex,
+	float3 WorldRayStart, 
+	float3 WorldRayEnd, 
+	float RayLength, 
+	float MinRayTime, 
+	out float OutMaxRayTime, 
+	out float OutIntersectRayTime, 
+	out float OutTotalStepsTaken)
+{
+	OutIntersectRayTime = RayLength;
+	OutTotalStepsTaken = 0;
+	OutMaxRayTime = 1;
+
+	float SurfaceBias = .5f * GlobalVolumeCenterAndExtent[ClipmapIndex].w * GlobalVolumeTexelSize;
+	float3 GlobalVolumeCenter = GlobalVolumeCenterAndExtent[ClipmapIndex].xyz;
+	// Subtract one texel from the extent to avoid filtering from invalid texels
+	float GlobalVolumeExtent = GlobalVolumeCenterAndExtent[ClipmapIndex].w - GlobalVolumeCenterAndExtent[ClipmapIndex].w * GlobalVolumeTexelSize;
+	float3 VolumeRayStart = WorldRayStart - GlobalVolumeCenter;
+	float3 VolumeRayEnd = WorldRayEnd - GlobalVolumeCenter;
+	float3 VolumeRayDirection = VolumeRayEnd - VolumeRayStart;
+	float VolumeRayLength = length(VolumeRayDirection);
+	VolumeRayDirection /= VolumeRayLength;
+
+	float2 IntersectionTimes = LineBoxIntersect(VolumeRayStart, VolumeRayEnd, -GlobalVolumeExtent.xxx, GlobalVolumeExtent.xxx);
+
+	if (IntersectionTimes.x < IntersectionTimes.y && IntersectionTimes.x < 1)
+	{
+		OutMaxRayTime = IntersectionTimes.y;
+		float SampleRayTime = max(MinRayTime, IntersectionTimes.x) * VolumeRayLength;
+
+		float MinDistance = 1000000;
+
+		uint StepIndex = 0;
+		uint MaxSteps = 512;
+
+		LOOP
+		for (; StepIndex < MaxSteps; StepIndex++)
+		{
+			float3 SampleVolumePosition = VolumeRayStart + VolumeRayDirection * SampleRayTime;
+			float3 VolumeUV = ComputeGlobalUV(SampleVolumePosition + GlobalVolumeCenter, ClipmapIndex);
+			float DistanceField = SampleGlobalDistanceField(ClipmapIndex, VolumeUV).x;
+			MinDistance = min(MinDistance, DistanceField);
+
+			float MinStepSize = GlobalVolumeExtent * 2 / 8000.0f;
+			float StepDistance = max(DistanceField, MinStepSize);
+			SampleRayTime += StepDistance;
+
+			// Terminate the trace if we reached a negative area or went past the end of the ray
+			if (DistanceField < SurfaceBias
+				|| SampleRayTime > IntersectionTimes.y * VolumeRayLength)
+			{
+				break;
+			}
+		}
+
+		//Result = max(Result, StepIndex / (float)MaxSteps);
+
+		if (MinDistance < SurfaceBias || StepIndex == MaxSteps)
+		{
+			OutIntersectRayTime = min(OutIntersectRayTime, SampleRayTime);
+		}
+
+		OutTotalStepsTaken += StepIndex;
+	}
+}
+
+float2 NumGroups;
+
+[numthreads(THREADGROUP_SIZEX, THREADGROUP_SIZEY, 1)]
+void VisualizeMeshDistanceFieldCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint ThreadIndex = GroupThreadId.y * THREADGROUP_SIZEX + GroupThreadId.x;
+
+	float2 ScreenUV = float2((DispatchThreadId.xy * DOWNSAMPLE_FACTOR + View.ViewRectMin.xy + .5f) * View.BufferSizeAndInvSize.zw);
+	float2 ScreenPosition = (ScreenUV.xy - View.ScreenPositionScaleBias.wz) / View.ScreenPositionScaleBias.xy;
+
+	float SceneDepth = CalcSceneDepth(ScreenUV);
+	float4 HomogeneousWorldPosition = mul(float4(ScreenPosition * SceneDepth, SceneDepth, 1), View.ScreenToWorld);
+	float3 OpaqueWorldPosition = HomogeneousWorldPosition.xyz / HomogeneousWorldPosition.w;
+
+	float TraceDistance = 40000;
+	float3 WorldRayStart = View.WorldCameraOrigin;
+	float3 WorldRayEnd = WorldRayStart + normalize(OpaqueWorldPosition - View.WorldCameraOrigin) * TraceDistance;
+	float3 WorldRayDirection = WorldRayEnd - WorldRayStart;
+	float3 UnitWorldRayDirection = normalize(WorldRayDirection);
+
+#if USE_GLOBAL_DISTANCE_FIELD
+	
+	float TotalStepsTaken = 0;
+
+	float MaxRayTime0;
+	float IntersectRayTime;
+	float StepsTaken;
+	RayTraceThroughGlobalDistanceField((uint)0, WorldRayStart, WorldRayEnd, TraceDistance, 0, MaxRayTime0, IntersectRayTime, StepsTaken);
+
+	TotalStepsTaken += StepsTaken;
+
+	if (IntersectRayTime >= TraceDistance)
+	{
+		float MaxRayTime1;
+		RayTraceThroughGlobalDistanceField((uint)1, WorldRayStart, WorldRayEnd, TraceDistance, MaxRayTime0, MaxRayTime1, IntersectRayTime, StepsTaken);
+		TotalStepsTaken += StepsTaken;
+
+		if (IntersectRayTime >= TraceDistance)
+		{
+			float MaxRayTime2;
+			RayTraceThroughGlobalDistanceField((uint)2, WorldRayStart, WorldRayEnd, TraceDistance, MaxRayTime1, MaxRayTime2, IntersectRayTime, StepsTaken);
+			TotalStepsTaken += StepsTaken;
+
+			if (IntersectRayTime >= TraceDistance)
+			{
+				float MaxRayTime3;
+				RayTraceThroughGlobalDistanceField((uint)3, WorldRayStart, WorldRayEnd, TraceDistance, MaxRayTime2, MaxRayTime3, IntersectRayTime, StepsTaken);
+				TotalStepsTaken += StepsTaken;
+			}
+		}
+	}
+
+	float3 Result = saturate(TotalStepsTaken / 400.0f);
+
+#else
+	if (ThreadIndex == 0)
+	{
+		NumIntersectingObjects = 0;
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
+	float3 TileConeVertex;
+	float3 TileConeAxis;
+	float TileConeAngleCos;
+	float TileConeAngleSin;
+
+	{
+		float2 ViewSize = float2(1 / View.ViewToClip[0][0], 1 / View.ViewToClip[1][1]);
+		float3 TileCorner00 = normalize(float3((GroupId.x + 0) / NumGroups.x * ViewSize.x * 2 - ViewSize.x, ViewSize.y - (GroupId.y + 0) / NumGroups.y * ViewSize.y * 2, 1));
+		float3 TileCorner10 = normalize(float3((GroupId.x + 1) / NumGroups.x * ViewSize.x * 2 - ViewSize.x, ViewSize.y - (GroupId.y + 0) / NumGroups.y * ViewSize.y * 2, 1));
+		float3 TileCorner01 = normalize(float3((GroupId.x + 0) / NumGroups.x * ViewSize.x * 2 - ViewSize.x, ViewSize.y - (GroupId.y + 1) / NumGroups.y * ViewSize.y * 2, 1));
+		float3 TileCorner11 = normalize(float3((GroupId.x + 1) / NumGroups.x * ViewSize.x * 2 - ViewSize.x, ViewSize.y - (GroupId.y + 1) / NumGroups.y * ViewSize.y * 2, 1));
+
+		float3 ViewSpaceTileConeAxis = normalize(TileCorner00 + TileCorner10 + TileCorner01 + TileCorner11);
+		TileConeAxis = mul(ViewSpaceTileConeAxis, (float3x3)View.ViewToTranslatedWorld);
+		TileConeAngleCos = dot(ViewSpaceTileConeAxis, TileCorner00);
+		TileConeAngleSin = sqrt(1 - TileConeAngleCos * TileConeAngleCos);
+		TileConeVertex = View.WorldCameraOrigin;
+	}
+
+	uint NumCulledObjects = GetCulledNumObjects();
+
+	LOOP
+	for (uint ObjectIndex = ThreadIndex; ObjectIndex < NumCulledObjects; ObjectIndex += THREADGROUP_TOTALSIZE)
+	{
+		float4 SphereCenterAndRadius = LoadObjectPositionAndRadius(ObjectIndex);
+
+		BRANCH
+		if (SphereIntersectCone(SphereCenterAndRadius, TileConeVertex, TileConeAxis, TileConeAngleCos, TileConeAngleSin))
+		{
+			uint ListIndex;
+			InterlockedAdd(NumIntersectingObjects, 1U, ListIndex);
+
+			if (ListIndex < MAX_INTERSECTING_OBJECTS)
+			{
+				IntersectingObjectIndices[ListIndex] = ObjectIndex; 
+			}
+		}
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
+	float MinRayTime;
+	float TotalStepsTaken;
+
+	// Trace once to find the distance to first intersection
+	RayTraceThroughTileCulledDistanceFields(WorldRayStart, WorldRayEnd, TraceDistance, MinRayTime, TotalStepsTaken);
+
+	float TempMinRayTime;
+	// Recompute the ray end point
+	WorldRayEnd = WorldRayStart + UnitWorldRayDirection * MinRayTime;
+	// Trace a second time to only accumulate steps taken before the first intersection, improves visualization
+	RayTraceThroughTileCulledDistanceFields(WorldRayStart, WorldRayEnd, MinRayTime, TempMinRayTime, TotalStepsTaken);
+
+	float3 Result = saturate(TotalStepsTaken / 200.0f);
+
+	if (MinRayTime < TraceDistance)
+	{
+		Result += .1f;
+	}
+
+#endif
+
+	RWVisualizeMeshDistanceFields[DispatchThreadId.xy] = float4(Result, 0);
+}
+
+Texture2D VisualizeDistanceFieldTexture;
+SamplerState VisualizeDistanceFieldSampler;
+
+void VisualizeDistanceFieldUpsamplePS(in float4 UVAndScreenPos : TEXCOORD0, out float4 OutColor : SV_Target0)
+{
+	// Distance field AO was computed at 0,0 regardless of viewrect min
+	float2 DistanceFieldUVs = UVAndScreenPos.xy - View.ViewRectMin.xy * View.BufferSizeAndInvSize.zw;
+
+	float3 Value = Texture2DSampleLevel(VisualizeDistanceFieldTexture, VisualizeDistanceFieldSampler, DistanceFieldUVs, 0).xyz;
+
+	OutColor = float4(Value, 1);
+}

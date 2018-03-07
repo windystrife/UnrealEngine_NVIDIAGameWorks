@@ -1,0 +1,89 @@
+﻿INTSourceChangelist:3242329
+Availability: Public
+Title:Customized UV
+Crumbs: %ROOT%, Engine, Engine/Rendering/Materials
+Description:버텍스 셰이더 내 계산 퍼포먼스를 픽셀 단위로 할 때보다 향상시킬 수 있는 기능입니다.
+Version: 4.9
+parent:Engine/Rendering/Materials
+order:12
+topic-image:CUVs_topic.png
+type:overview
+tags:Materials
+
+
+[TOC(start:2)]
+
+
+GPU 상에서, 버텍스 셰이더는 모든 버텍스에 대해 실행되며, 픽셀 셰이더는 모든 픽셀에 대해 실행됩니다. 언리얼 엔진 4 의 거의 모든 머티리얼 노드는 모든 픽셀에 대해 실행됩니다. 반면 **UV Coordinate** (UV 좌표) 노드는 버텍스 / 픽셀 셰이더 어디에도 속할 수 있지만, **CustomizedUVs** 기능은 버텍스 셰이더에서만 실행되는데, 같은 계산을 픽셀 셰이더에서 할 때보다 더 나은 퍼포먼스를 보입니다. 덕분에 그냥 텍스처 타일링 속도를 올리기에도 아주 좋습니다. 이 시스템이 UV 상에서 수행하는 수학 연산에 제한된 것은 아니지만, 결과는 메시의 테셀레이션에 따라 달라질 것입니다.
+
+주: Customized UVs 는 현재 특정 컴포넌트 유형에 대해서만 구현되어 있습니다: 스태틱 메시, 스켈레탈 메시, BSP, 랜드스케이프, 메시 파티클. 특히 스프라이트 파티클은 Customized UVs 를 아직 지원하지 않습니다.
+
+## 프로퍼티
+  
+**머티리얼 에디터** 에서, 메인 머티리얼 노드를 선택한 다음 **Material** 카테고리에 있는 **Num Customized UVs** 프로퍼티를 편집하는 것으로 **CustomizedUVs** 입력 핀 수를 설정할 수 있습니다. **Num Customized UVs** 가 0 보다 큰 수치로 설정된 경우, CustomizedUVs 핀이 메인 머티리얼 노드에 표시됩니다.
+
+[REGION:lightbox]
+[![](CUVs_matEd.png)(h:250)](CUVs_matEd.png) [![](CUVs_propLocation.png)(h:250)](CUVs_propLocation.png) [![](CUVs_addedPins.png)(h:250)](CUVs_addedPins.png)
+[/REGION]
+
+## 비선형 수학
+  
+일반적인 법칙상, 수행하는 연산이 상수를 (카메라 위치, 시간, 벡터 파라미터 등) 사용하거나 버텍스별 특성에 따라 선형으로 변화하는 경우, 그 작업은 버텍스 셰이더에서 해도 픽셀 셰이더에서 할 때와 같은 결과를 냅니다. 선형으로 변화한다는 것은, 연산 결과가 곡선이 아닌, 곱하기나 더하기처럼 선형으로 증감한다는 뜻입니다. 변수 제곱이나, 사인 또는 코사인을 사용하거나, `length` 같은 연산은 비선형 수식이 됩니다.
+
+비선형 수학 연산 결과가 바람직할 것인지는, 적용되는 메시의 디테일에 따라 다릅니다:
+
+![](CUVs_highVsLowDetailMesh.png)(w:935)
+
+_왼쪽의 메시는 9x9 폴리곤 그리드인 반면, 오른쪽의 메시는 4x4 폴리곤 그리드입니다._
+
+[REGION:lightbox]
+[![](CUVs_LVSNL_01.png)(w:935)](CUVs_LVSNL_01.png) 
+
+대조적으로, 같은 수학을 텍스처에 바로 입력했을 경우, 픽셀 셰이더에서 계산되어 메시 디테일과 무관하게 같은 결과가 날 것입니다.
+
+[![](CUVs_perPixel.png)(h:211)](CUVs_perPixel.png) [![](CUVs_LVSNL_02.png)(h:211)](CUVs_LVSNL_02.png)
+[/REGION]
+
+## 선형 수학
+
+UV 를 파라미터로 스케일 조절(곱)하는 연산은 양쪽에서 동일합니다. UVs 는 버텍스별 특성이며, 스케일 조절은 선형 연산입니다. 아래 그림은 선형 연산 수행시 버텍스 셰이더에서 계산되는 CustomizedUVs 가 픽셀 셰이더에서 같은 계산을 할 때와 같은 효과를 내는 것을 보여주고 있습니다.
+
+[REGION:lightbox]
+[![](CUVs_VequalP_01.png)(h:191)](CUVs_VequalP_01.png) [![](CUVs_VequalP_02.png)(h:191)](CUVs_VequalP_02.png)
+[/REGION]
+  
+
+  
+## 작동 원리
+  
+CustomizedUV 핀은 기본적으로 메시의 텍스처 좌표(UVs)를 통과시킵니다. 그런 다음 (BaseColor 같은) 픽셀 셰이더 입력에 Texcoord 노드를 배치하면, 계속해서 메시의 텍스처 좌표를 얻게 됩니다. 그런데, CustomizedUV0 에서 무언가 한 다음 BaseColor 입력의 Texcoord 0 를 사용한다면, 변경된 UV 값을 얻게 됩니다. 참고로 Texture sample 노드는 기본적으로 TexCoord 0 을 사용합니다.
+
+
+  
+PC 의 **셰이더 모델 5** 는 8 개의 커스텀 UV 를 사용할 수 있는 반면, 모바일의 **OpenGL ES2** 는 3 개만 가능합니다.
+ 
+예제는 이렇습니다. 원본 머티리얼은 월드 스페이스 Y 와 Z 를 사용해서 텍스처를 매핑하고 있습니다.
+
+![](CUVs_EX01.png)
+  
+이 머티리얼 역시 같은 작업을 하는데, Customized UV 0 의 로직이 Texcoord0 로써 BaseColor 픽셀 셰이더 입력으로 통과됩니다. 그러나, Texcoord0 은 버텍스 셰이더에서 완료되었습니다.
+  
+![](CUVs_EX02.png) 
+
+_Texture Sample 노드 안에는 TexCoord0 노드가 내포되어 있습니다._
+  
+## 일반적인 퍼포먼스
+  
+대부분의 경우, 버텍스의 수는 픽셀보다 훨씬 적으며, 어떤 수학 연산이든 버텍스 셰이더로 옮기는 것은 퍼포먼스상 큰 이점이 될 수 있습니다. 참고로 폴리곤 수가 매우 많은 메시를 만드는 경우, 또는 하이 폴리곤 메시를 포함한 LOD 를 전혀 활용하지 않는 경우, 추가적인 버텍스 셰이더 작업이 병목현상을 유발할 수 있습니다. 그 이유는 버텍스 셰이더 작업은 메시가 저 멀리 있어서 4 픽셀 짜리든, 전체 화면을 뒤덮든 똑같기 때문입니다.
+  
+## 모바일 관련
+  
+모바일에서는, **어떤 식으로든 텍스처 좌표를 건드리는 텍스처 샘플은 완행 버스를 탑니다**. 이를 일컬어 _종속적_ 텍스처 펫치라 합니다. Customized UV 입력을 사용하는 것으로 타일링이나 월드 스페이스 텍스처 매핑을 구현하면서도 모든 텍스처 펫치를 _독립적_ 으로 유지할 수 있습니다. 고속 버스를 타는 것이지요.
+  
+추가적으로, 모바일에서 픽셀 셰이더의 모든 것은 float 절반 정밀도로 계산됩니다. 이때문에 픽셀 셰이더 수학 연산이 텍스처 좌표상에서 이루어질 때, 텍스처가 각져 보이거나 다른 부작용이 생깁니다. 그러나 Customized UV 입력은 최대 정밀도로 계산되기에, 이 문제를 피해갈 수 있습니다.
+  
+두 가지 다른 타일링 비율을 사용해서 구성해본 동굴 머티리얼로, 독립적 텍스처 샘플로만 이루어진 것입니다.
+
+![](CUVs_independentTiling.png)
+  
+ 

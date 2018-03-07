@@ -1,0 +1,470 @@
+﻿INTSourceChangelist:2723610
+Availability:Public
+Title:マルチプレイヤー シュートアウト
+Crumbs:%ROOT%, Resources, Resources/Showcases
+Description:ブループリント マルチプレイヤー ショーケースと構築方法の詳細 
+Related:Engine/Blueprints
+Related:Engine/UMG
+Related:Programming/Online
+Related:Programming/Online/Steam
+Related:Gameplay/Networking/Actors
+Related:Resources/ContentExamples/Networking
+Version:4.9
+
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![](MultiplayerShootout_Featured-476x246-c51d69c862538ea6fb72a13f7a0034e0.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/online_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Resources\Showcases\BlueprintMultiplayer:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources\Showcases\BlueprintMultiplayer:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources\Showcases\BlueprintMultiplayer]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![](MultiplayerShootout_Featured-476x246-c51d69c862538ea6fb72a13f7a0034e0.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/online_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Resources\Showcases\BlueprintMultiplayer:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources\Showcases\BlueprintMultiplayer:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources\Showcases\BlueprintMultiplayer]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:raw]
+![](MultiplayerExample_Header.png)
+[/REGION]
+
+[TOC(start:2 end:3)]
+
+**Simple Blueprint Multiplayer** ショーケースは、**ブループリント** と **UMG UI** のみでビルドされたゲームです。ブループリントの **Session Nodes** を使用して、ゲームでマルチプレイヤーを容易にするためのサンプルです。メインメニュー、サービスリスト、HUD 上にスコアボード付きの簡単なマップが付いています。メインメニューの **[Play (再生)]** をクリックすると、セッションをホストしゲームプレイ マップを取り込みます。その後、他のプレイヤーが **[Find games (ゲーム検索)]** をクリックすると、新規メニュー画面上にホストされている全てのゲームのリストが表示されます。その中の 1 つをクリックすると、そこへ参加しようとします。エラーがあると、ダイアログが表示され、ユーザーはメインメニューに戻ります。
+
+このゲームは、**GameInstance** ブループリントを使ったステート管理方法のサンプルでもあります。GameInstance は、マップ ロードの間を維持し、エラー イベントを受け取るオブジェクトでもあるので、ステート管理を行うのに便利です。このサンプル ゲームでは、ほとんどのセッション コールとメニュー遷移が GameInstance で処理されます。
+
+[REGION:note]
+本ページでは [](Engine/Blueprints/UserGuide/OnlineNodes) 、およびマルチプレーイヤー ゲームのホスト、検出、参加、退出のための実装について説明します。本ページの内容は、他のプレイヤーを撃つ、ヒットする、消滅する / リスポーンする、そして得点が加算されるというゲームプレイの要素を反映するために、後日更新されます。 
+[/REGION]
+
+## ゲームを開始 / プレイする
+
+このセクションでは、ゲームそのものの開始とプレイ方法、およびゲームのコンポーネントの詳細について説明します。 
+
+[REGION:note]
+アンリアル エンジン 4 でのマルチプレイヤー テスティングが初めての場合は、 [](Gameplay/HowTo/Networking/TestMultiplayer) の内容を確認しておくと良いでしょう。 
+[/REGION]
+
+ゲームをロードするには、以下の手順を行います。 
+
+1.	**Game/Maps** フォルダの **MainMenu** マップを開きます。 
+1. MainMenu マップを開いて、 **[Play (再生)]** ボタンの横にある下向きの矢印をクリックし、 **[Number of Players (プレイヤー数)]** を 2 に設定します。  
+
+	![](SettingNumberOfPlayers.png)
+
+	[REGION:warning]
+	**[Run Dedicated Server (専用サーバーを実行)]** オプションを使うと、サーバーリストが正しく表示されない問題が生じることがあります。現在修正中です。
+	[/REGION]
+
+1.	**[Play]**ボタンをクリックして、ゲームを起動します。 
+1.	ゲームが開始すると、次の画面が表示されます。
+ 
+	![](twoWindows.png)
+
+	_上図は、それぞれが **640x480** に設定された **新規エディタ ウィンドウ** でプレイしています。 **[Advanced Settings... (詳細設定)]** オプションで設定することができます。_
+
+	[REGION:warning]
+	テスティングを上図のようにローカルのマルチプレイヤー ゲームではなくネットワーク上で行う場合は、 **Standalone Play Mode** を使用して、ゲームに参加、または自分がホストするゲームにプレイヤーを参加させます。現在のところ、PIE 経由でネットワーク ゲームを実行しようとすると不安定になります。この問題は対処中です。 
+	[/REGION]
+
+メインメニューの内容の概要は以下の通りです。 
+
+![](MainMenu.png)(w:480)
+
+| オプション | 説明 |
+|---|---|
+| **1** | 現在のゲーム ウィンドウからゲームを開始 / ホストします。 |
+| **2** | アクティブなゲームが全て入った **Server List** 画面を表示します。ここで参加するゲームを選択できます。 |
+| **3** | ゲームを終了します。 |
+| **4** | 接続モードを **LAN** ゲームと **インターネット** ゲームで切り替えます。 |
+
+参加あるいはホストするゲームを選択すると、以下のようなゲームプレイ領域に変わります。 
+
+![](InGame1.png)
+
+画面の左上端に、プレイヤー キャラクター名のためのテキストが (黄色の枠内に) 表示されます。プレイヤー キャラクター名の右隣にある緑の枠には、現在のスコアが表示されます。プレイヤーがゲームに参加すると、現在のゲーム参加人数合計と現在のスコアが更新されて、左上のボックスに表示されます。 
+
+![](TwoInGame.png)
+
+[REGION:note]
+上記のプレイヤー名は、LAN ゲームから取っています。**Steam** などのサービスを使う場合は、プレイヤーの Steam 名がここに表示されます。 
+[/REGION]
+
+ゲームをホストした場合は、2 人目のプレイヤーの **[Find games (ゲーム検索)]** をクリックすれば、 **Server List (サーバーリスト)** が表示されます。 
+
+![](ServerListWindow.png)
+
+ゲームを検索すると、現在アクティブなゲームがリストにすぐに表示されます。このウィンドウには、右から、サーバー名、ゲームのプレイヤー番号、ゲーム セッションの現在の ping が表示されます。画面の左下隅にある **[Refresh (更新)]** ボタンをクリックするとリストが更新され、 **[Back (戻る)]** ボタンを押すとメインメニューに戻ります。リストにある名前をクリックすると、サーバーに参加しゲーム内へのスポーンを試みます。 
+
+ゲーム内に入ったら、 **マウスの左ボタン** をクリックして、準備が整った合図を出します。 
+
+![](1Ready.png)
+
+(サーバーまたはクライアントを) 準備するためにクリックすると、プレイヤーの準備が整ったことを示すテキストが画面の左上隅に表示されます。 
+
+準備が整うと、ゲームを再生するために以下の制御を使用できるようになります。 
+
+| 制御 | 説明 |
+|---|---|
+| **Right Mouse Button** | 武器をドローする (押し続ければ、武器はドローされたままになります)。 |
+| **Mouse** | マウスを動かすと武器の方へ向くことができる **Aim Mode** にします。 |
+| **Left Mouse Button** | 武器を発砲します。 |
+| **Middle Mouse (Wheel Up/Down)** | Aim Mode でない間にリロードします。 |
+| **Q** | インゲームのポーズ メニューを表示します (ゲームを再開またはゲームから退出)。 |
+
+ゲームの目的は、他のプレイヤーを撃つことにより、得点を得て、他のプレイヤーをリスポーンさせることです。プレイヤーは 6 回まで発砲できます。 **Middle Mouse (Wheel Up/Down)** を使って、(1回ずつ) リロードします。 
+
+
+## プロジェクト設定 / コンフィギュレーション
+
+このセクションでは、 **コンテンツ ブラウザ** で作成 (あるいは修正) されたそれぞれのアセットの機能について説明します。ブループリントおよび UMG UI アセットの中には相互通信するものもあるので、このプロジェクトをゼロから再生成する場合は、必要なアセットを作成してからエントリするのが良いでしょう。
+
+アセットは、 **コンテンツ ブラウザ** の各フォルダに置かれています。
+
+**Game/Blueprints/Widgets**
+
+| 名前 | 説明 |
+|---|---|
+| **ErrorDialog** | 発生したエラー メッセージを表示する UI 画面です。 |
+| **HUD** | 全てのプレイヤーの名前とスコアを含む **ScoreboardRow** ウィジェットを表示するインゲーム スコアボードです。 |
+| **InGameMenu** | プレイヤーがゲームから退出したりメインメニューに戻れるようにするインゲーム メニューです。 |
+| **LoadingScreen** | ゲームへ参加しようとすると表示されるシンプルなロード画面です。 |
+| **MainMenu** | ゲーム起動時のメインメニューです。プレイヤーはゲームをホストしたり、ゲームへ参加したり、ゲームから退出できるようにします。 |
+| **ScoreboardRow** | **HUD** に追加され、プレイヤー名とプレイヤーのスコアが含まれるウィジェットです。 |
+| **ServerList** | 参加可能なゲームをすべて表示する **ServerRow** ウィジェットです。 |
+| **ServerRow** | サーバー名、プレイヤーと Ping 番号など、アクティブなサーバーの関連データを行ごとに表示するウィジェットです。 **ServerList** ウィジェットにパスされます。 |
+
+**Game/Blueprints**
+
+| 名前 | 説明 |
+|---|---|
+| **MyGameInstance** | (Instance Blueprint) - メインメニューからすべての遷移するステートを処理します。 |
+| **MyGameMode** | (Game Mode Blueprint) - すべてのデフォルト クラスを含みます (Pawn、HUD、PlayerController など)。プレイヤーのリスポーン、およびプレイヤーのゲームプレイ セッションへの初回参加時の処理をします。 |
+| **MyPlayerController** | (PlayerController Blueprint) インゲーム UI を設定し、プレイヤーがインゲームのポーズメニューを開けるようにします。 |
+| **MyPlayerState** | (PlayerState Blueprint) 各プレイヤーのスコアを処理します。 |
+| **ProjectileBP** | (Actor Blueprint) ダメージを与えようとして各プレイヤーがお互いに発砲する発射物です。 |
+| **State** | (Enumeration) ゲームが取りうる全てのステートのリストです。 |
+
+**ゲーム / 殺し屋**
+
+| 名前 | 説明 |
+|---|---|
+| **Gunslinger_BP** | インゲームでプレイ可能なキャラクターです。 |
+| **GunslingerTTP** | Gunslinger_BP を使ったスケルタル メッシュです。 |
+| **Gunslinger_AnimBP** | Gunslinger_BP 用のアニメーション操作のために使います。. |
+
+**Game/Character**
+
+| 名前 | 説明 |
+|---|---|
+| **Character_Parent** | Gunslinger_BP に使用する (親) マテリアルです。 |
+| **Character_Instance** | Gunslinger_BP と一緒に使う (インスタンス化) マテリアルです。 |
+
+**Game/Fonts**
+
+| 名前 | 説明 |
+|---|---|
+| **ScoreFont** | **Scoreboard** ウィジェットに追加して使用するフォントです。 |
+
+**Game/Maps** 
+
+| 名前 | 説明 |
+|---|---|
+| **MainMenu** | プロジェクト / エディタが開始するとロードし、Front End 表示を含むデフォルト マップです。 |
+| **Level_01** | ゲームをホスト / ゲームへ参加する時に、プレイヤーがスポーンするゲームプレイ マップです。 |
+
+### コンフィギュレーション設定
+
+マルチプレイヤー ゲームを正常にホストまたは接続するためには、(例えば) _UnrealProjectDirectory/ProjectName/Config_ に存在する **DefaultEngine.ini** ファイルにいくつかの設定をする必要があります。
+
+![](ExampleLocation.png)
+
+ファイルを開いたら、サブシステムに対応する **DefaultPlatformService** も使用するように **OnlineSubsystem** を指定する必要があります。 
+
+例えば、 `OnlineSubsystemNull` を追加すると LAN 上でプレイすることができます。
+
+	[OnlineSubsystem]
+	DefaultPlatformService=Null
+ 
+あるいは、 `OnlineSubsystemSteam` を使用すれば **Steam** 上でプレイすることができます。
+
+	[/Script/Engine.GameEngine]
+	+NetDriverDefinitions=(DefName="GameNetDriver",DriverClassName="OnlineSubsystemSteam.SteamNetDriver",DriverClassNameFallback="OnlineSubsystemUtils.IpNetDriver")
+
+	[OnlineSubsystem]
+	DefaultPlatformService=Steam
+
+	[OnlineSubsystemSteam]
+	bEnabled=true
+	SteamDevAppId=480
+	bVACEnabled=0
+
+	[/Script/OnlineSubsystemSteam.SteamNetDriver]
+	NetConnectionClassName="OnlineSubsystemSteam.SteamNetConnection"
+
+[REGION:note]
+Stream を使用しない場合は、 [SDK および INI の追加設定](Programming/Online/Steam) が必要です。詳細はリンクを参照してください。
+[/REGION]
+
+
+##ブループリント ウォークスルー
+
+次のセクションでは、ゲームの各ステートのウォークスルーとして、それぞれを操作するブループリントを説明します。 
+
+**Startup** シーケンスを見てみましょう。 
+
+### 起動する
+
+**MainMenu** マップで、 **Level ブループリント** を開きます。 
+
+![](Startup1.png)
+
+**Level ブループリント** を開くと、"Game Logic Starts Here" というスクリプトの 1 部が表示されます。 
+
+![](Startup2.png)
+
+ゲーム ロジックは実際スクリプトのこの部分から開始するので、まさにぴったりのコメントです。ここで、ゲームの開始時を指示し、ゲーム インスタンスを取得し、 **MyGameInstance** ブループリントへ **Cast** します。これにより、内部の変数、関数、スクリプトへアクセスし、このケースでは (以下に示されるように) **Begin Play Show Main Menu** という関数を呼び出します。 
+
+![](Startup3.png)
+
+**Begin Play Show Main Menu** が呼び出されると、まず最初に **IsCurrentState** というマクロが作成および実行されます。 
+
+[REGION:note]
+##### IsCurrentState Macro
+
+![](Startup4.png)
+
+**IsCurrentState** は、(Macro ノードで指定されている) **In State** が **Current State** という変数 (ゲームの現在のステートを維持する変数) と等しいかを確認します。**Current State** 変数は、ゲームが取りうる各ステートを維持する **State** と呼ばれる列挙型変数を使用します。 
+[/REGION:note]
+
+**Current State** は **In State** と等しいので、 **ShowMainMenuEvent** カスタム イベントが呼び出されます。
+
+![](Startup5a.png)(w:840)
+
+![](Startup5.png)(w:840)
+
+まず最初に **ShowMainMenuEvent** は、 [IsCurrentState Macro](#iscurrentstatemacro) を実行して、 **MainMenu** レベルが開いていれば **True** 、ゲームが現在 **Startup** ステートであれば **False** 値を返すことによって、 **Playing** に対する現在のステートを確認します。これにより、 **TransitionToState** と呼ばれる別のマクロが呼び出されます。 
+
+[REGION:note]
+##### TransitionToState Macro
+
+TransitionToState ではまず、 [IsCurrentState Macro](#iscurrentstatemacro) を実行して (1) **Current State** と **Desired State** を比べて、2 つが等しければ画面にエラーが印刷されます (2) 。2 つが等しくない場合、 **Switch on State** が実行され (3) **Current State** を取得します。そして、(表示中の UI ウィジェットを隠している) **Hide Widget** という関数 (該当する場合) を呼び出すか、(呼び出し元のプレイヤーのためにセッションを破棄する) **Destroy Session Caller** というカスタム イベントを実行します。 
+
+![](Startup6.png)
+
+Switch on State が完了すると、指定された Desired State を反映するために Current State が更新されます。 
+[/REGION]
+
+**TransitionToState** マクロを実行すれば、 **ShowMainMenuEvent** カスタム イベントで継続できます。 
+
+![](Startup7.png)
+
+上記の **IsValid** ノード (1) が実行され、変数 **Main Menu** が有効かどうかを確認します。最初の実行時には有効ではありません (有効であれば (2) と (3) を飛ばします)。ステップ (2) では **Create Widget** ノードを使って **Main Menu** と呼ばれる UMG Widget ブループリントを作成し、後に再生成しなくてもアクセスできるように、変数 (3) に昇格させます。ステップ (4) では、 **Set Input Mode UIOnly** ノードを使って入力を UI のみに制限し、ステップ (5) では **Main Menu** ウィジェットはビューポートに追加され、メインメニュー画面に表示されます。 
+
+![](Startup8.png)
+
+次に、ゲームをホストするために Play を押すと何が起こるのかを説明します。 
+
+### ゲームをホストする
+
+メインメニューがロードされたら **MainMenu** Widget ブループリントの **[Play]** ボタンをクリックすると、以下のスクリプトが実行されます。 
+
+![](Play1.png)
+
+**OnClicked** イベントは、 **MainMenu** Widget ブループリントの **[Designer (デザイナ)]** タブ上に "Play" ボタンとして割り当てた **ボタン** に相当します。このイベントは、発行されるとゲーム インスタンスを取得し **MyGameInstance** ブループリントへ **キャスト** します。それにより、 **Host Game Event** というカスタム イベントを呼び出せるようになります。 
+
+![](Play2.png)
+
+**HostGameEvent** は、まず最初に **MyGameInstance** ブループリント内で **ShowLoadingScreen** と呼ばれるカスタム イベントを実行します。 
+
+![](Play3.png)
+
+**ShowLoadingScreen** が呼び出されると、 [TransitionToState Macro](#transitiontostatemacro) (**Desired State** を **Loading Screen** に設定した状態で) を実行します。 
+
+以下の **IsValid** チェック (1) を実行して **ShowLoadingScreen** イベントを継続します。 
+
+![](Play4.png)
+
+変数 **Loading Widget** が有効かどうかを **IsValid** が確認します。最初の実行時は有効ではありません (有効であれば、上記の (2) と (3) をスキップします)。ステップ (2) では **Create Widget** ノードを使って **Loading Screen** と呼ばれる UMG Widget ブループリントを作成し、で再生成しなくてもアクセスできるように、それを変数 (3) に昇格させます。ステップ (4) では、 **Add to Viewport** ノードで **Loading Widget** をビューポートに追加し、スクリーンロード中に **Set Input Mode UIOnly** ノードを呼び出して、入力を UI へ制限します (この段階ではインゲームで表示されます)。 
+
+![](Play5.png)
+
+Loading Screen が表示されたら、スクリプトは **HostGameEvent** ノードと **Create Session** ノードへ戻ります。 
+
+![](Play6.png)
+
+**Create Session** ノードでは、 **Public Connections** (またはセッションに参加可能なプレイヤー) の数字を **4** に設定します。**Use LAN** 入力ピンにプラグインされている **Enable LAN** という **Boolean** 変数もあります。この **Enable LAN** 変数はメインメニューの **Play Mode** Toggle で使用されます。これについては後ほど説明します。セッションが正常に作成されると、 **Open Level** ノードを使ってプレイ セッションのために使用されるマップを開きます。エラーがあると、 **OnFailure** ピンが実行され、 **DisplayErrorDialog** というマクロが作成され、呼び出されます。 
+
+[REGION:note]
+##### DisplayErrorDialog Macro
+
+DisplayErrorDialog マクロは、呼び出されるとまず **Error Dialog** ステートに遷移するために (1) [TransitionToState Macro](#transitiontostatemacro) を実行します。新しいステートが適用されると、 **Destroy Session Caller** というカスタム イベントが実行され、現在のプレイヤーのセッションを破壊します (2) (イベント グラフ上に存在します)。セッションが破壊された後、エンジン マクロ **IsValid** が、(Error Dialog Widget ブループリントを指している) 変数 Error Dialog が本当に有効かチェックします。 
+
+![](Play7.png)
+
+最初の実行時は **Error Dialog** は有効ではありません。有効であれば、下図の (1) と (2) を飛ばして直接 (3) へ行きます。 
+
+![](Play8.png)
+
+ただし、最初の実行時に、 **Create Widget** ノードで ErrorDialog Widget ブループリントを作成した上記 (1) が実行されます。(2) で、 ErrorDialog Widget ブループリントが Error Dialog という変数に昇格されます (次回からはこのマクロを実行することができます)。(3) で、 **ErrorDialog** Widget ブループリント内の関数 Set Message が呼び出されます。マクロノード上で指定されたメッセージを取得し、それをメッセージとしてダイアログ ボックス (下図の黄色のボックス) に表示するように設定し、 **Add to Viewport** (4) は画面上に Error Dialog Widget ブループリントを表示して (5) が **Set Input Mode UIOnly** を使って入力モードを UI のみにする設定を行います。 
+
+![](Play9.png)
+
+[/REGION]
+
+エラーがなければ、 **Open Level** ノードで指定されたマップがロードされ、プレイヤーは **Gameplay** 状態になります。 
+
+### ゲームに参加する
+
+メインメニューで **Find games** ボタンをクリックすると、以下の **MainMenu** Widget ブループリント内のスクリプトが開始します。 
+
+![](Findgames1.png)
+
+ここでの **OnClicked** Event は、 **MainMenu** Widget ブループリントの **[Designer]** タブ上の [Find games] ボタンとして割り当てた **ボタン** に結合されます。発行された時、ゲームインスタンスは **Cast to MyGameInstance** ブループリントとなることで、内部の **Show Server List Event** へのアクセスと呼び出しが可能になります。 
+
+![](Findgames2.png)
+
+**ShowServerListEvent** は、ゲーム ステートを **Sever List** に設定する [TransitionToState Macro](#transitiontostatemacro) (1) を実行して開始します。そして、 **Server List** Widget Blueprint 変数に対して Server List メニューを画面上に表示するために Is Valid が **Add to Viewport** (5) ノードを使っているか、 **IsValid** (2) が確認します。ただし、最初の実行時に、 **Create Widget** (3) ノードを使って Server List 画面を作成して、画面への表示前に変数 (4) に昇格する必要があります。画面を表示する設定にすると、 **Set Input Mode UIOnly** ノードは入力方法を UI のみに設定します。 
+
+上記 (5) の間で (6) の前の Server List メニューが表示されている間、Server List メニューをアクティブ状態のゲームでエントリするために使う ServerList Widget ブループリント内で追加スクリプトが実行されます。以下の Server List Widget ブループリント内に表示されているように、Widget ブループリントが構築 (作成) されるように呼び出されると、 **Event Construct** ノードが発行され **RefreshListMacro** というマクロを作成してすぐに実行します。 
+
+![](Findgames3.png)
+
+[REGION:note]
+##### RefreshListMacro
+
+RefreshListMacro はかなりの数の多数を実行します。最初のセクションが下図になります。 
+
+![](Findgames4.png)
+
+上図では、マクロが呼び出されると、まず **Refresh Button Enabled** という Boolean 変数を **False** (1) に設定することで **[Refresh]** ボタンが無効にされ、プレイヤーが押さないようにします。次に、変数 **Status Text** を **Searching...** (2) に設定し、その **Visibility** を **Visible (3) に設定して Status Text を維持しているウィジェットがアップデートおよび表示されるようにします。 
+
+(4) では、Server List のエントリ使用する **ServerRow** ウィジェットのコレクションである配列変数 Found Session Widgets が、 **Remove Child** (5) を使って 1 つずつ取り除かれます。これにより、表示された画面上にリストするサーバーを効率よく削除することができます。(6) では **Found Session Widgets** 変数が、これまでに保存されたセッションを削除してクリアされ、新規検索を実施する前にすべてきれいにワイプします。 
+
+次に、マクロがゲームインスタンスを取得し、 **Enable LAN** が true であってもなくても (セッション検索時に使用する) にアクセスするために **Cast To MyGameInstance** ノード (下図の 1) を使用します。 
+
+![](Findgames5.png)
+
+**Find Sessions** ノード (2) を使って、(Results 値へ出力される) 存在するセッションをすべて見つけ出します。このノード上で **Max Results (返す検索結果の数字)** を設定することもできます。**Find Sessions** クエリからの結果は、配列変数 **Found Sessions** (3) 内に割り当てられ格納されます。そして **Results** を確認するために Branch が実行されて (4) 、0 の場合は **True** ピンが実行されます (そうでない場合、 **False** が実行されます)。理由は何であれ、 **Find Sessions** ノードを使ってエラーがあると、 **OnFailure** イベントが呼び出され、 **Search failed** (5) へ表示する **Status Text** を変更します。 
+
+**Branch** (前の画像の 4) を引き出し、 **True** の場合 (1 つもセッションが検索されなかった場合) **Status Text** を **No sessions found** (下図の 7) に設定し、**Refresh Button Enabled** 変数を **True** (8) に設定してプレイヤーが **[Refresh]** ボタンを押してセッションを再検索できるようにします。 
+
+![](Findgames6.png)
+
+セッションが検索された場合は、 **Status Text Visibility** を **Collapsed (折りたたみ)** (1) に設定してプレイヤーから見えないようにします。次に、 **ForEachLoop** ノード (2) による **Results** をそれぞれ受け取り、 **Create ServerRow** ノード (3) を使って、それぞれに対して Server Row ウィジェットを作成します。これらが、サーバーリストに存在するセッションの各行になります。 
+
+(4) で **Results** は **ServerRow** Widget ブループリント内で Set Search Result 関数を呼び出す前に Found Session Widgets 配列にも追加されます (サーバー名、プレイヤー数、Ping の表示に使われます)。Set Search Result ノードでコンテンツが ServerRow Widget ブループリントに表示される設定にしたら、 **Add Child** ノード (6) を使って作成した ServerRow Widget ブループリントをそれぞれ Server List メニューに表示されている **Scrolling Servers** スクロール ボックスに追加します。 
+
+検索されたセッションのそれぞれに ServerRow ウィジェットが作成およびエントリされ、 **Scrolling Servers** ウィジェットに追加されると、 **ForEachLoop** が完了し、 **Referesh Button Enabled** 変数が **True** に設定されます (8)。 
+[/REGION]
+
+セッション検索のために **RefreshListMacro** を実行すると、検索されたセッションがすべて **Server List** メニューに表示されます。 
+
+![](Findgames7.png)
+
+**[Refresh]** ボタンをクリックすると、再度 [RefreshListMacro](#refreshlistmacro) が実行されてセッションを検索します。**[Back]** ボタンをクリックすると、 **ShowMainMenuEvent** カスタム イベントが実行されます (説明は「起動する」(#起動する) に書かれています)。 
+
+サーバーリストに表示されたサーバーをクリックすると、 **ServerRow** Widget ブループリントの **OnClicked** イベントが発行されます (以下を参照)。 
+
+![](Findgames8.png)
+
+**ServerRow** ウィジェットの **OnClicked** Event は、ゲームインスタンスを受け取り **Cast To MyGameInstance** ノードを使って、その中の **Join from Server List Event** を呼び出します。**SearchResult** 変数が **MyGameInstance** ブループリントにもパスされて、プレイヤーはクリックしたサーバーへの参加の試みが可能になります。 
+
+**MyGameInstance** ブループリント内の **JoinFromServerListEvent** (下図参照) は、呼び出されるとまず最初に **ShowLoadingScreen** カスタム イベントを実行します (説明は [ゲームをホストする](#ゲームをホストする) セクションを参照)。 
+
+![](Findgames9.png)
+
+ロード中の画面の表示中、 Join Session ノードは、プレイヤーが参加するためにクリックした ServerRow Widget ブループリントからの Search Result への参加を試みます。これが成功すると、プレイヤーは選択したサーバーへ参加して、ゲームでのスポーンが可能になります。エラーがあると、 [DisplayErrorDialog](#displayerrordialogmacro) が実行され、 **Failed to join session** という **エラーメッセージ** が表示されます。 
+
+### Gameplay
+
+ゲームプレイ中にプレイヤーがキャラクターの制御をする前に、キャラクターとゲーム ステートの設定が必要になります (ゲームに参加する場合は、ゲームを更新し、新規プレイヤーが追加されたことを知らせます)。メイン メニューで **[Play]** ボタンをクリックしたり、 Server List メニューから参加するサーバーを選択すると、まず最初に、 **Game Mode** ブループリントの **Post Login** イベントが以下に示す設定プロセスを開始します。 
+
+![](Gameplay1.png)
+
+**Event Post Login** が発行されると、(サーバー側の) ネットワーク権限を持つマシン上でスクリプトが実行されているか、あるいは (クライアント側の) リモートマシン上で実行されているかどうかを確認するために使用する **Switch Has Authority** というエンジンマクロをまず実行します (1)。このプロセスはゲームをホストあるいはゲームに参加するサーバー上で実行されるので、 **Remote** ピンはその先に続きませんが、 **Authority** ピンは Post Login スクリプトへ続きます。 
+
+[REGION:note]
+**Switch Has Authority** に関する別の例は、 [Detecting Network Authority and Remote Clients in Blueprints](Resources/ContentExamples/Networking/1_2) タブを参照してください。 
+[/REGION]
+
+(2) では、 New Player から **PlayerState** は **MyPlayerState** ブループリントへ **Cast** され、そこで **Player Number** が設定され (3) 、全てのプレイヤーに対して同じプレイヤー順序がスコアボードに確実に表示されるようにします (追加された新規プレイヤーはスコアボードに追加されます)。プレイヤー数の設定後、 **ClientPostLogin** カスタム イベントが発行されるように、New Player が **MyPlayerController** ブループリントにも追加されます。 
+
+![](Gameplay2.png)
+
+上図で、 **ClientPostLogin** イベントには **[Details]** パネルで割り当てられたプロパティが幾つか付いています。 
+
+![](Gameplay3.png)
+
+**[Graph]** セクションの **Replicates (レプリケート)** オプションを **Run on owning Client (所有しているクライアントで実行)** に設定し、 **Reliable (信頼できる)** にチェックを入れます。これらの 2 つのオプションを使って、このイベントに続くスクリプトがサーバーから呼び出されますが、実行は所有しているクライアント マシン上のみとなるように指定します。**Reliable** 設定は、このスクリプトが実行され、渋滞が原因で失われることがないことを保証します (見せ掛けの外観を処理するレプリケートされたコールのほとんどは、ネットワーク サチュレーションを避けるために **Unreliable (信頼できない)** ですが、このケースではそうなって欲しいので **Reliable** に設定します)。 
+
+スクリプトの発生場所を特定すると、 **Setup Ingame UI** 関数が呼び出されます。 
+
+![](Gameplay4.png)
+
+この関数は **Branch** (1) でターゲットとされているコントローラーが Local Player Controller かを確認し、そうであれば、 **Create Widget** (2) を使って HUD Widget ブループリントを作成します。次に HUD ウィジェットが **HUD Widget** (3) という変数に昇格し、 **Add to Viewport** (4) ノードがウィジェットをプレイヤーのビューポートに追加します。(5) で、もう 1つの **Create Widget** ノードは **InGame Menu** Widget ブループリントを作成するために使用します。それを開くためにプレイヤーがボタンを押した時に In Game Menu を表示するための呼び出しにも使用できます。 
+
+[REGION:note]
+この時点で、「ログイン」プロセスが完了し、キャラクターそのものの設定が **Character Animation ブループリント** 経由で行われます。キャラクターの移動ステートのそれぞれを定義し、アニメーションが設定されます。このページでは説明しませんが、 **Animation ブループリント** についての詳細は [](Engine/Animation/AnimBlueprints) ドキュメントを参照してください。
+[/REGION]
+
+**Character Animation ブループリント** の設定が完了すると、 **Level_01** マップが開きます。このマップ内の **Level ブループリント** で、プレイヤーが実際レベル内にスポーンする前にスクリプトが呼び出されます。 
+
+![](level1LevelBlueprint.png)
+
+上図では、このマップの **Event Begin Play** 上で、 **Cast To MyGameInstance** ノードが現在のゲーム インスタンスに対して呼び出され、 **Start Playing State** 関数が呼び出されます。**MyGameInstance** ブループリント内にあるこの関数は、ゲーム ステートを以下のように **Playing** に変更します。 
+
+![](playingState.png)
+
+ステートが **Playing** に変更されたら、 **Set Focus to Game Viewport** ノード (前の図の 3 ) のあるゲーム ビューポートにマウス カーソルをロックし、 **Set Input Mode Game Only** ノード (前の図の 4) を使って UI 入力を無視します。 
+
+
+
+### ゲームを切断する
+
+ゲームから切断するプロセスはとても分かりやすいです。ディスプレイから幾つか UMG ウィジェットをオンオフし、メインメニューに戻るために最初にゲームをロードする時に発生する同じ開始プロセスでメインメニューへ戻ることができます。 
+
+ゲームプレイ中に **Q** を押すと、インゲーム ポーズ メニューが表示され、 **[Leave Game (退出する)]** オプションをクリックすると、 **InGameMenu** ウィジェット ブループリント内で以下のプロセスが発生します。 
+
+![](disconnectingGraph.png)
+
+上図は、 [Leave (退出する)] ボタンそのものがクリックされたので (1) 、所有プレイヤーを取得することで **MyPlayerController** ブループリントへ **キャスト** するイベントが発行されます (2)。**MyPlayerController** 内では、関数 **Hide in Game Menu** が以下のように呼び出されます。 
+
+![](hideingamemenu.png)
+
+スクリプトのこの部分は、 (既に作成されていてリファレンスとして保存されている) 変数 **In Game Menu Widget** を取得し、 **Remove from Parent** ノードで画面からそれを削除します。その後で、 **Set Input Mode Game Only** を使って、UI 入力を可能にするために再度入力モードを変更するまで、プレイヤーが他の UI 関連入力アクションを行わないようにします。 
+
+スクリプトは **InGameMenu** ウィジェット ブループリントと **Cast to MyGameInstance** ノードに戻って (4)。、ゲーム インスタンスを取得し、その中にある関数 **Show Main Menu Event** を呼び出します。ゲームがロードされると、関数はまず最初に、[起動する](#起動する) セクションの [IsCurrentState Macro](#iscurrentstatemacro) とその次のセクションを実行します。 
+
+![](disconnectingGraph.png)
+
+

@@ -1,0 +1,105 @@
+﻿INTSourceChangelist:2661707
+Availability:Public
+Title:インゲームでスレートを使用する
+Crumbs:%ROOT%, Programming, Programming/Slate
+Description:インゲーム ユーザー インターフェースにスレート UI ウィジェットを使用する
+Version:4.9
+
+
+スレート ウィジェットをインゲームで使用して、 
+ヘッドアップ ディスプレイ (HUD) やメニューなどのその他のユーザー インターフェース (UI) を作成することができます。通常はコンテナ ウィジェットという、それぞれが UI 固有の特性を持つ、様々なタイプのウィジェットで構成されるウィジェットを 
+ 1 つ以上作成します。 
+
+<!-- HUD widget w/ menu overlay -->
+
+例えば、ゲームの HUD 用に 1 つ総合的なウィジェットだけでなく、 
+メインメニュー、ポーズ メニュー、スコアボードなどのウィジェットもある場合があります。これらのウィジェットはそれぞれ他のカスタム ウィジェット、ラベル、テキストボックス、画像、 
+その他の種類のエレメントで構成されています。
+
+<!-- container widget breakdown -->
+
+これらのコンテナ ウィジェットはそれぞれ、ゲーム内の状況に応じて追加したり削除したりすることができます。 
+
+* ゲームが開始されると、メインメニュー ウィジェットを追加します。 
+* メニューのオプションの中から 1 つ選択すると (ゲームを開始するための場合もある) メインメニュー ウィジェットを削除します。 
+* どこかでプレイヤーがゲームを一時停止した場合、ポーズメニュー ウィジェットを追加します。
+* ゲームが再開されると、ポーズメニュー ウィジェットを削除します。
+* プレイヤーの HUD が初期化されると、 HUD ウィジェットを追加します。
+
+
+## プロジェクト設定
+
+[INCLUDE:Programming/Slate/Setup#main(offset:1)]
+
+## ウィジェットの表示
+
+ゲーム内にスレッド ウィジェットを表示するために、ゲームのビューポートに追加しなければなりません。Overlaid ウィジェットは 
+ Z 順序値が降順で 
+表示されます。
+
+###ゲーム ビューポートへアクセスする
+
+ゲームのビューポートは、`GameViewportClient` のインスタンスです。現在のゲーム ビューポートへのリファレンスへは、 アンリアル エンジンの `GameViewport` メンバー経由でアクセスできます。 
+そして、`GameViewport` メンバーには、ゲームの現在の UEngine インスタンスへ 
+ `GEngine` グローバル ポインタを使用してアクセスできます。 
+
+例:
+
+	GEngine->GameViewport
+
+[REGION:note]
+`GEngine` と `GameViewport` は `NULL` にできるので、 
+メンバーを含めてアクセス前に必ず値を確認してください。
+[/REGION]
+
+###ウィジェットをビューポートに追加する
+
+スレート ウィジェットは、リファレンス、正確には `TSharedref<SWidget>` を 
+ `GameViewportClient::AddViewportWidgetContent()` のウィジェットへパスすると、ビューポートへ追加されます。この関数はウィジェットと Z 順序の両方を受け取ると、 
+前述したとおり、新規ウィジェットのソート順序を決定します。Z 順序は任意ですが、 
+デフォルトの値は `0` です。
+
+ビューポートに追加したいウィジェットのリファレンスは、 HUD などのクラス内に格納されるか、 
+関数の呼び出し時に作成されパスされます。 
+
+メンバ変数に格納されているウィジェットへリファレンスをパス (`TSharedPtr` として)：
+
+	GEngine->GameViewport->AddViewportWidgetContent(
+		SNew(MyWidgetPtr.ToSharedRef())
+	);
+
+`GameViewportClient::AddViewportWidgetContent()` をパスする時に、 `SNew()` を使ってウィジェットを作成：
+
+	GEngine->GameViewport->AddViewportWidgetContent(
+		SNew(SWeakWidget)
+		.PossiblyNullContent(MyWidgetClass)
+	); 
+
+あるいは、`SAssignNew()` を使って作成し、`TSharedPtr` メンバを割り当て、以下にパス：
+
+	GEngine->GameViewport->AddViewportWidgetContent(
+		SAssignNew(MyWidgetPtr, SWeakWidget)
+		.PossiblyNullContent(MyWidgetClass)
+	);
+
+### ビューポートからウィジェットを取り除く
+
+スレート ウィジェットは、リファレンスを `GameViewportClient::RemoveViewportWidgetContent()` へパスして、 
+個別にビューポートから取り除くことができます。 
+
+例:
+
+	GEngine->GameViewport->RemoveViewportWidgetContent(
+		SNew(MyWidgetPtr.ToSharedRef())
+	);
+
+さらに、すべてのウィジェットは `GameViewportClient::RemoveAllViewportWidgets()` を呼び出すと、 1 度にビューポートから取り除くことができます。
+
+例:
+
+	GEngine->GameViewport->RemoveAllViewportWidgets();
+
+[REGION:note]
+`GEngine` と `GameViewport` は `NULL` にできるので、 
+メンバーを含めてアクセス前に必ず値を確認してください。
+[/REGION]

@@ -1,0 +1,43 @@
+﻿INTSourceChangelist:3591289
+Availability:Public
+Title:リプレイ システム
+Crumbs: %ROOT%, Engine
+Description:ゲームプレイを記録し再生するためのリプレイ システムの概要を説明します。
+Version:4.13
+parent:Engine
+order:18
+topic-image:replay_topic.png
+tags:Replays
+
+
+[REGION:banner]
+![](replay_banner.png)(convert:false)
+[/REGION]
+
+[TOC (start:2 end:2)]
+
+## リプレイ システムの概要
+UE4 には、後で見るためにゲームプレイを記録できるリプレイ システムがあります。簡単に説明すると、リプレイ システムは `DemoNetDriver` を使ってビルトインのレプリケーション システムからのデータを読み出すことで機能します。`NetDriver` で、ネットワーク環境でライブ ゲームプレイ環境が機能するのと似ています。マルチプレイヤー ゲームのようにデータをレプリケートするようにセットアップされたプロジェクトでは、実際にはマルチプレイヤー モードがなくても、さらに修正を加えない状態でリプレイ システムと互換性があります。これは、`DemoNetDriver` がレプリケートされたデータを Replay Streamer に渡すことで機能します。Replay Streamer ではデータのフィルタリングと保存を処理します。リプレイを見る場合、`DemoNetDriver` がライブ プレイ中に利用可能であったすべてのレプリケートされた情報や、リプレイのみに関連するとして指定された特殊なデータ入力フィールドにアクセスし、こうしたデータからゲームのイベントを再構築することができます。
+
+## リプレイ システムの機能
+リプレイ システムの基本機能としては、デモの記録の開始や終了、または過去に記録されたデモの再生があります。再生モード中は、リプレイ システムは一時停止、再生速度を変更し、特定の時点にジャンプするコマンドをサポートします。システムの詳細な使用方法として、リプレイにテキスト タグ (通常はメタ タグまたはゲームに参加するプレイヤー名) を追加、テキスト タグやバージョン情報に基づき既存のリプレイにクエリーするなどがあります。リプレイ システムは C++ コードから使用できます。主に、`UGameInstance` クラスおよび `UWorld` クラス経由で、またはコンソール コマンドやコマンドライン引数を使って使用できます。C++/Blueprint API を統合したものを構築中であり、エンジンの将来のバージョンでリリース予定です。
+
+| 関数または変数名 | 同等のコンソール コマンド | 効果 |
+| --- | --- | --- |
+| `UGameInstance::StartRecordingReplay` | "demorec (ReplayName)" | リプレイの記録を開始します。(ReplayName) パラメータを指定しないとリプレイ システムは独自に名前を生成します。 |
+| `UGameInstance::StopRecordingReplay` | "demostop" | 現在記録中のリプレイを停止します。 |
+| `UGameInstance::PlayReplay` | "demoplay (ReplayName)" | 指定したリプレイを再生します。 |
+| `UDemoNetDriver::GotoTimeInSeconds` | "demoscrub (ReplayTime)" | リプレイで指定された時間 (秒単位) にジャンプします。 |
+| `UWorld::Pauser` (variable) | "demopause" | この値を World の `DemoNetDriver->ServerConnection->OwningActor` 変数で適用できる PlayerController に設定するとリプレイが一時停止します。`NULL` に設定しなおすとリプレイが再開します。"demopause" コンソール コマンドはその変数を自動的に設定またはクリアします。 |
+| `WorldSettings->DemoPlayTimeDilation` (variable) | "demospeed (ReplaySpeed)" | 時間 - スケーリングの係数を設定して再生速度を速めたり遅くしたりします。値 0.1 は通常の速さです。 |
+| `AGameMode::bHandleDedicatedServerReplays` (variable) | N/A | この変数を true に設定すると、Dedicated サーバーが自動的にゲームを記録します。 |
+
+## DemoNetDriver とストリーマー
+
+`DemoNetDriver` は、**ストリーマー** を使って、リプレイを作成するために必要な情報の実際の抽出と記録を行います。リプレイ データがどのように見えるようにするかに応じて、異なるストリーマーを `DemoNetDriver` にアタッチすることができます。様々な用途に適した 3 種類のストリーマーがあります。デフォルトの **NULL Streamer** はホスト マシンからイベントを直接ディスクに記録します。シングル プレイヤー ゲームや、ホスト プレイヤー自身のマシンにローカルでリプレイを続けるゲームに最適です。**Memory Streamer** はクライアント マシンで実行し、メモリにデータを保存します。スポーツ作品のビデオ判定機能やシューティング ゲームのキルカメラに最適です。最後に **HTTP Streamer** はリプレイ データを LAN またはインターネット上の 2 台めのマシンに送ります。Dedicated サーバーのゲームやプレイヤーに反応し続けながら大勢の観戦者に向けてストリーミングする必要があるゲームに適しています。
+
+`DemoNetDriver` の機能、ストリーマーの詳細については、[](Engine/Replay/Streamers) のページをご覧ください。
+
+## 後方互換性
+
+リプレイ システムではバージョン 4.13 から後方互換性がサポートされています。ビルドに修正を加えることができることを意味します。すなわち、レプリケートされたプロパティを追加、削除しても、オリジナルのビルドで記録したリプレイをロードしたり、表示したりすることができます。ほとんどの場合、これは自動的に処理されます。リプレイ システムは、取り除かれた古いレプリケートされた入力フィールドをスキップするか、追加した新規にレプリケートされた入力フィールドに対してデフォルトを使用するからです。`NetSerialize` がオーバーライドされた構造体では、こうしたデータ形式の違いを手作業で処理する必要があります。この目的上、`FArchive` には、`EngineNetVer` 関数と `GameNetVer` 関数があります。これらは、エンジンとゲームのバージョンをそれぞれ特定し、現在のビルドに合うようにリプレイ データを調整することができます。`FNetworkVersion` にあるデリゲート、`GetLocalNetworkVersionOverride` は選択したものの `uint32` バージョン番号を戻します。互換性が正確にマッチしなくてもよい場合、`FNetworkVersion` には `IsNetworkCompatibleOverride` と呼ばれるデリゲートがあり、2 つのバージョン番号間の比較を行うようにオーバーライドして、互換性があるかどうかを判断します。

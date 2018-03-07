@@ -1,0 +1,395 @@
+Availability:Docs
+Title:Particle Emitter Technical Guide
+Crumbs:%ROOT%, Programming, Programming/Rendering
+Description:Programmer's guide to adding new particle emitter types.
+Version: 4.9
+tags:Rendering
+
+[TOC (start:2 end:3)]
+
+Creating new types of emitters requires a custom `ParticleEmitterInstance` and `ParticleModuleTypeData`. This guide explains the key aspects of each of these and walks through the creation of a new custom emitter type.
+
+## Particle Emitter Reference
+
+The `ParticleEmitterInstance` variables and functions, as well as the `ParticleModuleTypeData` class, are explained in this section.
+
+### The ParticleEmitterInstance Struct
+
+A `ParticleEmitterInstance` is a single particle emitter that represents an instance of an effect in a `ParticleSystemComponent`. 
+
+
+#### Member Variables
+
+The `ParticleEmitterInstance` struct contains the following public variables: 
+
+| Variable | Overview |
+| -------- | -------- |
+| `StaticType` | This is the type identifier of the emitter instance. It is used to identify the emitter as well as provide safe casting functionality. |
+| `SpriteTemplate` | Pointer to the `UParticleEmitter` template that the instance is based on. In the case of custom emitter types, any specific data required is usually stored in the `TypeDataModule` which will be detailed later in this document. |
+| `Component` | Pointer to the `UParticleSystemComponent` that _owns_ the emitter instance. |
+| `CurrentLODLevelIndex` | The index of the currently set LOD level. |
+| `CurrentLODLevel` | Pointer to the `UParticleLODLevel` that is currently active. |
+| `TypeDataOffset` | The offset to the `TypeData` payload in the particle data. Used to easily retrieve per-particle data that is specific to the type of emitter. |
+| `SubUVDataOffset` | The offset to SubUV-specific payload in the particle data. Only relevant when the subUV interpolation mode is not set to `NONE`. |
+| `Location` | An FVector giving the location of the emitter instance. |
+| `KillOnDeactivate` | If `true`, the emitter instance will be killed (deleted) when it is deactivated. |
+| `bKillOnCompleted` | If `true`, the emitter instance will be killed (deleted) when it completes its cycle. |
+| `ParticleData` | Pointer to the particle data array. |
+| `ParticleIndices` | Pointer to the particle index array. Used to provide a round-robin system of using particle data. |
+| `ModuleOffsetMap` | Maps module pointers to their offset into the particle payload data. |
+| `InstanceData` | Pointer to the per-instance data array. |
+| `InstancePayloadSize` | The size of the per-instance data array. |
+| `ModuleInstanceOffsetMap` | Maps module pointers to their offset into the per-instance data. |
+| `PayloadOffset` | The offset to the start of the particle payload data. |
+| `ParticleSize` | The total size of a particle in bytes. |
+| `ParticleStride` | The stride between particles in the ParticleData array (to allow for potentially aligning particle data). |
+| `ActiveParticles` | The number of particles that are currently active in the emitter. |
+| `MaxActiveParticles` | The maximum number of particles that can be held in the particle data array. |
+| `SpawnFraction` | The fraction of time left over from the last frame spawning. |
+| `SecondsSinceCreation` | The number of seconds that have passed since the instance was created. |
+| `EmitterTime` | The _position_ of the time in a single loop of the emitter. |
+| `OldLocation` | The previous location of the emitter. |
+| `ParticleBoundingBox` | The bounding box for the emitter. |
+| `BurstFired` | An array of entries for tracking the firing of bursts. |
+| `LoopCount` | The number of loops completed by the instance. |
+| `IsRenderDataDirty` | Flag indicating if the render data is dirty. |
+| `Module_AxisLock` | The AxisLock module, if present. Held to avoid searching for it each Tick. |
+| `EmitterDuration` | The current duration of the instance. |
+| `EmitterDurations` | An array of the durations at each LOD level of the instance. |
+| `TrianglesToRender` | The number of triangles the emitter will render this frame. |
+| `MaxVertexIndex` | The max vertex index that will be accessed by the emitter when rendering. |
+
+#### Member Functions
+
+The ParticleEmitterInstance struct contains the following member functions which provide the opportunity to override the base functionality: 
+
+| Function | Overview |
+| -------- | -------- |
+| [REGION:wrap]`void SetKillOnDeactivate(bool bKill)`[/REGION] | Sets the `KillOnDeactivate` flag to the given value. |
+| [REGION:wrap]`void SetKillOnCompleted(bool bKill)`[/REGION] | Sets the `bKillOnCompleted` flag to the given value. |
+| [REGION:wrap]`void InitParameters(UParticleEmitter* InTemplate, UParticleSystemComponent* InComponent)`[/REGION] | Initializes the parameters for the structure given the provided `ParticleEmitter` template and parent `ParticleSystemComponent`. |
+| [REGION:wrap]`void Init()`[/REGION] | Called to Initialize the instance. |
+| [REGION:wrap]`void Resize(int32 NewMaxActiveParticles, bool bSetMaxActiveCount = true)`[/REGION] | Called to resize the particle data array to the given number of `MaxActiveParticles`. |
+| [REGION:wrap]`void Tick(float DeltaTime, bool bSuppressSpawning)`[/REGION] | Tick the instance with the given time slice. If `bSuppressSpawning` is `true`, do not spawn any new particles. |
+| [REGION:wrap]`void Rewind()`[/REGION] | Rewind the emitter instance. |
+| [REGION:wrap]`FBox GetBoundingBox()`[/REGION] | Return the bounding box for the instance. |
+| [REGION:wrap]`void UpdateBoundingBox(float DeltaTime)`[/REGION] | Update the bounding box for the instance. This is where the final positioning of the particles takes place for the frame as all updates are guaranteed to have occurred by now. |
+| [REGION:wrap]`uint32 RequiredBytes()`[/REGION] | Retrieve the number of per-particle bytes that the emitter requires. |
+| [REGION:wrap]`uint8* GetModuleInstanceData(UParticleModule* Module)`[/REGION] | Get the pointer to the per-instance data allocated for the given module. |
+| [REGION:wrap]`uint32 CalculateParticleStride(uint32 ParticleSize)`[/REGION] | Calculate the stride of a single particle for this instance. |
+| [REGION:wrap]`void ResetBurstList()`[/REGION] | Reset the burst list information for the instance. |
+| [REGION:wrap]`float GetCurrentBurstRateOffset(float& DeltaTime, int32& Burst)`[/REGION] | Get the current burst rate offset - artificially increases `DeltaTime` to generate the bursts. |
+| [REGION:wrap]`float Spawn(float OldLeftover, float Rate, float DeltaTime, int32 Burst = 0, float BurstTime = 0.0f)`[/REGION] | Spawn particles for the instance given the current time slice (DeltaTime). Take the leftover from last from (OldLeftover) into account. |
+| [REGION:wrap]`void PreSpawn(FBaseParticle* Particle)`[/REGION] | Handle any pre-spawning actions required for the particles in this instance. |
+| [REGION:wrap]`bool HasCompleted()`[/REGION] | Return `true` if the instance has completed its run. |
+| [REGION:wrap]`void PostSpawn(FBaseParticle* Particle, float InterpolationPercentage, float SpawnTime)`[/REGION] | Handle any _post-spawning_ actions required for the particles in this instance. |
+| [REGION:wrap]`void KillParticles()`[/REGION] | Kill off any dead particle - simply remove them from the active array. |
+| [REGION:wrap]`void RemovedFromScene()`[/REGION] | Called when the instance is removed from the scene. |
+| [REGION:wrap]`FBaseParticle* GetParticle(int32 Index)`[/REGION] | Retrieve the particle at the given Index. |
+| [REGION:wrap]`FDynamicEmitterDataBase* GetDynamicData(bool bSelected)`[/REGION] | Get the dynamic data for rendering this instance this frame. |
+| [REGION:wrap]`void GetAllocatedSize(int32& InNum, int32& InMax)`[/REGION] | Get the allocated size of the emitter instance - for memory tracking. |
+
+
+### The ParticleModuleTypeDataBase class
+
+The `ParticleModuleTypeDataBase` class provides the mechanism for generating custom emitter instances when creating a **ParticleSystem** for use in the engine. For example, the `ParticleModuleTypeDataMesh` class will result in a `FParticleMeshEmitterInstance` getting created for the ParticleSystem.
+
+
+#### Member Functions
+
+The `ParticleModuleTypeDataBase` struct contains the following public functions which aid in generating custom emitters: 
+
+| Function | Overview |
+| -------- | -------- |
+| [REGION:wrap]`FParticleEmitterInstance* CreateInstance(UParticleEmitter* InEmitterParent, UParticleSystemComponent* InComponent)`[/REGION] | This is the key to overriding emitter instance creation in the UE4 particle system. The function is called when a TypeData module is found in a UParticleEmitter that is being instantiated. In this function, the desired FParticleEmitterInstance structure should be created and returned.
+| [REGION:wrap]`void SetToSensibleDefaults()`[/REGION] | Called when the module is first created. This function allows for you to set default values that make sense.
+| [REGION:wrap]`void PreSpawn(FParticleEmitterInstance* Owner, FBaseParticle* Particle)`[/REGION] | Called during the PreSpawn function of the emitter instance, this function allows for TypeDataModule-specific setup of a newly spawned particle.
+| [REGION:wrap]`void PreUpdate(FParticleEmitterInstance* Owner, int32 Offset, float DeltaTime)`[/REGION] | Called prior to any updating of the emitter instance, this function allows for handling any updates that need to occur prior to updating particles with each module contained in the emitter.
+| [REGION:wrap]`void PostUpdate(FParticleEmitterInstance* Owner, int32 Offset, float DeltaTime)`[/REGION] | Called after the updating of the emitter instance, this function allows for handling any updates that need to occur after updating particles with each module contained in the emitter.
+| [REGION:wrap]`bool SupportsSpecificScreenAlignmentFlags() const`[/REGION] | Allows for overriding the screen alignment flags found on the particle emitter. Currently only used by the mesh emitter.
+
+
+## Example Particle Emitter
+
+Writing a custom emitter instance is a two-step process. First, a `TypeDataModule` needs to be created which will provide the specific data for your emitter instance, as well as generate it at the appropriate time. As an example, an emitter instance will be created that spins the emitter instance in addition to the rotation of the 'parent' particle system component.
+
+### TypeDataModule Declaration
+
+The first step is to create the `TypeDataModule` that will generate the new emitter instance type.
+
+	UCLASS(editinlinenew, collapsecategories, hidecategories=Object)
+	public class UParticleModuleTypeDataSpinner : public UParticleModuleTypeDataBase
+	{
+
+		/** 
+
+			*  The amount to spin the emitter instance (in complete rotations) at   
+			*  the given time.
+			*/
+
+		UPROPERTY(Category=Spinner)
+		rawdistributionvector Spin;
+
+	#if CPP
+		/**
+		*   Create the custom ParticleEmitterInstance.
+		*
+		*   @param  InEmitterParent           The UParticleEmitter that holds this TypeData module.
+		*   @param  InComponent               The UParticleSystemComponent that 'owns' the emitter instance being created.
+		*   @return FParticleEmitterInstance* The create emitter instance.
+		*/
+		virtual FParticleEmitterInstance*   CreateInstance(UParticleEmitter* InEmitterParent, UParticleSystemComponent* InComponent);
+	#endif
+	}		
+
+### TypeDataModule Implementation
+
+The constructor for the `TypeDataModule` creates a `UDistributionVectorConstant` to assign to the `Spin` variable.
+
+	UParticleModuleTypeDataSpinner::UParticleModuleTypeDataSpinner(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+	{
+		UDistributionVectorConstant* DistributionSpin = ConstructorHelpers::CreateDefaultSubobject<UDistributionVectorConstant>(this, TEXT("DistributionSpin"));
+		DistributionSpin->Constant = FVector(0.0f, 0.0f, 0.0f);
+		Spin.Distribution = DistributionSpin;
+	}
+
+The `CreateInstance()` function is called by the `ParticleSystemComponent` that will hold the emitter instance. This is where the `TypeDataModule` can create any type of `ParticleEmitterInstance` to be utilized by the system.
+	
+	FParticleEmitterInstance* UParticleModuleTypeDataSpinner::CreateInstance(UParticleEmitter* InEmitterParent, UParticleSystemComponent* InComponent)
+	{
+	   // Create our Spinner emitter instance.
+	   FParticleSpinnerEmitterInstance* SpinnerInst = ::new FParticleSpinnerEmitterInstance();
+	   if (SpinnerInst)
+	   {
+		  // Initialize the parameters for the emitter.
+		  SpinnerInst->InitParameters(InEmitterParent, InComponent);
+		  return SpinnerInst;
+	   }
+
+	   // We failed. Return NULL to let a default sprite emitter be generated, or assert.
+	   return NULL;
+	}
+
+In this example, an instance of the `FParticleSpinnerEmitterInstance` will be generated. It is derived from the `FParticleSpriteEmitterInstance` to leverage as much existing code as possible.
+
+### Particle Emitter Declaration
+
+The `FParticleSpinnerEmitterInstance` custom emitter instance structure is defined as follows:
+
+	struct FParticleSpinnerEmitterInstance : public FParticleSpriteEmitterInstance
+	{
+	   /** Pointer to the spinner TypeDatModule.         */
+	   UParticleModuleTypeDataSpinner* SpinnerTypeData;
+	   /** The rotation that was used during the Tick call.   */
+	   FVector CurrentRotation;
+	   /** The rotation of the component.            */
+	   FRotator ComponentRotation;
+
+	   /** Constructor   */
+	   FParticleSpinnerEmitterInstance();
+
+	   virtual void InitParameters(UParticleEmitter* InTemplate, UParticleSystemComponent* InComponent);
+	   virtual void Tick(float DeltaTime, bool bSuppressSpawning);
+	   virtual void UpdateBoundingBox(float DeltaTime);
+
+	   /**
+		*   Adjust the component rotation to take the instance rotation into account.
+		*/
+	   void AdjustComponentRotation();
+	   /**
+		*   Restore the component rotation.
+		*/
+	   void RestoreComponentRotation();
+	};
+
+The following member variables are contained in the `FParticleSpinnerEmitterInstance`:
+
+| Variable | Overview |
+| -------- | -------- |
+| `SpinnerTypeData` | A pointer to the `UParticleModuleTypeDataSpinner`. It is held on to directly to avoid casting the TypeData module each time we need to access it. |
+| `CurrentRotation` | An `FVector` which tracks the current rotation of the emitter instance. Grabbed in `Tick()`/`TickEditor()` to update the rotation, and stored for use during the `UpdateBoundingBox()` function. |
+
+### Particle Emitter Implementation
+
+The following member functions are implemented for our custom emitter instance:
+
+| Function ||
+| -------- | -------- |
+| [INCLUDE:#Constructor] ||
+| [INCLUDE:#InitParameters] ||
+| [REGION:wrap]`virtual void Tick(float DeltaTime, bool bSuppressSpawning)`[/REGION] | The `Tick()` function is responsible for spawning and updating the particles in the instance. First, it gets the current rotation from the `SpinnerTypeData` distribution using the EmitterTime. Since the `LocalToWorld` of the _parent_ component can be used in the `Spawn()`/`Update()` functions of various modules, we need to ensure that the emitter instance rotation is taken into account. This is accomplished by saving off the `Rotation` of the component, and then adding the emitter instance amount to it. The component transform is then updated to include the new rotation. The emitter instance is then _ticked_ like normal by calling the super `Tick()` function. The component `Rotation` is then restored. [INCLUDE:#tick] |
+| [REGION:wrap]`virtual void UpdateBoundingBox(float DeltaTime)`[/REGION] | The `UpdateBoundingBox()` function has to be overridden in this case to ensure that the emitter instance rotation is taken into account when `bUseLocalSpace` is `true`. [INCLUDE:#UpdateBoundingBox] |
+| [REGION:wrap]`void FParticleSpinnerEmitterInstance::AdjustComponentRotation()`[/REGION] | The `AdjustComponentRotation()` function will alter the components `LocalToWorld` to account for the emitter instance rotation. [INCLUDE:#AdjustComponentRotation] |
+| [REGION:wrap]`void FParticleSpinnerEmitterInstance::RestoreComponentRotation()`[/REGION] | The `RestoreComponentRotation()` function will remove the emitter instance rotation from the components LocalToWorld. [INCLUDE:#RestoreComponentRotation] |
+
+<!--
+[EXCERPT:Constructor]
+[REGION:transparenttable]
+| --- | --- |
+| [REGION:wrap]`FParticleSpinnerEmitterInstance()`[/REGION] | The code for the constructor simply initializes the `SpinnerTypeData` to NULL and the `CurrentRotation` to `(0.0f, 0.0f, 0.0f)`. |
+| [INCLUDE:#ConstructorCode] ||
+[/REGION]
+[/EXCERPT:Constructor]
+[EXCERPT:ConstructorCode]
+	FParticleSpinnerEmitterInstance::FParticleSpinnerEmitterInstance() :
+		 FParticleSpriteEmitterInstance()
+	   , SpinnerTypeData(NULL)
+	{
+	}
+[/EXCERPT:ConstructorCode]
+
+[EXCERPT:InitParameters]
+[REGION:transparenttable]
+| --- | --- |
+| [REGION:wrap]`virtual void InitParameters(UParticleEmitter* InTemplate, UParticleSystemComponent* InComponent, bool bClearResources = true)`[/REGION] | The `InitParameters()` function calls the Super version to perform the standard functionality, and then casts the `TypeDataModule` pointer to an `UParticleModuleTypeDataSpinner` to avoid having to cast each time it is accessed. |
+| [INCLUDE:#InitParametersCode] ||
+[/REGION]
+[/EXCERPT:InitParameters]
+[EXCERPT:InitParametersCode]
+	void FParticleSpinnerEmitterInstance::InitParameters(UParticleEmitter* InTemplate, UParticleSystemComponent* InComponent)
+	{
+	   // Call the super InitParameters.
+	   FParticleEmitterInstance::InitParameters(InTemplate, InComponent);
+
+	   // Get the type data module
+	   UParticleLODLevel* LODLevel   = InTemplate->GetCurrentLODLevel(this);
+	   check(LODLevel);
+	   SpinnerTypeData = CastChecked<UParticleModuleTypeDataSpinner>(LODLevel->TypeDataModule);
+	}
+[/EXCERPT:InitParametersCode]
+
+[EXCERPT:Tick]
+	void FParticleSpinnerEmitterInstance::Tick(float DeltaTime, bool bSuppressSpawning)
+	{
+	   // Update our current rotation
+	   check(SpinnerTypeData);
+	   CurrentRotation = SpinnerTypeData->Spin.GetValue(EmitterTime, Component);
+
+	   // Adjust the component rotation
+	   AdjustComponentRotation();
+
+	   // Call the super Tick
+	   FParticleEmitterInstance::Tick(DeltaTime, bSuppressSpawning);
+
+	   // Restore the component rotation
+	   RestoreComponentRotation();
+	}
+[/EXCERPT:Tick]
+
+[EXCERPT:UpdateBoundingBox]
+	void FParticleSpinnerEmitterInstance::UpdateBoundingBox(float DeltaTime)
+	{
+		// Unfortunately, we have to completely override the UpdateBoundingBox function in
+		// order to ensure our rotation is taken into account...
+		// 
+		// Except for the last bit of code (where the bUseLocalSpace flag is taken into 
+		// account), the function is identical to the FParticleSpriteEmitterInstance
+		// version.
+		if (Component)
+		{
+			// Take component scale into account
+			FVector Scale = FVector(1.0f, 1.0f, 1.0f);
+			Scale *= Component->Scale * Component->Scale3D;
+			AActor* Actor = Component->GetOwner();
+			if (Actor && !Component->AbsoluteScale)
+			{
+				Scale *= Actor->DrawScale * Actor->DrawScale3D;
+			}			
+			float MaxSizeScale = 1.0f;
+			FVector NewLocation;
+			float NewRotation;
+			ParticleBoundingBox.Init();
+			// For each particle, offset the box appropriately 
+			for (int32 i=0; i<ActiveParticles; i++)
+			{
+				DECLARE_PARTICLE(Particle, ParticleData + ParticleStride * ParticleIndices[i]);
+				// Do linear integrator and update bounding box
+				// Do angular integrator, and wrap result to within +/- 2 PI
+				Particle.OldLocation = Particle.Location;
+				if ((Particle.Flags & STATE_Particle_Freeze) == 0)
+				{
+					if ((Particle.Flags & STATE_Particle_FreezeTranslation) == 0)
+					{
+						NewLocation = Particle.Location + (DeltaTime * Particle.Velocity);
+					}
+					else
+					{
+						NewLocation = Particle.Location;
+					}
+					if ((Particle.Flags & STATE_Particle_FreezeRotation) == 0)
+					{
+						NewRotation = (DeltaTime * Particle.RotationRate) + Particle.Rotation;
+					}
+					else
+					{
+						NewRotation = Particle.Rotation;
+					}
+				}
+				else
+				{
+					NewLocation = Particle.Location;
+					NewRotation = Particle.Rotation;
+				}
+				FVector Size = Particle.Size * Scale;
+				MaxSizeScale = Max(MaxSizeScale, Size.GetAbsMax()); //@todo particles: this does a whole lot of compares that can be avoided using SSE/ Altivec.
+				Particle.Rotation = appFmod(NewRotation, 2.f*(float)PI);
+				Particle.Location = NewLocation;
+				ParticleBoundingBox += NewLocation;
+			}
+			ParticleBoundingBox = ParticleBoundingBox.ExpandBy(MaxSizeScale);
+			// Transform bounding box into world space if the emitter uses a local space coordinate system.
+			UParticleLODLevel* LODLevel = SpriteTemplate->GetCurrentLODLevel(this);
+			check(LODLevel);
+			if (LODLevel->RequiredModule->bUseLocalSpace) 
+			{
+				// Adjust the component rotation
+				AdjustComponentRotation();
+				// Transform the bounding box
+				ParticleBoundingBox = ParticleBoundingBox.TransformBy(Component->LocalToWorld);
+				// Restore the component rotation
+				RestoreComponentRotation();
+			}
+		}
+	}
+[/EXCERPT:UpdateBoundingBox]
+
+[EXCERPT:AdjustComponentRotation]
+	void FParticleSpinnerEmitterInstance::AdjustComponentRotation()
+	{
+	   // Save the true rotation
+	   ComponentRotation = Component->Rotation;
+	   // Since the LocalToWorld of the component can be used in the Update functions of various modules,
+	   // we need to spoof it so our instance rotation is taken into account.
+	   // We need to reconstruct the components LocalToWorld so the rotation is taken into account
+	   // in the correct place.
+	   FVector CurrRotInDegrees = CurrentRotation * 360.0f;
+	   FRotator RotationRot = FRotator::MakeFromEuler(CurrRotInDegrees);
+	   Component->Rotation += RotationRot;
+	   Component->SetTransformedToWorld();
+	}
+[/EXCERPT:AdjustComponentRotation]
+
+[EXCERPT:RestoreComponentRotation]
+	void FParticleSpinnerEmitterInstance::RestoreComponentRotation()
+	{
+	   // Restore the component rotation
+	   Component->Rotation = ComponentRotation;
+	   Component->SetTransformedToWorld();
+	}
+[/EXCERPT:RestoreComponentRotation]
+-->
+
+### Results
+
+The following screen shots demonstrate the Spinner emitter instance in action. The settings were as follows:
+
+* The **Spin** distribution was set to a constant curve with a point at **(Time=0,X=0,Y=0,Z=0)** and another point at **(Time=1,X=0,Y=0,Z=1)** leading to the instance spinning around the Z-axis at a variable rate over the life of the emitter. 
+* An **InitialVelocity** module was used with a Constant Distribution set to **(X=100,Y=100,Z=100)** so that all particles would be emitted in a straight-line stream (discounting the spinning of the instance). 
+* An **InitialColor** module was used with **StartColor** set to a constant curve  with a point at **(Time=0,R=1,G=0,B=0)** and another at **(Time=1,R=0,G=0,B=1)** leading to the particles being emitted going from red to blue over the life of the emitter.
+
+[REGION:imagetable]
+| ![Spinner A](Spinner_A.png) | ![Spinner B](Spinner_B.png) |
+| --------------------------- | --------------------------- |
+|  |  |
+[/REGION]

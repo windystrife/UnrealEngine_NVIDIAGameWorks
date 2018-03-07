@@ -1,0 +1,153 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	OneColorShader.usf: 2D shader for drawing a single constant color.
+=============================================================================*/
+
+#include "Common.ush"
+
+
+
+/*=============================================================================
+ * Vertex shader
+ =============================================================================*/
+
+struct FOneColorVertexOutput
+{
+	float4 Position : SV_POSITION;
+#if USING_VERTEX_SHADER_LAYER && USING_LAYERS
+	uint LayerIndex : SV_RenderTargetArrayIndex;
+#endif
+};
+
+
+#ifndef USING_NDC_POSITIONS
+	#define USING_NDC_POSITIONS 1
+#endif
+
+void MainVertexShader(
+	in float4 InPosition : ATTRIBUTE0,
+#if USING_VERTEX_SHADER_LAYER && USING_LAYERS
+	in uint InstanceId	: SV_InstanceID,
+#endif
+	out FOneColorVertexOutput Output
+	)
+{
+	Output.Position = InPosition;
+
+#if !USING_NDC_POSITIONS
+	DrawRectangle( InPosition, Output.Position);
+#endif
+
+#if USING_VERTEX_SHADER_LAYER && USING_LAYERS
+	Output.LayerIndex = InstanceId;
+#endif
+}
+
+/*=============================================================================
+ * Pixel shader
+ =============================================================================*/
+
+#ifndef NUM_OUTPUTS
+#define NUM_OUTPUTS 1
+#endif
+
+//These shaders used for RHIClear.  Don't use any global uniform variables here as it greatly complicates
+//the state restoration for an inline shader clear.
+void MainPixelShaderMRT( 
+	out float4 OutColor[NUM_OUTPUTS] : SV_Target0)
+{
+	for (int i = 0; i < NUM_OUTPUTS; i++)
+	{
+		OutColor[i] = ClearShaderUB.DrawColorMRT[i];
+	}
+}
+
+void MainPixelShader( 
+	out float4 OutColor : SV_Target0)
+{
+	OutColor = ClearShaderUB.DrawColorMRT[0];
+}
+
+/** 
+ * Basic unit of a long GPU task
+ * To make sure that we're not CPU bound when profiling the GPU, as we can't isolate GPU idle time on PC. 
+ * Measured execution time on a 1080p render target:
+ * Intel HD Graphics 620: ~50ms
+ * NVIDIA GeForce GTX 670: ~8.02ms
+ * NVIDIA GeForce GTX 980: ~4.00ms
+ * NVIDIA GeForce GTX 1080: ~2.11ms
+ */
+void MainLongGPUTask(
+	FOneColorVertexOutput Input,
+	out float4 OutColor : SV_Target0
+	)
+{
+	OutColor = 0;
+
+#if FEATURE_LEVEL >= FEATURE_LEVEL_SM4
+	for (int i = 0; i < 1200; i++)
+	{
+		OutColor += .0001f * cos(Input.Position.x) * sin(Input.Position.y);
+	}
+#else
+	// Not effective, deprecated
+	for (int i = 0; i < 255; i++)
+	{
+		OutColor += .0001f * cos(i * .0001f) * sin(i * i * .00001f);
+	}
+#endif
+
+	OutColor *= .000001f;
+}
+
+#if FEATURE_LEVEL >= FEATURE_LEVEL_SM5
+
+float4 FillValue;
+RWTexture2D<float4> FillTexture;
+float4 Params0; // Texture Width,Height (.xy); Use Exclude Rect 1 : 0 (.z)
+float4 Params1; // Include X0,Y0 (.xy) - X1,Y1 (.zw)
+float4 Params2; // ExcludeRect X0,Y0 (.xy) - X1,Y1 (.zw)
+
+[numthreads(8,8,1)]
+void MainFillTextureCS(uint2 XY : SV_DispatchThreadID)
+{
+	float Width = Params0.x;
+	float Height = Params0.y;
+	bool bUseExcludeRect = (Params0.z != 0);
+
+	float X = XY.x;
+	float Y = XY.y;
+	float IncludeX0 = Params1.x;
+	float IncludeY0 = Params1.y;
+	float IncludeX1 = Params1.z;
+	float IncludeY1 = Params1.w;
+
+	if (X < Width && Y < Height)
+	{
+		if (X >= IncludeX0 && X <= IncludeX1 && Y >= IncludeY0 && Y <= IncludeY1)
+		{
+			bool bDoWrite = true;
+/*
+			if (bUseExcludeRect)
+			{
+				float ExcludeX0 = Params2.x;
+				float ExcludeY0 = Params2.y;
+				float ExcludeX1 = Params2.z;
+				float ExcludeY1 = Params2.w;
+				if (X >= ExcludeX0 && X <= ExcludeX1 && Y >= ExcludeY0 && Y <= ExcludeY1)
+				{
+					bDoWrite = false;
+				}
+			}
+*/
+
+			if (bDoWrite)
+			{
+				FillTexture[XY] = FillValue;
+			}
+		}
+	}
+}
+
+#endif

@@ -1,0 +1,215 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title: 애니메이션 노드 테크니컬 가이드
+Crumbs: %ROOT%, Engine, Engine/Animation
+Description: 애님 블루프린트의 그래프 안에서 사용할 노드를 새로 만드는 방법에 대한 안내서입니다.
+Version: 4.9
+
+[REGION:banner]
+![Anim Nodes](animnodes_banner.png)(convert:false)
+[/REGION]
+
+[TOC(start:2)]
+
+애니메이션 노드는 [애님 블루프린트](Engine/Animation/AnimBlueprints) 안에서 쓰이는 것으로, 
+포즈의 블렌딩이나 본의 직접 조작 같은 작업을 하는데 사용됩니다. 이미 여러가지 애니메이션 노드가 
+제공되어 있으나, 커스텀 노드를 만들어 어떤 게임의 요구에도 맞출 수 있습니다.
+
+## 애니메이션 노드의 구조
+
+애니메이션 노드는 두 부분으로 이루어집니다:
+
+* 출력 포즈 생성을 위한 실제 작업을 하는 런타임 구조체
+* 노드 제목이나 맥락 메뉴처럼, 그래프 안에서 노드의 
+시각적인 면과 함수성을 처리하는 에디터 시간 컨테이너 클래스
+
+
+새로운 애니매이션 노드를 추가하기 위해서는, 위 두가지 다 만들어야 합니다.
+
+### 노드 계층구조
+
+노드에 계층구조를 만드는 것이 가능은 하지만, abstract 가 아닌 에디터 시간 클래스의 경우 반드시 딱 
+하나의 런타임 노드가 있어야 합니다 (부모가 abstract 이면서 하나 들어있지 않은 경우가 아니고서야 노드를 추가하지 마세요).
+예제로는 `UAnimGraphNode_BlendListBase` 패밀리를 참고하세요.
+
+## 런타임 노드
+
+런타임 구조체는 `FAnimNode_Base` 에서 파생되며, 초기화와 업데이트는 물론 
+하나 이상의 입력 포즈에서 원하는 출력 포즈를 생성하기 위한 작업을 담당합니다. 
+또한 노드가 원하는 작업을 하는 데 있어 필요한 입력 포즈 링크라든가 프로퍼티가 있으면 선언해 주기도 합니다.
+
+### 포즈 입력
+
+런타임 노드에서, 포즈 입력의 노출은 `FPoseLink` 또는 
+`FComponentSpacePoseLink` 유형의 프로퍼티를 
+만들면 됩니다. `FPoseLink` 는 애니메이션 블렌딩처럼 로컬 스페이스에서의 포즈 작업시 사용됩니다. 
+`FComponentSpacePoseLink` 는 스켈레탈 콘트롤러 적용시처럼 컴포넌트 스페이스에서의 작업시 사용됩니다.
+
+노드는 하나의 포즈 입력을 가질 수 있습니다:
+
+**로컬 스페이스**
+
+	UPROPERTY(Category=Links)
+	FPoseLink BasePose;
+
+![Pose Input Pin](node_posepin.png)
+
+**컴포넌트 스페이스**
+
+	UPROPERTY(Category=Links)
+	FComponentSpacePoseLink ComponentPose;
+
+![Pose Input Pins](node_posepin_component.png)
+[REGION:caption]
+	컴포넌트 스페이스 포즈 핀에는 파랑 음영으로 표시됩니다.
+[/REGION]
+
+또는, 여러 애니메이션 블렌딩을 하는 노드는 둘 이상의 입력을 가질 수도 있습니다:
+
+	UPROPERTY(Category=Links)
+	FPoseLink Base;
+
+	UPROPERTY(Category=Links)
+	FPoseLink Additive;
+
+![Pose Input Pins](node_posepin_multiple.png)
+
+이 프로퍼티 각각은 포즈 링크를 표시합니다. 이런 유형의 프로퍼티는 항상 입력 핀으로 노출됩니다.
+선택적으로 숨긴다든가 **디테일** 패널에서 수정가능한 프로퍼티로만 사용한다든가 
+할 수 없습니다.
+
+### 프로퍼티와 데이터 입력
+
+애니메이션 노드는 알파, 트랜스폼 데이터 등 노드 작업을 수행하는 데 사용되는 프로퍼티를 
+몇이든 가질 수 있습니다. 이러한 프로퍼티는 다른 프로퍼티와 마찬가지로 선언되는데, 
+`UPROPERTY()` 매크로를 사용합니다.
+
+	UPROPERTY(Category=Settings, meta(PinShownByDefault))
+	mutable float Alpha;
+
+![Property Pin](node_propertypin.png)
+
+애니메이션 노드의 프로퍼티는 노드에 값을 전달하기 위해 특수한 메타데이터 키를 사용하여 데이터 입력으로 노출시킬 수 있는데, 
+이를 통해 노드에 사용되는 프로퍼티에 노드 밖에서 계산된 값을 사용할 수 있습니다.
+가능한 메타데이터 키는 다음과 같습니다:
+
+| 메타데이터 | 설명 |
+| -------- | ----------- |
+| `NeverAsPin` | 이 프로퍼티는 데이터 핀으로 노출되지 않으며, 페르소나의 디테일 패널에서만 편집 가능합니다. |
+| `PinHiddenByDefault` | 이 프로퍼티는 데이터 핀으로 노출은 가능하나 기본적으로 숨겨져 있습니다. (아래 [옵션 핀](#OptionalPins) 참고) |
+| `PinShownByDefault` | 이 프로퍼티는 데이터 핀으로 노출 가능하며, 기본적으로 보입니다. (아래 [옵션 핀](#OptionalPins) 참고) |
+| `AlwaysAsPin` | 이 프로퍼티는 항상 데이터 핀으로 노출됩니다. |
+
+(#OptionalPins)
+**옵션 핀**
+[REGION:none]
+	`PinHiddenByDefault` 또는 `PinShownByDefault` (기본으로 숨겨지거나 표시되는 핀)이 있는 프로퍼티의 경우, 
+	디테일 패널의 프로퍼티 옆에 나타나는 체크박스로 표시하거나 숨길 수 있습니다.
+[/REGION]	
+[REGION:none]
+	![Property Details](node_property_details.png)
+[/REGION]
+
+## 에디터 노드
+
+에디터 클래스는 `UAnimGraphNode_Base` 에서 파생되며, 비주얼 노드 제목이나 
+맥락 메뉴 액션 추가같은 작업을 담당합니다.
+
+에디터 시간 클래스에는 편집가능한 것으로 노출된 런타임 노드 인스턴스가 있어야 합니다.
+
+	UPROPERTY(Category=Settings)
+	FAnimNode_ApplyAdditive Node;
+
+### 제목
+
+![Node Title](node_title.png)
+
+페르소나에서 _애니메이션 블루프린트_ 의 그래프에 표시되는 애니메이션 노드 제목 문구와 배경색은 
+`GetNodeTitle()`, `GetNodeTitleColor()` 함수를 덮어쓰는 것으로 정의합니다.
+
+예를 들어 다음 `UAnimGraphNode_ApplyAdditive` 노드는 회색 배경에 "Apply Additive" 라고 표시됩니다:
+
+	FLinearColor UAnimGraphNode_ApplyAdditive::GetNodeTitleColor() const
+	{
+		return FLinearColor(0.75f, 0.75f, 0.75f);
+	}
+
+	FString UAnimGraphNode_ApplyAdditive::GetNodeTitle(ENodeTitleType::Type TitleType) const
+	{
+		return TEXT("Apply Additive");
+	}
+
+### 툴팁
+
+![Node Tooltip](node_tooltip.png)
+
+페르소나에서 노드에 마우스 커서를 올렸을 때 표시되는 툴팁은 `GetTooltip()` 함수를 덮어써서 정의합니다:
+
+	FString UAnimGraphNode_ApplyAdditive::GetTooltip() const
+	{
+		return TEXT("Apply additive animation to normal pose");
+	}
+
+### 맥락 메뉴
+
+각 애니메이션 노드는 페르소나에서 그래프의 노드에 우클릭했을 때 뜨는 맥락 메뉴에 노드 전용 옵션을 추가시킬 수 
+있습니다. 옵션의 추가는 모든 블루프린트 노드의 멤버인 `GetContextMenuActions()` 함수를 사용해서 
+이루어 집니다.
+
+![Node Context Menu Entry](node_menu.png)
+
+예를 들어 `UAnimGraphNode_LayeredBoneBlend` 노드는 새 입력 추가용 메뉴 항목을 더하거나 기존 것을 뺍니다:
+
+	void UAnimGraphNode_LayeredBoneBlend::GetContextMenuActions(const FGraphNodeContextMenuBuilder& Context) const
+	{
+		if (!Context.bIsDebugging)
+		{
+			if (Context.Pin != NULL)
+			{
+				// we only do this for normal BlendList/BlendList by enum, BlendList by Bool doesn't support add/remove pins
+				if (Context.Pin->Direction == EGPD_Input)
+				{
+					//@TODO: Only offer this option on arrayed pins
+					Context.MenuBuilder->BeginSection("AnimNodesLayeredBoneBlend", NSLOCTEXT("A3Nodes", "LayeredBoneBlend", "Layered Bone Blend"));
+					{
+						Context.MenuBuilder->AddMenuEntry(FGraphEditorCommands::Get().RemoveBlendListPin);
+					}
+					Context.MenuBuilder->EndSection();
+				}
+			}
+			else
+			{
+				Context.MenuBuilder->BeginSection("AnimNodesLayeredBoneBlend", NSLOCTEXT("A3Nodes", "LayeredBoneBlend", "Layered Bone Blend"));
+				{
+					Context.MenuBuilder->AddMenuEntry(FGraphEditorCommands::Get().AddBlendListPin);
+				}
+				Context.MenuBuilder->EndSection();
+			}
+		}
+	}
+
+## 파생된 네이티브 Getter
+
+다수의 프로젝트에서는 별도의 UAnimInstance 파생 클래스를 만들어 퍼포먼스를 높이고 있습니다. 그에 보조를 맞추기 위해서는 필요에 따라 새로운 getter 를 추가하면 됩니다. 하지만 그 정상 작동을 위해서는 약간의 구성 절차가 필요합니다.
+
+* getter 함수는 반드시 **UFUNCTIONS** 태그를 붙여야 합니다. 
+* 반드시 **BlueprintPure** 여야 합니다. 
+* 반드시 **AnimGetter="True"** 메타데이터를 포함해야 합니다. 
+
+또한 구체적인 이름이 있는 파라미터도 정의해야 합니다 (이 부분은 AnimInstance.h 의 베이스 애님 getter 함수 위에도 설명되어 있습니다). 그 파라미터 목록은 다음과 같습니다:
+
+| **파라미터** | **설명** |
+| --- | --- |
+| **int32 AssetPlayerIndex**| 애셋 플레이어에 작용하는 getter 로, 가능한 애셋 플레이어마다 에디터에 하나의 항목이 추가됩니다. |
+| **int32 MachineIndex**| 스테이트 머신에 작용하는 getter 로, 스테이트 머신마다 하나의 항목이 추가됩니다. |
+| **int32 StateIndex**| 이 부분도 MachineIndex 를 요합니다. 스테이트에 작용하는 getter 로, 스테이트마다 하나의 항목이 추가됩니다. |
+| **int32 TransitionIndex**| 이 부분도 MachineIndex 를 요합니다. 트랜지션에 작용하는 getter 로, 트랜지션마다 하나의 항목이 추가됩니다. |
+
+getter 에서 실제 노드를 구하는 헬퍼 함수도 있는데, UAnimInstance 에 존재합니다: 
+
+| **함수** | **설명** |
+| --- | --- |
+| **GetStateMachineInstance(int32 MachineIndex)**| 구은 스테이트 머신 인스턴스를 구합니다. |
+| **GetCheckedNodeFromIndex(int32 NodeIdx)**| 인덱스에서 노드를 구하며, 유효하지 않은 경우 어서트가 납니다. |
+| **GetNodeFromIndex(int32 NodeIdx)**| 위와 마찬가지로, nullptr 반환이 가능합니다. |
+| **GetRelevantAssetPlayerFromState(int32 MachineIndex, int32 StateIndex)**| 스테이트에서 가중치가 가장 높은 애셋 플레이어를 구합니다. |

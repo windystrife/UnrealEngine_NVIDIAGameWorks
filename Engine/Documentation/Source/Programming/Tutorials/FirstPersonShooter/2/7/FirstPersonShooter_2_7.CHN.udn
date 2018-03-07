@@ -1,0 +1,209 @@
+﻿INTSourceChangelist:3069483
+Availability:Public
+Title:2.7 - 更改摄像机视图
+Crumbs: %ROOT%, Programming, Programming/Tutorials/FirstPersonShooter, Programming/Tutorials/FirstPersonShooter/2
+Description:学习如何更改第一人称射击游戏角色的摄像机视图。
+SkillLevel:Beginner
+Version:4.11
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[Previous Step](Programming/Tutorials/FirstPersonShooter/2/6)
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[Section Home](Programming/Tutorials/FirstPersonShooter/2)
+	[/PARAM]
+	[PARAM:next]
+		[Next Step](Programming/Tutorials/FirstPersonShooter/2/8)
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+在上一步的最后，默认摄像机位于模型的颈部。在这步中，我们将设置一个 FPS 摄像机，用于调整摄像机的属性（如位置和视场）。
+
+## 附加摄像机组件
+
+1.	切回 Visual Studio，打开 `FPSCharacter.h` 添加以下代码：
+
+		// FPS 摄像机。
+		UPROPERTY(VisibleAnywhere)
+		UCameraComponent* FPSCameraComponent;
+
+1.	`FPSCharacter.h` 应与以下代码相似：
+
+		// 在 Project Settings 的 Description 页面填入版权声明。
+		
+		#pragma once
+		
+		#include "GameFramework/Character.h"
+		#include "FPSCharacter.generated.h"
+		
+		UCLASS()
+		class FPSPROJECT_API AFPSCharacter : public ACharacter
+		{
+			GENERATED_BODY()
+		
+		public:
+			// 设置该角色属性的默认值
+			AFPSCharacter();
+		
+			// 游戏开始时或生成时调用
+			virtual void BeginPlay() override;
+			
+			// 每帧调用
+			virtual void Tick( float DeltaSeconds ) override;
+		
+			// 调用后将功能绑定到输入
+			virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override;
+		
+			// 处理前后移动的输入。
+			UFUNCTION()
+			void MoveForward(float Value);
+		
+			// 处理左右移动的输入。
+			UFUNCTION()
+			void MoveRight(float Value);
+		
+			// 按下按键时设置跳跃标记。
+			UFUNCTION()
+			void StartJump();
+		
+			// 松开按键时清除跳跃标记。
+			UFUNCTION()
+			void StopJump();
+		
+			// FPS 摄像机。
+			UPROPERTY(VisibleAnywhere)
+			UCameraComponent* FPSCameraComponent;
+		};
+
+1.	打开 `FPSCharacter.cpp`，在构造函数中添加以下代码：
+
+		// 创建一个第一人称摄像机组件。
+		FPSCameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("FirstPersonCamera"));
+		// 将摄像机组件附加到胶囊体组件。
+		FPSCameraComponent->AttachTo(GetCapsuleComponent());
+
+	此代码创建了一个 `UCameraComponent` 并将其附加到角色的 `CapsuleComponent`。
+
+1.	将以下代码添加到写入构造函数中的代码块下方：
+
+		// 将摄像机放置在眼睛上方不远处。
+		FPSCameraComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 50.0f + BaseEyeHeight));
+		// 用 pawn 控制摄像机旋转。
+		FPSCameraComponent->bUsePawnControlRotation = true;
+
+	此代码将把摄像机位调至角色眼睛上方不远处，利用 pawn 控制摄像机的旋转。
+
+1.	`FPSCharacter.cpp` 应与以下代码相似：
+
+		// 在 Project Settings 的 Description 页面填入版权声明。
+		
+		#include "FPSProject.h"
+		#include "FPSCharacter.h"
+		
+		// 设置默认值
+		AFPSCharacter::AFPSCharacter()
+		{
+		 	// 设置此角色每帧调用 Tick()。不需要时可将此关闭，以提高性能。
+			PrimaryActorTick.bCanEverTick = true;
+		
+			// 创建一个第一人称摄像机组件。
+			FPSCameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("FirstPersonCamera"));
+			// 将摄像机组件附加到胶囊体组件。
+			FPSCameraComponent->AttachTo(GetCapsuleComponent());
+			// 将摄像机放置在眼睛上方不远处。
+			FPSCameraComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 50.0f + BaseEyeHeight));
+			// 用 pawn 控制摄像机旋转。
+			FPSCameraComponent->bUsePawnControlRotation = true;
+		}
+		
+		// 游戏开始时或生成时调用
+		void AFPSCharacter::BeginPlay()
+		{
+			Super::BeginPlay();
+			
+			if (GEngine)
+			{
+				// 显示调试信息五秒。-1“键”值（首个参数）说明我们无需更新或刷新此消息。
+				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("We are using FPSCharacter."));
+			}
+		}
+		
+		// 每帧调用
+		void AFPSCharacter::Tick( float DeltaTime )
+		{
+			Super::Tick( DeltaTime );
+		
+		}
+		
+		// 调用后将功能绑定到输入
+		void AFPSCharacter::SetupPlayerInputComponent(class UInputComponent* InputComponent)
+		{
+			Super::SetupPlayerInputComponent(InputComponent);
+		
+			// 设置“移动”绑定。
+			InputComponent->BindAxis("MoveForward", this, &AFPSCharacter::MoveForward);
+			InputComponent->BindAxis("MoveRight", this, &AFPSCharacter::MoveRight);
+		
+			// 设置“查看”绑定。
+			InputComponent->BindAxis("Turn", this, &AFPSCharacter::AddControllerYawInput);
+			InputComponent->BindAxis("LookUp", this, &AFPSCharacter::AddControllerPitchInput);
+		
+			// 设置“动作”绑定。
+			InputComponent->BindAction("Jump", IE_Pressed, this, &AFPSCharacter::StartJump);
+			InputComponent->BindAction("Jump", IE_Released, this, &AFPSCharacter::StopJump);
+		}
+		
+		void AFPSCharacter::MoveForward(float Value)
+		{
+			// 明确哪个方向是“前进”，并记录玩家试图向此方向移动。
+			FVector Direction = FRotationMatrix(Controller->GetControlRotation()).GetScaledAxis(EAxis::X);
+			AddMovementInput(Direction, Value);
+		}
+		
+		void AFPSCharacter::MoveRight(float Value)
+		{
+			// 明确哪个方向是“向右”，并记录玩家试图向此方向移动。
+			FVector Direction = FRotationMatrix(Controller->GetControlRotation()).GetScaledAxis(EAxis::Y);
+			AddMovementInput(Direction, Value);
+		}
+		
+		void AFPSCharacter::StartJump()
+		{
+			bPressedJump = true;
+		}
+		
+		void AFPSCharacter::StopJump()
+		{
+			bPressedJump = false;
+		}
+
+## 测试新摄像机
+
+现在即可编译并测试新实现的摄像机代码。
+
+1.	在 Visual Studio 中保存 `FPSCharacter` 头 (\*.h) 和 CPP (\*.cpp)文件。
+
+1.	在 **Solution Explorer** 中找到 **FPSProject**。
+
+1.	右键单击 **FPSProject** 并选择 **Build** 编译项目。
+
+	![](BuildProject.png)
+
+1.	构建完成后，在虚幻编辑器中打开 **FPSProject**。
+
+1.	点击关卡编辑器工具栏中的 **Play** 按钮。
+
+	![](NewCameraComponent.png)
+
+	摄像机位现在应处在角色眼睛上方不远处。
+
+1.	按下 Esc 键或点击关卡编辑器中的 **Stop** 按钮即可退出 Play in Editor（PIE）模式。
+
+%Steps%

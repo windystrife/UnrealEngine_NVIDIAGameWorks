@@ -1,0 +1,111 @@
+﻿INTSourceChangelist:2728773
+Availability:Public
+Title:UObject インスタンスの作成
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture
+Description:ゲームプレイ コードでオブジェクトの新規インスタンスを作成する手法
+Version:4.9
+
+[TOC (start:2 end:3)]
+
+## NewObject
+
+`NewObject()` は最もシンプルな UObject のファクトリ メソッドです。任意の外部オブジェクトとクラスを受け取り、自動生成される名前で新規のインスタンスを作成します。
+
+	template< class T >
+	T* NewObject
+	(
+		UObject* Outer=(UObject*)GetTransientPackage(),
+		UClass* Class=T::StaticClass() 
+	)
+
+| パラメータ | 説明 |
+| --- | --- |
+| `Outer` | 任意です。作成中の Object の Outer として設定する `UObject` です。 |
+| `Class` | 任意です。作成する Object のクラスを指定する `UClass` です。 |
+|[REGION:tablesection]戻り値[/REGION]||
+| 指定クラスのスポーンされたインスタンスへのポインターです。 ||
+
+## NewNamedObject
+
+`NewNamedObject()` は、新規インスタンスの名前、[オブジェクト フラグ](#ObjectFlags) とテンプレート オブジェクトを引数として指定することを許可することで `NewObject()` を展開します。
+
+	template< class TClass >
+	TClass* NewNamedObject
+	(
+		UObject* Outer, 
+		FName Name, 
+		EObjectFlags Flags = RF_NoFlags, 
+		UObject const* Template=NULL
+	)
+
+| パラメータ | 説明 |
+| --- | --- |
+| `Outer` | 作成中の Object の Outer として設定する `UObject` 。 |
+| `Name` | 新規 Object の `Name` として設定する `FName`。 |
+| `Flags` | 任意です。新規の Object を表現する `FObjectFlags` の列挙型変数。|
+| `Template` | 任意です。新規 Object の作成時に、テンプレートとして使用する `UObject`。|
+|[REGION:tablesection]戻り値[/REGION]||
+| 指定クラスのスポーンされたインスタンスへのポインターです。 ||
+
+## ConstructObject
+
+柔軟性を極めるために、 `UObjects` の新規インスタンスは `ConstructObject()`関数を使って作成することができます。この関数は Object を割り当てる `StaticConstructObject()` を呼び出し、`ClassConstructor` を実行し、config プロパティの読み込み、ローカライズされたプロパティの読み込み、コンポーネントのインスタンス化といった初期化を実行します。
+
+	template< class T >
+	T* ConstructObject
+	(
+		UClass* Class, 
+		UObject* Outer = (UObject*)GetTransientPackage(), 
+		FName Name=NAME_None, 
+		EObjectFlags SetFlags=RF_NoFlags, 
+		UObject const* Template=NULL, 
+		bool bCopyTransientsFromClassDefaults=false, 
+		struct FObjectInstancingGraph* InstanceGraph=NULL 
+	)
+
+| パラメータ | 説明 |
+| --- | --- |
+| `Class` | 作成する Object のクラスを指定する `UClass` です。
+| `Outer` | 任意です。作成中の Object の Outer として設定する `UObject` です。 |
+| `Name` | 任意です。新規 Object の `Name` として設定する `FName` です。 |
+| `SetFlags` | 任意です。新規 Object を表す `EObjectFlags` の列挙型変数。|
+| `Template` | 任意です。新規 Object の作成時に、テンプレートとして使用する `UObject`。|
+| `bCopyTransientsFromClassDefaults` | 任意です。渡されたアーキタイプのポインターの代わりにクラスのデフォルト オブジェクトから一時プロパティのコピーの実行を判断する `bool` 値です。`true' の場合、クラスのデフォルト オブジェクトの一時プロパティが使用されます。
+| `FObjectInstancingGraph` | 任意。インスタンス化されたオブジェクトとコンポーネントのマッピングをテンプレートへ格納する `FObjectInstancingGraph` 構造体です。新規の Object が所有するコンポーネントをインスタンス化する際に使用します。 |
+|[REGION:tablesection]戻り値[/REGION]||
+| 指定クラスのスポーンされたインスタンスへのポインターです。 ||
+
+
+## Object Flags
+
+`EObjectFlags` 列挙型変数は、 Object を迅速かつ簡潔に表す際に使用します。Object の型、ガーベジ コレクションの処理方法の説明、ライフタイムにおける Object のステージ状況などを表すさまざまなフラグがあります。特別なマスク、全てのマスク、マスク無しや、定義済みのフラグのグループもあります。
+
+| フラグ | 値 | 説明 |
+| ---- | ----- | ----------- |
+| [REGION:tablesection]オブジェクトの型[/REGION] |||
+| *RF_Public* | `0x00000001` | Object は格納されているパッケージの外側から可視出来ます。 |
+| *RF_Standalone* | `0x00000002` | 参照されない Object も編集のために保持されます。 |
+| *RF_Native* | `0x00000004` | Object はネイティブです。これは `UClass` オブジェクトのみに使用されます。 |
+| *RF_Transactional* | `0x00000008` | Object はトランザクション オブジェクトです。 |
+| *RF_ClassDefaultObject* | `0x00000010` | Object は、このクラスのデフォルトオブジェクトです。例えば、作成時にそのクラスの新規インスタンスが使用するデフォルト テンプレートなどです。 |
+| *RF_ArchetypeObject* | `0x00000020` | Object は、別のオブジェクトのテンプレートです。クラスのデフォルト オブジェクトのような扱いです。 |
+| *RF_Transient* | `0x00000040` | Object はディスクに保存されません。 |
+| [REGION:tablesection]ガーベジ コレクション[/REGION] |||
+| *RF_RootSet* | `0x00000080` | 何からも参照されない場合でも、 Object はガーベジ コレクションされません。 |
+| *RF_IsLazyReferenced* | `0x00000100` | Object は怠惰なポインタに参照され、削除の際に追加のクリーンアップを必要とします。 |
+| *RF_Unreachable* | `0x00000200` | オブジェクト グラフ上では到達できない Object です。 |
+| *RF_TagGarbageTemp* | `0x00000400` | ガーベジ コレクションを使用するさまざまなユーティリティの使用にマーク付けされる Object です。このフラグはガーベジ コレクタそのものにはインタープリットされません。 |
+| [REGION:tablesection]オブジェクトのライフタイム[/REGION] |||
+| *RF_NeedLoad* | `0x00000800` | Object は読み込みが必要です。 |
+| *RF_AsyncLoading* | `0x00001000` | Object は非同期で読み込まれています。 |
+| *RF_NeedPostLoad* | `0x00002000` | Object は後で読み込まなくてはいけません。 |
+| *RF_NeedPostLoadSubobjects* | `0x00004000` | Object はサブ オブジェクトをインスタンス化し、シリアル化されたコンポーネント参照を修正する必要があります。 |
+| *RF_PendingKill* | `0x00008000` | Object は、破壊のペンディング状態です。ゲームプレイ上の理由から無効なものとしてマスクしても、有効な Object のままです。
+| *RF_BeginDestroyed* | `0x00010000` | Object は `BeginDestroy()` を呼び出しました。 |
+| *RF_FinishDestroyed* | `0x00020000` | Object は `FinishDestroy()` を呼び出しました。 |
+| [REGION:tablesection]特別なマスク[/REGION] |||
+| *RF_AllFlags* | `0x0003ffff` | Object は全てのフラグを持っています。主にエラーのチェックに使用します。 |
+| *RF_NoFlags* | `0x00000000` | Object はフラグを持っていません。キャストの回避に使用します。 |
+| [REGION:tablesection]定義済みグループ[/REGION] |||
+| *RF_Load* | [REGION:wrap]`RF_Public | RF_Standalone | RF_Native | RF_Transactional | RF_ClassDefaultObject | RF_ArchetypeObject`[/REGION] | フラグはアンリアル ファイルから読み込まれます。|
+| *RF_PropagateToSubobjects* | [REGION:wrap]`RF_Public | RF_ArchetypeObject | RF_Transactional`[/REGION] | フラグはスーパー オブジェクトのサブオブジェクトによって継承されます。 |

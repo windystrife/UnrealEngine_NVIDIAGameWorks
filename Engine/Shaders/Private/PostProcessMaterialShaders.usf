@@ -1,0 +1,107 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	PostProcessMaterialShaders.usf: Shaders for rendering post process materials
+=============================================================================*/
+
+#include "Common.ush"
+#include "/Engine/Generated/Material.ush"
+
+#if (FEATURE_LEVEL > FEATURE_LEVEL_ES3_1)
+
+void MainVS(
+	in float4 InPosition : ATTRIBUTE0,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	DrawRectangle(InPosition,  OutPosition);
+}
+
+void MainPS(
+	in float4 SvPosition : SV_Position,		// after all interpolators
+	out float4 OutColor : SV_Target0
+	)
+{
+	ResolvedView = ResolveView();
+	FMaterialPixelParameters Parameters = MakeInitializedMaterialPixelParameters();
+	FPixelMaterialInputs PixelMaterialInputs;
+
+	// can be optimized
+	float2 ScreenUV = SvPositionToBufferUV(SvPosition);
+
+#if NUM_MATERIAL_TEXCOORDS
+	for(int CoordinateIndex = 0;CoordinateIndex < NUM_MATERIAL_TEXCOORDS;CoordinateIndex++)
+	{
+		Parameters.TexCoords[CoordinateIndex] = ScreenUV;
+	}
+#endif
+
+	Parameters.VertexColor = 1;
+	
+	SvPosition.z = LookupDeviceZ(ScreenUV);
+	SvPosition.z = max(SvPosition.z, 1e-18);
+
+	// fill out other related material parameters
+	CalcMaterialParametersPost(Parameters, PixelMaterialInputs, SvPosition, true);
+
+	// Grab emissive colour as output
+#if MATERIAL_OUTPUT_OPACITY_AS_ALPHA
+	const float Alpha = GetMaterialOpacity(PixelMaterialInputs);
+#else
+	const float Alpha = 1.0f;
+#endif
+	OutColor = float4(GetMaterialEmissive(PixelMaterialInputs), Alpha );
+} 
+
+#else // FEATURE_LEVEL_ES3_1
+//
+// Mobile version
+//
+void MainVS_ES2(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 InTexCoord : ATTRIBUTE1,
+	out float2 OutUV : TEXCOORD0,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	DrawRectangle(InPosition, InTexCoord, OutPosition, OutUV);
+}
+
+void MainPS_ES2(
+	in float2 InUV : TEXCOORD0,
+	in float4 SvPosition : SV_Position,		// after all interpolators
+	out half4 OutColor : SV_Target0
+	)
+{
+	ResolvedView = ResolveView();
+	FMaterialPixelParameters Parameters = MakeInitializedMaterialPixelParameters();
+	FPixelMaterialInputs PixelMaterialInputs;
+
+	float2 ScreenUV = InUV;
+
+#if NUM_MATERIAL_TEXCOORDS
+	for(int CoordinateIndex = 0;CoordinateIndex < NUM_MATERIAL_TEXCOORDS;CoordinateIndex++)
+	{
+		Parameters.TexCoords[CoordinateIndex] = ScreenUV;
+	}
+#endif
+
+	Parameters.VertexColor = 1;
+
+	// fill out other related material parameters
+	CalcMaterialParametersPost(Parameters, PixelMaterialInputs, SvPosition, true);
+
+	// Grab emissive colour as output
+	half3 EmissiveColor = GetMaterialEmissive(PixelMaterialInputs);
+	half4 FullSceneColor = half4(EmissiveColor, Parameters.BackupSceneColorAlpha);
+
+#if POST_PROCESS_MATERIAL_BEFORE_TONEMAP
+#if OUTPUT_GAMMA_SPACE
+	FullSceneColor.rgb = sqrt(FullSceneColor.rgb);
+#else
+	FullSceneColor = Encode32BPPHDR(FullSceneColor, SvPosition);
+#endif
+#endif
+	OutColor = FullSceneColor;
+}
+#endif //(FEATURE_LEVEL > FEATURE_LEVEL_ES3_1)

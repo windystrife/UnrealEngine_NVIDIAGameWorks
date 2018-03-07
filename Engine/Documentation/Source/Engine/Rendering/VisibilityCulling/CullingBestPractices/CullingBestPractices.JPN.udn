@@ -1,0 +1,91 @@
+﻿INTSourceChangeList:3108692
+Availability:Docs
+Title:Visibility Culling のベスト プラクティス
+Crumbs: %ROOT%, Engine, 
+Description:Visibility Culling のストラテジーとベスト プラクティス
+Version:4.13
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Rendering/VisibilityCulling:title%]()
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/VisibilityCulling:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/VisibilityCulling:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/VisibilityCulling]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/VisibilityCulling:title%]()
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/VisibilityCulling:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/VisibilityCulling:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/VisibilityCulling]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[TOC(start:2 end:2)]
+
+
+
+ゲームで Visibility Culling を作成および使用するためのグッドプラクティスをいくつか紹介します。 
+
+## Large View Distances
+
+Large View Distances は、レンダリングが必要なアクタ数のために、パフォーマンスに影響を与える可能性があります。こういった Large View Distances を大きなオクルーダでブロックすれば、レンダリングされてしまう可能性のあるアクタをブロックすることができます。
+これによりチェックするアクタ数が少なくなるため、GPU へ送らなければならないクエリ数を減らすことができます。同様に、チェックおよびレンダリングするアクタ数が減れば、パフォーマンスも良くなります。
+
+* 可能な限り、大きいオクルーダを使います。 
+* 小さなアクタは、例えビューからオクルードされていても、それが遠くで見えずらい場合は、Cull Distance Volumes を使って取り除きます。
+* Translucent アクタから取得したオーバードローはオクルードされないので、量を制限します。
+
+## GPU クエリによる "ポッピング" / Lag
+
+GPU から 1 フレーム遅れて読み取られるので、視錐台とハードウェア オクルージョン クエリに Visibility Culling を使うとこの問題がよく発生します。プレイヤー カメラを急速に切り替える、もしくは明るい照明の前の領域を暗く照らそうとすると、 
+よく分かります。 
+
+* 別のジオメトリを使って、このアーティファクトを隠します。洞窟や、暗い場所で外が明るい場合、これらの構成要素のちょうど外側に収まる大きなオクルーダ メッシュを使って、ポッピングの部分を隠し、アーティファクトを目立たせるライトをブロックします。
+* 問題のビヘイビアを発生させているアクタの Bounds Scale を増やします。 
+* 小さい構成要素を組み立てなくて済むような方法でジオメトリをビルドします。ウォール、フロア、天井に特に当てはまります。
+
+##アセットの構築
+
+ゲームのジオメトリを作成する場合、ジオメトリをモジュラーに分割しておくと、デザインがしやすく、また再利用もできます。ただし、あまりに小さい要素で大きなジオメトリを作ろうとすると、 
+デザイン プロセスで非常に多くのモジュラーができてしまう可能性があります。そこで、各アクタの可視性ステートをチェックしておく必要があります。ゲーム デザインにぴったりのバランスを見つけ出し、
+ベストパフォーマンスを引き出すような最適化を行うことが重要です。可視性チェックに必要なクエリ数の削減が最適化には必須であり、「ポッピング」が起こる確率も減らしやすくなります。 
+
+* 構造的なサーフェイスに対してレベルを作る時は、小さな構成要素にたくさん分割せずに大きいジオメトリを使います。単一のアクタをテストするよりも、複数の小さなアクタをテストする方が GPU への負荷は大きくなります。
+* メッシュ構築を検討する際に、アクタの "ポッピング" を減らします。
+
+
+## Occlusion Culling と Distance Culling の負荷を考慮する
+
+オクルージョンと Visibility Culling メソッドは GPU クエリを要求するため、Distance Culling よりも高負荷です。従って、そのシーンのある場所から別のアクタでオクルードされていても、 
+遠くのものには Cull Distance Volumes を設定すると良いでしょう。
+
+* Cull Distance Volumes を活用して、Occlusion Culling 負荷を削減します。
+* Distance Culling または Occlusion Culling に依存するのではなく、できる限りレベルをストリームアウトします。
+* `Stat Initviews` コマンドを使って、常にパフォーマンス バランスを確認します。
+
+* セットアップ方法については、以下の [レベル ストリーミング](Engine/LevelStreaming) セクションをご覧ください！
+

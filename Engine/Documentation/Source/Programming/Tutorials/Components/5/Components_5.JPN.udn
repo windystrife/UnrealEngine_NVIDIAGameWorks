@@ -1,0 +1,264 @@
+﻿Availability:Public
+Title:5.Playing in Editor （PIE）
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/Components
+Description:エディタ再生によるコードのテスト
+version:4.9
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[前のステップ](Programming\Tutorials\Components\4 "%Programming\Tutorials\Components\4:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[](Programming\Tutorials\Components\)
+	[/PARAM]
+	[PARAM:next]
+		[次のステップ](Programming\Tutorials\Components\6 "%Programming\Tutorials\Components\6:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+1. **アンリアルエディタ** で **Compile (コンパイル) ** ボタンを押して変更したコードをロードします。
+
+	![](CompileFromEditor.png)
+
+1. ワールドに **CollidingPawn** のインスタンスをドロップします。**コンテンツ ブラウザ** の "C++ Classes/(Our Project Name)/CollidingPawn" の配下にクラスがあります。
+
+	![](ClassInContentBrowser.png)
+
+	![](LevelEditorBeforePlay.png)
+
+1. **Play (再生)** を押すと、スフィア (球体) は WASD キーで移動、マウス操作で回転、そして例にあるテーブルやチェアやワールドに配置したいその他の物理オブジェクトなど、ワールドオブジェクトと平行に「衝突してスライド」します。スペースバーで球体に火を付ける (または火を消す) こともできます！
+
+	![](CollidingAndOnFire.png)
+
+----
+
+**アンリアル エンジン 4** は幅広い用途向けの **コンポーネント** を提供しています。これまでは一般的なコンポーネントをいくつか紹介しただけですが、その他にもたくさんのコンポーネントがあります。ビルトイン コンポーネントを試してみたり、独自のコンポーネントを記述してみてください！柔軟性に優れたパワフルな機能を提供するだけでなく、プロジェクトコードの管理と再利用に役立ちます。
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    code
+    [/PARAMLITERAL]
+    [PARAM:heading]
+	    完成コード
+    [/PARAM]
+    [PARAM:content]
+		**CollidingPawn.h**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "GameFramework/Pawn.h"
+			#include "CollidingPawn.generated.h"
+
+			UCLASS()
+			class HOWTO_COMPONENTS_API ACollidingPawn : public APawn
+			{
+				GENERATED_BODY()
+
+			public:
+				// このポーンのプロパティのデフォルト値を設定
+				ACollidingPawn();
+
+				// ゲーム開始時またはスポーン時に呼ばれます。
+				virtual void BeginPlay() override;
+				// フレーム毎に呼ばれます。
+				virtual void Tick( float DeltaSeconds ) override;
+
+				// 機能と入力をバインドするために呼ばれます。
+				virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override;
+
+				UParticleSystemComponent* OurParticleSystem;
+				class UCollidingPawnMovementComponent* OurMovementComponent;
+
+				virtual UPawnMovementComponent* GetMovementComponent() const override;
+
+				void MoveForward(float AxisValue);
+				void MoveRight(float AxisValue);
+				void Turn(float AxisValue);
+				void ParticleToggle();
+			};
+
+		**CollidingPawn.cpp**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_Components.h"
+			#include "CollidingPawn.h"
+			#include "CollidingPawnMovementComponent.h"
+
+			// デフォルト値を設定
+			ACollidingPawn::ACollidingPawn()
+			{
+ 				// フレーム毎に Tick() を呼び出すには、このポーンを設定します。必要がなければパフォーマンスを向上させるためにオフにすることができます。
+				PrimaryActorTick.bCanEverTick = true;
+
+				// ルート コンポーネントは物理に反応するスフィア (球体) になります。
+				USphereComponent* SphereComponent = CreateDefaultSubobject<USphereComponent>(TEXT("RootComponent"));
+				RootComponent = SphereComponent;
+				SphereComponent->InitSphereRadius(40.0f);
+				SphereComponent->SetCollisionProfileName(TEXT("Pawn"));
+
+				// 球体の位置が分かるようにメッシュ コンポーネントを作成して配置します
+				UStaticMeshComponent* SphereVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualRepresentation"));
+				SphereVisual->AttachTo(RootComponent);
+				static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereVisualAsset(TEXT("/Game/StarterContent/Shapes/Shape_Sphere.Shape_Sphere"));
+				if (SphereVisualAsset.Succeeded())
+				{
+					SphereVisual->SetStaticMesh(SphereVisualAsset.Object);
+					SphereVisual->SetRelativeLocation(FVector(0.0f, 0.0f, -40.0f));
+					SphereVisual->SetWorldScale3D(FVector(0.8f));
+				}
+
+				// アクティブまたは非アクティブにできるパーティクル システムを作成
+				OurParticleSystem = CreateDefaultSubobject<UParticleSystemComponent>(TEXT("MovementParticles"));
+				OurParticleSystem->AttachTo(SphereVisual);
+				OurParticleSystem->bAutoActivate = false;
+				OurParticleSystem->SetRelativeLocation(FVector(-20.0f, 0.0f, 20.0f));
+				static ConstructorHelpers::FObjectFinder<UParticleSystem> ParticleAsset(TEXT("/Game/StarterContent/Particles/P_Fire.P_Fire"));
+				if (ParticleAsset.Succeeded())
+				{
+					OurParticleSystem->SetTemplate(ParticleAsset.Object);
+				}
+
+				// カメラにスムーズで自然な動きを与えるためにスプリング アームを使用
+				USpringArmComponent* SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraAttachmentArm"));
+				SpringArm->AttachTo(RootComponent);
+				SpringArm->RelativeRotation = FRotator(-45.f, 0.f, 0.f);
+				SpringArm->TargetArmLength = 400.0f;
+				SpringArm->bEnableCameraLag = true;
+				SpringArm->CameraLagSpeed = 3.0f;
+
+				// カメラを作成してスプリング アームに親子付け
+				UCameraComponent* Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("ActualCamera"));
+				Camera->AttachTo(SpringArm, USpringArmComponent::SocketName);
+
+				// デフォルト プレイヤーをコントロール
+				AutoPossessPlayer = EAutoReceiveInput::Player0;
+
+				// Movement コンポーネントのインスタンスを作成し、ルート コンポーネントの更新を指示します。
+				OurMovementComponent = CreateDefaultSubobject<UCollidingPawnMovementComponent>(TEXT("CustomMovementComponent"));
+				OurMovementComponent->UpdatedComponent = RootComponent;
+			}
+
+			// ゲーム開始時またはスポーン時に呼ばれます。
+			void ACollidingPawn::BeginPlay()
+			{
+				Super::BeginPlay();
+	}
+
+			// フレーム毎に呼ばれます。
+			void ACollidingPawn::Tick( float DeltaTime )
+			{
+				Super::Tick( DeltaTime );
+
+			}
+
+			// 機能と入力をバインドするために呼ばれます。
+			void ACollidingPawn::SetupPlayerInputComponent(class UInputComponent* InputComponent)
+			{
+				Super::SetupPlayerInputComponent(InputComponent);
+
+				InputComponent->BindAction("ParticleToggle", IE_Pressed, this, &ACollidingPawn::ParticleToggle);
+
+				InputComponent->BindAxis("MoveForward", this, &ACollidingPawn::MoveForward);
+				InputComponent->BindAxis("MoveRight", this, &ACollidingPawn::MoveRight);
+				InputComponent->BindAxis("Turn", this, &ACollidingPawn::Turn);
+			}
+
+			UPawnMovementComponent* ACollidingPawn::GetMovementComponent() const
+			{
+				return OurMovementComponent;
+			}
+
+			void ACollidingPawn::MoveForward(float AxisValue)
+			{
+				if (OurMovementComponent && (OurMovementComponent->UpdatedComponent == RootComponent))
+				{
+					OurMovementComponent->AddInputVector(GetActorForwardVector() * AxisValue);
+				}
+			}
+
+			void ACollidingPawn::MoveRight(float AxisValue)
+			{
+				if (OurMovementComponent && (OurMovementComponent->UpdatedComponent == RootComponent))
+				{
+					OurMovementComponent->AddInputVector(GetActorRightVector() * AxisValue);
+				}
+			}
+
+			void ACollidingPawn::Turn(float AxisValue)
+			{
+				FRotator NewRotation = GetActorRotation();
+				NewRotation.Yaw += AxisValue;
+				SetActorRotation(NewRotation);
+			}
+
+			void ACollidingPawn::ParticleToggle()
+			{
+				if (OurParticleSystem && OurParticleSystem->Template)
+				{
+					OurParticleSystem->ToggleActive();
+				}
+			}
+
+		**CollidingPawnMovementComponent.h**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "GameFramework/PawnMovementComponent.h"
+			#include "CollidingPawnMovementComponent.generated.h"
+
+			/**
+			 * 
+			 */
+			UCLASS()
+			class HOWTO_COMPONENTS_API UCollidingPawnMovementComponent : public UPawnMovementComponent
+			{
+				GENERATED_BODY()
+
+			public:
+				virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction *ThisTickFunction) override;	
+			};
+
+		**CollidingPawnMovementComponent.cpp**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_Components.h"
+			#include "CollidingPawnMovementComponent.h"
+
+			void UCollidingPawnMovementComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction *ThisTickFunction)
+			{
+				Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+				// 全てがまだ有効であり、移動可能であることを確認
+				if (!PawnOwner || !UpdatedComponent || ShouldSkipUpdate(DeltaTime))
+				{
+					return;
+				}
+
+				// ACollidingPawn::Tick で設定した移動ベクターを Get (その後クリア) 
+				FVector DesiredMovementThisFrame = ConsumeInputVector().GetClampedToMaxSize(1.0f) * DeltaTime * 150.0f;
+				if (!DesiredMovementThisFrame.IsNearlyZero())
+				{
+					FHitResult Hit;
+					SafeMoveUpdatedComponent(DesiredMovementThisFrame, UpdatedComponent->GetComponentRotation(), true, Hit);
+
+					//何かとぶつかった場合は、ぶつかった対象物に沿ってスライド
+					if (Hit.IsValidBlockingHit())
+					{
+						SlideAlongSurface(DesiredMovementThisFrame, 1.f - Hit.Time, Hit.Normal, Hit);
+					}
+				}
+			};
+
+
+    [/PARAM]
+[/OBJECT]
+
+%Steps%

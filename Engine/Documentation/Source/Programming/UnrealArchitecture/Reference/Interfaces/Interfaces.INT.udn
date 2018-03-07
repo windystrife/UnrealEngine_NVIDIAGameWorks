@@ -1,0 +1,101 @@
+Availability:Public
+Title: Interfaces
+Crumbs:
+Description:Reference to creating and implementing interfaces.
+Tags: Programming
+Version: 4.14
+Parent:Programming/UnrealArchitecture/Reference
+Order:
+SkillLevel:Intermediate
+Type:overview
+
+[TOC(start:2)]
+
+
+Interface classes are useful for ensuring that a set of (potentially) unrelated classes implement a common set of functions. This is very useful in cases where some game functionality may be shared by large, complex classes, that are otherwise dissimilar. For example, a game might have a system whereby entering a trigger volume can activate traps, alert enemies, or award points to the player. This might be implemented by a "ReactToTrigger" function on traps, enemies, and point-awarders. However, traps may be derived from `AActor`, enemies from a specialized `APawn` or `ACharacter` subclass, and point-awards from `UDataAsset`. All of these classes need shared functionality, but have no common ancestor other than `UObject`. In this case, an interface is recommended.
+
+## Interface Declaration
+
+Declaring an interface class is similar to declaring a normal Unreal class, but with two main differences. First, an interface class uses the UINTERFACE macro instead of the UCLASS macro, and inherits from `UInterface` instead of `UObject` directly.
+
+	UINTERFACE([specifier, specifier, ...], [meta(key=value, key=value, ...)])
+	class UClassName : public UInterface
+	{
+		GENERATED_BODY()
+	};
+
+Second, the UINTERFACE class is not the actual interface; it is an empty class that exists only for visibility to Unreal Engine's reflection system. The actual interface that will be inherited by other classes must have the same class name, but with the initial "U" changed to an "I".
+
+In your .h file (e.g. `ReactToTriggerInterface.h`):
+
+    #pragma once
+
+    #include "ReactToTriggerInterface.generated.h"
+
+    UINTERFACE(Blueprintable)
+    class UReactToTriggerInterface : public UInterface
+    {
+        GENERATED_BODY()
+    };
+
+    class IReactToTriggerInterface
+    {    
+		GENERATED_BODY()
+
+    public:
+		/** React to a trigger volume activating this object. Return true if the reaction succeeds. */
+        UFUNCTION(BlueprintCallable, BlueprintImplementableEvent, Category="Trigger Reaction")
+        bool ReactToTrigger() const;
+    };
+
+Functions can be written directly in the .h file, and this is commonly done when a function does nothing by default, or has a trivial behavior like returning false, zero, an empty string (or something similar). More complex functions can be written in the .cpp file to reduce compile times and pure virtual functions are supported. Although our sample function is trivial and could reasonably be written in the .h file, we'll write it in the .cpp file. Your .cpp file (e.g. `ReactToTriggerInterface.cpp`) should now contain this:
+
+    #include "ReactToTriggerInterface.h"
+	
+	bool IReactToTriggerInterface::ReactToTrigger() const
+	{
+		return false;
+	}
+
+The "U-prefixed" class needs no constructor or any other functions, while the "I-prefixed" class will contain all interface functions and is the one that will actually be inherited by your other classes.
+
+[REGION:NOTE]The `Blueprintable` specifier is required if you want to allow Blueprints to implement this interface.[/REGION:NOTE]
+
+### Interface Specifiers
+
+[INCLUDE:Programming/UnrealArchitecture/Reference/Interfaces/Specifiers#main(offset:1)]
+
+## Implementing Your Interface in C++
+
+To use your interface in a new class, simply inherit from your "I-prefixed" interface class (in addition to whatever `UObject`-based class you are using).
+
+    class ATrap : public AActor, public IReactToTriggerInterface
+    {
+        GENERATED_BODY()
+
+    public:
+        virtual bool ReactToTrigger() const override;
+    };
+
+## Determining If A Given Class Implements Your Interface
+
+For compatability with both C++ and Blueprint classes that implement your interface, use either of the following functions:
+
+    bool bIsImplemented = OriginalObject->GetClass()->ImplementsInterface(UReactToTriggerInterface::StaticClass()); // bIsImplemented will be true if OriginalObject implements UReactToTriggerInterface.
+	IReactToTriggerInterface* ReactingObject = Cast<IReactToTriggerInterface>(OriginalObject); // ReactingObject will be non-null if OriginalObject implements UReactToTriggerInterface.
+
+[REGION:note]
+Attempting to use `Cast` on the "U-prefixed" class will fail, while the `StaticClass` function is not implemented in the "I-prefixed" class and will not compile.
+[/REGION]
+
+## Casting To Other Unreal Types
+
+Unreal Engine's casting system supports casting from one interface to another, or from an interface to an Unreal type, where appropriate.
+
+	IReactToTriggerInterface* ReactingObject = Cast<IReactToTriggerInterface>(OriginalObject); // ReactingObject will be non-null if the interface is implemented.
+	ISomeOtherInterface* DifferentInterface = Cast<ISomeOtherInterface>(ReactingObject); // DifferentInterface will be non-null if ReactingObject is non-null and also implements ISomeOtherInterface.
+	AActor* Actor = Cast<AActor>(ReactingObject); // Actor will be non-null if ReactingObject is non-null and OriginalObject is an AActor or AActor-derived class.
+
+## Blueprint Implementable Classes
+
+If you want Blueprints to be able to implement this interface, you must use the `Blueprintable` metadata specifier. Every interface function that your Blueprint class is intended to override, must be a `BlueprintNativeEvent` or a `BlueprintImplementableEvent`. Functions marked as `BlueprintCallable` will still be able to be called, but not overridden. All other functions will be inaccessible from Blueprints.

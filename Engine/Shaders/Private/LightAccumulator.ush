@@ -1,0 +1,103 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	LightAccumulator.usf: FLightAccumulator "class" and it's methods, useful for screen space subsurface scattering
+=============================================================================*/
+
+#ifndef __LIGHTACCUMULATOR_COMMON__
+#define __LIGHTACCUMULATOR_COMMON__
+
+// set by c++, not set for LPV
+// 0 / 1
+#ifndef VISUALIZE_LIGHT_CULLING
+	#define VISUALIZE_LIGHT_CULLING 0
+#endif
+ 
+// for ScreenSpaceSubsurfaceScattering
+// 0 : fastest (speculars leak in SSSSS). Forces checkerboard rendering for subsurface profile
+// 1 : luminance specular - works well (needs 64bit SceneColor, stores luminance of specular in alpha, can be optimized further in LightAccumulator_Add() ) 
+//	   NOTE: Dependent on View.bCheckerboardSubsurfaceProfileRendering - if this is off, we fall back to mode 0
+// 2 : colored specular works well (best, requires another RT for light accumulation)
+#define SUBSURFACE_CHANNEL_MODE 1
+
+struct FLightAccumulator
+{
+	float3 TotalLight;
+
+	// only actually used SUBSURFACE_CHANNEL_MODE == 1
+	// assumed to be compiled out otherwise (not compiled out with #if so we can use if() instead of #if for better readability and compiler error checking)
+	// input for ScreenSpaceSubsurfaceScattering
+	float ScatterableLightLuma;
+
+	// only actually used SUBSURFACE_CHANNEL_MODE == 2
+	// assumed to be compiled out otherwise (not compiled out with #if so we can use if() instead of #if for better readability and compiler error checking)
+	// input for ScreenSpaceSubsurfaceScattering
+	float3 ScatterableLight;
+
+	// only used for development (not compiled out with #if so we can use if() instead of #if for better readability and compiler error checking)
+	// assumed to be compiled out otherwise
+	float EstimatedCost;
+};
+
+//
+// accumulate light, can be called multiple times
+void LightAccumulator_Add(inout FLightAccumulator In, float3 TotalLight, float3 ScatterableLight, float3 CommonMultiplier, const bool bNeedsSeparateSubsurfaceLightAccumulation)
+{
+	// 3 mad
+	In.TotalLight += TotalLight * CommonMultiplier;
+
+	// This should ideally be evaluated statically outside of this function to avoid the branch
+	if (bNeedsSeparateSubsurfaceLightAccumulation)
+	{
+		if (SUBSURFACE_CHANNEL_MODE == 1)
+		{
+			if (View.bCheckerboardSubsurfaceProfileRendering == 0)
+			{
+				In.ScatterableLightLuma += Luminance(ScatterableLight * CommonMultiplier);
+			}
+		}
+		else if (SUBSURFACE_CHANNEL_MODE == 2)
+		{
+			// 3 mad
+			In.ScatterableLight += ScatterableLight * CommonMultiplier;
+		}
+	}
+}
+
+//
+// compute final value to store in the MRT0
+// @retrun RGB:SceneColor Specular and Diffuse, A:Non Specular SceneColor Luminance
+float4 LightAccumulator_GetResult(FLightAccumulator In)
+{
+	float4 Ret;
+
+	if (VISUALIZE_LIGHT_CULLING == 1)
+	{
+		// a soft gradient from dark red to bright white, can be changed to be different
+		Ret = 0.1f * float4(1.0f, 0.25f, 0.075f, 0) * In.EstimatedCost;
+	}
+	else
+	{
+		Ret = float4(In.TotalLight, 0);
+
+		if (SUBSURFACE_CHANNEL_MODE == 1 )
+		{
+			if (View.bCheckerboardSubsurfaceProfileRendering == 0)
+			{
+				// RGB accumulated RGB HDR color, A: specular luminance for screenspace subsurface scattering
+				Ret.a = In.ScatterableLightLuma;
+			}
+		}
+		else if (SUBSURFACE_CHANNEL_MODE == 2)
+		{
+			// RGB accumulated RGB HDR color, A: view independent (diffuse) luminance for screenspace subsurface scattering
+			// 3 add,  1 mul, 2 mad, can be optimized to use 2 less temporary during accumulation and remove the 3 add
+			Ret.a = Luminance(In.ScatterableLight);
+			// todo, need second MRT for SUBSURFACE_CHANNEL_MODE==2
+		}
+	}
+
+	return Ret;
+}
+
+#endif // __LIGHTACCUMULATOR_COMMON__

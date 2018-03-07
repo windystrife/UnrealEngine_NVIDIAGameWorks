@@ -1,0 +1,503 @@
+//-----------------------------------------------------------------------------
+// File:		LPVPropagation.usf
+//
+// Summary:		Compute shader which handles LPV propagation
+//
+// Created:		2013-03-01
+//
+// Author:		mailto:benwood@microsoft.com
+//
+//				Copyright (C) Microsoft. All rights reserved. 
+//-----------------------------------------------------------------------------
+
+/*------------------------------------------------------------------------------  
+	Compile time parameters: 
+------------------------------------------------------------------------------*/
+ 
+#include "Common.ush"  
+#include "LPVWriteCommon.ush"
+#include "LPVGeometryVolumeCommon.ush"
+#include "LPVPacking.ush"
+
+//-------------------------------------------------------------------------------------------------
+ 
+#define PROPAGATION					1
+
+// Reduce register overhead by temporarily storing values in LDS
+#define LDS_OPTIMISATION			0
+#define LDS_PACKED 					0
+#define NORMALS_LOOKUP 				1
+
+#define LDS_READ_CACHE				1
+
+// Should the GV block AO?
+#define LPV_SECONDARY_OCCLUSION_AO  0
+
+#if REFINE_OVER_TIME
+  #define PROPAGATE_WEIGHT 0.008  
+#else
+  #define PROPAGATE_WEIGHT 0.08
+#endif 
+ 
+// LPV_MULTIPLE_BOUNCES_ENABLED only works if LPV_SECONDARY_OCCLUSION and LPV_MULTIPLE_BOUNCES are enabled
+#if ( !LPV_MULTIPLE_BOUNCES || !LPV_SECONDARY_OCCLUSION ) && LPV_MULTIPLE_BOUNCES_ENABLED
+  #undef LPV_MULTIPLE_BOUNCES_ENABLED
+  #define LPV_MULTIPLE_BOUNCES_ENABLED 0
+#endif
+
+//-------------------------------------------------------------------------------------------------
+
+#define L1 1.0f
+#define L2 0.7071067f
+#define L3 0.5773502f
+
+//-------------------------------------------------------------------------------------------------
+
+#if LDS_READ_CACHE
+
+uint GetLDSCacheIndex( int3 ldsCacheOrigin, int3 gridAddress ) 
+{
+	int3 offset3 = gridAddress-ldsCacheOrigin;
+	return uint( offset3.x + offset3.y*6 + offset3.z*6*6 );
+}
+
+groupshared LPVCellPacked LDSCachedLPV[6*6*6]; //56 bytes per element
+
+#endif
+
+#if LDS_OPTIMISATION && LPV_SECONDARY_OCCLUSION
+
+//-------------------------------------------------------------------------------------------------
+
+// TODO: Actually share some data between threads!
+
+//-------------------------------------------------------------------------------------------------
+
+#if LPV_MULTIPLE_BOUNCES_ENABLED 
+
+groupshared uint LDSCachedGV[64][26];
+
+void ClearWeights( uint groupIndex )
+{
+}
+
+void StoreWeightAndColor( uint groupIndex, uint neighbourIndex, float weight, float3 color )
+{
+	uint4 intOut = uint4( saturate( float4( weight, color ) ) * 255.0f );
+	uint intPacked = ( (uint)intOut.x ) >>  0 |					
+					 ( (uint)intOut.y ) >>  8 |
+					 ( (uint)intOut.z ) >> 16 |
+  					 ( (uint)intOut.w ) >> 24;
+	LDSCachedGV[groupIndex][neighbourIndex] = intPacked;
+}
+
+float GetWeight( uint groupIndex, uint neighbourIndex )
+{
+	return float(LDSCachedGV[groupIndex][neighbourIndex] & 0x000000ff )/255.0f;
+}
+
+float3 GetColor( uint groupIndex, uint neighbourIndex )
+{
+	uint colourPacked = LDSCachedGV[groupIndex][neighbourIndex];
+	float3 col;
+	col.r = float( ( colourPacked & 0x0000ff00 ) >> 8  );
+	col.g = float( ( colourPacked & 0x00ff0000 ) >> 16 );
+	col.b = float( ( colourPacked & 0xff000000 ) >> 24 );
+	return col / 255.0f;
+}
+
+
+#else //!LPV_MULTIPLE_BOUNCES_ENABLED 
+
+#if LDS_PACKED
+groupshared uint LDSCachedGV[64][7];
+
+void ClearWeights( uint groupIndex )
+{
+	[unroll]
+	for ( int i=0; i<7; i++ )
+	{
+		LDSCachedGV[groupIndex][i] = 0;
+	}
+}
+
+void StoreWeight( uint groupIndex, uint neighbourIndex, float weight )
+{
+	uint uintIndex  = neighbourIndex /4;//>> 2;
+	uint bitOffset  = ( neighbourIndex % 4 ) * 8;//( neighbourIndex & 0x3 ) << 3;
+	uint unpacked = uint(saturate(weight)*255.0f);
+	uint packed = unpacked << bitOffset;
+	packed = packed | LDSCachedGV[groupIndex][uintIndex];
+	LDSCachedGV[groupIndex][uintIndex] = packed;
+}
+
+float GetWeight( uint groupIndex, uint neighbourIndex )
+{
+	uint uintIndex  = neighbourIndex /4;//>> 2;
+	uint bitOffset  = ( neighbourIndex % 4 ) * 8;//( neighbourIndex & 0x3 ) << 3;
+	uint packed = LDSCachedGV[groupIndex][uintIndex];
+	uint unpacked = ( packed >> bitOffset ) & 0xff;
+	return float(unpacked)/255.0f;
+}
+#else
+groupshared uint LDSCachedGV[64][26];
+
+void ClearWeights( uint groupIndex )
+{
+}
+void StoreWeight( uint groupIndex, uint neighbourIndex, float weight )
+{
+	LDSCachedGV[groupIndex][neighbourIndex] = uint( saturate( weight ) * 255.0f );
+}
+
+float GetWeight( uint groupIndex, uint neighbourIndex )
+{
+	return float(LDSCachedGV[groupIndex][neighbourIndex])/255.0f;
+}
+
+#endif // LDS_PACKED
+
+#endif // !LPV_MULTIPLE_BOUNCES_ENABLED 
+
+
+#endif
+
+//-------------------------------------------------------------------------------------------------
+
+int3 GetDirectionFromIndex( const uint index )
+{
+	uint idx = index<13 ? index : index+1;
+	return int3( idx/9,	(idx/3) % 3,  idx % 3 ) - int3(1,1,1);
+}
+
+float3 GetNormalisedDirectionFromIndex( const uint index )
+{
+	uint idx = index<13 ? index : index+1;
+	return normalize( float3( idx/9,	(idx/3) % 3,  idx % 3 )- float3(1,1,1) );
+}
+
+
+GeometryVolumeEntry ReadGvCell_Pos( int3 pos ) // TODO: move this to GvCommon
+{
+	pos = max( min( int3(31,31,31), pos ), int3(0,0,0) );
+	return ReadGvCell( GetGridAddress( pos ) );
+}
+
+#if LPV_SECONDARY_OCCLUSION
+void GetGeometryVolumeCellWeights( int3 gridPos, 
+#if LDS_OPTIMISATION
+								   const uint groupIndex,
+#else
+								   out float weights[26], 
+#if LPV_MULTIPLE_BOUNCES_ENABLED  
+								   out float3 colors[26], 
+#endif
+#endif
+								   const float3 directions[26] )
+{
+	// Read the surrounding 8 geometry volume cells
+	GeometryVolumeEntry gvCells[8];
+
+#if LPV_MULTIPLE_BOUNCES_ENABLED && !LDS_OPTIMISATION
+	[unroll]
+	for ( int i=0; i<26; i++ ) colors[i] = 1.0f;
+#endif
+#if LDS_OPTIMISATION
+	ClearWeights( groupIndex );
+#endif
+
+	// 8 1-tap weights (corners)
+	{
+		const int destIndex[8] = { 0, 17, 6, 23, 2, 19, 8, 25 };
+
+#if PS4_PROFILE
+		[unroll]
+#endif
+		for ( int i=0; i<8; i++ )
+		{
+#if NORMALS_LOOKUP
+			const float3 direction = directions[ destIndex[i] ];
+#else
+			const float3 direction = GetNormalisedDirectionFromIndex( destIndex[i] );//directions[ destIndex[i] ];
+#endif
+
+			gvCells[i] = ReadGvCell_Pos( gridPos + int3( i&1,i&2,i&4 ) );
+			float weight = 1.0f-saturate( SHLookupGeometryVolume( gvCells[i], direction ) * LpvWrite.SecondaryOcclusionStrength );
+#if LDS_OPTIMISATION
+ #if !LPV_MULTIPLE_BOUNCES_ENABLED
+			StoreWeight( groupIndex, destIndex[i], weight );
+ #endif
+#else
+			weights[ destIndex[i] ] = weight;
+#endif
+
+#if LPV_MULTIPLE_BOUNCES_ENABLED 
+			float3 color = gvCells[i].color;
+#if LDS_OPTIMISATION
+			StoreWeightAndColor( groupIndex, destIndex[i], weight, color );
+#else
+			colors[ destIndex[i] ] = color;
+#endif
+#endif
+		}
+	}
+	// 12 2-tap weights (edges)
+	{
+		const int destIndex[12]      = {  1,	 3,	    5,	   7,	  9,	 11,	14,    16,    18,    20,    22,    24 };
+		const int sourceIndex[12][2] = { {0,4}, {0,2}, {4,6}, {2,6}, {0,1}, {4,5}, {2,3}, {6,7}, {1,5}, {1,3}, {5,7}, {3,7} };
+
+#if PS4_PROFILE
+		[unroll]
+#endif
+		for ( int i=0; i<12; i++ )
+		{
+#if NORMALS_LOOKUP
+			const float3 direction = directions[ destIndex[i] ];
+#else
+			const float3 direction = GetNormalisedDirectionFromIndex( destIndex[i] );
+#endif
+			float cellWeight = SHLookupGeometryVolume( gvCells[ sourceIndex[i][0] ], direction );
+			cellWeight		+= SHLookupGeometryVolume( gvCells[ sourceIndex[i][1] ], direction );
+			float weight = 1.0f-saturate( cellWeight * 0.5f * LpvWrite.SecondaryOcclusionStrength );
+#if LDS_OPTIMISATION
+ #if !LPV_MULTIPLE_BOUNCES_ENABLED
+			StoreWeight( groupIndex, destIndex[i], weight );
+ #endif
+#else
+			weights[ destIndex[i] ] = weight;
+#endif
+
+#if LPV_MULTIPLE_BOUNCES_ENABLED 
+			float3 cellColour = gvCells[ sourceIndex[i][0] ].color + gvCells[ sourceIndex[i][1] ].color;
+			float3 color = cellColour * 0.5f;
+#if LDS_OPTIMISATION
+			StoreWeightAndColor( groupIndex, destIndex[i], weight, color );
+#else
+			colors[ destIndex[i] ] = color;
+#endif
+#endif
+		} 
+	}
+	// 6 4-tap weights (faces)
+	{
+		const int destIndex[6]      = {  4,         10,        12,        13,        15,        21 };
+		const int sourceIndex[6][4] = { {0,2,4,6}, {0,1,4,5}, {0,1,2,3}, {4,5,6,7}, {2,3,6,7}, {1,3,5,7} };
+
+#if PS4_PROFILE
+		[unroll]
+#endif
+		for ( int i=0; i<6; i++ )
+		{
+#if NORMALS_LOOKUP
+			const float3 direction = directions[ destIndex[i] ];
+#else
+			const float3 direction = GetNormalisedDirectionFromIndex( destIndex[i] );
+#endif
+			float cellWeight = SHLookupGeometryVolume( gvCells[ sourceIndex[i][0] ], direction ) * LpvWrite.SecondaryOcclusionStrength;
+			cellWeight		+= SHLookupGeometryVolume( gvCells[ sourceIndex[i][1] ], direction ) * LpvWrite.SecondaryOcclusionStrength;
+			cellWeight		+= SHLookupGeometryVolume( gvCells[ sourceIndex[i][2] ], direction ) * LpvWrite.SecondaryOcclusionStrength;
+			cellWeight		+= SHLookupGeometryVolume( gvCells[ sourceIndex[i][3] ], direction ) * LpvWrite.SecondaryOcclusionStrength;
+			float weight = 1.0f-saturate( cellWeight * 0.25f );
+#if LDS_OPTIMISATION
+ #if !LPV_MULTIPLE_BOUNCES_ENABLED
+			StoreWeight( groupIndex, destIndex[i], weight );
+ #endif
+#else
+			weights[ destIndex[i] ] = weight; 
+#endif 
+#if LPV_MULTIPLE_BOUNCES_ENABLED
+			float3 cellColour = gvCells[ sourceIndex[i][0] ].color + gvCells[ sourceIndex[i][1] ].color +
+								gvCells[ sourceIndex[i][2] ].color + gvCells[ sourceIndex[i][3] ].color;
+			float3 color = cellColour * 0.25f;
+#if LDS_OPTIMISATION
+			StoreWeightAndColor( groupIndex, destIndex[i], weight, color );
+#else
+			colors[ destIndex[i] ] = color;
+#endif
+#endif
+		}
+	}
+}
+#endif
+
+
+//-------------------------------------------------------------------------------------------------
+
+[numthreads(4,4,4)]
+void CSPropagate(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint groupIndex : SV_GroupIndex  ) 
+{
+	int index = GetGridAddress( DTid );
+
+	float3 gridPos = float3( DTid );
+
+	const int n=26;
+	const int3 directions[n] = 
+		{	int3(-1,-1,-1 ), int3(-1,-1, 0 ), int3(-1,-1, 1 ), int3(-1, 0,-1 ), int3(-1, 0, 0 ), int3(-1, 0, 1 ), int3(-1, 1,-1 ), int3(-1, 1, 0 ), int3(-1, 1, 1 ),
+			int3( 0,-1,-1 ), int3( 0,-1, 0 ), int3( 0,-1, 1 ), int3( 0, 0,-1 ),                  int3( 0, 0, 1 ), int3( 0, 1,-1 ), int3( 0, 1, 0 ), int3( 0, 1, 1 ),
+			int3( 1,-1,-1 ), int3( 1,-1, 0 ), int3( 1,-1, 1 ), int3( 1, 0,-1 ), int3( 1, 0, 0 ), int3( 1, 0, 1 ), int3( 1, 1,-1 ), int3( 1, 1, 0 ), int3( 1, 1, 1 ) };
+
+	const float3 nDirections[26] = 
+		{	float3(-L3,-L3,-L3 ), float3(-L2,-L2, 0  ), float3(-L3,-L3, L3 ), float3(-L2, 0 ,-L2 ), float3(-L1, 0 , 0  ), float3(-L2, 0 , L2 ), float3(-L3, L3,-L3 ), float3(-L2, L2, 0  ), float3(-L3, L3, L3 ),
+			float3( 0 ,-L2,-L2 ), float3( 0 ,-L1, 0  ), float3( 0 ,-L2, L2 ), float3( 0 , 0 ,-L1 ),						  float3( 0 , 0 , L1 ), float3( 0 , L2,-L2 ), float3( 0 , L1, 0  ), float3( 0 , L2, L2 ),
+			float3( L3,-L3,-L3 ), float3( L2,-L2, 0  ), float3( L3,-L3, L3 ), float3( L2, 0 ,-L2 ), float3( L1, 0 , 0  ), float3( L2, 0 , L2 ), float3( L3, L3,-L3 ), float3( L2, L2, 0  ), float3( L3, L3, L3 ) };
+
+
+	// Get the weights from the geometry volume
+#if LPV_SECONDARY_OCCLUSION
+
+#if LDS_OPTIMISATION
+	GetGeometryVolumeCellWeights( DTid, groupIndex, nDirections );
+#else
+	float gvWeights[n];
+#if LPV_MULTIPLE_BOUNCES_ENABLED 
+	float3 gvColors[n];
+	GetGeometryVolumeCellWeights( DTid, gvWeights, gvColors, nDirections );
+#else
+	GetGeometryVolumeCellWeights( DTid, gvWeights, nDirections );
+#endif
+#endif
+#endif
+
+	// FIXME: Use these weights for energy preserving propagation. For now we just use for AO
+	// These plus the centre add up to 1.0. 
+	// Read the current SH cell
+	LPVCell cell = ReadLpvCell( index );
+
+#if LPV_MULTIPLE_BOUNCES_ENABLED
+	LPVCell originalCell = cell;
+#endif
+
+#if LPV_PROPAGATE_AO 
+
+	const float gaussianWeights[26] = 
+	{
+		0.015625,	0.03125,		0.015625,
+		0.03125,		0.0625,		0.03125,
+		0.015625,	0.03125,		0.015625,
+		
+		0.03125,		0.0625,		0.03125,
+		0.0625,					0.0625,
+		0.03125,		0.0625,		0.03125,
+		
+		0.015625,	0.03125,		0.015625,
+		0.03125,		0.0625,		0.03125,
+		0.015625,	0.03125,		0.015625
+	}; 
+
+	const float centreGaussian = 0.125f;
+	cell.AO *= centreGaussian;
+#endif
+
+#if LDS_READ_CACHE
+#if XB1_PROFILE && 0
+	uint laneID = __XB_GetLaneID();
+	int thread0cellIndex = __XB_ReadLane(index,0); // Read the index at zone0
+	int3 gridPosThread0 = IndexToGridPos(thread0cellIndex);
+#else
+	uint laneID = groupIndex;
+	int3 ldsCacheOrigin = DTid & (~0x3);//(~0x3f);
+	ldsCacheOrigin -= int3(1,1,1);
+#endif
+
+	for (int i=0;i<4;i++)
+	{
+		// Get the cell index,from 0-215 (6x6x6 block). There will be 4 indices per thread (with some duplication)
+		uint cellCacheIndex = laneID*4+i;
+		if ( cellCacheIndex < (6*6*6) )
+		{
+			uint3 offset3;
+			offset3.x = ( cellCacheIndex % 6 );
+			offset3.y = ( cellCacheIndex / 6 ) %  6;
+			offset3.z = cellCacheIndex / ( 6 * 6 );
+			int3 cachedGridPos = ldsCacheOrigin + int3(offset3);
+			LPVCell CachedThreadCell = ReadLpvCell( GetGridAddress(cachedGridPos) );
+ 
+			LDSCachedLPV[cellCacheIndex] = PackLPVCell( CachedThreadCell );
+		}
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+#endif
+
+
+#if XBOXONE_PROFILE
+	[loop]
+#endif
+	for ( int i=0; i<n; i++ )
+	{
+#if NORMALS_LOOKUP
+		int3 direction=directions[i];
+#else
+		int3 direction=GetDirectionFromIndex(i);
+#endif
+
+		int3 pos = DTid+direction;
+		pos = max(pos,float3(0,0,0) );
+		pos = min(pos,float3(31,31,31) );
+
+		int nIndex = GetGridAddress( pos );
+
+#if LDS_READ_CACHE
+		uint ldsIndex = GetLDSCacheIndex( ldsCacheOrigin, pos );
+		LPVCell nCell = UnpackLPVCell( LDSCachedLPV[ldsIndex] );
+
+#else
+		LPVCell nCell = ReadLpvCell( nIndex );
+#endif
+
+#if NORMALS_LOOKUP
+		float3 nDir = float3(directions[i]);
+		float lenSq = dot(nDir,nDir);
+		nDir = nDirections[i];
+#else
+		float3 nDir = float3(direction);
+		float lenSq = dot(nDir,nDir);
+		nDir = normalize(nDir);
+#endif
+
+		float cellWeight = 1.0f/(lenSq); // Falloff with 1/distance sq
+		float weight = cellWeight * PROPAGATE_WEIGHT;
+#if LPV_SECONDARY_OCCLUSION
+#if LDS_OPTIMISATION
+		float gvWeight = GetWeight( groupIndex, i );
+#else
+		float gvWeight = gvWeights[i];
+#endif
+		weight *= gvWeight;
+#endif
+		float3 col = LPVCellLookup( nCell, nDir ) * weight;
+
+#if LPV_MULTIPLE_BOUNCES_ENABLED 
+		// Get the flux output from this cell to its neighbour
+		// TODO: can we use group shared memory to avoid this (since the neighbouring cell has to compute it anyway)
+		float3 cellOutColor = LPVCellLookup( originalCell, -nDir ) * cellWeight * PROPAGATE_WEIGHT; 
+
+		float opacity = 1.0f - gvWeight;
+		// Reflect the light back, multiplying by the geometry's opacity and colour. 
+		// This is added to the light read back from the cell
+#if LDS_OPTIMISATION
+		float3 gvColor = GetColor( groupIndex, i );
+#else
+		float3 gvColor = gvColors[i];
+#endif
+		float3 reflectColor = ( gvColor * cellOutColor) * pow(opacity,3);
+		col += reflectColor * LpvWrite.SecondaryBounceStrength;
+#endif
+
+		AccumulateLighting( col, nDir, 1.0f, cell );
+		// AO
+#if LPV_PROPAGATE_AO
+		{
+			float aoWeight = gaussianWeights[i];
+#if LPV_SECONDARY_OCCLUSION && LPV_SECONDARY_OCCLUSION_AO
+			aoWeight *= gvWeight;
+#endif
+			cell.AO += nCell.AO * aoWeight; 
+		}
+#endif // LPV_PROPAGATE_AO
+	}
+
+	// Write the accumulated cell
+	WriteLpvCell( cell, index );
+}
+ 

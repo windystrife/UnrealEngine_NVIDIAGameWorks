@@ -1,0 +1,83 @@
+Availability:Public
+Title:Custom Expressions
+Crumbs: %ROOT%, Engine, Engine/Rendering/Materials, Engine/Rendering/Materials/ExpressionReference
+Description:Expressions that allow the use of custom, plain shader code.
+Skilllevel: Advanced
+Version: 4.9
+tags:Materials
+
+## Custom
+
+The **Custom** expression allows you to write custom HLSL shader code operating on an arbitrary amount of inputs and outputting the result of the operation.
+
+| Item | Description |
+| -------- | ----------- |
+| [REGION:tablesection]Properties[/REGION] ||
+| **Code** | Contains the shader code the expression will execute. (See [warnings](#Warnings) below) |
+| **Output Type** | Specifies the type of the value output by the expression. |
+| **Description** | Specifies the text to display in the title bar of the expression in the Material Editor. |
+| **Inputs** | The array of inputs used by the expression. |
+|[INCLUDE:Engine/Rendering/Materials/ExpressionReference/Custom#CustomInputItem] | [INCLUDE:Engine/Rendering/Materials/ExpressionReference/Custom#CustomInputDesc]|
+
+<!--
+[EXCERPT:CustomInputItem]
+[REGION:prop_sublist]
+**Input Name**
+[/REGION]
+[/EXCERPT:CustomInputItem]
+
+[EXCERPT:CustomInputDesc]
+[REGION:prop_sublist]
+Specifies the name of the input. This is the name displayed on the expression in the Material Editor as well as the name used within the HLSL code to reference the input's value.
+[/REGION]
+[/EXCERPT:CustomInputDesc]
+-->
+
+Add as many inputs as you need to the Inputs array, and name them. You can then write code in the Code property. You can type either a full function body with return statements as shown in the example, or a simple expression such as **Input.bgr**. You must also specify the output data type in OutputType.
+
+![](T_Custom_Node.png)
+
+Here is the code that was used above so you can try out the Custom node for yourself.
+
+	float3 blur = Texture2DSample(Tex, TexSampler, UV);
+
+	for (int i = 0; i < r; i++)
+	{
+
+	  blur += Texture2DSample(Tex, TexSampler, UV + float2(i * dist, 0));
+	  blur += Texture2DSample(Tex, TexSampler, UV - float2(i * dist, 0));
+
+	}
+
+	for (int j = 0; j < r; j++)
+	{ 
+
+	  blur += Texture2DSample(Tex, TexSampler, UV + float2(0, j * dist));
+	  blur += Texture2DSample(Tex, TexSampler, UV - float2(0, j * dist));
+
+	}
+
+	blur /= 2*(2*r)+1;
+	return blur;
+
+(#Warnings)
+[REGION:warning]
+**Using the custom node prevents constant folding and may use significantly more instructions than an equivalent version done with built in nodes!**  Constant folding is an optimization that UE4 employs under the hood to reduce shader instruction count when necessary.  For example, an expression chain of Time >Sin >Mul by parameter > Add to something' can and will be collapsed by UE4 into a single instruction, the final add.  This is possible because all of the inputs of that expression (Time, parameter) are constant for the whole draw call, they do not change per-pixel.  UE4 cannot collapse anything in a custom node, which can produce less efficient shaders than an equivalent version made out of existing nodes.  As a result, it is best to only use the custom node when it gives you access to functionality not possible with the existing nodes.
+[/REGION]
+
+
+[REGION:warning]
+**Shader code written in a custom node is compiled 'as is' for the target platform.**  This means that if the shader is being compiled for PC, it is assumed to be valid HLSL.  If compiling for PS3, it is assumed to be valid Cg.
+[/REGION]
+
+
+<!--
+## CustomTexture
+
+The CustomTexture expression allows you to refer to a texture in the HLSL code inside a [Custom](#Custom) expression, typically to sample it inside the HLSL using the tex2D or similar function.
+
+It is possible to use a regular TextureSample as input to a Custom node, but in that case the sample is being calculated outside the Custom node and the result passed in as a float4 value. This is not flexible enough for the case where you would like to sample the same texture multiple times in a loop, or to use other sampling instructions such as tex2Dbias, tex2Dlod, tex2Dproj (see HLSL documentation for the purpose of these).
+
+![customtex.jpg](customtex.jpg)
+
+-->

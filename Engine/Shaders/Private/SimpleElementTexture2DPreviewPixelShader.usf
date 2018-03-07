@@ -1,0 +1,79 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	SimpleElementTexture2DPreviewPixelShader.hlsl: Pixel shader for previewing 2d textures and normal maps.
+=============================================================================*/
+
+#include "Common.ush"
+#include "ColorUtils.ush"
+#include "GammaCorrectionCommon.ush"
+
+#define WRITE_TO_GBUFFER (FEATURE_LEVEL >= FEATURE_LEVEL_SM4 && !FORWARD_SHADING)
+
+Texture2D InTexture;
+SamplerState InTextureSampler;
+
+half4 TextureComponentReplicate;
+half4 TextureComponentReplicateAlpha;
+
+float4x4 ColorWeights;
+
+//x=Gamma, y=MipLevel, z=bIsNormalMap, w=Unused
+float4 PackedParams;
+
+void Main(
+	in float2 TextureCoordinate : TEXCOORD0,
+	in float4 Color : TEXCOORD1,
+	out float4 OutColor : SV_Target0
+#if WRITE_TO_GBUFFER
+	,out float4 OutWorldNormal : SV_Target1 
+#endif
+	)
+{
+	float Gamma = PackedParams.x;
+	float MipLevel = PackedParams.y;
+	float bIsNormalMap = PackedParams.z;
+
+	float4 FinalColor;
+	float4 Sample;
+
+	if( MipLevel >= 0.0f )
+	{
+		Sample = Texture2DSampleLevel(InTexture, InTextureSampler,TextureCoordinate,MipLevel);
+	}
+	else
+	{
+		Sample = Texture2DSample(InTexture, InTextureSampler,TextureCoordinate);
+	}
+
+	ReplicateChannel(Sample,TextureComponentReplicate,TextureComponentReplicateAlpha);
+
+	if( bIsNormalMap >= 0.0 )
+	{
+		const float4 Normal = UnpackNormalMap(Sample);
+		const float4 RescaledNormal = float4(Normal.xyz * 0.5 + 0.5, 1);
+		Sample = RETURN_COLOR(RescaledNormal);	
+	}
+
+	// Seperate the Color weights and use against the Base colour to detrmine the actual colour from our filter
+	FinalColor.r = dot(Sample, ColorWeights[0]);
+	FinalColor.g = dot(Sample, ColorWeights[1]);
+	FinalColor.b = dot(Sample, ColorWeights[2]);
+	FinalColor.a = dot(Sample, ColorWeights[3]);
+
+	FinalColor *= Color;
+
+	if( Gamma != 1.0 )
+	{
+		FinalColor.rgb = ApplyGammaCorrection(saturate(FinalColor.rgb), 2.2 / (1.0 / Gamma));
+	}
+	
+	FinalColor = RETURN_COLOR(FinalColor);	
+		 
+	OutColor = FinalColor;
+
+#if WRITE_TO_GBUFFER
+	// Set the G buffer bits that indicate that deferred lighting and image reflections are not enabled
+	OutWorldNormal = 0;
+#endif
+}

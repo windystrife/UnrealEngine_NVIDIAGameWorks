@@ -1,0 +1,251 @@
+﻿INTSourceChangelist:3482475
+Availability:Public
+Crumbs:
+Title:ブルーム
+Description:ライトなど明るいオブジェクトに発光効果をもたらすハロー
+Type:reference
+Version:4.16
+Parent:Engine/Rendering/PostProcessEffects
+Order:1
+Tags:Post Process
+Topic-image:bloom_Topic.png
+
+[VAR:spacer]![](%ROOT%/spacer.png)(w:150 convert:false)[/VAR]
+[VAR:spacer2]![](%ROOT%/spacer.png)(w:40 convert:false)[/VAR]
+
+[TOC(start:2 end:2)]
+
+
+[EXCERPT:Bloom_Desc]
+**ブルーム** とは、現実世界における発光現象です。これを利用することによって、適度なレンダリング パフォーマンス コストでレンダリングされた画像の現実味を、知覚的かつ大幅に向上させることができます。非常に明るいオブジェクトの後ろにきわめて暗い背景があると、 
+ブルームを肉眼で見ることができます。オブジェクトがさらに明るくなると他の効果 (光の筋やレンズフレア) も生み出しますが、 
+一般的なブルーム エフェクトはこのような効果は処理しません。私達が使用するディスプレイ (TV や TFT など) は通常 HDR (High Dynamic Range) 対応ではないため、極めて明るいオブジェクトのレンダリングできないのです。その代わりに、目の中で生じる効果 (網膜のサブサーフェス スキャタリング) をシミュレートします。 
+この効果は、光がフィルムにあたる場合 (フィルム サブサーフェス スキャタリング) や、乳白色のガラスフィルターをカメラの前に置いた場合に確認できます。必ずしも物理的に正しい効果ではありませんが、 
+オブジェクトの相対光度を示すので、画面に表示される LDR (Low Dynamic Range) 画をリアルにする場合に役立ちます。
+[/EXCERPT:Bloom_Desc]
+
+[REGION:fullwidth]
+![Bloom Effect](bloom.png)
+[/REGION]
+
+ブルームは、単一の Gaussian Bluar (ガウスブラー) で実現することができます。複数のガウスブラーをさまざまな半径と組み合わせて、品質を高めます。パフォーマンスを上げるためには、 
+低解像度のブラーを広範囲に適用します。UE3 ではガウスブラーの解像度は 1/4 、 1/8 、 1/16 の 3 つでしたが、解像度 1/2 (Blur1) から 1/32 (Blur5) の複数のブラーが設定されました (Blur1 から Blur 5)。 
+
+さまざまなブラーを組み合わせて、正確に制御し品質を高めることができます。最高のパフォーマンスを引き出すために、高解像度のブラー (値が小さい) は小さくし、 
+広範囲のブラーには通常低解像度のブラー (値が大きい) を利用してください。
+
+[REGION:raw]
+| プロパティ　| %spacer2% | 説明 |
+| -------| --------- | ---- |
+| **Intensity** || ブルームエフェクト全体の色をスケーリングします (直線)。潜在的用途：時間の経過とともにフェードインまたはアウトして暗くします [INCLUDE:#Intensity] |
+| **Threshold** || ブルームに影響を与えるために必要な、カラーの輝度単位を定義します。閾値に加えて、カラーが部分的にブルームに影響を与える直線部分 (1 幅単位) があります。全てのシーンのカラーをブルームと関係付けるには、 -1 のボリュームを使用します。潜在的用途：実際に HDR コンテンツではない、ドリームシーケンスを微調整します。 [INCLUDE:#Threshold] |
+| **#1/#2/#3/#4/#5 Tint** || 輝度と各ブルームの色を変更します。黒色を使用しても渡す速度は変わりませんが、変更できます。|
+| **#1/#2/#3/#4/#5 Size** || スクリーン幅をパーセンテージで表したサイズです。ある数字でクランプされます。より大きな数値が必要な場合、代わりに次の低解像度のブラーを使用します。 [INCLUDE:#Size] |
+[/REGION]
+
+<!--
+[EXCERPT:Intensity]
+[REGION:imagetable]
+| ![Bloom Intensity - 0](bloom_intensity_0_small.png)(w:250) | ![Bloom Intensity - 1](bloom_intensity_1_small.png)(w:250) | ![Bloom Intensity - 5](bloom_intensity_5_small.png)(w:250) |
+| ------ | ------ | ------ |
+| 0.0 | 1.0 | 5.0 |
+[/REGION]
+[/EXCERPT:Intensity]
+
+[EXCERPT:Threshold]
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Threshold - 0.0](bloom_threshold_0_small.png)
+	[/PARAM]
+	[PARAM:after]
+	![Threshold - 10.0](bloom_threshold_10_small.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:Threshold]
+
+[EXCERPT:Size]
+[REGION:imagetable]
+| ![Bloom Tint 1](bloom_tint_1_small.png)(w:145) | ![Bloom Tint 2](bloom_tint_2_small.png)(w:145) | ![Bloom Tint 3](bloom_tint_3_small.png)(w:145) | ![Bloom Tint 4](bloom_tint_4_small.png)(w:145) | ![Bloom Tint 5](bloom_tint_5_small.png)(w:145) |
+| --- | --- | --- | --- | --- |
+| #1 | #2 | #3 | #4 | #5 |
+[/REGION]
+[/EXCERPT:Size]
+-->
+
+## ブルームの畳みこみ (Bloom Convolution)
+
+ブルームの **畳み込み** エフェクトは、物理的にリアルなブルーム エフェクトを表現するテキストを使って、カスタム仕様のブルーム カーネル形状の追加を可能にします。
+それによってカーネル イメージを使ったソース イメージの数学的畳み込みによってスキャタリングと回折がモデル化されます。 
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Convolution for Bloom: Enabled](FFTBloom_Enabled.png)
+	[/PARAM]
+	[PARAM:after]
+	![Convolution for Bloom: Disabled](FFTBloom_disabled.png)
+	[/PARAM]
+[/OBJECT]
+[REGION:caption]
+[/REGION]
+[REGION:caption]
+この例では、星状のバーストから周囲を照らすディフューズまで一連の反応をブルーム技術が生み出しています。
+[/REGION]
+
+カーネルは、ビュー フィールド中央にある単一のポイント ソースに対する光学デバイスの反応を表します。ソースの各ピクセルは、 
+カーネル イメージで指示された通りに周囲に明るさを与えます。ソース ピクセルが明るくなるほど、生成されるブルームはよく見えるようになります。このエネルギー節約型のスキャタリングが畳み込み演算として定式化され、 
+Fast Fourier Transform (FFT) の使用により加速します。
+
+[REGION:warning]
+ブルームの畳み込み機能は、シネマティックスやハイエンド ハードウェアでの使用を想定して作られていますが、 ** _既存の (標準)_ ブルームは、ほとんどのゲーム アプリケーションでご利用いただけます**。 
+_既存の_ ブルームはパフォーマンスでは圧倒的に有利ですが、 
+保守的ではない (イメージが全体的に明るくなる結果になる) ですし、ブルームの畳み込み機能の視覚的な複雑さに欠ける点がトレードオフです。
+[/REGION]
+
+ブルームの畳み込み機能を有効にするには、[Post Process Volume] の **[Lens]** セクションの **[Method]** の横にあるボックスで **[Convolution]** を選択します。
+
+![](ConvolutionBloomSettings.png)(w:450)
+
+[REGION:raw]
+| プロパティ | %spacer2% | 説明 |
+| ------- | -------- | ---- |
+| **Convolution Kernel** || カーネルを定義するテクスチャの選択に使用します。  |
+| [REGION:tablesection] 詳細なプロパティ [/REGION] |||
+| **Convolution Scale**  || ビューポートの単位で Convolution Kernel イメージの相対サイズを表します。デフォルトは 1 です。主に、ブルームのサイズを小さくするために使用します。 |
+| **Convolution Center** || UV 座標では、デフォルトは (1/2, 1/2) です。理想的には、Convolution Kernel イメージは、明るいソースに対してきっちり真ん中に反応しますが、通常は微調整が必要になります。ここでオフセットすると、ブルーム イメージは完全にオフセットされます。 |
+| **Convolution Boost** || 畳み込みブルーム フィルターを適用する前に、選択ピクセルの強度をあげます。最低値、最高値、乗算値で構成されています。輝度デルタが最低値より乗数値で増幅します。デフォルトではこの増加は無効になっているので、使用には注意してください。 |
+| **Convolution Buffer** || 画面サイズの一部を使った黙示的なバッファ領域で、ブルームがイメージの周りを絶対にラップしないようにします。この値が増えると、パフォーマンスは悪くなります。 |
+[/REGION]
+
+### カーネル イメージのベスト プラクティス
+
+イメージ ベースの折り畳みが生み出す新たなリアリズムは、視覚的に面白い、非対称のカーネル イメージによるものです。カーネル イメージを作成し、ブルームの畳み込み機能の使用を設定する際に、 
+留意すべき点がいくつかあります。 
+
+* カーネル イメージは GPU 上にすべて存在し、フル解像度で利用できます。 
+逆に、カーネル イメージを低解像度で使用すると、品質に著しい劣化が生じます。この操作を行うには、カーネル イメージのテクスチャ エディタで以下のプロパティを設定します。
+	[INCLUDE:#cbtextureproperties]
+* ブルームは全体がイメージ フィルターなので畳み込みブルームを使うことにより、イメージの注目部分が他のイメージよりもかなり明るくなります (.exr 形式との相性が非常に良いです)。
+畳み込みブルームを使わないと、フィルターによって画面上に強いブラー エフェクトが発生します。
+* 注目ポイントはカーネル イメージの中央にくるようになっていますが、**Convolution Center** 制御で調節することができます。
+* ブルーム カーネル構造体、カーネル イメージの大部分がフィルされます。Photoshop でデフォルトのカーネル イメージを見ると、
+中央から分岐するラジアル ラインがイメージのかなりの範囲に広がっていることが分かります。
+	[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Kernel Image unaltered](KernelImage1.png)(w:400)
+	[/PARAM]
+	[PARAM:after]
+	![Kernel Image adjusted for demonstration](KernelImage2.png)(w:400)
+	[/PARAM]
+	[/OBJECT]
+* ブルームの畳み込みの詳細プロパティによる微調整でカーネル イメージを変更するだけで、折り畳みのビヘイビアを大幅に変更することができます。
+
+<!--- Excerpt ----
+
+[EXCERPT:cbtextureproperties]
+[REGION:simpletable]
+|||
+|---|---|
+|  [INCLUDE:#cbtexturepropertiesimage] | [INCLUDE:#cbtexturepropertieslist] |
+[/REGION]
+[/EXCERPT:cbtextureproperties]
+
+[EXCERPT:cbtexturepropertiesimage]
+![](CB_TextureProperties.png)(w:475)
+[/EXCERPT:cbtexturepropertiesimage]
+
+[EXCERPT:cbtexturepropertieslist]
+* [Mips Gen Setting]:**No Mipmaps**
+* [Never Stream]:**Enabled**
+[/EXCERPT:cbtexturepropertieslist]
+
+----->
+
+## ブルームの汚れマスク (Bloom Dirt Mask)
+
+**ブルームの汚れマスク** エフェクトは、テクスチャを使用して定義されたスクリーン領域の一部を明るくします。これは戦闘シーンを捉えたカメラの様子、より印象深い HDR エフェクト、 
+またはリアル カメラ エフェクトなどの作成に使用します。
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Dirt Mask Enabled](DirtMaskEnabled.png)(w:600)
+	[/PARAM]
+	[PARAM:after]
+	![Dirt Mask Disabled](DirtMaskDisabled.png)(w:600)
+	[/PARAM]
+[/OBJECT]
+
+ブルームの汚れマスク機能を有効にするには、[Post Process Volume] の **[Lens]** セクションで **[Dirt Mask Texture]** オプションを有効にします。[Texture] セクションを使って、汚れマスクのテクスチャを適用します。
+
+![](DirtMaskProperties.png)(w:450)
+
+[REGION:raw]
+| プロパティ | %spacer2% | 説明 |
+| ------- | -------- | ---- |
+| **Dirt Mask Texture** || 選択ボックスを使用して、汚れマスクに使用する Texture2D を割り当てます。このプロパティは他の Post Process Volumes とブレンドすることはできません。ご注意ください。 |
+| **Dirt Mask Intensity** || ブルームの汚れマスク エフェクトの色をスケーリングします (直線) 。このプロパティは汚れマスクの輝度の微調整に使用します。 |
+| **Dirt Mask Tint Color** || 汚れマスクテクスチャをより暗くする、または淡彩にするために使用します。汚れマスクの輝度や色の微調整に使用します。|
+[/REGION]
+
+### 汚れマスク イメージのベスト プラクティス
+
+汚れマスク テクスチャを作成し、ブルームの汚れマスク機能の使用を設定する時に、留意すべき点がいくつかあります。 
+
+* テクスチャは GPU 上にすべて存在し、フル解像度で利用できます。この操作を行うには、テクスチャ エディタで以下のプロパティを設定します。 
+	[INCLUDE:#dirtmasktextureproperty]
+* このプロパティは他の Post Process Volumes とブレンドすることはできません。ご注意ください。 
+* 汚れマスク テクスチャを作成する際は、以下の点に留意してください。 
+	[INCLUDE:#dirtmaskexample]
+	* 2 のべき乗ではない画像サイズの使用を推奨します。2 のべき乗ではないサイズが使用されると Mip 作成とストリーミングが行われなくなるので自動設定されます。しかしながら、2 のべき乗のテクスチャ サイズを使うと Texture Editor プロパティでもこれらを設定する必要があります。
+	* カメラ上の汚れや傷の表現には一般的に十分であり、アウトフォーカスやブラーを使う可能性があるので、低解像テクスチャを使用することができます。圧縮アーティファクトが発生した場合は、高解像の画像を試してください。
+	* Photoshop (もしくは類似した画像編集ソフトウェア) のぼかし (レンズ) 機能を使ってテクスチャを作成することができます。 
+	* 色収差 (カラー フリンジ) をテクスチャに使用すると、汚れマスクの見た目を改善しやすくなります。
+
+
+<!--- Excerpt ----
+
+[EXCERPT:dirtmasktextureproperty]
+[REGION:simpletable]
+|||
+|---|---|
+|  [INCLUDE:#dirtmasktexturepropertyimage] | [INCLUDE:#dirtmasktexturepropertylist] |
+[/REGION]
+[/EXCERPT:dirtmasktextureproperty]
+
+[EXCERPT:dirtmasktexturepropertyimage]
+![](DirtMaskTextureProperties.png)(w:475)
+[/EXCERPT:dirtmasktexturepropertyimage]
+
+[EXCERPT:dirtmasktexturepropertylist]
+* [Mips Gen Setting]:**No Mipmaps**
+* [Never Stream]:**Enabled**
+[/EXCERPT:dirtmasktexturepropertylist]
+
+[EXCERPT:dirtmaskexample]
+[REGION:lightbox]
+[![](DirtMaskTextureExample.png)(w:500)](DirtMaskTextureExample.png)
+[/REGION]
+[REGION:caption] ビークル ゲームでの汚れマスク テクスチャの使用例[/REGION]
+[/EXCERPT:dirtmaskexample]
+
+----->
+
+
+## トレーニング ストリーム
+
+[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:videoid]
+	SkJgopq-JQA
+	[/PARAMLITERAL]
+	[PARAMLITERAL:width]
+	100
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	56.25
+	[/PARAMLITERAL]
+	[PARAMLITERAL:units]
+	%
+	[/PARAMLITERAL]
+	[PARAMLITERAL:type]
+	simple
+	[/PARAMLITERAL]
+[/OBJECT]

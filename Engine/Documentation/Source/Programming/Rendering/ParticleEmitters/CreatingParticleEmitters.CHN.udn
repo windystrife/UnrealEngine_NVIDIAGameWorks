@@ -1,0 +1,394 @@
+﻿Availability:Public
+Title:粒子发射器技术指南
+Crumbs:%ROOT%, Programming, Programming/Rendering
+Description:添加新的粒子发射器类型的程序员指南。
+Version: 4.5
+
+[TOC (start:2 end:3)]
+
+创建新的发射器类型需要自定义的`ParticleEmitterInstance`和`ParticleModuleTypeData`。 这个指南解释了每项内容的关键部分并描述了创建新自定义发射器类型的步骤。
+
+## 粒子发射器引用
+
+`ParticleEmitterInstance`变量和函数以及`ParticleModuleTypeData`类都在此部分中进行了解释。
+
+### ParticleEmitterInstance结构体
+
+`ParticleEmitterInstance`是一个可以代表`ParticleSystemComponent`中的特效实例的单独粒子发射器。 
+
+
+#### 成员变量
+
+`ParticleEmitterInstance`结构体包含以下public 变量： 
+
+| 变量 | 概述 |
+| -------- | -------- |
+| `StaticType` |这是发射器实例的类型标识符。 它可以用于标识发射器以及提供安全投射功能。 |
+| `SpriteTemplate` | 指向建立实例的基础 `UParticleSpriteEmitter` 模板的指针。 在自定义发射器类型案例中，任何需要的特定数据通常都存储在稍后会在该文档中详细描述的 `TypeDataModule` 中。 |
+| `Component` |指向 _拥有_ 这个发射器实例的 `UParticleSystemComponent` 指针。 |
+| `CurrentLODLevelIndex` | 当前 LOD 关卡集合的索引。 |
+| `CurrentLODLevel` | 指向当前活动的 `UParticleLODLevel` 的指针。 |
+| `TypeDataOffset` | 在特定数据中 `TypeData` 净荷的偏移。 使用它可以轻松检索指定给发射器类型的粒子级数据。 |
+| `SubUVDataOffset` | 在特定数据中 SubUV-specific 净荷的偏移。 只有在没有将 subUV 插值模式设置为 `NONE`（无）的情况下才相关。 |
+| `Location` | FVector 提供发射器实例的位置。 |
+| `KillOnDeactivate` | 如果为 `true`（真），会在停用发射器实例的时候将其销毁（删除）。 |
+| `bKillOnCompleted` | 如果为 `true`（真），会在发射器实例完成它的周期后将其销毁（删除）。 |
+| `ParticleData` | 指向粒子数据数组的指针。 |
+| `ParticleIndices` | 指向粒子索引数组的指针。 用于提供可以使用粒子数据的轮循系统。 |
+| `ModuleOffsetMap` | 指向它们在粒子净荷数据中的偏移量的地图模块指针。 |
+| `InstanceData` | 指向实例级数据数据的指针。 |
+| `InstancePayloadSize` | 实例级数据数组的大小。 |
+| `ModuleInstanceOffsetMap` | 指向它们在实例级数据中的偏移量的地图模块指针。 |
+| `PayloadOffset` |  粒子净荷数据的开始位置的偏移量。 |
+| `ParticleSize` | 粒子的总大小（以字节为单位）。 |
+| `ParticleStride` | 在 ParticleData 数组中的粒子之间的结构体（允许假定对齐粒子数据）。 |
+| `ActiveParticles` | 在发射器中当前活动的粒子数。 |
+| `MaxActiveParticles` | 可以在粒子数据数组中具有的粒子最大数。 |
+| `SpawnFraction` | 最后帧产生中遗留的时间部分。 |
+| `SecondsSinceCreation` | 从实例创建开始经过的秒数。 |
+| `EmitterTime` | 在发射器单个循环中时间的 _位置_ 。 |
+| `OldLocation` | 发射器以前的位置。 |
+| `ParticleBoundingBox` | 发射器的边界盒。 |
+| `BurstFired` | 用于跟踪爆炸触发的元素项的数组。 |
+| `LoopCount` |  - 通过实例完成的循环数。 |
+| `IsRenderDataDirty` | 表示渲染数据是否已经修改的标志。 |
+| `Module_AxisLock` | 如存在，则为 **AxisLock** 模块。 具有可避免每个 Tick（更新）搜索它。 |
+| `EmitterDuration` | 实例的当前持续时间。 |
+| `EmitterDurations` | 实例的每个 LOD 关卡上持续时间的数组。 |
+| `TrianglesToRender` | 发射器要渲染这个帧的三角形数。 |
+| `MaxVertexIndex` | 渲染时发射器将会访问的最大顶点索引。 |
+
+#### 成员函数
+
+ParticleEmitterInstance 结构体可以包含以下成员函数，它们可以提供覆盖基础功能的机会： 
+
+| 函数 | 概述 |
+| -------- | -------- |
+| [REGION:wrap]`void SetKillOnDeactivate(bool bKill)`[/REGION] | 将 `KillOnDeactivate` 标志设置为给定的值。 |
+| [REGION:wrap]`void SetKillOnCompleted(bool bKill)`[/REGION] | 将 `bKillOnCompleted` 标志设置为给定的值。 |
+| [REGION:wrap]`void InitParameters(UParticleEmitter* InTemplate, UParticleSystemComponent* InComponent, bool bClearResources = true)`[/REGION] |假设提供了`ParticleEmitter` 模板和 _父_ `ParticleSystemComponent`，可以初始化结构体的参数。 |
+| [REGION:wrap]`void Init()`[/REGION] | 调用它初始化实例。 |
+| [REGION:wrap]`void Resize(int32 NewMaxActiveParticles, bool bSetMaxActiveCount = true)`[/REGION] |调用它可以将粒子数据数组重新调整为 `MaxActiveParticles` 的给定数。 |
+| [REGION:wrap]`void Tick(float DeltaTime, bool bSuppressSpawning)`[/REGION] | 使用给定的时间切片更新实例。 如果 `bSuppressSpawning` 为 `true`（真），那么不要产生任何新粒子。 |
+| [REGION:wrap]`void Rewind()`[/REGION] | 倒回发射器实例。 |
+| [REGION:wrap]`FBox GetBoundingBox()`[/REGION] |为实例返回边界盒。 |
+| [REGION:wrap]`void UpdateBoundingBox(float DeltaTime)`[/REGION] | 为实例更新边界盒。 **这里就是为这个帧粒子的最终定位而进行的更新，到现在为止，已经确保发生了所有更新。** |
+| [REGION:wrap]`uint32 RequiredBytes()`[/REGION] |获取发射器需要的粒子级字节数。 |
+| [REGION:wrap]`uint8* GetModuleInstanceData(UParticleModule* Module)`[/REGION] | 获取指向分配给给定模型的实例级数据的指针。 |
+| [REGION:wrap]`uint32 CalculateParticleStride(uint32 ParticleSize)`[/REGION] | 计算这个实例中单个粒子的跨距。 |
+| [REGION:wrap]`void ResetBurstList()`[/REGION] |为实例重新设置爆炸列表信息。 |
+| [REGION:wrap]`float GetCurrentBurstRateOffset(float& DeltaTime, int32& Burst)`[/REGION] |获取当前爆炸速率偏移量 – 人为增加 DeltaTime 导致爆炸。 |
+| [REGION:wrap]`float Spawn(float OldLeftover, float Rate, float DeltaTime, int32 Burst = 0, float BurstTime = 0.0f)`[/REGION] |在给定当前时间切片 (DeltaTime) 的情况下为实例产生粒子。 将最后从 (OldLeftover) 中遗留的粒子考虑进去。 |
+| [REGION:wrap]`void PreSpawn(FBaseParticle* Particle)`[/REGION] |处理在这个实例中粒子所需要的任意 _pre-spawning（生成前）_ 操作。 |
+| [REGION:wrap]`bool HasCompleted()`[/REGION] | 如果实例已经完成它的运行，那么返回 TRUE（真）。 |
+| [REGION:wrap]`void PostSpawn(FBaseParticle* Particle, float InterpolationPercentage, float SpawnTime)`[/REGION] |处理在这个实例中粒子所需要的任意 _post-spawning（生成后）_ 操作。 |
+| [REGION:wrap]`void KillParticles()`[/REGION] |销毁所有销毁的粒子 – 只需从活动数组中将其删除。 |
+| [REGION:wrap]`void RemovedFromScene()`[/REGION] | 从场景中删除实例时会调用它。 |
+| [REGION:wrap]`FBaseParticle* GetParticle(int32 Index)`[/REGION] | 	在给定索引处获取粒子。 |
+| [REGION:wrap]`FDynamicEmitterDataBase* GetDynamicData(bool bSelected)`[/REGION] | 获取渲染这个实例这个帧的动态数据。 |
+| [REGION:wrap]`void GetAllocatedSize(int32& InNum, int32& InMax)`[/REGION] | 获取发射器实例分配的内存大小 - 进行内存跟踪。 |
+
+
+### ParticleModuleTypeDataBase类
+
+`ParticleModuleTypeDataBase` 类可以提供在创建一个 **ParticleSystem** 供在引擎中使用时生成自定义发射器实例的机制。 例如，`ParticleModuleTypeDataMesh` 类最后结果会为 **ParticleSystem** 而创建 `FParticleMeshEmitterInstance`。
+
+
+#### 成员函数
+
+`ParticleModuleTypeDataBase` 结构体会包含以下可以协助生成自定义发射器的 public 函数： 
+
+| 函数 | 概述 |
+| -------- | -------- |
+| [REGION:wrap]`FParticleEmitterInstance* CreateInstance(UParticleEmitter* InEmitterParent, UParticleSystemComponent* InComponent)`[/REGION] |它对于覆盖在 UE4 粒子系统中创建的发射器实例非常重要。 在一个实例化的 UParticleEmitter 中发现 TypeData 模型时调用这个函数。 在这个函数中，应该创建并返回预期的 FParticleEmitterInstance。
+| [REGION:wrap]`void SetToSensibleDefaults()`[/REGION] | 在首次创建这个模型时调用它。 这个函数允许您设置合理的默认值。
+| [REGION:wrap]`void PreSpawn(FParticleEmitterInstance* Owner, FBaseParticle* Particle)`[/REGION] |在发射器实例的 PreSpawn 函数中调用，这些函数允许刚刚产生的粒子进行特定 TypeDataModule 设置。
+| [REGION:wrap]`void PreUpdate(FParticleEmitterInstance* Owner, int32 Offset, float DeltaTime)`[/REGION] | 在更新任何发射器实例之前调用，这个函数可以处理任何需要在使用发射器中包含的每个模型更新粒子之前进行的任何更新。
+| [REGION:wrap]`void PostUpdate(FParticleEmitterInstance* Owner, int32 Offset, float DeltaTime)`[/REGION] | 在更新任何发射器实例之后调用，这个函数可以处理任何需要在使用发射器中包含的每个模型更新粒子之后进行的任何更新。
+| [REGION:wrap]`bool SupportsSpecificScreenAlignmentFlags() const`[/REGION] | 可以覆盖在粒子发射器上出现的屏幕对齐标志。 目前只供网格物体发射器使用。
+
+
+## 示例粒子发射器
+
+编写自定义发射器实例为两步过程。 第一步，需要创建将会为您的发射器实例提供特定数据的 `TypeDataModule`，并且在适当的时间生成它。 例如，会创建一个发射器实例，它可以不断执行发射器实例以及‘父’粒子系统组件的旋转量。
+
+### TypeDataModule声明
+
+第一步是创建会生成新的发射器实例类型的`TypeDataModule`。
+
+	UCLASS(editinlinenew, collapsecategories, hidecategories=Object)
+	public class UParticleModuleTypeDataSpinner : public UParticleModuleTypeDataBase
+	{
+
+		/** 
+
+			*  在给定时间要执行发射器实例的数量
+			*  （在全部旋转量中）。
+			*/
+
+		UPROPERTY(Category=Spinner)
+		rawdistributionvector Spin;
+
+	#if CPP
+		/**
+		*   创建自定义 ParticleEmitterInstance。
+		*
+		*   @param  InEmitterParent           UParticleEmitter 可以具有这个 TypeData 模型。
+		*   @param  InComponent               UParticleSystemComponent 可以‘拥有’正在进行创建的发射器实例。
+		*   @return FParticleEmitterInstance* 创建发射器实例。
+		*/
+		virtual FParticleEmitterInstance*   CreateInstance(UParticleEmitter* InEmitterParent, UParticleSystemComponent* InComponent);
+	#endif
+	}		
+
+### TypeDataModule的实现
+
+`TypeDataModule`的构造函数创建`UDistributionVectorConstant`以指派给`Spin`变量。
+
+	UParticleModuleTypeDataSpinner::UParticleModuleTypeDataSpinner(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+	{
+		UDistributionVectorConstant* DistributionSpin = ConstructorHelpers::CreateDefaultSubobject<UDistributionVectorConstant>(this, TEXT("DistributionSpin"));
+		DistributionSpin->Constant = FVector(0.0f, 0.0f, 0.0f);
+		Spin.Distribution = DistributionSpin;
+	}
+
+`CreateInstance()` 函数将会由具有发射器实例的 `ParticleSystemComponent`进行调用。 在这里 `TypeDataModule` 可以创建任何类型的 `ParticleEmitterInstance` 供系统使用的。
+	
+	FParticleEmitterInstance* UParticleModuleTypeDataSpinner::CreateInstance(UParticleEmitter* InEmitterParent, UParticleSystemComponent* InComponent)
+	{
+	   // 创建我们的 Spinner 发射器实例。
+	   FParticleSpinnerEmitterInstance* SpinnerInst = ::new FParticleSpinnerEmitterInstance();
+	   if (SpinnerInst)
+	   {
+		  // 初始化发射器的参数。
+		  SpinnerInst->InitParameters(InEmitterParent, InComponent);
+		  return SpinnerInst;
+	   }
+
+	   // 如果失败。 会返回 NULL 可以生成默认平面发射器或断言。
+	   return NULL;
+	}
+
+在这个示例中，将会生成一个 `FParticleSpinnerEmitterInstance` 的实例。 它从 `FParticleSpriteEmitterInstance` 衍生而来，可以尽量多地利用现有代码。
+
+### 粒子发射器声明
+
+`FParticleSpinnerEmitterInstance`自定义的发射器实例结构体定义如下：
+
+	struct FParticleSpinnerEmitterInstance : public FParticleSpriteEmitterInstance
+	{
+	   /** 指向旋转器 TypeDatModule 的指针。         */
+	   UParticleModuleTypeDataSpinner* SpinnerTypeData;
+	   /** 在 Tick（更新）调用过程中使用的旋转量。   */
+	   FVector CurrentRotation;
+	   /** 分量的旋转量。            */
+	   FRotator ComponentRotation;
+
+	   /** 构造函数   */
+	   FParticleSpinnerEmitterInstance();
+
+	   virtual void InitParameters(UParticleEmitter* InTemplate, UParticleSystemComponent* InComponent, bool bClearResources = true);
+	   virtual void Tick(float DeltaTime, bool bSuppressSpawning);
+	   virtual void UpdateBoundingBox(float DeltaTime);
+
+	   /**
+		*   调整分量旋转量以便将实例旋转量考虑进去。
+		*/
+	   void AdjustComponentRotation();
+	   /**
+		*   恢复分量旋转量。
+		*/
+	   void RestoreComponentRotation();
+	};
+
+`FParticleSpinnerEmitterInstance` 中包含以下成员变量：
+
+| 变量 | 概述 |
+| -------- | -------- |
+| `SpinnerTypeData` | 指向 `UParticleModuleTypeDataSpinner` 的指针。 这样做每次我们需要访问它的时候可以直接避免转换 TypeData 模型。 |
+| `CurrentRotation` | `FVector` 可以跟踪发射器实例当前的旋转量。 在 `Tick()`/`TickEditor()` 中获得以更新旋转量，并存储从而在 `UpdateBoundingBox()` 函数中使用。 |
+
+### 粒子发射器实现
+
+为我们的自定义发射器实例执行以下成员函数：
+
+| 函数 ||
+| -------- | -------- |
+| [INCLUDE:#Constructor] ||
+| [INCLUDE:#InitParameters] ||
+| [REGION:wrap]`virtual void Tick(float DeltaTime, bool bSuppressSpawning)`[/REGION] | `Tick()`函数主要负责在实例中产生和更新粒子。 首先，它会使用 EmitterTime 从 `SpinnerTypeData` 分布中获取当前旋转量。 因为 _父_ 分量的 `LocalToWorld` 可以在各种模块的 `Spawn()`/`Update()` 函数中使用，所以我们需要确保将发射器实例旋转量考虑进去。 这可以通过保存分量的 `Rotation`（旋转量）然后将发射器实例量添加到它完成。 这样就会将分量变换更新为包括这个新的旋转量。 然后通过调用超级 `Tick()`（更新）函数将发射器实例 _更新为_ 与通用实例相同： 这样就可以恢复分量 `Rotation`（旋转量）。 [INCLUDE:#tick] |
+| [REGION:wrap]`virtual void UpdateBoundingBox(float DeltaTime)`[/REGION] |在这个案例中必须覆盖 `UpdateBoundingBox()` 函数才能确保在 `bUseLocalSpace` 为`true`的时候考虑发射器实例。 [INCLUDE:#UpdateBoundingBox] |
+| [REGION:wrap]`void FParticleSpinnerEmitterInstance::AdjustComponentRotation()`[/REGION] | 	`AdjustComponentRotation()` 函数会更改分量 LocalToWorld 以说明发射器实例旋转量。 [INCLUDE:#AdjustComponentRotation] |
+| [REGION:wrap]`void FParticleSpinnerEmitterInstance::RestoreComponentRotation()`[/REGION] |	`RestoreComponentRotation()` 函数会从组件 LocalToWorld 中删除发射器实例旋转量。 [INCLUDE:#RestoreComponentRotation] |
+
+<!--
+[EXCERPT:Constructor]
+[REGION:transparenttable]
+| --- | --- |
+| [REGION:wrap]`FParticleSpinnerEmitterInstance()`[/REGION] |构造函数的代码只可以将 `SpinnerTypeData` 初始化为 NULL 并将 `CurrentRotation` 初始化为 `(0.0f, 0.0f, 0.0f)`。 |
+| [INCLUDE:#ConstructorCode] ||
+[/REGION]
+[/EXCERPT:Constructor]
+[EXCERPT:ConstructorCode]
+	FParticleSpinnerEmitterInstance::FParticleSpinnerEmitterInstance() :
+		 FParticleSpriteEmitterInstance()
+	   , SpinnerTypeData(NULL)
+	{
+	}
+[/EXCERPT:ConstructorCode]
+
+[EXCERPT:InitParameters]
+[REGION:transparenttable]
+| --- | --- |
+| [REGION:wrap]`virtual void InitParameters(UParticleEmitter* InTemplate, UParticleSystemComponent* InComponent, bool bClearResources = true)`[/REGION] | `InitParameters()` 函数可以调用 Super（超级）版执行标准功能，然后将 `TypeDataModule` 指针转换为 `UParticleModuleTypeDataSpinner`，这样可以避免每次访问它时必须进行转换。 |
+| [INCLUDE:#InitParametersCode] ||
+[/REGION]
+[/EXCERPT:InitParameters]
+[EXCERPT:InitParametersCode]
+	void FParticleSpinnerEmitterInstance::InitParameters(UParticleEmitter* InTemplate, UParticleSystemComponent* InComponent, bool bClearResources)
+	{
+	   // 调用超级 InitParameters。
+	   FParticleEmitterInstance::InitParameters(InTemplate, InComponent, bClearResources);
+
+	   // 获取类型数据模块
+	   UParticleLODLevel* LODLevel   = InTemplate->GetCurrentLODLevel(this);
+	   check(LODLevel);
+	   SpinnerTypeData = CastChecked<UParticleModuleTypeDataSpinner>(LODLevel->TypeDataModule);
+	}
+[/EXCERPT:InitParametersCode]
+
+[EXCERPT:Tick]
+	void FParticleSpinnerEmitterInstance::Tick(float DeltaTime, bool bSuppressSpawning)
+	{
+	   // 更新我们当前的旋转量
+	   check(SpinnerTypeData);
+	   CurrentRotation = SpinnerTypeData->Spin.GetValue(EmitterTime, Component);
+
+	   //  调整分量旋转量。
+	   AdjustComponentRotation();
+
+	   // 调用 Tick（更新）超级版。
+	   FParticleEmitterInstance::Tick(DeltaTime, bSuppressSpawning);
+
+	   // 恢复分量旋转量
+	   RestoreComponentRotation();
+	}
+[/EXCERPT:Tick]
+
+[EXCERPT:UpdateBoundingBox]
+	void FParticleSpinnerEmitterInstance::UpdateBoundingBox(float DeltaTime)
+	{
+		// 不幸的是，我们必须完全覆盖 UpdateBoundingBox 函数才能
+		// 确保将我们的旋转量考虑进去...
+		// 
+		// 除代码的最后一位（考虑 bUseLocalSpace 的地方）以外， 
+		// 这个函数等价于 FParticleSpriteEmitterInstance 
+		// 版本。
+		if (Component)
+		{
+			// 考虑分量比例系数
+			FVector Scale = FVector(1.0f, 1.0f, 1.0f);
+			Scale *= Component->Scale * Component->Scale3D;
+			AActor* Actor = Component->GetOwner();
+			if (Actor && !Component->AbsoluteScale)
+			{
+				Scale *= Actor->DrawScale * Actor->DrawScale3D;
+			}			
+			float MaxSizeScale = 1.0f;
+			FVector NewLocation;
+			float NewRotation;
+			ParticleBoundingBox.Init();
+			// 对于每个粒子，相应地偏移盒子 
+			for (int32 i=0; i<ActiveParticles; i++)
+			{
+				DECLARE_PARTICLE(Particle, ParticleData + ParticleStride * ParticleIndices[i]);
+				// 进行线性积分操作并更新边界盒
+				// 进行角度积分操作并覆盖 +/- 2 PI 范围内的结果
+				Particle.OldLocation = Particle.Location;
+				if ((Particle.Flags & STATE_Particle_Freeze) == 0)
+				{
+					if ((Particle.Flags & STATE_Particle_FreezeTranslation) == 0)
+					{
+						NewLocation = Particle.Location + (DeltaTime * Particle.Velocity);
+					}
+					else
+					{
+						NewLocation = Particle.Location;
+					}
+					if ((Particle.Flags & STATE_Particle_FreezeRotation) == 0)
+					{
+						NewRotation = (DeltaTime * Particle.RotationRate) + Particle.Rotation;
+					}
+					else
+					{
+						NewRotation = Particle.Rotation;
+					}
+				}
+				else
+				{
+					NewLocation = Particle.Location;
+					NewRotation = Particle.Rotation;
+				}
+				FVector Size = Particle.Size * Scale;
+				MaxSizeScale = Max(MaxSizeScale, Size.GetAbsMax()); //@todo particles: this does a whole lot of compares that can be avoided using SSE/ Altivec.
+				Particle.Rotation = appFmod(NewRotation, 2.f*(float)PI);
+				Particle.Location = NewLocation;
+				ParticleBoundingBox += NewLocation;
+			}
+			ParticleBoundingBox = ParticleBoundingBox.ExpandBy(MaxSizeScale);
+			// 如果发射器可以使用本地空间坐标系统，那么将边界盒变换为世界空间。
+			UParticleLODLevel* LODLevel = SpriteTemplate->GetCurrentLODLevel(this);
+			check(LODLevel);
+			if (LODLevel->RequiredModule->bUseLocalSpace) 
+			{
+				//  调整分量旋转量
+				AdjustComponentRotation();
+				// 变换边界盒
+				ParticleBoundingBox = ParticleBoundingBox.TransformBy(Component->LocalToWorld);
+				// 恢复分量旋转量
+				RestoreComponentRotation();
+			}
+		}
+	}
+[/EXCERPT:UpdateBoundingBox]
+
+[EXCERPT:AdjustComponentRotation]
+	void FParticleSpinnerEmitterInstance::AdjustComponentRotation()
+	{
+	   // 保存实际的旋转量
+	   ComponentRotation = Component->Rotation;
+	   // 由于在各种模块的 Update 函数中可以使用分量的 LocalToWorld，
+	   // 所以我们需要模仿它，这样才能考虑到我们的实例旋转量。
+	   // 我们需要重建分量 LocalToWorld，
+	   // 这样才能正确地考虑到旋转量。
+	   FVector CurrRotInDegrees = CurrentRotation * 360.0f;
+	   FRotator RotationRot = FRotator::MakeFromEuler(CurrRotInDegrees);
+	   Component->Rotation += RotationRot;
+	   Component->SetTransformedToWorld();
+	}
+[/EXCERPT:AdjustComponentRotation]
+
+[EXCERPT:RestoreComponentRotation]
+	void FParticleSpinnerEmitterInstance::RestoreComponentRotation()
+	{
+	   // 恢复分量旋转量
+	   Component->Rotation = ComponentRotation;
+	   Component->SetTransformedToWorld();
+	}
+[/EXCERPT:RestoreComponentRotation]
+-->
+
+### 结果
+
+下面的屏幕截图会在操作过程中演示 Spinner 发射器实例。 设置如下所示：
+
+* 将 **Spin** 分布设置为其中一个点位于 **(Time=0,X=0,Y=0,Z=0)** 另一个点位于 **(Time=1,X=0,Y=0,Z=1)** 的常量曲线，它可以使实例在发射器的声明周期过程中以不同的速率围绕 Z 轴进行旋转。 
+* 将 **InitialVelocity** 模块与一个设置为 **(X=100,Y=100,Z=100)** 的 Constant Distribution（常数分布）联合使用，这样所有的粒子将会以直线流的方式发射（不考虑实例的旋转）。 
+* 将 **InitialColor** 模块与设置为其中一个点为 **(Time=0,R=1,G=0,B=0)** 另一个点为 **(Time=1,R=0,G=0,B=1)** 的 **StartColor** 联合使用，这样可以使发射器的生命周期过程中所发射的粒子从红色变为蓝色。
+
+[REGION:imagetable]
+| ![Spinner A](Spinner_A.png) | ![Spinner B](Spinner_B.png) |
+| --------------------------- | --------------------------- |
+|  |  |
+[/REGION]

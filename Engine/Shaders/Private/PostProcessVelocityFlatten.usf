@@ -1,0 +1,226 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+#include "FastMath.ush"
+
+#define THREADGROUP_SIZEX		16
+#define THREADGROUP_SIZEY		16
+#define THREADGROUP_TOTALSIZE	(THREADGROUP_SIZEX * THREADGROUP_SIZEY)
+
+groupshared float4 Shared[ THREADGROUP_TOTALSIZE ];
+
+RWTexture2D<float4>	OutVelocityFlat;
+RWTexture2D<float4>	OutMaxTileVelocity;
+
+float4 MotionBlurParameters;
+
+float4 MinMaxLength( float4 v0, float4 v1 )
+{
+	float2 Min = dot( v0.xy, v0.xy ) < dot( v1.xy, v1.xy ) ? v0.xy : v1.xy;
+	float2 Max = dot( v0.zw, v0.zw ) > dot( v1.zw, v1.zw ) ? v0.zw : v1.zw;
+	return float4( Min, Max );
+}
+
+float4 MinMaxLengthPolar( float4 v0, float4 v1 )
+{
+	float2 Min = v0.x < v1.x ? v0.xy : v1.xy;
+	float2 Max = v0.z > v1.z ? v0.zw : v1.zw;
+	return float4( Min, Max );
+}
+
+float2 CartesianToPolar( float2 Velocity )
+{
+	float Length = length( Velocity );
+	float Angle = atan2Fast( Velocity.y, Velocity.x );
+	return float2( Length, Angle );
+}
+
+float2 PolarToCartesian( float2 Velocity )
+{
+	float Length = Velocity.x;
+	float Angle = Velocity.y;
+	sincos( Angle, Velocity.y, Velocity.x );
+	return Velocity * Length;
+}
+
+[numthreads(THREADGROUP_SIZEX, THREADGROUP_SIZEY, 1)]
+void VelocityFlattenMain(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+	uint3 GroupThreadId : SV_GroupThreadID,
+	uint GroupIndex : SV_GroupIndex ) 
+{
+	uint2 PixelPos = DispatchThreadId.xy + ViewportRect.xy;
+
+	float2 Velocity = PostprocessInput0[ PixelPos ].xy;
+	float Depth = PostprocessInput1[ PixelPos ].x;
+
+	if( Velocity.x > 0.0 )
+	{
+		Velocity = DecodeVelocityFromTexture( Velocity );
+	}
+	else
+	{
+		float2 ScreenUV = ( (float2)DispatchThreadId.xy + 0.5 ) / ( ViewportRect.zw - ViewportRect.xy );
+		float3 PosN = float3( ScreenUV, Depth );
+		float ScaleM = rcp( dot( PosN, CameraMotion.Value[0].xyz ) + CameraMotion.Value[0].w );
+		Velocity.x = -2.0 * ((PosN.x * ((CameraMotion.Value[1].x * PosN.y) + (CameraMotion.Value[1].y * PosN.z) + CameraMotion.Value[1].z)) + (CameraMotion.Value[1].w * PosN.y) + (CameraMotion.Value[2].x * PosN.x * PosN.x) + (CameraMotion.Value[2].y * PosN.z) + CameraMotion.Value[2].z) * ScaleM;
+		Velocity.y =  2.0 * ((PosN.y * ((CameraMotion.Value[3].x * PosN.x) + (CameraMotion.Value[3].y * PosN.z) + CameraMotion.Value[3].z)) + (CameraMotion.Value[3].w * PosN.x) + (CameraMotion.Value[4].x * PosN.y * PosN.y) + (CameraMotion.Value[4].y * PosN.z) + CameraMotion.Value[4].z) * ScaleM;
+
+		//Velocity.x += 0.3;
+		//Velocity.y += 0.1;
+	}
+
+	const float AspectRatio = MotionBlurParameters.x;
+	Velocity.y *= -AspectRatio;
+
+	float2 VelocityPolar = CartesianToPolar(Velocity);
+	
+	// If the velocity vector was zero length, VelocityPolar will contain NaNs.
+	if (any(isnan(VelocityPolar)))
+	{
+		VelocityPolar = float2(0.0f, 0.0f);
+	}
+	
+	bool bInsideViewport = all( PixelPos.xy < ViewportRect.zw );
+	
+#if 1
+	// 11:11:10  (VelocityLength, VelocityAngle, Depth)
+	float2 EncodedVelocity;
+	EncodedVelocity.x = VelocityPolar.x;
+	EncodedVelocity.y = VelocityPolar.y * (0.5 / PI) + 0.5;
+#else
+	// 11:11:10 (Velocity.xy, Depth)
+	// Only handles values in range (-2,2)
+	Velocity = clamp( Velocity, -1.9999, 1.9999 );
+	// Kill denormals
+	Velocity = abs( Velocity ) < exp2(-14.0) ? 0 : Velocity;
+	// Store sign in top bit of 6e5 exponent
+	float2 EncodedVelocity = Velocity * ( Velocity < 0 ? -32768.0 : 1 );
+#endif
+	
+	BRANCH
+	if( bInsideViewport )
+	{
+		OutVelocityFlat[ PixelPos ] = float3( EncodedVelocity, ConvertFromDeviceZ( Depth ) ).xyzz;
+	}
+
+#if 1
+	// Limit velocity
+	VelocityPolar.x = min( VelocityPolar.x, MotionBlurParameters.w / MotionBlurParameters.y );
+#endif
+
+	float4 VelocityMinMax = VelocityPolar.xyxy;
+	VelocityMinMax.x = bInsideViewport ? VelocityMinMax.x : 2;
+	VelocityMinMax.z = bInsideViewport ? VelocityMinMax.z : 0;
+
+	Shared[ GroupIndex ] = VelocityMinMax;
+
+	GroupMemoryBarrierWithGroupSync();
+
+#if THREADGROUP_TOTALSIZE > 512
+	if( GroupIndex < 512 )	Shared[ GroupIndex ] = MinMaxLengthPolar( Shared[ GroupIndex ], Shared[ GroupIndex + 512 ] );
+	GroupMemoryBarrierWithGroupSync();
+#endif
+#if THREADGROUP_TOTALSIZE > 256
+	if( GroupIndex < 256 )	Shared[ GroupIndex ] = MinMaxLengthPolar( Shared[ GroupIndex ], Shared[ GroupIndex + 256 ] );
+	GroupMemoryBarrierWithGroupSync();
+#endif
+#if THREADGROUP_TOTALSIZE > 128
+	if( GroupIndex < 128 )	Shared[ GroupIndex ] = MinMaxLengthPolar( Shared[ GroupIndex ], Shared[ GroupIndex + 128 ] );
+	GroupMemoryBarrierWithGroupSync();
+#endif
+#if THREADGROUP_TOTALSIZE > 64
+	if( GroupIndex <  64 )	Shared[ GroupIndex ] = MinMaxLengthPolar( Shared[ GroupIndex ], Shared[ GroupIndex +  64 ] );
+	GroupMemoryBarrierWithGroupSync();
+#endif
+
+	// Safe for vector sizes 32 or larger, AMD and NV
+	// TODO Intel variable size vector
+	if( GroupIndex < 32 )	Shared[ GroupIndex ] = MinMaxLengthPolar( Shared[ GroupIndex ], Shared[ GroupIndex + 32 ] );
+	if( GroupIndex < 16 )	Shared[ GroupIndex ] = MinMaxLengthPolar( Shared[ GroupIndex ], Shared[ GroupIndex + 16 ] );
+	if( GroupIndex <  8 )	Shared[ GroupIndex ] = MinMaxLengthPolar( Shared[ GroupIndex ], Shared[ GroupIndex +  8 ] );
+	if( GroupIndex <  4 )	Shared[ GroupIndex ] = MinMaxLengthPolar( Shared[ GroupIndex ], Shared[ GroupIndex +  4 ] );
+	if( GroupIndex <  2 )	Shared[ GroupIndex ] = MinMaxLengthPolar( Shared[ GroupIndex ], Shared[ GroupIndex +  2 ] );
+	if( GroupIndex <  1 )	Shared[ GroupIndex ] = MinMaxLengthPolar( Shared[ GroupIndex ], Shared[ GroupIndex +  1 ] );
+
+	if( GroupIndex == 0 )
+	{
+		OutMaxTileVelocity[ GroupId.xy ] = float4( PolarToCartesian( Shared[0].xy ), PolarToCartesian( Shared[0].zw ) );
+	}
+}
+
+
+
+RWTexture2D<float4>	OutScatteredMaxVelocity;
+
+[numthreads(16, 16, 1)]
+void VelocityGatherCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+	uint3 GroupThreadId : SV_GroupThreadID,
+	uint GroupIndex : SV_GroupIndex ) 
+{
+	uint2 PixelPos = DispatchThreadId.xy;
+	float2 UV = ( (float2)PixelPos.xy + 0.5 ) * PostprocessInput0Size.zw;
+
+	float4 MinMaxVelocity = PostprocessInput0[ PixelPos ];
+
+#if 1
+	// Scatter as gather
+	for( int x = -3; x <= 3; x++ )
+	{
+		for( int y = -3; y <= 3; y++ )
+		{
+			if( x == 0 && y == 0 )
+				continue;
+
+			int2 Offset = int2(x,y);
+			int2 SampleIndex = PixelPos + Offset;
+			
+			bool2 bInsideViewport = 0 <= SampleIndex && SampleIndex < (int2)ViewportRect.zw;
+			if( !all( bInsideViewport ) )
+				continue;
+
+			float4 ScatterMinMax = PostprocessInput0[ SampleIndex ];
+			float2 MaxVelocity = ScatterMinMax.zw;
+
+			float2 VelocityPixels = MaxVelocity * MotionBlurParameters.z;
+
+			float  VelocityLengthPixelsSqr = dot( VelocityPixels, VelocityPixels );
+			float  VelocityLengthPixelsInv = rsqrtFast( VelocityLengthPixelsSqr + 1e-8 );
+			float  VelocityLengthPixels = VelocityLengthPixelsSqr * VelocityLengthPixelsInv;
+			float2 VelocityDir = VelocityPixels * VelocityLengthPixelsInv;
+
+			// Project pixel corner on to dir. This is the oriented extent of a pixel.
+			// 1/2 pixel because shape is swept tile
+			// +1/2 pixel for conservative rasterization
+			// 99% to give epsilon before neighbor is filled. Otherwise all neighbors lie on edges of quad when no velocity in their direction.
+			float PixelExtent = abs( VelocityDir.x ) + abs( VelocityDir.y );
+			float2 QuadExtent = float2( VelocityLengthPixels, 0 ) + PixelExtent.xx * 0.99;
+
+			// Orient quad along velocity direction
+			float2 AxisX = VelocityDir;
+			float2 AxisY = float2( -VelocityDir.y, VelocityDir.x );
+
+			// Project this pixel center onto scatter quad
+			float2 PixelCenterOnQuad;
+			PixelCenterOnQuad.x = dot( AxisX, Offset );
+			PixelCenterOnQuad.y = dot( AxisY, Offset );
+
+			bool2 bInsideQuad = abs( PixelCenterOnQuad ) < QuadExtent;
+			if( all( bInsideQuad ) ) 
+			{
+				MinMaxVelocity = MinMaxLength( MinMaxVelocity, ScatterMinMax );
+			}
+		}
+	}
+#endif
+
+	BRANCH
+	if( all( PixelPos.xy < ViewportRect.zw ) )
+	{
+		OutScatteredMaxVelocity[ PixelPos ] = MinMaxVelocity;
+	}
+}

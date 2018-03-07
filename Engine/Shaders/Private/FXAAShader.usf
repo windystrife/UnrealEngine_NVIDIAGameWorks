@@ -1,0 +1,116 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	FXAAShader.usf : Postprocess Anti aliasing based on FXAA code from NVIDIA
+=============================================================================*/
+
+#include "Common.ush"
+#include "PostProcessCommon.ush"
+
+// 1/RenderTargetWidth, 1/RenderTargetHeight, see Fxaa.. header for more details (used for VS and PS)
+float2 fxaaQualityRcpFrame;
+
+// FXAA_PRESET is set on C++ side
+// 0:low quality but fast, .. 5: high quality but slow
+
+// depending on the FXAA preset (formerly from 0 to 5
+// we chose the FXAA settings
+#if FXAA_PRESET == 0
+	#define FXAA_QUALITY__PRESET 10
+	#define FXAA_PC_CONSOLE 1
+#elif FXAA_PRESET == 1
+	#define FXAA_QUALITY__PRESET 15
+	#define FXAA_PC_CONSOLE 1
+#elif FXAA_PRESET == 2
+	#define FXAA_QUALITY__PRESET 20
+	#define FXAA_PC_CONSOLE 1
+#elif FXAA_PRESET == 3
+	#define FXAA_QUALITY__PRESET 20
+	#define FXAA_PC 1
+#elif FXAA_PRESET == 4
+	#define FXAA_QUALITY__PRESET 29
+	#define FXAA_PC 1
+#elif FXAA_PRESET == 5
+	#define FXAA_QUALITY__PRESET 39
+	#define FXAA_PC 1
+#endif
+
+// make sure FXAA_360_OPT is 0 or 1
+#ifndef FXAA_360_OPT
+	#define FXAA_360_OPT 0
+#endif
+
+/*-----------------------------------------------------------------------------
+	FXAA vertex shader
+-----------------------------------------------------------------------------*/
+void FxaaVS(
+	in float4 InPosition : ATTRIBUTE0,
+	in float2 UV : ATTRIBUTE1,
+	out noperspective float2 OutCenterUV : TEXCOORD0,
+	out noperspective float4 OutCornersUV : TEXCOORD1,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	DrawRectangle(InPosition, UV, OutPosition, OutCenterUV);
+	OutCornersUV = float4(OutCenterUV.xy - 0.5f * fxaaQualityRcpFrame, OutCenterUV.xy + 0.5f * fxaaQualityRcpFrame);
+}
+
+
+/*-----------------------------------------------------------------------------
+	FXAA pixel shader
+-----------------------------------------------------------------------------*/
+#if PIXELSHADER
+
+#if FEATURE_LEVEL >= FEATURE_LEVEL_SM5
+	#define FXAA_HLSL_5 1
+#elif FEATURE_LEVEL == FEATURE_LEVEL_SM4
+	#define FXAA_HLSL_4 1
+#endif
+	
+	#define DECLARE_PARAMETER(a, b, c)
+	float4 fxaaConstDir = float4(1.0, -1.0, 0.25, -0.25);
+
+	// see Fxaa.. header file for more details
+	float4 fxaaConsoleRcpFrameOpt;
+	float4 fxaaConsoleRcpFrameOpt2;
+	float4 fxaaConsole360RcpFrameOpt2;
+	float fxaaQualitySubpix;
+	float fxaaQualityEdgeThreshold;
+	float fxaaQualityEdgeThresholdMin;
+	float fxaaConsoleEdgeSharpness;
+	float fxaaConsoleEdgeThreshold;
+	float fxaaConsoleEdgeThresholdMin;
+	float4 fxaaConsole360ConstDir;
+
+	// include NVIDIA FXAA source
+	#include "Fxaa3_11.ush"
+
+	void FxaaPS(noperspective float2 TexCenter : TEXCOORD0, noperspective float4 TexCorners : TEXCOORD1, out float4 OutColor : SV_Target0)
+	{
+		FxaaTex TextureAndSampler;
+		TextureAndSampler.tex = PostprocessInput0;
+		TextureAndSampler.smpl = PostprocessInput0Sampler;
+
+		OutColor = float4(FxaaPixelShader(
+			TexCenter, TexCorners,
+			TextureAndSampler,
+			TextureAndSampler,
+			TextureAndSampler,
+			fxaaQualityRcpFrame,
+			fxaaConsoleRcpFrameOpt,
+			fxaaConsoleRcpFrameOpt2,
+			fxaaConsole360RcpFrameOpt2,
+			fxaaQualitySubpix,
+			fxaaQualityEdgeThreshold,
+			fxaaQualityEdgeThresholdMin,
+			fxaaConsoleEdgeSharpness,
+			fxaaConsoleEdgeThreshold,
+			fxaaConsoleEdgeThresholdMin,
+			fxaaConsole360ConstDir).rgb, 1.0f);
+
+//		OutColor = Texture2DSample(PostprocessInput0, PostprocessInput0Sampler, TexCenter.xy);
+//		OutColor = Texture2DSample(PostprocessInput0, PostprocessInput0Sampler, TexCenter.xy + fxaaQualityRcpFrame *0.5f);
+//		OutColor = Texture2DSample(PostprocessInput0, PostprocessInput0Sampler, TexCorners.xy);
+	}
+
+#endif // PIXELSHADER

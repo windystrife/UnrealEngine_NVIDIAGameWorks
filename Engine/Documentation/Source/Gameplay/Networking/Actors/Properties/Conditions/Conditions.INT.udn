@@ -1,0 +1,54 @@
+Availability:Public
+Title:Conditional Property Replication
+Crumbs:%ROOT%, Gameplay, Gameplay/Networking, Gameplay/Networking/Actors, Gameplay/Networking/Actors/Properties
+Description:Detailed information about how to conditionally replicate Actor properties.
+version: 4.9
+
+Once a property is registered for replication, you can't unregister it (that's where the lifetime part comes from). The reason for this is because we bake in as much information as possible, so we can take advantage of sharing work across many connections for the same set of properties. This saves a lot of computation time.
+
+So how does one get more fine grain control over how this property replicates? That's where conditional properties come in.
+
+By default, each replicated property has a built-in condition, and that is that they don't replicate if they haven't changed.
+
+To give you more control over how a property replicates, there is a special macro that allows you to add a secondary condition.
+
+This macro is called `DOREPLIFETIME_CONDITION`. An example of its usage can be seen below:
+
+	void AActor::GetLifetimeReplicatedProps( TArray< FLifetimeProperty > & OutLifetimeProps ) const
+	{
+		DOREPLIFETIME_CONDITION( AActor, ReplicatedMovement, COND_SimulatedOnly );
+	}
+
+The `COND_SimulatedOnly` flag that was passed into the condition macro will cause an extra check to be performed before even considering this property for replication.In this case, it will only replicate to clients that have a simulating copy of this actor.
+
+One of the big benefits of this is that it saves bandwidth; since we've determined that client that has the autonomous proxy version of this actor doesn't need to know about this property (this client is setting this property directly for prediction purposes for example). Another benefit is that for the client not receiving this property, the server won't step on this client's local copy.
+
+Here is a quick glance at the list of conditions currently supported, specified in the `ELifetimeCondition` enum in `Engine\Source\Runtime\CoreUObject\Public\UObject\CoreNet.h`:
+
+| Condition | Description |
+|-----------|-------------|
+| `COND_InitialOnly`		| This property will only attempt to send on the initial bunch |
+| `COND_OwnerOnly`			| This property will only send to the actor's owner |
+| `COND_SkipOwner`			| This property send to every connection EXCEPT the owner |
+| `COND_SimulatedOnly`		| This property will only send to simulated actors |
+| `COND_AutonomousOnly`		| This property will only send to autonomous actors |
+| `COND_SimulatedOrPhysics`	| This property will send to simulated OR bRepPhysics actors |
+| `COND_InitialOrOwner`		| This property will send on the initial packet, or to the actors owner |
+| `COND_Custom`				| This property has no particular condition, but wants the ability to toggle on/off via SetCustomIsActiveOverride |
+
+So far we've talked about conditions that are based off of state that is already known. This makes it easy for the engine to make the necessary optimizations while still giving you enough control over property replication.
+
+But what if this isn't enough control? There is one more thing to talk about on this subject. There is a macro called `DOREPLIFETIME_ACTIVE_OVERRIDE`, which gives you full control over when a property does and does not replicate, using any custom condition you want. The one caveat is that this is per actor, not per connection. So in other words, it's not safe to use a state that can change per connection in your custom condition. An example can be seen below.
+
+	void AActor::PreReplication( IRepChangedPropertyTracker & ChangedPropertyTracker )
+	{
+		DOREPLIFETIME_ACTIVE_OVERRIDE( AActor, ReplicatedMovement, bReplicateMovement );
+	}
+
+The property ReplicatedMovement will now only replicate if bReplicateMovement is true.
+
+Why not use this macro all the time? There are two main reasons to avoid this method:
+* If custom condition value changes a lot, this can slow things down.
+* You cannot use condition that can change per connection (don't check RemoteRole here).
+
+Property replication conditions give a nice balance of control vs. performance. They give the engine the opportunity to optimize the time it takes to check and send the properties for many connections, while still giving the programmer fine-grained control over how and when properties replicate.

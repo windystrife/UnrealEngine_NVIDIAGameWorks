@@ -1,0 +1,188 @@
+Availability:Docs
+Title:Custom Importers Technical Guide
+Crumbs: %ROOT%, Engine, Engine/UI, Programming
+Description:Programmer's guide to writing importers for custom asset types.
+
+[REGION:todo]
+	This page is converted from Unreal Engine 3 documentation and currently being reviewed. Information may be outdated.
+[/REGION]
+
+[TOC(start:2)]
+
+UFactory classes are used in the editor for creating new assets, most commonly based on external files.
+
+The sister class of UFactory is UExporter, which is used to export assets for copy/duplicate operations, as well as for exporting assets to file. See [Writing Custom Exporters](Programming/Assets/CustomExporters) for information on how to write an exporter.
+
+
+
+## Adding A New UFactory Class
+
+You will want to create your own UFactory class, probably in your game editor project. Consult classes found in Editor/UnrealEd/Classes/Factories for examples of UFactory-derived types that ship with UnrealEngine4.
+
+
+
+## UFactory Members of Note
+
+Factories that want input from the user typically expose their members by adding a category to their UPROPERTY() declaration. These UProperties are used to populate the property window on the import/create dialog.
+
+What follows is a list of UFactory members typically set by a UFactory-derived type in its constructor.
+
+
+### SupportedClass
+
+Indicates the type of object created by this factory.  NULL indicates the factory supports multiple types and must implement ResolveSupportedClass to disambiguate -- more below.
+
+
+### Description
+
+Describes the type(s) supported by this factory.  Presented to the user in the editor UI. 
+
+
+### bText
+
+If _true_, indicates the factory imports text via FactoryCreateText.  If _false_, indicates the factory imports binary data via FactoryCreateBinary.
+
+
+### bCreateNew
+If _true_, the factory creates objects by implementing FactoryCreateNew rather than importing data via FactoryCreateText or FactoryCreateBinary.
+
+
+### bEditorImport
+
+If _true_, indicates that the factory should be considered by the UI as a factory for importing data -- in other words, the factory creates asset types based on external data.
+
+
+### AutoPriority
+
+Optional; an integer used to prioritize factories that support the same type.
+
+
+
+## Factories Supporting a Single Type
+
+Most UFactory-derived types import or create objects of a single type, specified by the factory by setting the SupportedClass member in your factory class' StaticConstructor() override.  Below is an example implementation of a simple factory used to create new UDecalMaterial objects.
+
+
+    
+	UCurveFactory::UCurveFactory(const FObjectInitializer& ObjectInitializer)
+		: Super(ObjectInitializer)
+	{
+		// Property initialization
+		bCreateNew = true;
+		bEditAfterNew = true;
+		SupportedClass = UCurveBase::StaticClass();
+		Description = TEXT("Curve");
+
+		CurveClass = UCurveFloat::StaticClass();
+	}
+    
+    UObject* UCurveFactory::FactoryCreateNew(UClass* Class,
+												UObject* InParent,
+												FName Name,
+												EObjectFlags Flags,
+												UObject* Context,
+												FFeedbackContext* Warn)
+	{
+		UCurveBase* NewCurve = NULL;
+		if(CurveClass != NULL)
+		{
+			NewCurve = CastChecked<UCurveBase>(StaticConstructObject(CurveClass,InParent,Name,Flags));		
+		}
+
+		return NewCurve;
+	}
+    
+
+
+
+
+
+## Factories Supporting Multiple Types
+
+Implementing a factory that supports multiple return types is achieved by declares NULL as the SupportedClass, and then implementing ResolveSupportedClass() to resolve the class before import.
+
+As an example, consider the following code for a factory that reads in the fictitious .ABC text file format and uses it to create objects of type A or type B, per the user's choice:
+
+
+    
+	UCLASS(hidecategories=Object)
+	class UYourFactory : public UFactory
+	{
+		GENERATED_UCLASS_BODY()
+    
+        // Flag indicating whether the input file should be
+        // treated as type A or type B.  This will be set by
+        // the user in the Import Dialog, and examined in
+        // ResolveSupportedClass() to determine the type of
+        // object to create.
+		UPROPERTY(Category=ABCOptions)
+        bool bTreatAsTypeA;
+
+	#if CPP
+		// UFactory implementation
+		UClass* ResolveSupportedClass();
+		UObject* FactoryCreateText(UClass* Class, /* more args */, FFeedbackContext* Warn);
+
+		/** Creates an object of type A */
+		UObject* UYourFactory::CreateTypeA(UClass* Class, /* more args */, FFeedbackContext* Warn)
+
+		/** Creates an object of type B */
+		UObject* UYourFactory::CreateTypeB(UClass* Class, /* more args */, FFeedbackContext* Warn)
+	#endif // CPP
+    }
+
+    UYourFactory::UYourFactory(const FObjectInitializer& ObjectInitializer)
+		: Super(ObjectInitializer)
+	{
+		// Property initialization
+
+		// Indicate that this factory should be considered by "Import" UI.
+        bEditorImport = true;
+
+		// Declaring no supported classes indicates that the import
+        // path should call ResolveSupportedClass() after 'OK' is
+        // selected in the Import Dialog is closed.
+        SupportedClass = NULL;
+
+        // Register that this factory is interested in .ABC files.
+        new(Formats) FString( TEXT("abc;Ye Olde ABC Type") );
+
+        bCreateNew = false;
+        bText = true;          // Indicates ABC is a text file format.
+	}
+    
+    // This is called by the import dialog when SupportedClass is NULL.
+    UClass* UYourFactory::ResolveSupportedClass()
+    {
+        UClass* UserSpecifiedClass = bTreatAsTypeA ? UTypeA::StaticClass() : UTypeB::StaticClass();
+        return UserSpecifiedClass;
+    }
+    
+    UObject* UYourFactory::FactoryCreateText(UClass* Class, /* more args */, FFeedbackContext* Warn)
+    {
+        UObject* NewObject;
+        if ( bTreatAsTypeA )
+        {
+            NewObject = CreateTypeA( Class, /* more args */, Warn );
+        }
+        else
+        {
+            NewObject = CreateTypeB( Class, /* more args */, Warn );
+        }
+        return NewObject;
+    }
+    
+    UObject* UYourFactory::CreateTypeA(UClass* Class, /* more args */, FFeedbackContext* Warn)
+    { ... }
+    UObject* UYourFactory::CreateTypeB(UClass* Class, /* more args */, FFeedbackContext* Warn)
+    { ... }
+    
+    
+
+
+
+ 
+
+
+
+

@@ -1,0 +1,542 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	DistanceFieldObjectCulling.usf
+=============================================================================*/
+
+#include "Common.ush"
+#include "DeferredShadingCommon.ush"
+#include "DistanceFieldLightingShared.ush"
+#include "DistanceFieldAOShared.ush"
+#include "GlobalDistanceFieldShared.ush"
+
+uint NumUploadOperations;
+Buffer<uint> UploadOperationIndices;
+Buffer<float4> UploadOperationData;
+
+// In float4's.  Must match equivalent C++ variables.
+#define UPLOAD_DATA_STRIDE (1 + OBJECT_DATA_STRIDE)
+
+void UploadDataFloat4(uint DestIndex, uint UploadIndex)
+{
+	float4 UploadVector = UploadOperationData[UploadIndex];
+	RWObjectData[4 * DestIndex + 0] = UploadVector.x;
+	RWObjectData[4 * DestIndex + 1] = UploadVector.y;
+	RWObjectData[4 * DestIndex + 2] = UploadVector.z;
+	RWObjectData[4 * DestIndex + 3] = UploadVector.w;
+}
+
+[numthreads(UPDATEOBJECTS_THREADGROUP_SIZE, 1, 1)]
+void UploadObjectsToBufferCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint UploadOperationIndex = DispatchThreadId.x;
+
+	if (DispatchThreadId.x < NumUploadOperations)
+	{
+		uint DestIndex = UploadOperationIndices[UploadOperationIndex];
+		float4 UploadBounds = UploadOperationData[UploadOperationIndex * UPLOAD_DATA_STRIDE + 0];
+		RWObjectBounds[4 * DestIndex + 0] = UploadBounds.x;
+		RWObjectBounds[4 * DestIndex + 1] = UploadBounds.y;
+		RWObjectBounds[4 * DestIndex + 2] = UploadBounds.z;
+		RWObjectBounds[4 * DestIndex + 3] = UploadBounds.w;
+
+		UNROLL
+		for (uint VectorIndex = 0; VectorIndex < OBJECT_DATA_STRIDE; VectorIndex++)
+		{
+			UploadDataFloat4(DestIndex * OBJECT_DATA_STRIDE + VectorIndex, UploadOperationIndex * UPLOAD_DATA_STRIDE + VectorIndex + 1);
+		}
+	}
+}
+
+RWBuffer<float> RWCopyObjectBounds;
+RWBuffer<float> RWCopyObjectData;
+
+void CopyDataFloat4(uint DestIndex, uint SourceIndex)
+{
+	RWCopyObjectData[4 * DestIndex + 0] = ObjectData[4 * SourceIndex + 0];
+	RWCopyObjectData[4 * DestIndex + 1] = ObjectData[4 * SourceIndex + 1];
+	RWCopyObjectData[4 * DestIndex + 2] = ObjectData[4 * SourceIndex + 2];
+	RWCopyObjectData[4 * DestIndex + 3] = ObjectData[4 * SourceIndex + 3];
+}
+
+[numthreads(UPDATEOBJECTS_THREADGROUP_SIZE, 1, 1)]
+void CopyObjectBufferCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint CopyOperationIndex = DispatchThreadId.x;
+
+	if (CopyOperationIndex < NumSceneObjects)
+	{
+		uint SourceIndex = CopyOperationIndex;
+		uint DestIndex = CopyOperationIndex;
+		RWCopyObjectBounds[4 * DestIndex + 0] = ObjectBounds[4 * SourceIndex + 0];
+		RWCopyObjectBounds[4 * DestIndex + 1] = ObjectBounds[4 * SourceIndex + 1];
+		RWCopyObjectBounds[4 * DestIndex + 2] = ObjectBounds[4 * SourceIndex + 2];
+		RWCopyObjectBounds[4 * DestIndex + 3] = ObjectBounds[4 * SourceIndex + 3];
+
+		UNROLL
+		for (uint VectorIndex = 0; VectorIndex < OBJECT_DATA_STRIDE; VectorIndex++)
+		{
+			CopyDataFloat4(DestIndex * OBJECT_DATA_STRIDE + VectorIndex, SourceIndex * OBJECT_DATA_STRIDE + VectorIndex);
+		}
+	}
+}
+
+uint NumRemoveOperations;
+Buffer<uint4> RemoveOperationIndices;
+
+#if REMOVE_FROM_SAME_BUFFER
+	#define RWBoundsRemoveSource RWObjectBounds
+	#define RWDataRemoveSource RWObjectData
+#else
+
+	Buffer<float> ObjectBounds2;
+	Buffer<float> ObjectData2;
+
+	#define RWBoundsRemoveSource ObjectBounds2
+	#define RWDataRemoveSource ObjectData2
+#endif
+
+void WriteDataFloat4(uint DestIndex, uint SourceIndex)
+{
+	RWObjectData[4 * DestIndex + 0] = RWDataRemoveSource[4 * SourceIndex + 0];
+	RWObjectData[4 * DestIndex + 1] = RWDataRemoveSource[4 * SourceIndex + 1];
+	RWObjectData[4 * DestIndex + 2] = RWDataRemoveSource[4 * SourceIndex + 2];
+	RWObjectData[4 * DestIndex + 3] = RWDataRemoveSource[4 * SourceIndex + 3];
+}
+
+[numthreads(UPDATEOBJECTS_THREADGROUP_SIZE, 1, 1)]
+void RemoveObjectsFromBufferCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint RemoveOperationIndex = DispatchThreadId.x;
+
+	if (RemoveOperationIndex < NumRemoveOperations)
+	{
+		// RemoveAtSwap
+		uint SourceIndex = RemoveOperationIndices[RemoveOperationIndex].y;
+		uint DestIndex = RemoveOperationIndices[RemoveOperationIndex].x;
+
+		RWObjectBounds[4 * DestIndex + 0] = RWBoundsRemoveSource[4 * SourceIndex + 0];
+		RWObjectBounds[4 * DestIndex + 1] = RWBoundsRemoveSource[4 * SourceIndex + 1];
+		RWObjectBounds[4 * DestIndex + 2] = RWBoundsRemoveSource[4 * SourceIndex + 2];
+		RWObjectBounds[4 * DestIndex + 3] = RWBoundsRemoveSource[4 * SourceIndex + 3];
+
+		UNROLL
+		for (uint VectorIndex = 0; VectorIndex < OBJECT_DATA_STRIDE; VectorIndex++)
+		{
+			WriteDataFloat4(DestIndex * OBJECT_DATA_STRIDE + VectorIndex, SourceIndex * OBJECT_DATA_STRIDE + VectorIndex);
+		}
+	}
+}
+
+uint ObjectBoundingGeometryIndexCount;
+
+groupshared uint NumGroupObjects;
+
+groupshared uint GroupBaseIndex;
+groupshared uint GroupObjectIndices[UPDATEOBJECTS_THREADGROUP_SIZE];
+
+float4 FetchObjectDataFloat4(uint SourceIndex)
+{
+	return float4(ObjectData[4 * SourceIndex + 0], ObjectData[4 * SourceIndex + 1], ObjectData[4 * SourceIndex + 2], ObjectData[4 * SourceIndex + 3]);
+}
+
+void CopyCulledObjectData(uint DestIndex, uint SourceIndex)
+{
+	RWCulledObjectBounds[DestIndex] = float4(ObjectBounds[4 * SourceIndex + 0], ObjectBounds[4 * SourceIndex + 1], ObjectBounds[4 * SourceIndex + 2], ObjectBounds[4 * SourceIndex + 3]);
+
+	UNROLL
+	for (uint VectorIndex = 0; VectorIndex < CULLED_OBJECT_DATA_STRIDE; VectorIndex++)
+	{
+		float4 Data = FetchObjectDataFloat4(SourceIndex * OBJECT_DATA_STRIDE + VectorIndex);
+
+		// Note: only copying the first CULLED_OBJECT_DATA_STRIDE of the original object data
+		RWCulledObjectData[DestIndex * CULLED_OBJECT_DATA_STRIDE + VectorIndex] = Data;
+	}
+}
+
+[numthreads(UPDATEOBJECTS_THREADGROUP_SIZE, 1, 1)]
+void CullObjectsForViewCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint ObjectIndex = DispatchThreadId.x;
+
+#define USE_FRUSTUM_CULLING 1
+#if USE_FRUSTUM_CULLING
+	if (DispatchThreadId.x == 0)
+	{
+		// RWObjectIndirectArguments is zeroed by a clear before this shader, only need to set things that are non-zero (and are not read by this shader as that would be a race condition)
+		// IndexCount, NumInstances, StartIndex, BaseVertexIndex, FirstInstance
+		RWObjectIndirectArguments[0] = ObjectBoundingGeometryIndexCount;
+	}
+
+	if (GroupThreadId.x == 0)
+	{
+		NumGroupObjects = 0;
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
+	if (ObjectIndex < NumSceneObjects)
+	{
+		uint SourceIndex = ObjectIndex;
+
+		float4 ObjectBoundingSphere = float4(ObjectBounds[4 * SourceIndex + 0], ObjectBounds[4 * SourceIndex + 1], ObjectBounds[4 * SourceIndex + 2], ObjectBounds[4 * SourceIndex + 3]);
+		float DistanceToViewSq = dot(View.WorldCameraOrigin - ObjectBoundingSphere.xyz, View.WorldCameraOrigin - ObjectBoundingSphere.xyz);
+
+		if (DistanceToViewSq < Square(AOMaxViewDistance + ObjectBoundingSphere.w)
+			&& ViewFrustumIntersectSphere(ObjectBoundingSphere.xyz, ObjectBoundingSphere.w + AOObjectMaxDistance))
+		{
+			uint DestIndex;
+			InterlockedAdd(NumGroupObjects, 1U, DestIndex);
+			GroupObjectIndices[DestIndex] = SourceIndex;
+		}
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
+	if (GroupThreadId.x == 0)
+	{
+		InterlockedAdd(RWObjectIndirectArguments[1], NumGroupObjects, GroupBaseIndex);
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
+	if (GroupThreadId.x < NumGroupObjects)
+	{
+		uint SourceIndex = GroupObjectIndices[GroupThreadId.x];
+		uint DestIndex = GroupBaseIndex + GroupThreadId.x;
+		CopyCulledObjectData(DestIndex, SourceIndex);
+	}
+
+#else
+
+	if (DispatchThreadId.x == 0)
+	{
+		// IndexCount, NumInstances, StartIndex, BaseVertexIndex, FirstInstance
+		RWObjectIndirectArguments[0] = ObjectBoundingGeometryIndexCount;
+		RWObjectIndirectArguments[1] = NumSceneObjects;
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
+	if (ObjectIndex < NumSceneObjects)
+	{
+		uint SourceIndex = ObjectIndex;
+		uint DestIndex = ObjectIndex;
+
+		CopyCulledObjectData(DestIndex, SourceIndex);
+	}
+
+#endif
+}
+
+/** Min and Max depth for this tile. */
+groupshared uint IntegerTileMinZ;
+groupshared uint IntegerTileMaxZ;
+
+/** Inner Min and Max depth for this tile. */
+groupshared uint IntegerTileMinZ2;
+groupshared uint IntegerTileMaxZ2;
+
+/** View rect min in xy, max in zw. */
+uint4 ViewDimensions;
+float2 NumGroups;
+
+RWBuffer<float4> RWTileConeAxisAndCos;
+RWBuffer<float4> RWTileConeDepthRanges;
+
+/** Builds tile depth ranges and bounding cones. */
+[numthreads(THREADGROUP_SIZEX, THREADGROUP_SIZEY, 1)]
+void BuildTileConesMain(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+    uint ThreadIndex = GroupThreadId.y * THREADGROUP_SIZEX + GroupThreadId.x;
+
+	float2 BaseLevelScreenUV = (DispatchThreadId.xy + float2(.5f, .5f)) * DOWNSAMPLE_FACTOR * View.BufferSizeAndInvSize.zw;
+	float SceneDepth = GetDownsampledDepth(BaseLevelScreenUV);
+
+	//float2 ScreenUV = (DispatchThreadId.xy * DOWNSAMPLE_FACTOR + View.ViewRectMin.xy + float2(.5f, .5f)) * View.BufferSizeAndInvSize.zw;
+	//float SceneDepth = CalcSceneDepth(ScreenUV);
+
+	// Initialize per-tile variables
+    if (ThreadIndex == 0) 
+	{
+        IntegerTileMinZ = 0x7F7FFFFF;     
+        IntegerTileMaxZ = 0;
+		IntegerTileMinZ2 = 0x7F7FFFFF;  
+		IntegerTileMaxZ2 = 0;
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+    
+	// Use shared memory atomics to build the depth bounds for this tile
+	// Each thread is assigned to a pixel at this point
+
+	if (SceneDepth < AOMaxViewDistance)
+	{
+		InterlockedMin(IntegerTileMinZ, asuint(SceneDepth));
+		InterlockedMax(IntegerTileMaxZ, asuint(SceneDepth));
+	}
+
+    GroupMemoryBarrierWithGroupSync();
+
+    float MinTileZ = asfloat(IntegerTileMinZ);
+    float MaxTileZ = asfloat(IntegerTileMaxZ);
+
+	float HalfZ = .5f * (MinTileZ + MaxTileZ);
+
+	// Compute a second min and max Z, clipped by HalfZ, so that we get two depth bounds per tile
+	// This results in more conservative tile depth bounds and fewer intersections
+	if (SceneDepth >= HalfZ && SceneDepth < AOMaxViewDistance)
+	{
+		InterlockedMin(IntegerTileMinZ2, asuint(SceneDepth));
+	}
+
+	if (SceneDepth <= HalfZ)
+	{
+		InterlockedMax(IntegerTileMaxZ2, asuint(SceneDepth));
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+	
+	float MinTileZ2 = asfloat(IntegerTileMinZ2);
+	float MaxTileZ2 = asfloat(IntegerTileMaxZ2);
+
+	if (ThreadIndex == 0)
+	{
+		float3 TileConeVertex;
+		float3 TileConeAxis;
+		float TileConeAngleCos;
+		float TileConeAngleSin;
+		float4 ConeAxisDepthRanges;
+
+		{
+			float2 ViewSize = float2(1 / View.ViewToClip[0][0], 1 / View.ViewToClip[1][1]);
+			float3 TileCorner00 = normalize(float3((GroupId.x + 0) / NumGroups.x * ViewSize.x * 2 - ViewSize.x, ViewSize.y - (GroupId.y + 0) / NumGroups.y * ViewSize.y * 2, 1));
+			float3 TileCorner10 = normalize(float3((GroupId.x + 1) / NumGroups.x * ViewSize.x * 2 - ViewSize.x, ViewSize.y - (GroupId.y + 0) / NumGroups.y * ViewSize.y * 2, 1));
+			float3 TileCorner01 = normalize(float3((GroupId.x + 0) / NumGroups.x * ViewSize.x * 2 - ViewSize.x, ViewSize.y - (GroupId.y + 1) / NumGroups.y * ViewSize.y * 2, 1));
+			float3 TileCorner11 = normalize(float3((GroupId.x + 1) / NumGroups.x * ViewSize.x * 2 - ViewSize.x, ViewSize.y - (GroupId.y + 1) / NumGroups.y * ViewSize.y * 2, 1));
+
+			TileConeAxis = normalize(TileCorner00 + TileCorner10 + TileCorner01 + TileCorner11);
+			TileConeAngleCos = dot(TileConeAxis, TileCorner00);
+			TileConeAngleSin = sqrt(1 - TileConeAngleCos * TileConeAngleCos);
+
+			float TileConeAngleTan = TileConeAngleSin / TileConeAngleCos; 
+			float ConeExpandDistance = 0;
+			float VertexPullbackLength = ConeExpandDistance / TileConeAngleTan;
+			float DistanceToNearPlane = length(TileConeAxis / TileConeAxis.z * View.NearPlane);
+			// 1 / cos(AngleBetweenTileCenterAndViewForward)
+			float InvCosTileAngle = 1.0f / TileConeAxis.z;
+			float ConeAxisDistanceMultiply = InvCosTileAngle;
+			float ConeAxisDistanceAdd = VertexPullbackLength + DistanceToNearPlane;
+			ConeAxisDepthRanges.x = ConeAxisDistanceMultiply * (MinTileZ - ConeExpandDistance) + ConeAxisDistanceAdd;
+			ConeAxisDepthRanges.y = ConeAxisDistanceMultiply * (MaxTileZ2 + ConeExpandDistance) + ConeAxisDistanceAdd;
+			ConeAxisDepthRanges.z = ConeAxisDistanceMultiply * (MinTileZ2 - ConeExpandDistance) + ConeAxisDistanceAdd;
+			ConeAxisDepthRanges.w = ConeAxisDistanceMultiply * (MaxTileZ + ConeExpandDistance) + ConeAxisDistanceAdd;
+
+			// Pull back cone vertex to contain potential samples
+			TileConeVertex = float3(0, 0, 0) - TileConeAxis * VertexPullbackLength;
+		}
+
+		uint TileIndex = GroupId.y * NumGroups.x + GroupId.x;
+		RWTileConeAxisAndCos[TileIndex] = float4(TileConeAxis, TileConeAngleCos);
+		RWTileConeDepthRanges[TileIndex] = ConeAxisDepthRanges;
+	}
+}
+
+
+struct FObjectCullVertexOutput
+{
+	nointerpolation float4 PositionAndRadius : TEXCOORD0;
+	nointerpolation uint ObjectIndex : TEXCOORD1;
+};
+ 
+float ConservativeRadiusScale;
+
+/** Used when culling objects into screenspace tile lists */
+void ObjectCullVS(
+	float4 InPosition : ATTRIBUTE0,
+	uint ObjectIndex : SV_InstanceID,
+	out FObjectCullVertexOutput Output,
+	out float4 OutPosition : SV_POSITION
+	)
+{
+	//@todo - implement ConservativelyBoundSphere
+	float4 ObjectPositionAndRadius = LoadObjectPositionAndRadius(ObjectIndex);
+	//@todo - expand to handle conservative rasterization
+	float EffectiveRadius = (ObjectPositionAndRadius.w + AOObjectMaxDistance) * ConservativeRadiusScale;
+	float3 WorldPosition = InPosition.xyz * EffectiveRadius + ObjectPositionAndRadius.xyz;
+	OutPosition = mul(float4(WorldPosition, 1), View.WorldToClip);
+	Output.PositionAndRadius = ObjectPositionAndRadius;
+	Output.ObjectIndex = ObjectIndex;
+} 
+
+/** Used for object <-> tile culling */
+bool IntersectObjectWithConeDepthRange(
+	float3 TileConeVertex, 
+	float3 TileConeAxis, 
+	float TileConeAngleCos, 
+	float TileConeAngleSin, 
+	float2 ConeDepthRange, 
+	float2 ConeAxisDistanceMinMax,  
+	uint ObjectIndex)
+{
+	BRANCH
+	if (ConeAxisDistanceMinMax.x > ConeDepthRange.x && ConeAxisDistanceMinMax.y < ConeDepthRange.y)
+	{
+#define USE_DISTANCE_FIELD_FOR_OBJECT_CULLING 1
+#if USE_DISTANCE_FIELD_FOR_OBJECT_CULLING
+
+		// Use the position halfway between the depth ranges as the center for the bounding sphere of this tile depth range
+		float3 ViewTileBoundingSphereCenter = TileConeVertex + TileConeAxis * (.5f * (ConeDepthRange.x + ConeDepthRange.y));
+		float3 WorldTileBoundingSphereCenter = mul(float4(ViewTileBoundingSphereCenter.xyz, 1), View.ViewToTranslatedWorld).xyz - View.PreViewTranslation.xyz;
+		float DistanceAlongAxis = .5f * (ConeDepthRange.y - ConeDepthRange.x);
+		float FarDepthDistanceToEdgeOfCone = ConeDepthRange.y * TileConeAngleSin / TileConeAngleCos;
+		float TileBoundingSphereRadius = sqrt(DistanceAlongAxis * DistanceAlongAxis + FarDepthDistanceToEdgeOfCone * FarDepthDistanceToEdgeOfCone);
+
+		float3 LocalPositionExtent = LoadObjectLocalPositionExtent(ObjectIndex);
+		float4x4 WorldToVolume = LoadObjectWorldToVolume(ObjectIndex);
+		bool bGeneratedAsTwoSided;
+		float4 UVScaleAndVolumeScale = LoadObjectUVScale(ObjectIndex, bGeneratedAsTwoSided);
+		float3 VolumeTileBoundingSphereCenter = mul(float4(WorldTileBoundingSphereCenter, 1), WorldToVolume).xyz;
+		float BoxDistance = ComputeDistanceFromBoxToPoint(-LocalPositionExtent, LocalPositionExtent, VolumeTileBoundingSphereCenter) * UVScaleAndVolumeScale.w;
+
+		BRANCH
+		if (BoxDistance < TileBoundingSphereRadius + AOObjectMaxDistance)
+		{
+			float3 UVAdd = LoadObjectUVAddAndSelfShadowBias(ObjectIndex).xyz;
+			float2 DistanceFieldMAD = LoadObjectDistanceFieldMAD(ObjectIndex);
+
+			float3 ClampedSamplePosition = clamp(VolumeTileBoundingSphereCenter, -LocalPositionExtent, LocalPositionExtent);
+			float DistanceToClamped = length(VolumeTileBoundingSphereCenter - ClampedSamplePosition);
+
+			float3 StepVolumeUV = DistanceFieldVolumePositionToUV(ClampedSamplePosition, UVScaleAndVolumeScale.xyz, UVAdd);
+			float DistanceToOccluder = (SampleMeshDistanceField(StepVolumeUV, DistanceFieldMAD).x + DistanceToClamped) * UVScaleAndVolumeScale.w;
+
+			BRANCH
+			if (DistanceToOccluder < TileBoundingSphereRadius + AOObjectMaxDistance)
+			{
+				return true;
+			}
+		}
+
+#else
+		return true;
+#endif
+	}
+
+	return false;
+}
+
+Buffer<float4> TileConeAxisAndCos;
+Buffer<float4> TileConeDepthRanges;
+
+/** Intersects a single object with the tile and adds to the intersection list if needed. */
+void ObjectCullPS(
+	FObjectCullVertexOutput Input, 
+	in float4 SVPos : SV_POSITION,
+	out float4 OutColor : SV_Target0)
+{
+	OutColor = 0;
+	
+	uint2 TilePosition = (uint2)SVPos.xy;
+	uint TileIndex = TilePosition.y * NumGroups.x + TilePosition.x;
+	float4 ConeAxisAndCos = TileConeAxisAndCos.Load(TileIndex);
+	float4 ConeAxisDepthRanges = TileConeDepthRanges.Load(TileIndex);
+	float3 TileConeVertex = 0;
+	float3 TileConeAxis = ConeAxisAndCos.xyz;
+	float TileConeAngleCos = ConeAxisAndCos.w;
+	float TileConeAngleSin = sqrt(1 - TileConeAngleCos * TileConeAngleCos);
+
+	float4 WorldSphereCenterAndRadius = Input.PositionAndRadius;
+	float3 ViewSpaceSphereCenter = mul(float4(WorldSphereCenterAndRadius.xyz + View.PreViewTranslation.xyz, 1), View.TranslatedWorldToView).xyz;
+	
+	// A value of 1 is conservative, but has a huge impact on performance
+	float RadiusScale = .5f;
+
+	float4 SphereCenterAndRadius = float4(ViewSpaceSphereCenter, WorldSphereCenterAndRadius.w + RadiusScale * AOObjectMaxDistance);
+
+	if (SphereIntersectCone(SphereCenterAndRadius, TileConeVertex, TileConeAxis, TileConeAngleCos, TileConeAngleSin))
+	{
+		float ConeAxisDistance = dot(SphereCenterAndRadius.xyz - TileConeVertex, TileConeAxis);
+		float2 ConeAxisDistanceMinMax = float2(ConeAxisDistance + SphereCenterAndRadius.w, ConeAxisDistance - SphereCenterAndRadius.w);
+
+		uint TotalNumGroups = (uint)(NumGroups.x * NumGroups.y + .5f);
+
+		bool bTileIntersectsObject = IntersectObjectWithConeDepthRange(TileConeVertex, TileConeAxis, TileConeAngleCos, TileConeAngleSin, ConeAxisDepthRanges.xy, ConeAxisDistanceMinMax, Input.ObjectIndex);
+
+		if (!bTileIntersectsObject)
+		{
+			bTileIntersectsObject = IntersectObjectWithConeDepthRange(TileConeVertex, TileConeAxis, TileConeAngleCos, TileConeAngleSin, ConeAxisDepthRanges.zw, ConeAxisDistanceMinMax, Input.ObjectIndex);
+		}
+
+		if (bTileIntersectsObject)
+		{
+#if SCATTER_CULLING_COUNT_PASS
+			InterlockedAdd(RWNumCulledTilesArray[Input.ObjectIndex], 1);
+#else
+			uint CulledTileIndex;
+			InterlockedAdd(RWNumCulledTilesArray[Input.ObjectIndex], 1, CulledTileIndex);
+
+			uint CulledTileDataStart = CulledTilesStartOffsetArray[Input.ObjectIndex];
+
+			RWCulledTileDataArray[(CulledTileDataStart + CulledTileIndex) * CULLED_TILE_DATA_STRIDE + 0] = TileIndex;
+			RWCulledTileDataArray[(CulledTileDataStart + CulledTileIndex) * CULLED_TILE_DATA_STRIDE + 1] = Input.ObjectIndex;
+#endif
+		}
+	}
+}
+
+RWBuffer<uint> RWObjectTilesIndirectArguments;
+Buffer<uint> NumCulledTilesArray;
+
+#ifndef COMPUTE_START_OFFSET_GROUP_SIZE
+#define COMPUTE_START_OFFSET_GROUP_SIZE 1
+#endif
+
+[numthreads(COMPUTE_START_OFFSET_GROUP_SIZE, 1, 1)]
+void ComputeCulledTilesStartOffsetCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+	uint3 GroupThreadId : SV_GroupThreadID)
+{
+	uint ObjectIndex = DispatchThreadId.x;
+	uint NumCulledObjects = GetCulledNumObjects();
+
+	if (ObjectIndex < NumCulledObjects)
+	{
+		uint NumIntersectingTiles = NumCulledTilesArray[ObjectIndex];
+		uint NumConeTraceThreadGroups = (NumIntersectingTiles + CONE_TRACE_TILES_PER_THREADGROUP - 1) / CONE_TRACE_TILES_PER_THREADGROUP;
+
+		uint StartOffsetThreadGroups;
+		InterlockedAdd(RWObjectTilesIndirectArguments[0], NumConeTraceThreadGroups, StartOffsetThreadGroups);
+		uint StartOffset = StartOffsetThreadGroups * CONE_TRACE_TILES_PER_THREADGROUP;
+		RWCulledTilesStartOffsetArray[ObjectIndex] = StartOffset;
+
+		// Pad remaining entries with INVALID_TILE_INDEX so we can skip computing them in the cone tracing pass
+		for (uint PaddingTileIndex = NumIntersectingTiles; PaddingTileIndex < NumConeTraceThreadGroups * CONE_TRACE_TILES_PER_THREADGROUP; PaddingTileIndex++)
+		{
+			RWCulledTileDataArray[(StartOffset + PaddingTileIndex) * CULLED_TILE_DATA_STRIDE + 0] = INVALID_TILE_INDEX;
+			RWCulledTileDataArray[(StartOffset + PaddingTileIndex) * CULLED_TILE_DATA_STRIDE + 1] = ObjectIndex;
+		}
+	}
+
+	if (DispatchThreadId.x == 0)
+	{
+		RWObjectTilesIndirectArguments[1] = 1;
+		RWObjectTilesIndirectArguments[2] = 1;
+	}
+}

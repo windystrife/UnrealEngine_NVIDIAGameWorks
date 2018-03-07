@@ -1,0 +1,541 @@
+﻿INTSourceChangelist:3507178
+Availability:Public
+Title: 리플렉션 인바이언먼트
+Crumbs: %ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description:국소적 광택 리플렉션을 캡처하여 표시하는 시스템입니다.
+Version: 4.14
+
+[TOC(start:2)]
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:title%](%ROOT%/Engine/Rendering/LightingAndShadows/ReflectionEnvironment/reflection_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+	![](%ROOT%/ue4_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+	%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:title%
+	[/PARAM]
+	[PARAM:description]
+	%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/ReflectionEnvironment]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:title%](%ROOT%/Engine/Rendering/LightingAndShadows/ReflectionEnvironment/reflection_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+	![](%ROOT%/ue4_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+	%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:title%
+	[/PARAM]
+	[PARAM:description]
+	%Engine/Rendering/LightingAndShadows/ReflectionEnvironment:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/ReflectionEnvironment]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[EXCERPT:ReflectionEnv001]
+**Reflection Environment** (반사 환경, 리플렉션 인바이언먼트)란 레벨의 모든 영역에 효율적인 광택 리플렉션을 내는 
+기능입니다. 메탈같은 여러 중요 머티리얼에는 모든 방향의 반사가 있어야 하는데, Reflection Environment 로 가능합니다.
+콘솔과 중간 사양 PC 를 대상으로 잡고 있으니, 실행 속도도 매우 빠를 것입니다. 다이내믹 오브젝트의 리플렉션이나 
+선명한 리플렉션은 지원하긴 하지만, 메모리에 걸리는 부하가 늘어납니다.
+[/EXCERPT:ReflectionEnv001]
+
+[REGION:fullwidth]
+![리플렉션 인바이언먼트](reflection_environment.png)
+[/REGION]
+
+## 리플렉션 인바이언먼트 간단 셋업
+
+프로젝트의 레벨에서 리플렉션 인바이언먼트를 쓸 수 있도록 간단히 설정하는 방법은 다음과 같습니다:
+
+1. 레벨에 라이트를 몇 개 추가하고 라이팅을 한 번 빌드합니다. 리플렉션 인바이언먼트가 제대로 표시되도록 하는 데 필요한 간접 디퓨즈 라이팅이 있을 것이기 때문입니다.
+
+1. **모드** 패널의 **비주얼 이펙트** 아래, **Sphere Reflection Capture** (구체 리플렉션 캡처) 액터를 끌어 레벨에 놓습니다.
+
+레벨에 리플렉션이 보이지 않거나 리플렉션 세기가 충분치 않은 경우 다음과 같은 방법을 시도해 볼 수 있습니다:
+
+* 머티리얼에 적당한 스페큘러와 낮은 러프니스 값이 배정되었는지 확인합니다.
+* Reflection Override (리플렉션 덮어쓰기) 뷰 모드를 통해 무엇이 캡처되는지를 시각화시켜 보면 머티리얼의 어떤 값을 조정해야 하는지 더욱 잘 파악할 수 있습니다.
+
+## 리플렉션 인바이언먼트 사용하도록 레벨 구성하기
+
+리플렉션을 잘 만들기 위한 첫 번째 단계는 라이트맵을 사용하여 간접광을 포함한 디퓨즈 라이팅을 구성하는 것입니다. 
+그 방법이 익숙치 않은 경우 [](Engine/Rendering/LightingAndShadows/Lightmass/) 문서를 참고하세요. 
+빌드 후 라이트매스 간접광이 작동하지 않는다면 다음과 같은 경우일 것입니다 (다른 이유가 더 있을 수도 있습니다):
+* 스카이박스가 그림자를 드리우거나, 
+* **LightmassImportanceVolume** 이 없다거나, 
+* 라이트맵 UV 구성이 잘못 혹은 안되어 있다거나, 
+* **월드 프로퍼티** 에 **Force No Precomputed Lighting** 이 **True** 로 설정되어 있는 경우입니다.
+
+레벨의 디퓨즈 컬러는 리플렉션 인바이언먼트를 통해 반사시킬 것을 결정하므로, 최적의 결과를 위해서는 다음과 같은 사항을 점검해야 합니다.
+* 직접 라이팅과 섀도잉된 영역 사이의 대비를 확실히 합니다.
+* 밝게 디퓨즈 라이팅된 영역은 리플렉션에 명확히 나타나는 곳입니다.
+* 어둡게 그늘진 영역은 리플렉션이 가장 잘 보이는 곳입니다.
+* 리플렉션 캡처가 보는 레벨의 모습을 확인하려면 스페큘러 표시 옵션을 끈 상태로 라이팅포함 뷰모드를 사용하면 됩니다.
+
+다음과 같은 사항을 염두에 두고 레벨의 머티리얼이 리플렉션 인바이언먼트와 잘 작동하도록 구성하는 것이 매우 중요합니다.
+* 평평한 거울 표면에는 단순한 모양에 투영된 큐브맵 합성의 부정확함이 명확히 드러나게 됩니다.
+* 그러나 지오메트리 굴곡이나 거친 표면때문에 이러한 부작용이 희석되어 그럴싸한 결과를 내게 됩니다.
+* 그러므로 디테일 노멀 맵과 아울러 평평한 부분에 사용되는 머티리얼은 적당한 수준으로 거칠게 만들어 주는 것이 
+중요합니다. 그래야 리플렉션이 더욱 잘 드러날 것이기 때문입니다.
+
+[REGION:imagetable]
+| ![Curvy and Sharp](1CurvyAndSharp.png)(w:290) | ![Flat and Rough](1FlatAndRough.png)(w:290) | ![Flat and Sharp](1FlatAndSharp.png)(w:290)|
+| ------ | ------ | ------ |
+| 매끄러운 표면에 굴곡진 지오메트리: 리플렉션 퀄리티 좋음 | 거친 표면에 평평한 지오메트리: 리플렉션 퀄리티 좋음 | 부드러운 표면에 평평한 지오메트리: 리플렉션이 맞지 않는다는게 드러납니다.
+[/REGION]
+
+1. 리플렉션이 있었으면 하는 곳에 리플렉션 캡처를 놓습니다. 반사시키고자 하는 레벨 부분이 반경 
+안에 꼭 맞게끔 구체 캡처를 놓도록 해 보세요. 레벨이 그 구체 모양에 재투영될 것이기 때문입니다. 
+레벨 지오메트리 너무 가까이에는 캡처를 놓지 않는 것이 좋은데, 그 지오메트리가 반사면의 주를 이뤄 
+뒤쪽의 디테일이 먹히기 때문입니다.
+
+ ## 광택 간접 스페큘러
+
+기술적인 부분에 있어서 Reflection Environment 에는 간접 스페큘러가 제공됩니다. 분석적 라이트를 통해 
+직접 스페큘러를 구하기는 하지만, 약간 밝은 방향의 리플렉션이 나올 뿐입니다. 스카이 라이트를 통해서도 
+하늘의 스페큘러를 구하기도 하지만, 스카이 라이트 큐브맵은 무한히 먼 거리에 있는 것이기에 국소적 반사에는 쓸 수 없습니다. 간접 스페큘러는 레벨의 모든 부분이 다른 모든 부분에 반사되도록 하는데, 
+이러한 것은 디퓨즈 반응이 없는 메탈같은 재질에 특히나 중요합니다.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![디퓨즈만](DiffuseOnly.png)(w:700)
+	[/PARAM]
+	[PARAM:after]
+	![리플렉션만](ReflectionOnly.png)(w:700)
+	[/PARAM]
+[/OBJECT]
+
+**풀 라이팅**
+
+[REGION:fullwidth]
+![전체 씬](Complete.png)
+[/REGION]
+
+[EXCERPT:RefEnvIntro]
+Reflection Environment 작동방식은 여러 지점에서 정적인 레벨을 캡처한 다음 그 내용을 리플렉션 안에서 구체같은 
+단순한 모양에 재투영하는 식입니다. **_ReflectionCapture_** 액터를 놓아 아티스트가 캡처 지점을 선택합니다.
+리플렉션 업데이트는 배치상의 편의를 위해 편집 도중 실시간으로 일어나지만 실행시간에는 정적입니다.
+캡처된 레벨을 단순한 모양에 투영하면 리플렉션에 유사 시차 효과가 납니다. 각 픽셀은 
+여러 큐브맵을 혼합하여 최종 결과를 냅니다. 작은 ReflectionCapture 액터로 큰 것을 덮어써서, 영역의 리플렉션 시차 정확도를 필요한 대로 높일 수 있습니다. 
+예를 들어 방 중앙에 캡처를 놓은 다음 방 구석에 작은 캡처를 놓는 식으로 리플렉션을 
+개선시킬 수 있습니다.
+[/EXCERPT:RefEnvIntro]
+
+다양한 광택의 머티리얼은 캡쳐된 큐브맵의 뿌연 버전 밉맵을 생성하는 식으로 지원됩니다.
+  
+![다양한 광택](VaryingGlossiness.png)
+
+그러나 매우 거친 표면에 큐브맵 리플렉션만 사용해서는 과도히 밝은 리플렉션이 나오는데, 여기에는 
+로컬 오클루전의 부재로 인해 누수가 심각합니다. 이 문제는 라이트매스가 생성한 라이트맵을 재사용하여 
+해결합니다. 큐브맵 리플렉션은 머티리얼의 거칠기에 따라 라이트맵 간접 스페큘러와 혼합시킵니다.
+매우 거친 (완전 디퓨즈) 머티리얼은 라이트맵 결과에 수렴됩니다.
+이 혼합은 본질적으로 라이팅 데이터 한 세트의 높은 디테일 부분(큐브맵)을 또다른 라이팅 데이터 세트의 빈도가 낮은 부분(라이트맵)과 합치는 것입니다. 그러나 이 방법이 올바르게 작동하기 위해서는, 라이트맵에 
+간접광만이 있어야 합니다. 즉 고정된(Stationary) 라이트에서의 간접광만이 거친 표면의 리플렉션 질을 
+향상시킬 수 있다는 뜻입니다. **스태틱 라이트 유형을 Reflection Environment 와 같이 사용해서는 안되는데, 
+라이트맵에 직사광이 들어가기 때문입니다.** 참고로 이런 라이트맵과의 혼합은 
+맵에 유의미한 간접 디퓨즈 라이팅이 있어야 함을, 그리고 그 라이팅 빌드가 이미 끝나서 결과를 볼 수 있어야 함을 
+뜻합니다.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![그림자 없는 거친 표면의 리플렉션](2RoughWithNoShadowing.png)(w:550)
+	[/PARAM]
+	[PARAM:after]
+	![그림자 있는 거친 표면](2RoughWithShadowing.png)(w:550)
+	[/PARAM]
+[/OBJECT]
+
+## 리플렉션 캡처 라이트맵 혼합
+
+리플렉션 캡처 액터를 사용할 때, UE4 는 리플렉션 캡처의 간접 스페큘러와 라이트맵의 간접 디퓨즈 라이팅을 혼합합니다. 그러면 리플렉션 큐브맵은 공간의 한 점에서만 캡처되므로 누수 현상을 줄이는 데 도움이 되지만, 라이트맵은 받는 표면 전체에서 계산되어 국소적 그림자 정보를 포함합니다.
+
+[OBJECT:ComparisonSlider]
+    [PARAM:before]
+    ![Reduce Lightmap Mixing On Smooth Surfaces Off](ReduceLightmapMixingOnSmoothSurfaces_Off.png)
+    [/PARAM]
+    [PARAM:after]
+    ![Reduce Lightmap Mixing On Smooth Surfaces On.png](ReduceLightmapMixingOnSmoothSurfaces_On.png)
+    [/PARAM]
+[/OBJECT]
+
+라이트맵 혼합 기능은 거친 표면에는 잘 작동하지만, 부드러운 표면에는 깨집니다. 리플렉션 캡처 액터의 리플렉션이 스크린 스페이스 리플렉션이나 플레이너 리플렉션과 같은 다른 메소드에 일치되지 않기 때문입니다. 그때문에 매우 부드러운 표면에는 더이상 라이트맵 혼합이 사용되지 않습니다. 표면의 러프니스 값 0.3 에서 라이트맵 혼합이 최대, 서서히 약해지다가 러프니스 값 0.1 이하에서 라이트맵 혼합이 없어집니다. 그러면 리플렉션 캡처와 스크린 스페이스 리플렉션이 더욱 잘 어울려 바뀌는 부분을 알아채기 어려워 집니다.
+
+### 라이트맵 혼합 및 기존 콘텐츠
+
+기본적으로 라이트맵 혼합 기능은 기본적으로 켜져있습니다. 기존 콘텐츠에 영향을 끼친다는 뜻입니다. 부드러운 표면에 리플렉션 누수 현상이 생기는 경우 더욱 확연히 드러나게 됩니다. 이러한 누수 문제를 줄이려면 레벨에 리플렉션 캡처 액터를 추가 배치하면 됩니다. 아니면 **편집** > **프로젝트 세팅** >  **렌더링** > **리플렉션** 에서 **Reduce lightmap mixing on smooth surfaces** (부드러운 표면에 라이트맵 혼합 감소) 옵션을 꺼 예전의 라이트맵 혼합 방식으로 돌아가면 됩니다.
+
+![](Engine\Rendering\LightingAndShadows\ReflectionEnvironment\Enable_LM_Mixing.png)
+
+UE4 콘솔에서 다음 명령을 통해 라이트맵 믹싱 정도를 미세 조정할 수 있습니다.
+ 
+* **r.ReflectionEnvironmentBeginMixingRoughness (기본값 = 0.1)**
+* **r.ReflectionEnvironmentEndMixingRoughness (기본값 = 0.3)**
+* ** r.ReflectionEnvironmentLightmapMixBasedOnRoughness (기본값 = 1)**
+* **r.ReflectionEnvironmentLightmapMixLargestWeight (기본값 = 1000)**
+
+## 하이 퀄리티 리플렉션
+
+기본 리플렉션 퀄리티 세팅으로도 퍼포먼스와 비주얼 퀄리티 사이의 균형을 잘 잡기는 합니다만, 리플렉션 퀄리티를 더욱 높이고 싶을 때가 있습니다. 여기서는 리플렉션의 퀄리티를 높이는 방법에 대해 알아보겠습니다.
+
+### 높은 정밀도의 스태틱 메시 버텍스 노멀 및 탄젠트 인코딩
+
+(High Precision Static Mesh Vertex Normal and Tangent Encoding) 리플렉션 퀄리티를 높이는 데 있어 중요한 요소라면 버텍스 노멀과 탄젠트를 얼마나 정확히 표현할 수 있는가에 달려있습니다. 메시의 밀도가 매우 높으면 인접한 버텍스가 같은 버텍스 노멀 및 탄젠트 값으로 양자화되어 버릴 수 있습니다. 그렇게 되면 노멀 방향이 뚝뚝 널뛰게 될 수가 있습니다. 그래서 노멀과 탄젠트를 채널당 16 비트 벡터로 인코딩하는 옵션을 추가하여, 개발자의 판단에 따라 버텍스 버퍼 인코딩에 메모리를 추가로 쓰는 대신 퀄리티를 높일 수 있도록 했습니다.
+
+**높은 정밀도의 스태틱 메시 버텍스 노멀 및 탄젠트 인코딩을 켜려면:**
+
+1. **콘텐츠 브라우저** 에서 스태틱 메시를 더블클릭하여 **스태틱 메시 에디터** 에서 엽니다.
+
+1. 스태틱 메시 에디터에서 **디테일** 패널의 **LOD0** 옵션을 펼칩니다.
+
+	[REGION:lightbox]
+	[![](SM_HP_Vertex_Normals_00.png)(w:400 h:350)](SM_HP_Vertex_Normals_00.png)
+	[/REGION]
+
+1. **LOD0** 하단에 보면 **Build Settings** (빌드 세팅)이라는 부분이 있습니다. 그 옆의 작은 삼각형을 클릭하여 빌드 세팅 옵션을 펼칩니다.
+
+	[REGION:lightbox]
+	[![](SM_HP_Vertex_Normals_01.png)(w:400 h:350)](SM_HP_Vertex_Normals_01.png)
+	[/REGION]
+
+1. 그 이름 옆의 체크박스를 클릭하여 **Use High Precision Tangent Basis** (고정밀 탄젠트 베이시스 사용) 옵션을 켠 뒤 **변경사항 적용** 버튼을 눌러 새로운 세팅을 적용합니다.
+
+	[REGION:lightbox]
+	[![](SM_HP_Vertex_Normals_02.png)(w:400 h:350)](SM_HP_Vertex_Normals_02.png)
+	[/REGION]
+
+뷰포트가 자동으로 업데이트되어 변경사항이 반영됩니다.
+
+[REGION:note]
+보이는 리플렉션의 퀄리티는 스태틱 메시의 테셀레이션 밀도에 직접적인 관련이 있습니다. 테셀레이션이 적은 스태틱 메시는 많은 것보다 리플렉션에서 늘어지는 부작용이 심할 것입니다.
+[/REGION] 
+
+[OBJECT:ComparisonSlider]
+[PARAM:before]
+![고정밀 버텍스 노멀 꺼짐](SM_HP_Vertex_Normals_Off.png)(h:580)
+[/PARAM]
+[PARAM:after]
+![고정밀 버텍스 노멀 꺼짐](SM_HP_Vertex_Normals_On.png)(h:580)
+[/PARAM]
+[/OBJECT]
+
+[REGION:lightbox]
+[![](SM_HP_Vertex_Normals_Wireframe.png)(w:582 h:580)](SM_HP_Vertex_Normals_Wireframe.png)
+[/REGION]
+	
+
+### 고정밀 GBuffer 노멀 인코딩
+
+이 (High Precision GBuffer Normal Encoding) 옵션을 켜면 GBuffer 에서 보다 높은 정밀도의 노멀 인코딩을 사용할 수 있습니다. 이 고정밀 GBuffer 노멀 인코딩은 노멀 벡터를 16 비트짜리 3 채널로 인코딩해 넣습니다. 고정밀 인코딩 옵션을 사용하면 스크린 스페이스 리플렉션(SSR)같은 기법에 높은 정밀도의 노멀을 사용할 수 있습니다.
+
+**고정밀 GBuffer 노멀 인코딩 옵션을 켜려면:**
+
+1. **메인 툴바** 에서 **편집** > **프로젝트 세팅** 으로 **프로젝트 세팅** 창을 엽니다.
+
+	[REGION:lightbox]
+	[![](ARCS_00.png)(w:400 h:350)](ARCS_00.png)
+	[/REGION]
+
+1. 프로젝트 세팅의 **Engine** (엔진) 섹션에서, **Rendering** (렌더링) 옵션을 클릭하고, **Optimizations** (최적화) 섹션 아래 **Gbuffer Format** (GBuffer 포맷)을 **Default** (기본)에서 **High Precision Normals** (고정밀 노멀)로 변경합니다.
+
+	[REGION:lightbox]
+	[![](HPGBuffer_01.png)(w:400 h:350)](HPGBuffer_01.png)
+	[/REGION]
+
+	[region:warning]
+	이 인코딩에는 GPU 메모리 요구량이 더욱 많기에, 이 옵션을 켜면 프로젝트의 퍼포먼스에 직접적인 영향을 끼칩니다.
+	[/region]
+
+GBuffer 포맷은 변경해도 에디터 재시작이 필요치 않으므로, 다양한 GBuffer 포맷을 변경하면서 리플렉션 비주얼에 끼치는 영향을 빠르게 확인할 수 있습니다. 아래 그림에서는 GBuffer 포맷을 기본에서 고정밀 노멀로 변경했을 때 리플렉션의 모양과 퀄리티가 어떻게 변하는지 확인할 수 있습니다.
+
+[OBJECT:ComparisonSlider]
+[PARAM:before]
+![기본 GBuffer 포맷](Default_GBuffer_Format.png)(h:600)
+[/PARAM]
+[PARAM:after]
+![고정밀도 GBuffer 포맷](Hight_P_GBuffer_Format.png)(h:600)
+[/PARAM]
+[/OBJECT]
+
+## 리플렉션 캡처 모양
+
+[EXCERPT:RefCaptures]
+리플렉션 캡처 모양은 현재 두 가지, 구체와 박스 입니다. 이 모양은 매우 중요한데, 레벨의 어떤 부분이 
+큐브맵 속에 캡쳐되는지, 리플렉션에서 레벨을 어떤 모양 위에 재투영할지, 레벨의 어떤 부분이 
+그 큐브맵에서 리플렉션을 받을 수 있는지 (영향력 범위) 등을 그 모양이 결정하기 때문입니다. 
+[/EXCERPT:RefCaptures]
+
+### 구체 모양
+
+구체 모양은 현재 가장 유용합니다. 반사되는 지오메트리 모양이 일치될 일도 없지만, 
+불연속도 모서리도 없으므로 오차가 균일합니다.
+
+![구체 모양](SphereShape.png)(w:720)
+
+구체 모양에는 어느 픽셀이 그 큐브맵의 영향을 받을 수 있는지 제어할 수 있는 주황색 영향력 반경이 있어, 그 구체에 
+레벨이 재투영됩니다.
+
+캡처의 크기가 작은 것이 큰 것을 덮어써서, 레벨 주변에 작은 캡처를 놓는 식으로 개선이 가능합니다.
+
+### 박스 모양
+
+박스 모양은 활용도 면에서는 매우 제한적이며 일반적으로 통로나 사각형 방에서만 쓸 수 있습니다.
+그 이유는 박스 안의 픽셀만이 리플렉션을 볼 수 있으며, 동시에 그 박스 안의 모든 지오메트리가 
+박스 모양에 투영되어서, 심각한 부작용이 생기는 경우가 많이 때문입니다.
+
+![박스 모양](BoxShape.png)
+
+박스에는 선택했을 때 주황색으로 나오는 투영 모양 미리보기가 있습니다. 이 박스 밖의 **Box Transition Distance** 
+(박스 전환 거리) 범위 내 레벨만 캡처합니다. 이 캡처의 영향력은 박스 내 전환 거리에 걸쳐서도 페이드 인이 
+일어납니다.
+
+## 리플렉션 프로브 편집
+
+Reflection Probe(리플렉션 프로브)를 편집할 때, 원하는 결과를 얻기 위해 기억해야 할 것들이 몇 가지 있습니다. 여기서는 프로젝트에서 최고의 리플렉션 퀄리티를 얻기 위해 확인해야 하는 것들에 대해 다루겠습니다.
+
+### 리플렉션 프로브 업데이트
+
+중요한 사항 한 가지, 리플렉션 프로브는 최신 상태를 자동으로 업데이트하지 않습니다. 레벨에 배치된 리플렉션 프로브가 자동 업데이트되는 상황은 다음과 같습니다.
+
+* 맵 로드
+* 리플렉션 캡처 액터의 프로퍼티 직접 편집
+* 레벨 라이팅 빌드
+
+라이트의 밝기 수정이나 레벨 지오메트리 이동 등 레벨에 다른 종류의 편집을 한 경우, 리플렉션 캡처 액터를 선택하고 **Update Captures** (캡처 업데이트) 버튼을 클릭해야 변경내용이 전파됩니다.
+
+[REGION:lightbox]
+[![](Update_Captures_Button.png)(w:400 h:350)](Update_Captures_Button.png)
+[/REGION]
+
+### 리플렉션 프로브에 커스텀 HDRI 큐브맵 사용
+
+리플렉션 프로브에는 리플렉션 데이터에 사용할 큐브맵을 지정하는 기능 뿐 아니라, 그 큐브맵의 크기를 지정하는 기능도 갖고 있습니다. 기존에 UE4 는 쿠킹된 큐브맵의 리플렉션 프로브가 사용할 해상도가 하드코딩되어 있었습니다. 이제 퍼포먼스, 메모리, 퀄리티 상관관계에 따라 필요에 딱 맞는 해상도를 개발자가 직접 선택할 수 있게 되었습니다. 아래 그림은 **Captured Scene** (캡처된 씬) 옵션을 사용했을 때와 **Specified Cubemap** (지정된 큐브맵) 옵션을 사용했을 때의 차이점을 나타냅니다.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Captured Scene](CC_Capture_Scene.png)(h:500)
+	[/PARAM]
+	[PARAM:after]
+	![Specified Cubemap](CC_Specified_Cubemap.png)(h:500)
+	[/PARAM]
+[/OBJECT]
+
+프로젝트의 리플렉션 프로브가 사용할 커스텀 HDRI 큐브맵을 지정하는 방법은 다음과 같습니다:
+
+1. 먼저, 사용할 수 있는 HDRI 큐브맵 텍스처가 있는지 확인합니다. 프로젝트에 HDRI 큐브맵 텍스처가 없는 경우, 시작용 콘텐츠에 **HDRI_Epic_Courtyard_Daylight** 라는 이름으로 포함된 것이 있습니다.
+
+	[REGION:lightbox]
+	[![](Custom_Cubemap_00.png)(w:400 h:350)](Custom_Cubemap_00.png)
+	[/REGION]
+
+	[region:note]
+	한 프로젝트에서 다른 프로젝트로 애셋을 이동할 때는 [Migrate](Engine/Content/Browser/UserGuide/Migrate/) (이주) 기능을 사용하면 됩니다.
+	[/region]
+
+
+1. 레벨에 배치된 **Reflection Probe** (리플렉션 프로브) 액터를 선택한 뒤 **디테일** 패널에서 **Reflection Capture** (리플렉션 캡처) 부분 아래 **Reflection Source Type** (리플렉션 소스 유형) 옵션을 **Captured Scene** (캡처된 씬)에서 **Specified Cubemap** (지정된 큐브맵)으로 변경합니다.
+
+	[REGION:lightbox]
+	[![](Custom_Cubemap_01.png)(w:400 h:350)](Custom_Cubemap_01.png)
+	[/REGION]
+
+1. 여전히 레벨에 리플렉션 프로브를 선택한 상태에서, 콘텐츠 브라우저로 가 사용하고자 하는 HDRI 텍스처를 선택합니다. 그런 다음 리플렉션 캡처 액터에서, 콘텐츠 브라우저의 HDRI 텍스처를 끌어 **Reflection Capture** (리플렉션 캡처) 아래 **Cubemap** 입력에 놓습니다.
+
+	[REGION:lightbox]
+	[![](Custom_Cubemap_02.png)(w:400 h:350)](Custom_Cubemap_02.png)
+	[/REGION]
+
+1. **캡처 업데이트** 버튼을 눌러 리플렉션 캡처 액터가 방금 지정된 새로운 HDRI 큐브맵 텍스처를 사용하도록 새로고칩니다.
+
+	[REGION:lightbox]
+	[![](Custom_Cubemap_03.png)(w:400 h:350)](Custom_Cubemap_03.png)
+	[/REGION]
+
+### 리플렉션 프로브 해상도 조절
+
+리플렉션 캡처 액터에 사용되는 HDRI 큐브맵 해상도를 전체적으로 조절하는 방법은 다음과 같습니다:
+
+1. **메인 툴바** 의 **편집** > **프로젝트 세팅** 을 통해 **프로젝트 세팅** 창을 엽니다.
+	
+	[REGION:lightbox]
+	[![](ARCS_00.png)(w:400 h:350)](ARCS_00.png)
+	[/REGION]
+
+1. 프로젝트 세팅 메뉴에서 **Engine** (엔진) > **Rendering** (렌더링) 부분으로 이동한 뒤 **Textures** (텍스처) 옵션을 찾습니다.
+	
+	[REGION:lightbox]
+	[![](ARCS_01.png)(w:400 h:350)](ARCS_01.png)
+	[/REGION]
+
+1. **Reflection Capture Resolution** (리플렉션 캡처 해상도) 옵션을 조절하는 것으로 지정된 HDRI 큐브맵 텍스처의 크기를 늘이거나 줄일 수 있습니다.
+
+	![](ARCS_02.png)
+
+	[region:warning]
+	매우 높은 해상도의 텍스처를 사용할 때는, GPU 메모리 요구량으로 인해 퍼포먼스에 엄청난 영향을 끼칠 수 있으니 세심한 주의를 요합니다.
+	[/region]
+
+다음 그림은 리플렉션 캡처 해상도를 **1**, **4**, **8**, **16**, **32**, **64**, **128**, **256**, **512**, **1024** 로 설정했을 때 리플렉션이 어때 보이는지를 나타냅니다.
+[REGION:fullwidth]
+[INCLUDE:Engine\Rendering\LightingAndShadows/ReflectionEnvironment#ReflectionResolution]
+[/REGION]
+
+### 스카이라이트 리플렉션 해상도 조절
+
+리플렉션 프로브와 마찬가지로, 스카이라이트에도 리플렉션에 사용되는 HDRI 큐브맵 해상도를 정의하고 조절하는 기능이 있습니다. UE4 프로젝트에서 이 기능을 활용하는 방법은 다음과 같습니다:
+
+1. **모드** 패널의 **라이트** 부분 아래 **스카이라이트** 를 끌어 레벨에 놓습니다.
+	
+	[REGION:lightbox]
+	[![](Skylight_Reflection_00.png)(w:500 h:300)](Skylight_Reflection_00.png)
+	[/REGION]
+
+1. **디테일** 패널의 **라이트** 부분 아래 스카이라이트를 선택한 뒤, **Source Type** (소스 유형)을 **SLS Captured Scene** 에서 **SLS Specified Cubemap** 으로 변경합니다.
+
+	[REGION:lightbox]
+	[![](Skylight_Reflection_01.png)(w:500 h:300)](Skylight_Reflection_01.png)
+	[/REGION]
+
+1. **Cubemap** (큐브맵) 부분의 드롭다운 박스를 클릭한 다음 목록에서 HDRI 큐브 맵을 선택합니다.
+
+	[REGION:lightbox]
+	[![](Skylight_Reflection_02.png)(w:300 h:300)](Skylight_Reflection_02.png)
+	[/REGION]
+
+1. 큐브맵을 선택한 후에는 **Cubemap Resolution** 입력 값을 변경하여 해상도를 조절할 수 있습니다.
+	
+	[REGION:lightbox]
+	[![](Skylight_Reflection_03.png)(w:300 h:300)](Skylight_Reflection_03.png)
+	[/REGION]
+
+	[region:note]
+	Cubemap Resolution 은 16,64,128,25,512,1024 처럼 2 의 제곱수만 통합니다.
+	[/region]
+
+
+### 다수의 리플렉션 프로브 데이터 블렌딩
+다양한 HDRI 큐브맵의 리플렉션 캡처 액터를 여럿 제공하여 다수의 각기 다른 큐브맵 리플렉션을 섞을 수 있습니다. UE4 프로젝트에서 그 방법은 다음과 같습니다:
+
+1. 먼저 레벨에 추가된 **리플렉션 프로브** 가 최소 하나 있는지, **Reflection Source Type** (리플렉션 소스 유형)을 **Specified Cubemap** (지정된 큐브맵)으로 설정했는지, **Cubemap** 입력에 HDRI 텍스처를 입력했는지 확인합니다.
+
+	[REGION:lightbox]
+	[![](Blend_RFD_00.png)(w:600 h:400)](Blend_RFD_00.png)
+	[/REGION]
+
+1. 레벨에 리플렉션 프로브를 새로 추가하거나 기존의 것을 복제한 뒤, 노랑 영향력 반경 일부가 첫 번쨰 리플렉션 프로브와 겹치도록 위치와 **Influence Radius** (영향력 반경)을 조절합니다.
+
+	[REGION:lightbox]
+	[![](Blend_RFD_01.png)(w:600 h:400)](Blend_RFD_01.png)
+	[/REGION]
+
+1. 새로 복제/생성된 리플렉션 프로브 액터를 선택하고 **디테일** 패널의 **Cubemap** 부분 아래에서 HDRI 큐브맵을 다른 것으로 변경합니다.
+
+	[REGION:lightbox]
+	[![](Blend_RFD_02.png)(w:600 h:400)](Blend_RFD_02.png)
+	[/REGION]
+
+1. 추가/복제된 리플렉션 프로브를 여전히 선택해 둔 채, **디테일** 패널로 가 **Reflection Capture** 부분의 **Update Captures** (캡처 업데이트) 버튼을 눌러 리플렉션이 Cubemap 입력에 연결된 것을 사용하도록 업데이트합니다.
+
+	[REGION:lightbox]
+	[![](Blend_RFD_03.png)(w:600 h:400)](Blend_RFD_03.png)
+	[/REGION]
+
+1. 리플렉션 프로브를 선택하고 레벨에서 이동시켜 보면 두 개의 HDRI 큐브맵이 서로 어떻게 섞이는지 더욱 잘 파악해 볼 수 있습니다.
+
+	[OBJECT:EmbeddedVideo]
+		[PARAMLITERAL:width]
+		640
+		[/PARAMLITERAL]
+		[PARAMLITERAL:height]
+		360
+		[/PARAMLITERAL]
+		[PARAMLITERAL:videoid]
+		QYbSsYP2Nkk
+		[/PARAMLITERAL]
+	[/OBJECT]
+
+### 시각화
+
+리플렉션이 잘 구성되었나 쉬운 확인을 위해 Reflection Override (리플렉션 덮어쓰기) 뷰모드가 추가되었습니다. 
+이 뷰모드는 모든 노멀을 부드러운 버텍스 노멀로 덮어쓰고, 모든 표면을 (거울처럼) 완벽히 매끄러운 
+최대 스페큘러 면으로 만듭니다. 이 모드에서는 Reflection Environment 의 한계와 부작용 역시 명확히 
+보이므로, 가끔씩 Lit 모드로 바꿔 (굴곡진 노멀, 다양한 광택, 어두운 스페큘러 등의) 보통 상황에서 
+리플렉션이 어때 보이는지 확인하는 것이 중요합니다.
+
+![Reflection Override](ReflectionOverride.png)
+
+라이팅 성분을 따로 떼어내는 데 유용한 표시 플래그 몇 가지가 새로 추가되었습니다:
+
+| 플래그 | 설명 |
+| ---- | ---- |
+| **Lighting Components > Diffuse** | 디퓨즈를 모든 라이팅 메소드에서의 디퓨즈 기여를 숨깁니다. |
+| **Lighting Components > Specular** | 스페큘러를 끄면 모든 리플렉션 메소드에서의 스페큘러 기여를 숨깁니다. |
+| **Lighting Features > ReflectionEnvironment** | Reflection Environment 기능은 끄지만, 다른 리플렉션 기능은 (SSR, 분석적 스페큘러) 남아있습니다. |
+
+
+## 퍼포먼스 고려사항
+
+Reflection Environment 비용은 화면상의 픽셀에 얼마나 많은 캡처가 영향을 끼치는가에 따라서만 달라집니다.
+이런 관점에서 보면 디퍼드 라이팅과 매우 비슷합니다. 리플렉션 캡처는 그 영향력 반경에 따라 바운드가 
+정해지므로, 매우 효율적으로 컬링됩니다. 광택은 큐브맵 밉맵을 통해 구현되므로,
+리플렉션이 선명하냐 거치냐에 따라서는 퍼포먼스 차이가 미미합니다.
+
+## 한계
+
+* 이 방법을 통한 리플렉션은 추정치입니다. 구체적으로, 오브젝트를 단순한 모양 위에 투영한 것이기에 
+씬의 실제 오브젝트와 거의 맞아 떨어지지 않습니다. 혼합되고 있는 큐브맵의 수가 여럿이기에, 
+리플렉션에서 해당 오브젝트는 여러 버전이 만들어지게 됩니다. 평평하고 매끄러운 표면에는 
+거울 반사의 오차가 눈에 띄게 표시됩니다. 
+디테일 노멀 맵과 러프니스를 사용하여 리플렉션과 그 부작용을 흩트려 주세요.
+* 씬을 큐브맵에 캡처해 넣는 것은 느린 작업으로 게임 세션 밖에서 해 놔야 합니다. 즉 동적인 오브젝트는 
+반사가 불가능하다는 뜻으로, 정적인 씬의 리플렉션을 받을 수는 있습니다.
+* 오차 감소를 위해 씬의 디퓨즈만 캡처합니다. 즉 순수 스페큘러 표면(메탈)은 캡처 도중 그 스페큘러가 디퓨즈인 것처럼 적용된다는 뜻입니다.
+* 벽의 양쪽 면에 라이팅 조건이 다를 경우 심각한 누수가 발생할 수 있습니다.
+한 면에 올바른 리플렉션 셋업이 가능하기는 하지만, 반대편에는 항상 누수가 생깁니다.
+* DX11 하드웨어의 한계로 인해 씬을 캡처하는 데 사용되는 큐브맵은 각 면이 모두 128 이며, 
+월드에 최대로 가능한 리플렉션 캡처 수는 한 번에 341 개입니다.
+
+
+<!-----
+[EXCERPT:ReflectionResolution]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:max]
+	10
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	RCR
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	**슬라이더를 끌면 해상도가 리플렉션 모양에 어떻게 영향을 끼치는지 확인할 수 있습니다.**
+	[/PARAM]
+	[PARAM:image_list]
+	![](RCR_1.png)
+	![](RCR_2.png)
+	![](RCR_3.png)
+	![](RCR_4.png)
+	![](RCR_5.png)
+	![](RCR_6.png)
+	![](RCR_7.png)
+	![](RCR_8.png)
+	![](RCR_9.png)
+	![](RCR_10.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:ReflectionResolution]
+-->

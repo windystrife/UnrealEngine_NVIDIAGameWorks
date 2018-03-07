@@ -1,0 +1,88 @@
+// NvFlow begin
+
+#include "/Engine/Public/Platform.ush"
+#include "/Engine/Generated/GeneratedUniformBuffers.ush" 
+
+/** Input buffer containing particle indices. */
+Buffer<float2> InParticleIndices;
+/** Texture containing particle positions. */
+Texture2D<float4> PositionTexture;
+Texture2D<float4> VelocityTexture;
+
+Texture3D<uint> BlockTable;
+Texture3D<float4> DataIn;
+RWTexture3D<float4> DataOut;
+
+
+int3 TableValToCoord(uint val)
+{
+	uint valInv = ~val;
+	return int3(
+		(valInv >> 0) & 0x3FF,
+		(valInv >> 10) & 0x3FF,
+		(valInv >> 20) & 0x3FF);
+}
+
+void CoupleParticleToGrid(inout float4 uvwa, float3 partVel)
+{
+	float3 error3 = partVel.xyz - uvwa.xyz;
+
+	float rate = 0.f;
+	float uvwaLen2 = uvwa.x*uvwa.x + uvwa.y*uvwa.y + uvwa.z*uvwa.z;
+	float partVelLen2 = partVel.x*partVel.x + partVel.y*partVel.y + partVel.z*partVel.z;
+	if( uvwaLen2 < partVelLen2 )
+	{
+		rate = NvFlowCoupleParticles.AccelRate;
+	}
+	else if( uvwaLen2 > partVelLen2)
+	{
+		rate = NvFlowCoupleParticles.DecelRate;
+	}
+
+	if(rate > 0.f)
+	{
+		float x = log2(partVelLen2/uvwaLen2) / log2(NvFlowCoupleParticles.Threshold);
+		x = abs(x) - 0.5f;
+		x = max(x,0.f);
+		x = min(x,1.f);
+		rate *= (-2.f*x*x*x + 3*x*x);
+	}
+	rate = min(rate,1.f);
+
+	// apply coupling impulse
+	uvwa.x += rate * error3.x;
+	uvwa.y += rate * error3.y;
+	uvwa.z += rate * error3.z;
+}
+
+[numthreads(THREAD_COUNT, 1, 1)]
+void CoupleParticlesToGrid(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	uint InputIndex = DispatchThreadId.x;
+	if (InputIndex < NvFlowCoupleParticles.ParticleCount)
+	{
+		// Read in the particle index and its position.
+		const float2 ParticleIndex = float2(InParticleIndices[InputIndex]);
+		int3 ParticleTexel = int3(ParticleIndex.xy * int2(NvFlowCoupleParticles.TextureSizeX, NvFlowCoupleParticles.TextureSizeY), 0);
+		const float4 ParticlePosition = PositionTexture.Load(ParticleTexel);
+		if (ParticlePosition.w <= 1.0f)
+		{
+			float3 VolumePositon = mul(float4(ParticlePosition.xyz, 1), NvFlowCoupleParticles.WorldToVolume).xyz;
+			int3 Index = int3(floor(float3(NvFlowCoupleParticles.VDim) * VolumePositon));
+			if (NvFlowCoupleParticles.IsVTR == 0)
+			{
+				int3 VBlockIdx = (Index >> NvFlowCoupleParticles.BlockDimBits.xyz);
+				int3 RBlockIdx = TableValToCoord(BlockTable[VBlockIdx]);
+				Index = (RBlockIdx << NvFlowCoupleParticles.BlockDimBits.xyz) | (Index & (NvFlowCoupleParticles.BlockDim.xyz - int3(1, 1, 1)));
+			}
+
+			const float4 ParticleVelocity = VelocityTexture.Load(ParticleTexel);
+			float4 GridVelocity = DataIn[Index];
+
+			CoupleParticleToGrid(GridVelocity, ParticleVelocity.xyz * NvFlowCoupleParticles.InvVelocityScale);
+			DataOut[Index] = GridVelocity;
+		}
+	}
+}
+
+// NvFlow end

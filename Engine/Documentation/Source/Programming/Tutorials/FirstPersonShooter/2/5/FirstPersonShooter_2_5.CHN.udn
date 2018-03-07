@@ -1,0 +1,227 @@
+﻿INTSourceChangelist:3069483
+Availability:Public
+Title:2.5 - 实现角色跳跃
+Crumbs: %ROOT%, Programming, Programming/Tutorials/FirstPersonShooter, Programming/Tutorials/FirstPersonShooter/2
+Description:学习如何实现第一人称射击游戏角色的跳跃。
+SkillLevel:Beginner
+Version:4.11
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[Previous Step](Programming/Tutorials/FirstPersonShooter/2/4)
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[Section Home](Programming/Tutorials/FirstPersonShooter/2)
+	[/PARAM]
+	[PARAM:next]
+		[Next Step](Programming/Tutorials/FirstPersonShooter/2/6)
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+整体而言，动作映射处理离散事件的输入。可通过它们将输入映射到“易懂的命名”，之后再绑定到事件驱动的行为。实现的最终效果是：按下和/或松开一个键、鼠标按钮、或键盘按钮后将直接触发游戏行为。
+
+在这步中，我们将设置空格键的输入动作映射，实现角色的跳跃功能。
+
+## 跳跃动作映射
+
+1.	在 **Edit** 菜单中点击 **Project Settings**。
+
+1.	在 **Project Settings** 标签左侧的 **Engine** 标题下点击 **Input**。
+
+1.	在 **Bindings** 下点击 **Action Mappings** 旁的加号。
+
+1.	点击 **Action Mappings** 左侧的箭头。
+
+1.	在出现的文本框中输入“Jump”，然后点击文本框左侧的箭头展开动作绑定选项。
+
+1.	在下拉菜单中，从 **Keyboard** 下拉列表中选择 **Space Bar**。
+
+1.	输入设置应与下图相似：
+
+	![](JumpActionMapping_SpaceBar.png)
+
+1.	关闭 **Project Settings** 菜单。
+
+## 实现输入处理
+
+在 Character 基类的接口文件中查看时，会发现内置的角色跳跃支持。角色跳跃与 `bPressedJump` 变量绑定。因此需要执行的操作是在按下跳跃动作时将该布尔型设为 `true`，松开跳跃动作时设为 `false`。
+需要添加以下两个函数完成此操作：
+
+*	`StartJump`
+*	`StopJump`
+
+返回 Visual Studio 为 FPSCharacter 类添加代码。
+
+1.	在 `FPSCharacter.h` 中添加以下公开函数声明：
+
+		// 按下按键时设置跳跃标记。
+		UFUNCTION()
+		void StartJump();
+
+		// 松开按键时清除跳跃标记。
+		UFUNCTION()
+		void StopJump();
+
+1.	`FPSCharacter.h` 应与以下代码相似：
+
+		// 在 Project Settings 的 Description 页面填入版权声明。
+		
+		#pragma once
+		
+		#include "GameFramework/Character.h"
+		#include "FPSCharacter.generated.h"
+		
+		UCLASS()
+		class FPSPROJECT_API AFPSCharacter : public ACharacter
+		{
+			GENERATED_BODY()
+		
+		public:
+			// 设置该角色属性的默认值
+			AFPSCharacter();
+		
+			// 游戏开始时或生成时调用
+			virtual void BeginPlay() override;
+			
+			// 每帧调用
+			virtual void Tick( float DeltaSeconds ) override;
+		
+			// 调用后将功能绑定到输入
+			virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override;
+		
+			// 处理前后移动的输入。
+			UFUNCTION()
+			void MoveForward(float Value);
+
+			// 处理左右移动的输入。
+			UFUNCTION()
+			void MoveRight(float Value);
+
+			// 按下按键时设置跳跃标记。
+			UFUNCTION()
+			void StartJump();
+
+			// 松开按键时清除跳跃标记。
+			UFUNCTION()
+			void StopJump();
+		};
+
+1.	在 `FPSCharacter.cpp` 中添加以下函数定义：
+
+		void AFPSCharacter::StartJump()
+		{
+			bPressedJump = true;
+		}
+		
+		void AFPSCharacter::StopJump()
+		{
+			bPressedJump = false;
+		}
+
+1.	将以下代码添加到 `SetupPlayerInputComponent`，将跳跃动作绑定到新编写的函数：
+
+		// 设置“动作”绑定。
+		InputComponent->BindAction("Jump", IE_Pressed, this, &AFPSCharacter::StartJump);
+		InputComponent->BindAction("Jump", IE_Released, this, &AFPSCharacter::StopJump);
+
+1.	`FPSCharacter.cpp` 应与以下代码相似：
+
+		// 在 Project Settings 的 Description 页面填入版权声明。
+		
+		#include "FPSProject.h"
+		#include "FPSCharacter.h"
+		
+		// 设置默认值
+		AFPSCharacter::AFPSCharacter()
+		{
+		 	// 设置此角色每帧调用 Tick()。不需要时可将此关闭，以提高性能。
+			PrimaryActorTick.bCanEverTick = true;
+		
+		}
+		
+		// 游戏开始时或生成时调用
+		void AFPSCharacter::BeginPlay()
+		{
+			Super::BeginPlay();
+			
+			if (GEngine)
+			{
+				// 显示调试信息五秒。-1“键”值（首个参数）说明我们无需更新或刷新此消息。
+				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("We are using FPSCharacter."));
+			}
+		}
+		
+		// 每帧调用
+		void AFPSCharacter::Tick( float DeltaTime )
+		{
+			Super::Tick( DeltaTime );
+		
+		}
+		
+		// 调用后将功能绑定到输入
+		void AFPSCharacter::SetupPlayerInputComponent(class UInputComponent* InputComponent)
+		{
+			Super::SetupPlayerInputComponent(InputComponent);
+		
+			// 设置“移动”绑定。
+			InputComponent->BindAxis("MoveForward", this, &AFPSCharacter::MoveForward);
+			InputComponent->BindAxis("MoveRight", this, &AFPSCharacter::MoveRight);
+		
+			// 设置“查看”绑定。
+			InputComponent->BindAxis("Turn", this, &AFPSCharacter::AddControllerYawInput);
+			InputComponent->BindAxis("LookUp", this, &AFPSCharacter::AddControllerPitchInput);
+		
+			// 设置“动作”绑定。
+			InputComponent->BindAction("Jump", IE_Pressed, this, &AFPSCharacter::StartJump);
+			InputComponent->BindAction("Jump", IE_Released, this, &AFPSCharacter::StopJump);
+		}
+		
+		void AFPSCharacter::MoveForward(float Value)
+		{
+			// 明确哪个方向是“前进”，并记录玩家试图向此方向移动。
+			FVector Direction = FRotationMatrix(Controller->GetControlRotation()).GetScaledAxis(EAxis::X);
+			AddMovementInput(Direction, Value);
+		}
+		
+		void AFPSCharacter::MoveRight(float Value)
+		{
+			// 明确哪个方向是“向右”，并记录玩家试图向此方向移动。
+			FVector Direction = FRotationMatrix(Controller->GetControlRotation()).GetScaledAxis(EAxis::Y);
+			AddMovementInput(Direction, Value);
+		}
+		
+		void AFPSCharacter::StartJump()
+		{
+			bPressedJump = true;
+		}
+		
+		void AFPSCharacter::StopJump()
+		{
+			bPressedJump = false;
+		}
+
+## 测试角色跳跃
+
+现在即可编译并测试新实现的角色移动函数。
+
+1.	在 Visual Studio 中保存 `FPSCharacter` 头 (\*.h) 和 CPP (\*.cpp)文件。
+
+1.	在 **Solution Explorer** 中找到 **FPSProject**。
+
+1.	右键单击 **FPSProject** 并选择 **Build** 编译项目。
+
+	![](BuildProject.png)
+
+1.	构建完成后，在虚幻编辑器中打开 **FPSProject**。
+
+1.	点击关卡编辑器工具栏中的 **Play** 按钮。现在即可在地图中进行跳跃。
+
+1.	按下 Esc 键或点击关卡编辑器中的 **Stop** 按钮即可退出 Play in Editor（PIE）模式。
+
+%Steps%

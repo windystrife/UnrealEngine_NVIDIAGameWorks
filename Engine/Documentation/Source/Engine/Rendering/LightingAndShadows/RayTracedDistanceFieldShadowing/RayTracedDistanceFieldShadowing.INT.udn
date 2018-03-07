@@ -1,0 +1,161 @@
+Availability: Public
+Title: Ray Traced Distance Field Soft Shadows
+Crumbs: %ROOT%, Engine, Engine/Rendering/LightingAndShadows
+Description:Dynamic area shadows
+Version: 4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/RayTracedDistanceFieldShadowing:title%](DistanceFieldShadowing_Topic.jpg)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/RayTracedDistanceFieldShadowing:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/RayTracedDistanceFieldShadowing:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/RayTracedDistanceFieldShadowing]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Rendering/LightingAndShadows/RayTracedDistanceFieldShadowing:title%](DistanceFieldShadowing_Topic.jpg)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/light_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Rendering/LightingAndShadows/RayTracedDistanceFieldShadowing:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Rendering/LightingAndShadows/RayTracedDistanceFieldShadowing:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Rendering/LightingAndShadows/RayTracedDistanceFieldShadowing]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+[REGION:fullwidth raw]
+![](DistanceFieldShadowing_Header.jpg)
+[/REGION]
+
+[TOC(start:2 end:2)]
+
+
+
+Ray Traced Distance Field shadows leverage the properties of a distance field representation of the scene to compute efficient area shadowing from dynamic meshes.  This uses the same data as [Distance Field Ambient Occlusion](Engine/Rendering/LightingAndShadows/DistanceFieldAmbientOcclusion), and therefore has many of the same limitations.
+
+To calculate shadowing, a ray is traced from the point being shaded through the scene's signed distance fields toward each light.  The closest distance to an occluder is used to approximate a cone trace for about the same cost as the ray trace.  This allows high quality area shadowing from spherical light source shapes.
+
+[REGION:note]
+Distance field shadows require the Project setting **'Generate Mesh Distance Fields'** (under Rendering) to be enabled.  The editor must be restarted after changing the value of this setting.
+[/REGION]
+
+## Point and Spot lights
+
+'Source Radius' is used to determine how large shadow penumbras are on a point light.  Area shadows are computed with sharp contacts that get softer over long distances.  Note that the light source sphere should not be intersecting the scene or it will cause artifacts.
+
+[![](LightSourceVis.jpg)(w:288)](LightSourceVis.jpg)
+[REGION:caption]
+The editor draws the source shape of a light with yellow lines.
+[/REGION]
+
+[REGION:fullwidth]
+	![](PointLightAreaShadows.jpg)
+[/REGION]
+
+[REGION:caption]
+Ray Traced soft shadows from a point light with a Source Radius of 100.
+[/REGION]
+
+[_Video of a moving point light using Ray Traced Distance Field shadowing._](https://www.youtube.com/watch?v=-xai0iBffUc&list=UUBobmJyzsJ6Ll7UbfhI4iwQ)
+
+## Directional lights
+
+'Light Source Angle' is used to determine how large shadow penumbras are on a directional light.  Ray Traced shadows have very few self-intersection problems and therefore avoid the leaking and over-biasing problems in the distance that traditional shadow mapping is plagued by.
+
+[REGION:fullwidth]
+	![](DirectionalLightAreaShadows.jpg)
+[/REGION]
+[REGION:caption]
+Ray Traced soft shadows from a directional light with a Light Source Angle of 2.
+[/REGION]
+
+Cascaded Shadow Maps are typically used to provide dynamic shadowing of a directional light.  These require rendering the meshes in the scene into several cascade shadow maps.  The cost of the shadowing increases steeply at larger shadow distances, because of how many meshes and triangles are being rendered into the shadowmaps. 
+
+Ray Traced Distance Field shadows behave much more gracefully in the distance, doing shadowing work only for visible pixels.  Cascaded Shadow Maps can be used to cover regions near the camera, while Ray Traced Shadows will cover regions up until 'DistanceField Shadow Distance'.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![A foliage scene with CSM covering up to 100 meters.](CSM2.jpg)(w:800)
+	[/PARAM]
+	[PARAM:after]
+	![A foliage scene with CSM covering up to 100 meters, and Ray Traced Distance Field shadows covering up to 1.2 kilometers.](RTDF2.jpg)(w:800)
+	[/PARAM]
+[/OBJECT]
+
+
+[_Video of changing time of day using Ray Traced Distance Field shadowing._](https://www.youtube.com/watch?v=4249b94KtyA&list=UUBobmJyzsJ6Ll7UbfhI4iwQ)
+
+## Quality
+
+Distance field fidelity has a large impact on shadow accuracy, more so than Distance Field AO.  Set the 'Distance Field Resolution' (under Build Settings) higher on Static Meshes that need it.  
+
+These shadows are computed at half resolution with a depth-aware upsample.  Temporal AA does a great job of reducing the flickering from half res, but jaggies in the shadows still appear sometimes.
+
+## Limitations
+
+The limitations of this technique are similar to [Distance Field Ambient Occlusion](Engine/Rendering/LightingAndShadows/DistanceFieldAmbientOcclusion)'s limitations:
+
+* Only Static Mesh components, Instanced Static Mesh components and foliage (once "Affect Distance Field Lighting" has been enabled) generate distance fields and can cast shadows.  However, skeletal meshes can still composite their shadows with 'Cast Inset Shadow'.  Landscape is best handled with Far cascades enabled by "Far Shadow Cascade Count".
+* Only slight non-uniform scaling (squishing) of meshes is supported.  Artifacts in the penumbras will appear with higher amounts of mesh squishing.
+* Deformation through World Position Offset or Tessellation cannot be represented and may cause self-shadowing artifacts.  It can be useful to use CSM to cover areas near the viewer to support vertex animation while using Ray Traced shadows in the distance.
+
+## Performance
+
+On a directional light, a larger Light Source Angle increases cost as more objects have to be considered for each point being shadowed.  Larger values for 'DistanceField Shadow Distance' reduce the culling efficiency a bit.  Shadows from meshes with "Generate Distance Field As If Two Sided" cost more as the resulting shadows are never fully opaque.
+
+These GPU timings were done on a Radeon 7870 at 1920x1080 in a full game scene.
+
+Directional light with distance 10k, 3 cascades
+* Cascaded shadow maps 3.1ms
+* Distance Field shadows 2.3ms (25% faster)
+
+Directional light with distance 30k, 6 cascades
+* Cascaded shadow maps 4.9ms
+* Distance Field shadows 2.8ms (43% faster)
+
+One large point light
+* Cubemap shadow map 1.8ms
+* Distance Field shadows 1.3ms (30% faster)
+
+Five small point lights
+* Cubemap shadow maps 3.2ms
+* Distance Field shadows 1.8ms (45% faster)
+
+## Settings
+
+### Light
+| Property | Description |
+| -------- | ----------- |
+| **Use RayTraced DistanceField Shadows** | Switches from shadow mapping techniques to distance field shadowing. |
+| **Ray Start Offset Depth Scale** | Controls how large of an offset ray traced shadows have from the receiving surface as the camera gets further away.  This can be useful to hide self-shadowing artifacts from low resolution distance fields on huge static meshes. |
+
+### Point and Spot Lights
+| Property | Description |
+| -------- | ----------- |
+| **Source Radius** | Size of the light source sphere.  Larger values result in larger penumbras, but also cost more performance. |
+
+### Directional Light
+| Property | Description |
+| -------- | ----------- |
+| **DistanceField Shadow Distance** | Distance for the ray traced shadows to cover.  Must be further than 'Dynamic Shadow Distance' used by Cascaded Shadow Maps for ray traced shadows to be used. |
+| **Light Source Angle** | Half angle that the directional light source covers from a receiver perspective.  Larger angles will result in larger penumbras, but also costs more performance. |

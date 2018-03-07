@@ -1,0 +1,228 @@
+//-----------------------------------------------------------------------------
+// File:		LPVGeometryVolumeCommon.usf
+//
+// Summary:		Common functionality for geometry volumes
+//
+// Created:		2013-03-01
+//
+// Author:		mailto:benwood@microsoft.com
+//
+//				Copyright (C) Microsoft. All rights reserved.
+//-----------------------------------------------------------------------------
+
+#ifndef LPV_MULTIPLE_BOUNCES
+#define LPV_MULTIPLE_BOUNCES 0
+#endif 
+
+#define GV_ORDER 2
+
+#ifndef LPV_GV_SH_ORDER
+#error LPV_GV_SH_ORDER is not defined!
+#else
+#if ( GV_ORDER > LPV_GV_SH_ORDER )
+#undef GV_ORDER
+#define GV_ORDER LPV_GV_SH_ORDER
+#endif
+#endif
+
+//------------------------------------------------------------------------------
+
+struct GeometryVolumeEntry
+{
+#if (GV_ORDER==2)
+	float SH[9];
+#elif (GV_ORDER==1)
+	float SH[4];
+#elif (GV_ORDER==0)
+	float SH[1];
+#endif
+
+#if LPV_MULTIPLE_BOUNCES
+	//@todo : store colour as SH? Is single component good enough?
+	float3 color;
+#endif
+};
+
+//------------------------------------------------------------------------------
+
+RWTexture3D<float4>	gGv3DTextureRW0;
+Texture3D<float4>	gGv3DTexture0;
+#if ( GV_ORDER >= 1 )
+RWTexture3D<float4>	gGv3DTextureRW1;
+Texture3D<float4>	gGv3DTexture1;
+#endif
+#if (GV_ORDER >= 2 )
+RWTexture3D<float4>	gGv3DTextureRW2;
+Texture3D<float4>	gGv3DTexture2;
+#endif
+
+//-------------------------------------------------------------------------------------------------
+// Functions
+//-------------------------------------------------------------------------------------------------
+
+GeometryVolumeEntry ReadGvCell( uint index )
+{
+	GeometryVolumeEntry gv;
+
+	int4 texIndex = int4( IndexToGridPos( index ), 0 );
+	float4 gvTex0 = gGv3DTexture0.Load( texIndex );
+	gv.SH[0] = gvTex0.x;
+#if ( GV_ORDER >= 1 )
+	float4 gvTex1 = gGv3DTexture1.Load( texIndex );
+	gv.SH[1] = gvTex0.y;
+	gv.SH[2] = gvTex0.z;
+	gv.SH[3] = gvTex0.w;
+#endif
+#if ( GV_ORDER >= 2 )
+	float4 gvTex2 = gGv3DTexture2.Load( texIndex );
+	gv.SH[4] = gvTex1.x;
+	gv.SH[5] = gvTex1.y;
+	gv.SH[6] = gvTex1.z;
+	gv.SH[7] = gvTex1.w;
+	gv.SH[8] = gvTex2.x;
+#endif
+
+ #if LPV_MULTIPLE_BOUNCES
+ #if (GV_ORDER == 0 )
+  gv.color = gvTex0.yzw;
+#elif (GV_ORDER == 1)
+  gv.color = gvTex1.xyz;
+#else
+	gv.color = gvTex2.yzw;
+ #endif
+ #endif
+	return gv;
+	}
+
+//-------------------------------------------------------------------------------------------------
+
+float3 GvGetDominantDirectionApprox( in GeometryVolumeEntry cell )
+{
+#if (GV_ORDER == 0 )
+	return float3(0,0,0);
+#else
+	float3 dir = float3( -cell.SH[3], -cell.SH[1], -cell.SH[2] );
+	float len = length( dir );
+	float den = ( len > 0.01 ) ? len : 1.0f;
+	return dir/den;
+#endif
+}
+
+//-------------------------------------------------------------------------------------------------
+
+void WriteGvCell( uint index, GeometryVolumeEntry entry )
+{
+
+	int3 texIndex = IndexToGridPos( index );
+
+#if ( GV_ORDER == 0 )
+ #if LPV_MULTIPLE_BOUNCES
+	gGv3DTextureRW0[ texIndex ] = float4( entry.SH[0], 0.0f, 0.0f, 0.0f );
+ #else
+	gGv3DTextureRW2[ texIndex ] = float4( entry.SH[0], entry.color.rgb );
+ #endif
+#elif ( GV_ORDER == 1 )
+	gGv3DTextureRW0[ texIndex ] = float4( entry.SH[0], entry.SH[1], entry.SH[2], entry.SH[3] );
+ #if LPV_MULTIPLE_BOUNCES
+	gGv3DTextureRW1[ texIndex ] = float4( entry.color.rgb, 0.0f );
+ #endif
+#else
+	gGv3DTextureRW0[ texIndex ] = float4( entry.SH[0], entry.SH[1], entry.SH[2], entry.SH[3] );
+	gGv3DTextureRW1[ texIndex ] = float4( entry.SH[4], entry.SH[5], entry.SH[6], entry.SH[7] );
+ #if LPV_MULTIPLE_BOUNCES
+	gGv3DTextureRW2[ texIndex ] = float4( entry.SH[8], entry.color.rgb );
+ #else
+	gGv3DTextureRW2[ texIndex ] = float4( entry.SH[8], 0.0f, 0.0f, 0.0f );
+ #endif
+#endif
+}
+
+//-------------------------------------------------------------------------------------------------
+
+void ClearGvEntry( in out GeometryVolumeEntry entry )
+	{
+	entry.SH[0] = 0.0f;
+ #if ( GV_ORDER >= 1 )
+	entry.SH[1] = 0.0f;
+	entry.SH[2] = 0.0f;
+	entry.SH[3] = 0.0f;
+ #endif
+ #if ( GV_ORDER >= 2 )
+	entry.SH[4] = 0.0f;
+	entry.SH[5] = 0.0f;
+	entry.SH[6] = 0.0f;
+	entry.SH[7] = 0.0f;
+	entry.SH[8] = 0.0f;
+ #endif
+
+ #if LPV_MULTIPLE_BOUNCES
+	entry.color = 0.0f;
+ #endif
+}
+
+//-------------------------------------------------------------------------------------------------
+
+void ClearGvCell( uint index )
+{ 
+	int3 texIndex = IndexToGridPos( index );
+	gGv3DTextureRW0[ texIndex ] = 0.0f;
+ #if ( GV_ORDER >= 1 )
+	gGv3DTextureRW1[ texIndex ] = 0.0f;
+ #endif
+ #if ( GV_ORDER >= 2 )
+	gGv3DTextureRW2[ texIndex ] = 0.0f;
+ #endif
+}
+
+//-------------------------------------------------------------------------------------------------
+
+float SHLookupGeometryVolume( 
+	GeometryVolumeEntry cell,
+    float3 n ) 
+{
+	const float1 c1 = 0.429043 ;
+	const float1 c2 = 0.511664 ;
+	const float1 c3 = 0.743125 ;
+	const float1 c4 = 0.886227 ;
+	const float1 c5 = 0.247708 ;
+
+	float3 n2 = n*n;
+#if ( GV_ORDER == 0 )
+	float value = c4*cell.SH[0];
+#elif ( GV_ORDER == 1 )
+	float value = c4*cell.SH[0] + 2.0f*c2*(cell.SH[3]*n.x+cell.SH[1]*n.y+cell.SH[2]*n.z);
+#else
+	float xy = n.x*n.y ; 
+	float yz = n.y*n.z ; 
+	float xz = n.x*n.z ;
+	float value = c1*cell.SH[8]*(n2.x-n2.y) + c3*cell.SH[6]*n2.z + c4*cell.SH[0] - c5*cell.SH[6] 
+            + 2.0f*c1*(cell.SH[4]*xy + cell.SH[7]*xz + cell.SH[5]*yz) 
+            + 2.0f*c2*(cell.SH[3]*n.x+cell.SH[1]*n.y+cell.SH[2]*n.z) ;
+#endif
+	return max( value, 0.0f );
+}
+
+//-------------------------------------------------------------------------------------------------
+
+void AccumulateCoeffsGeometryVolume(float value, float3 n, in out GeometryVolumeEntry cell ) 
+{ 
+	const float c0 = 0.282095f;
+	const float c1 = 0.488603f;
+	const float c2 = 1.092548f;
+	const float c3 = 0.315392f;
+	const float c4 = 0.546274f;
+
+	cell.SH[0] += c0*value;
+#if ( GV_ORDER >= 1 )
+	cell.SH[1] += (c1*n.y)*value;   
+	cell.SH[2] += (c1*n.z)*value;   
+	cell.SH[3] += (c1*n.x)*value;   
+ #if ( GV_ORDER >= 2 )
+	cell.SH[4] += (c2*n.x*n.y)*value; 
+	cell.SH[5] += (c2*n.y*n.z)*value; 
+	cell.SH[7] += (c2*n.x*n.z)*value; 
+	cell.SH[6] += (c3*(3.0f*n.z*n.z-1.0f))*value; 
+	cell.SH[8] += (c4*(n.x*n.x-n.y*n.y))*value;
+ #endif
+#endif
+}

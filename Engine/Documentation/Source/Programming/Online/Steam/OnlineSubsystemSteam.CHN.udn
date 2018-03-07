@@ -1,0 +1,123 @@
+﻿INTSourceChangelist:2744667
+Availability:Public
+Title:Steam 在线子系统
+Crumbs:%ROOT%, Programming
+Description:Steam 在线子系统的特有内容 
+Version:4.9
+
+[TOC(start:2)]
+
+
+[EXCERPT:Intro] 
+此处包含的内容只属于 Steam 实现。此处还包含额外设置步骤、提示和技巧，以及解决方法。
+[/EXCERPT:Intro]
+
+
+
+**Steam** 模块通过在线子系统实现多数公开接口，并通过 Steamworks SDK 支持 Valve 提供的多数内容。 
+
+Steam 接口
+* 配对（大厅/游戏服务器 API）
+* 排行榜
+* 成就
+* 声音
+* 用户云
+* 共享云
+* 外部 UI
+
+
+
+所有游戏都必须拥有有效 Steam 应用 ID。开发过程中，此应用 ID 通过一个名为 steam_appid.txt 的文件公开到 SDK。此文件必须放置在可执行文件的相同目录中。此文件由虚幻引擎在启动时生成，引擎正常关闭时删除。因此无需通过 Steam 客户端即可运行游戏（但客户端必须为运行状态）。这些文件不应包含在 Steam 图片中。
+
+在发布版本中，引擎还将进行检查，确保登入用户正常注册游戏，出现异常则关闭引擎。这是保证游戏安全的方法之一。使用 Steam DRM（查阅 Steamworks SDK）可进一步防止游戏被篡改。
+
+## 基础设置
+
+Steam 子系统要求通过 Valve 进行一些额外设置。联系 Valve 并查阅其文档，确保在虚幻引擎中尝试使用 Steam 之前在 Valve 端进行设置。
+
+### 安装 Steamworks SDK
+由于法律原因，使用 Steam 需要从 Valve 下载最新 SDK。当前的 SDK 版本号为 *v1.29a*，未来更新都应为路径名的直接修改。查看 ThirdParty/Steamworks 目录中的 *Steamworks.build.cs*
+
+针对预编译版本引擎使用 Steam 只要求将部分 DLL 从 Valve 的 SDK 复制到适当位置。如需针对源重编译引擎，也需要将 SDK 放置到正确位置。
+
+* SDK 需要被解压/复制到此路径
+	* /YourUnrealEnginePath/Engine/Source/ThirdParty/Steamworks/Steamv130/sdk
+* 从 SDK 的 /redistributable_bin/ 目录找到以下二进制文件并将它们放到标注位置。<br>*注意：*普通 Steam 客户端目录中存在部分 64 位 dll 文件。Valve 并未将它们全部包含到 SDK 中，原因不详。
+	* /YourUnrealEnginePath/Engine/Binaries/ThirdParty/Steamworks/Steamv130/Win64
+		* steam_api64.dll
+		* steamclient64.dll
+		* tier0_s64.dll
+		* vstdlib_s64.dll
+	* /YourUnrealEnginePath/Engine/Binaries/ThirdParty/Steamworks/Steamv130/Win32
+		* steam_api.dll
+		* steamclient.dll
+		* tier0_s.dll
+		* vstdlib_s.dll
+	* /YourUnrealEnginePath/EngineOrGameFolder/Binaries/Mac/YourGame.app/Contents/MacOS
+		* libsteam_api.dylib（来源路径为 /redistributable_bin/osx32 — 拥有 32 和 64 位支持的单一 dylib 文件）
+		
+[REGION:note]
+如在对整个引擎进行编译，则需要在 OnlineSubsystemSteam\Private\OnlineSubsystemSteamPrivatePCH.h 中修改以下命令行： 
+
+define STEAM_SDK_VER TEXT("Steamv130")，
+
+确保其应用新的 SDK 目录位置/版本
+[/REGION]
+
+### INI 配置
+
+在游戏的 DefaultEngine.ini 中打开部分设定。  
+[REGION:note]
+480 SteamDevAppId 是 Valve 的测试应用 ID，所有人共享。随着工作的深入您需要自己的应用 Id，但 Steam 的大部分功能均可通过测试 ID 使用。
+[/REGION]
+
+    [/Script/Engine.GameEngine]
+    +NetDriverDefinitions=(DefName="GameNetDriver",DriverClassName="OnlineSubsystemSteam.SteamNetDriver",DriverClassNameFallback="OnlineSubsystemUtils.IpNetDriver")
+    
+    [OnlineSubsystem]
+    DefaultPlatformService=Steam
+
+    [OnlineSubsystemSteam]
+    bEnabled=true
+    SteamDevAppId=480
+
+    [/Script/OnlineSubsystemSteam.SteamNetDriver]
+    NetConnectionClassName="OnlineSubsystemSteam.SteamNetConnection"
+
+### 模块设置
+
+必须将虚幻引擎 Steam 模块纳入为项目的一个部分。（在 [](Programming/UnrealBuildSystem/TargetFiles) 中可查阅额外帮助）
+
+添加以下代码应足以确保 Steam 模块随游戏构建。它存在于 mygame.build.cs 的构造函数中。 
+
+    DynamicallyLoadedModuleNames.Add("OnlineSubsystemSteam");
+
+### Mac 上的 Steam 覆盖
+
+和 Windows 相反，Mac 上的 Steam 覆盖要求使用 Steam 客户端运行游戏。对此，首先需要使用 Steam 游戏菜单中的“Add a Non-Steam Game to My Library”选项将游戏添加到库。
+
+<!--
+### Steam 套接字
+
+### Steam 网络驱动
+
+### Steam 网络连接
+
+
+
+## 参考
+
+[OBJECT:TopicList]
+	[PARAM:icon]
+	[/PARAM]
+	[PARAM:title]
+	接口
+	[/PARAM]
+	[PARAM:description]
+	[/PARAM]
+	[PARAM:links]
+	* [](Programming/Online/):%Programming/Online/:Description%
+	[/PARAM]
+[/OBJECT]
+   
+  --> 

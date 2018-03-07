@@ -1,0 +1,144 @@
+﻿INTSourceChangelist:3588288
+Availability: Docs
+Crumbs: %ROOT%
+Title: 애셋 관리
+Description: 애셋 로드와 언로드
+Type: Overview
+SkillLevel: Intermediate
+Version: 4.17
+Parent: Engine/Basics/AssetsAndPackages
+Order: 0
+Tags: Assets
+Tags: Asset Management
+Related: Engine/Basics/AssetsAndPackages
+Related: Engine/Basics/AssetsAndPackages/AssetManagement/CookingAndChunking
+
+
+[TOC (start:2 end:3)]
+
+언리얼 엔진 4 는 [애셋](Engine/Basics/AssetsAndPackages/) 로드와 언로드를 자동으로 처리하므로, 개발자가 코딩 시스템을 통해 직접 각 애셋이 정확히 언제 필요하게 될 것인지 엔진에게 알려주지 않아도 됩니다. 하지만 애셋 발견, 로드, 감사 시기와 방법을 개발자가 보다 정교하게 제어하고싶은 경우가 있을 수 있습니다. 그러한 경우 **애셋 매니저** 가 도움이 될 수 있습니다. 애셋 매니저는 에디터는 물론 패키징된 게임에도 존재하는 고유한 글로벌 오브젝트로, 특정 프로젝트에 맞게 덮어써서 커스터마이징할 수 있습니다. 여기에는 애셋 관리를 위한 프레임워크가 제공되어 프로젝트 맥락에 맞는 청크로 콘텐츠를 분할시킬 수 있으며, 이 과정에서도 언리얼 엔진 4 의 [느슨한 패키지 구조](Engine/Basics/AssetsAndPackages/) 장점을 계속해서 누릴 수 있습니다. 디스크 및 메모리 사용량 감사를 위한 툴 세트도 제공되므로, 게임을 디플로이할 때 애셋 구조를 [쿠킹 및 청킹](Engine/Basics/AssetsAndPackages/AssetManagement/CookingAndChunking) 에 용이하도록 최적화시키는 데 필요한 정보를 확인할 수 있습니다.
+
+
+## 주요 애셋, 부 애셋, 주요 애셋 라벨
+
+개념적으로, 언리얼 엔진 4 의 애셋 관리 시스템은 모든 애셋을 **Primary Assets** (주요 애셋)과 **Secondary Assets** (부 애셋) 두 가지 유형으로 나눕니다. 주요 애셋은 `GetPrimaryAssetId` 호출을 통해 얻을 수 있는 자체 [**Primary Asset ID**](API:FPrimaryAssetId) 를 통해 애셋 매니저가 직접 조작할 수 있습니다. 특정 `UObject` 클래스에서 만들어진 애셋을 주요 애셋으로 지정하기 위해서는, `GetPrimaryAssetId` 가 유효한 `FPrimaryAssetId` 구조체를 반환하도록 덮어씁니다. 부 애셋은 애셋 매니저가 직접 처리하지 않는 대신, 주요 애셋에 사용되거나 레퍼런싱되는 데 반응해서 엔진이 자동으로 로드합니다. 기본적으로 `UWorld` 애셋(레벨)만 주요 애셋이고, 다른 모든 애셋은 부 애셋입니다. 부 애셋을 주요 애셋으로 만들기 위해서는, 그 클래스에 대한 `GetPrimaryAssetId` 함수가 유효한 `FPrimaryAssetId` 구조체를 반환하도록 덮어써야 합니다.
+
+
+## 애셋 매니저와 스트리머블 매니저
+
+[Asset Manager](API:UAssetManager) 오브젝트는 주요 애셋의 발견과 로드를 관리하는 싱글톤(단독 개체)입니다. 엔진에 포함된 베이스 Asset Manager 클래스는 기본적인 관리 함수 기능을 제공하지만, 프로젝트의 요구에 맞도록 확장시킬 수 있습니다. 애셋 매니저에 포함되어 있는 [**Streamable Manager**](API:FStreamableManager) 구조체는 오브젝트 비동기 로드의 실제 작업을 수행할 뿐만 아니라, 오브젝트가 더이상 필요치 않아 언로드 가능할 때까지 **Streamable Handles** 를 통해 메모리에 오브젝트를 유지하는 작업을 합니다. 싱글톤 애셋 매니저와는 달리, 엔진 다양한 부분에 다양한 용도의 스트리머블 매니저가 다수 있습니다.
+
+
+## 애셋 번들
+
+**Asset Bundle** 은 주요 애셋에 관련된 특정 애셋의 네임드 리스트입니다. 애셋 번들 생성은 메타 태그가 "AssetBundles" 인 `UObject` 의 `TAssetPtr` 또는 `FStringAssetReference` 멤버에 `UPROPERTY` 섹션 태그를 붙이는 것으로 이루어집니다. 태그 값은 부 애셋을 저장해야하는 번들 이름을 나타냅니다. 예를 들어 다음 스태틱 메시 애셋은 `MeshPtr` 라는 멤버 변수에 저장되어 있으며, UObject 저장 시 "TestBundle" 이라는 애셋 번들에 추가될 것입니다:
+
+	/** Mesh */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = Display, AssetRegistrySearchable, meta = (AssetBundles = "TestBundle"))
+	TAssetPtr<UStaticMesh> MeshPtr;
+
+애셋 번들을 사용하는 두 번째 방법은, 런타임에서 프로젝트의 Asset Manager 클래스로 등록해 주는 것입니다. 이 경우, 프로그래머는 `FAssetBudleData` 구조체를 채우는 코드를 작성한 뒤 그 구조체를 애셋 매니저의 `AddDynamicAsset` 함수에 전달하면서, Primary Asset ID 는 번들의 Secondary Assets 으로 할당해 주면 됩니다.
+
+
+### 주요 애셋 등록 및 디스크에서 로드
+
+대부분의 주요 애셋은 콘텐츠 브라우저에서 찾을 수 있으며, 디스크에 저장되는 애셋 파일로 존재하므로, 아티스트나 디자이너가 편집할 수 있습니다. 프로그래머가 이런 식으로 사용할 수 있는 클래스를 만드는 가장 쉬운 방법은 `UPrimaryDataAsset` 를 상속하는 것인데, 이는 애셋 번들 데이터를 로드하고 저장하는 함수 기능이 내장된 `UDataAsset` 버전입니다. `APawn` 과 같은 다른 베이스 클래스를 원하는 경우, 해당 클래스의 애셋 번들 작동을 위해 반드시 필요한 기능 최소 예제가 들어있는 `UPrimaryDataAsset` 이 좋습니다. 다음 클래스는 Fortnite 의 Zone Theme 데이터를 저장하는 것으로, 게임의 맵 선택 모드에서 한 지역의 시각적인 표현을 구사할 때 어떤 아트 애셋을 사용할지 게임에 알려주는 것입니다:
+
+	/** A zone that can be selected by the user from the map screen */
+	UCLASS(Blueprintable)
+	class FORTNITEGAME_API UFortZoneTheme : public UPrimaryDataAsset
+	{
+		GENERATED_UCLASS_BODY()
+
+		/** Name of the zone */
+		UPROPERTY(EditDefaultsOnly, Category=Zone)
+		FText ZoneName;
+
+		/** The map that will be loaded when entering this zone */
+		UPROPERTY(EditDefaultsOnly, Category=Zone)
+		TAssetPtr<UWorld> ZoneToUse;
+
+		/** The blueprint class used to represent this zone on the map */
+		UPROPERTY(EditDefaultsOnly, Category=Visual, meta=(AssetBundles = "Menu"))
+		TAssetSubclassOf<class AFortTheaterMapTile> TheaterMapTileClass;
+	};
+
+
+이 클래스는 `UPrimaryDataAsset` 를 상속하므로, 애셋의 짧은 이름 및 네이티브 클래스를 사용하는 `GetPrimaryAssetId` 작동 버전이 있습니다. 예를 들어, "Forest" 라는 이름으로 저장된 `UFortZoneTheme` 는 Primary Asset ID 가 "FortZoneTheme:Forest" 일 것입니다. 에디터에서 `UFortZoneTheme` 애셋이 저장될 때마다, 그것을 Secondary Asset 으로 포함시키도록 `PrimaryDataAsset` 의 `AssetBundleData` 멤버를 업데이트합니다.
+
+Primary Assets 등록 및 로드를 위해서는 다음과 같은 작업이 필요합니다:
+
+1. **엔진에 프로젝트의 커스텀 Asset Manager 클래스가 있다면 그에 대해 알립니다.** 프로젝트의 `DefaultEngine.ini` 파일을 변경하여 `[/Script/Engine.Engine]` 섹션 아래 `AssetManagerClassName` 변수를 설정해 주면 됩니다. 최종 값 포맷은 다음과 같을 것입니다:
+	[/Script/Engine.Engine]
+	AssetManagerClassName=/Script/Module.UClassName
+"Module" 은 프로젝트의 모듈 이름을 가리키고, "UClassName" 은 사용하고자 하는 `UClass` 이름을 가리킵니다. Fortnite 예제에서, 프로젝트의 모듈 이름은 "FortniteGame" 이고, 사용하고자 하는 클래스 이름은 `UFortAssetManager` (, 즉 그 `UClass` 이름이 `FortAssetManager`) 이므로, 두 번째 줄은 다음과 같이 읽힐 것입니다:
+	AssetManagerClassName=/Script/FortniteGame.FortAssetManager
+[REGION:note]특별한 기능이 필요치 않다면 기본 Asset Manager 클래스를 덮어쓸 필요는 없습니다. 기본 엔진 클래스인 `UAssetManager` 를 사용한다면 이 단계는 건너뛰어도 됩니다.[/REGION]
+
+1. **Primary Assets 에 Asset Manager 를 등록합니다.** 그 방법은 세 가지입니다. **프로젝트 세팅** 메뉴에서 환경설정하는 방법, `DefaultGame.ini` 에 검색할 애셋 경로 배열을 수동 추가하는 방법, Asset Manager 가 스타트업 도중 그 작업을 하도록 프로그래밍해 주는 방법이 있습니다.
+	
+	* **프로젝트 세팅** (에서 **Game / Asset Manager** 섹션)을 통한 환경설정은 이와 같습니다:
+	![](ProjectSettingsAssetManager.png)
+	[REGION:caption]주요 애셋 검색을 위한 경로를 설정할 수 있습니다.[/REGION]
+	[REGION:note]
+	| 세팅 | 효과 |
+	| --- | --- |
+	| Primary Asset Types to Scan | 검색할 주요 애셋 유형 - 발견하여 등록할 주요 애셋 유형과, 어디서 찾을지 그리고 어떻게 할지를 나열합니다. |
+	| Directories to Exclude | 제외할 디렉토리 - 명시적으로 주요 애셋 검색을 하지 않을 디렉토리입니다. 테스트 애셋을 제외시킬 때 좋습니다. |
+	| Primary Asset Rules | 주요 애셋 룰 - 애셋 처리 방식을 나타내는 구체적인 Rules Override (룰 오버라이드)를 나열합니다. 자세한 정보는 [](Engine/Basics/AssetsAndPackages/AssetManagement/CookingAndChunking) 문서를 참고하세요. |
+	| Only Cook Production Assets | 프로덕션 애셋만 쿠킹 - 이 옵션을 체크하면 쿠킹 프로세스 도중 DevelopmentCook 지정된 애셋은 오류를 냅니다. 최종 shipping 빌드에 테스트 애셋이 포함되지 않도록 하는 데 좋습니다. |
+	| Primary Asset ID Redirects | 주요 애셋 ID 리디렉트 - 애셋 매니저가 주요 애셋에 대해 목록에 어느 ID 를 표시할지 찾아볼 때, 그 ID 를 제공된 대체 ID 로 바꿉니다. |
+	| Primary Asset Type Redirects | 주요 애셋 유형 리디렉트 - 애셋 매니저가 주요 애셋에 대한 데이터를 찾아볼 때, 원래 유형 대신 이 목록에 제공된 유형 이름을 사용합니다. |
+	| Primary Asset Name Redirects | 주요 애셋 이름 리디렉트 - 애셋 매니저가 주요 애셋에 대한 데이터를 찾아볼 때, 원래 이름 대신 이 목록에 제공된 애셋 이름을 사용합니다. |
+	[/REGION]
+	
+	* `DefaultGame.ini` 편집은, `/Script/Engine.AssetManagerSettings` 라는 섹션을 검색( 또는 생성)한 뒤 Primary Asset 클래스를 수동으로 추가해 줍니다. 포맷은 이와 같습니다:
+			[/Script/Engine.AssetManagerSettings]
+			!PrimaryAssetTypesToScan=ClearArray
+			+PrimaryAssetTypesToScan=(PrimaryAssetType="Map",AssetBaseClass=/Script/Engine.World,bHasBlueprintClasses=False,bIsEditorOnly=True,Directories=((Path="/Game/Maps")),SpecificAssets=,Rules=(Priority=-1,bApplyRecursively=True,ChunkId=-1,CookRule=Unknown))
+			+PrimaryAssetTypesToScan=(PrimaryAssetType="PrimaryAssetLabel",AssetBaseClass=/Script/Engine.PrimaryAssetLabel,bHasBlueprintClasses=False,bIsEditorOnly=True,Directories=((Path="/Game")),SpecificAssets=,Rules=(Priority=-1,bApplyRecursively=True,ChunkId=-1,CookRule=Unknown))
+
+	* Primary Assets 를 코드에서 바로 등록하고자 하는 경우, Asset Manager 클래스의 `StartInitialLoading` 함수에서 `ScanPathsForPrimaryAssets` 를 바로 호출하도록 덮어씁니다. 이 경우, 유형이 같은 모든 Primary Assets 은 같은 서브폴더에 넣어줄 것을 추천합니다. 그래야 애셋 발견과 등록이 빨라집니다.
+	
+1. **애셋을 로드합니다.** Asset Manager 함수 `LoadPrimaryAssets`, `LoadPrimaryAsset`, `LoadPrimaryAssetsWithType` 은 적절한 때 Primary Asset 로드를 시작하는 데 사용할 수 있습니다. 나중에 `UnloadPrimaryAssets`, `UnloadPrimaryAsset`, `UnloadPrimaryAssetsWithType` 으로 애셋을 언로드할 수 있습니다. 이 로드 함수들을 사용할 때, Asset Bundle 리스트를 지정할 수 있습니다. 이런 식의 로드는 Asset Manager 로 하여금 위에서 언급한 대로 그 Asset Bundle 에 레퍼런싱된 Secondary Asset 을 로드하도록 합니다.
+
+
+### 동적으로 생성된 Primary Asset 등록 및 로드
+
+Primary Asset Bundle 은 런타임에 동적으로 등록 및 로드할 수도 있습니다. 이 작업을 이해하기에 좋은 Asset Manager 함수가 둘 있습니다:
+* `ExtractStringAssetReferences` 는 주어진 `UScriptStruct` 의 모든 `UPROPERTY` 멤버를 조사하고 애셋 레퍼런스를 식별한 뒤, 애셋 이름 배열에 저장합니다. 이 배열은 Asset Bundle 을 생성할 때 사용할 수 있습니다.
+`ExtractStringAssetReferences` 파라미터:
+| 파라미터 | 목적 |
+| --- | --- |
+| `Struct` | 구조체 - 애셋 레퍼런스를 검색할 구조체입니다. |
+| `StructValue` | 구조체 값 - 구조체에 대한 `void pointer` 입니다. |
+| `FoundAssetReferences` | 찾은 애셋 레퍼런스 - 구조체에서 찾은 애셋 레퍼런스를 반환하는 데 사용되는 배열입니다. |
+| `PropertiesToSkip` | 생략할 프로퍼티 - 반환 배열에서 제외시킬 프로퍼티 이름 배열입니다. |
+
+* `RecursivelyExpandBundleData` 는 Primary Asset 에 대한 모든 레퍼런스를 찾아 재귀적으로 확장하며 그 Asset Bundle 종속성을 전부 찾습니다. 이 경우, 위의 ZoneTheme 에 레퍼런싱된 TheaterMapTileClass 가 AssetBundleData 에 추가된다는 뜻입니다.
+그 후 그 이름으로 된 다이내믹 애셋을 등록하고 로드를 시작합니다.
+`RecursivelyExpandBundleData` 파라미터:
+| 파라미터 | 목적 |
+| --- | --- |
+| `BundleData` | 번들 데이터 - 애셋 레퍼런스가 들어있는 번들 데이터입니다. 재귀적으로 확장되며, 연관된 애셋 세트를 로드할 때 유용할 수 있습니다. |
+
+예를 들어, Fortnite 는 커스텀 Asset Manager 클래스에서 다음 코드를 사용하여 게임 도중 다운로드한 "theater" 데이터에 따라 애셋을 생성하고 로드합니다:
+
+	// Construct the name from the theater ID
+	UFortAssetManager& AssetManager = UFortAssetManager::Get();
+	FPrimaryAssetId TheaterAssetId = FPrimaryAssetId(UFortAssetManager::FortTheaterInfoType, FName(*TheaterData.UniqueId));
+				
+	TArray<FStringAssetReference> AssetReferences;
+	AssetManager.ExtractStringAssetReferences(FFortTheaterMapData::StaticStruct(), &TheaterData, AssetReferences);
+
+	FAssetBundleData GameDataBundles;
+	GameDataBundles.AddBundleAssets(UFortAssetManager::LoadStateMenu, AssetReferences);
+
+	// Recursively expand references to pick up tile blueprints in Zone
+	AssetManager.RecursivelyExpandBundleData(GameDataBundles);
+
+	// Register a dynamic Asset 
+	AssetManager.AddDynamicAsset(TheaterAssetId, FStringAssetReference(), GameDataBundles);
+
+	// Start preloading
+	AssetManager.LoadPrimaryAsset(TheaterAssetId, AssetManager.GetDefaultBundleState());

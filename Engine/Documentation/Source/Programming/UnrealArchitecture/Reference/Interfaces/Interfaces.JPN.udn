@@ -1,0 +1,102 @@
+﻿INTSourceChangelist:3454520
+Availability:Public
+Title:インターフェース
+Crumbs:
+Description:インターフェースの作成および実装に関するリファレンス
+tags:Programming
+Version:4.14
+Parent:Programming/UnrealArchitecture/Reference
+Order:
+SkillLevel:Intermediate
+Type:overview
+
+[TOC(start:2)]
+
+
+Interface クラスは関連性のない一連のクラスが共通の関数を確実に実装するために役立ちます。これはあるゲーム機能が、それ以外は類似性がない大きく複雑なクラスによって共有される場合に非常に便利です。例えば、ゲームではトリガー ボリュームに入るとトラップがアクティベートし、敵が警戒したり、プレイヤーにポイントを報酬として与えるなどのシステムがあります。これはトラップ、敵、ポイント付与の "ReactToTrigger" 関数によって実装されることがあります。ただし、トラップは `AActor`から、敵は特殊な `APawn` または `ACharacter`サブクラスから、ポイント付与は `UDataAsset` から派生することがあります。こうしたクラスはすべて共有の機能を必要としますが、`UObject` 以外は共通の 祖先 (ancestor) がありません。この場合、インターフェースをお勧めします。
+
+## インターフェースの宣言
+
+インターフェース クラスの宣言は通常の Unreal クラスの宣言と似ていますが、大きな違いが 2 つあります。まず、インターフェース クラスは UCLASS マクロの代わりに UINTERFACE マクロを使用します。また、直接 `UObject` からではなく `UInterface` から継承します。
+
+	UINTERFACE([specifier, specifier, ...], [meta(key=value, key=value, ...)])
+	class UClassName : public UInterface
+	{
+		GENERATED_BODY()
+	};
+
+2 つめの違いとして、UINTERFACE クラスは実際のインターフェースではありませんが、アンリアル エンジンのリフレクション システムで見えるようにするためにだけ存在する空のクラスです。他のクラスによって継承される実際のインターフェースは、必ず同じクラス名を持たなければなりませんが、イニシャルの "U" が "I" に変わっています。
+
+ヘッダー ファイルで (例、 `ReactToTriggerInterface.h`) 以下のようにします。
+
+    #pragma once
+
+    #include "ReactToTriggerInterface.generated.h"
+
+    UINTERFACE(Blueprintable)
+    class UReactToTriggerInterface : public UInterface
+    {
+        GENERATED_BODY()
+    };
+
+    class IReactToTriggerInterface
+    {    
+		GENERATED_BODY()
+
+    public:
+		/** React to a trigger volume activating this object. (このオブジェクトをアクティベートするトリガー ボリュームに反応。) Return true if the reaction succeeds. (反応が成功したら true を戻す。)  */
+        UFUNCTION(BlueprintCallable, BlueprintImplementableEvent, Category="Trigger Reaction")
+        bool ReactToTrigger() const;
+    };
+
+関数は直接ヘッダー ファイルに書き込まれますが、これは関数がデフォルトで行われるか、または false、ゼロ、空の文字列、または類似のものを戻すなどの自明なビヘイビアを持つ場合に行われます。コンパイル時間を短縮するためにより複雑な関数を、 .cpp ファイルに書き込むことができます。純粋仮想関数がサポートされます。サンプルの関数は自明であり、ヘッダー ファイルに書き込むことができますが、.cpp ファイルに書き込みます。.cpp ファイル (例、 `ReactToTriggerInterface.cpp`) には以下が含まれます。:
+
+    #include "ReactToTriggerInterface.h"
+	bool IReactToTriggerInterface::ReactToTrigger() const
+
+	{
+		return false;
+	}
+
+"U プリフィックス" クラスはコンストラクタや他の関数を必要としません。"I プリフィックス" クラスはすべてのインターフェース関数を含み、他のクラスによって実際に継承されるものになります。
+
+[REGION:NOTE]ブループリントにこのインターフェースを実装させたい場合は、`Blueprintable` の指定子が必要です。[/REGION:NOTE]
+
+### Interface 指定子
+
+[INCLUDE:Programming/UnrealArchitecture/Reference/Interfaces/Specifiers#main(offset:1)]
+
+## C++ でインターフェースを実装する
+
+新規クラスでインターフェースを使用するには、"I プリフィックス" インターフェース クラスから継承します (使用している `UObject` ベースのクラスに加えて)。
+
+    class ATrap : public AActor, public IReactToTriggerInterface
+    {
+        GENERATED_BODY()
+
+    public:
+        virtual bool ReactToTrigger() const override;
+    };
+
+## 任意のクラスがインターフェースを実装するかを判断する
+
+インターフェースを実装する C++ と Blueprint のクラスの両方で互換性を得るためには、以下のいずれかの関数を使用します。
+
+    bool bIsImplemented = OriginalObject->GetClass()->ImplementsInterface(UReactToTriggerInterface::StaticClass()); // bIsImplemented will be true if OriginalObject implements UReactToTriggerInterface.(OriginalObject が UReactToTriggerInterface を実装する場合、bIsImplemented は true)
+	IReactToTriggerInterface* ReactingObject = Cast<IReactToTriggerInterface>(OriginalObject); // ReactingObject will be non-null if OriginalObject implements UReactToTriggerInterface.(OriginalObject が UReactToTriggerInterface を実装する場合、ReactingObject は null ではない)
+
+[REGION:note]
+`StaticClass` 関数は "I-prefixed" クラスに実装されておらずコンパイルを行わないと同時に、"U-prefixed" クラスで `Cast` を使用すると失敗します。
+[/REGION]
+
+## 他のアンリアル タイプにキャストする
+
+アンリアル エンジンは、あるインターフェースから別のインターフェースへのキャスト、もしくはあるインターフェースからあるアンリアル タイプへのキャストを適宜サポートしています。
+
+	IReactToTriggerInterface* ReactingObject = Cast<IReactToTriggerInterface>(OriginalObject); // ReactingObject will be non-null if the interface is implemented. (インターフェースが実装されている場合は ReactingObject は null ではない)
+	ISomeOtherInterface* DifferentInterface = Cast<ISomeOtherInterface>(ReactingObject); // DifferentInterface will be non-null if ReactingObject is non-null and also implements ISomeOtherInterface.(ReactingObject が null でなく、かつ ISomeOtherInterface を実装する場合、DifferentInterface は null ではない)
+	AActor* Actor = Cast<AActor>(ReactingObject); // Actor will be non-null if ReactingObject is non-null and OriginalObject is an AActor or AActor-derived class.(ReactingObject is が null でなく、かつ OriginalObject が AActor もしくは AActor 派生クラスの場合、アクタは null ではない)
+
+## Blueprint Implementable クラス
+
+ブループリントにこのインターフェースを実装させたい場合は、`Blueprintable` のメタデータの指定子を使用しなければなりません。ブループリントのクラスがオーバーライドしようとする関数は、 `BlueprintNativeEvent` または `BlueprintImplementableEvent` でなければなりません。`BlueprintCallable` としてマークされる関数も呼び出し可能ですが、オーバーライドはされません。他のすべての関数はブループリントからアクセスできません。

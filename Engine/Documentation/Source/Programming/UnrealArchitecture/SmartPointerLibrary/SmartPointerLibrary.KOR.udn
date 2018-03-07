@@ -1,0 +1,210 @@
+﻿INTSourceChangelist:3599948
+Availability:Public
+Title:언리얼 스마트 포인터 라이브러리
+Crumbs:%ROOT%, Programming, Programming/UnrealArchitecture
+Description:약 포인터, Null 불가 공유 레퍼런스를 포함해서, 공유 포인터에 대한 커스텀 구현입니다.
+Version: 4.9
+
+[TOC(start:2)]
+
+## 스마트 포인터
+
+[EXCERPT:Overview]
+언리얼 스마트 포인터 라이브러리(Unreal Smart Pointer Library)는 공유 레퍼런스 (`TSharedRef`), 공유 포인터 (`TSharedPtr`), 약 포인터 (`TWeakPtr`) 는 물론 관련 헬퍼 함수와 클래스의 커스텀 구현입니다. 이 구현은 C++0x 표준 라이브러리의 shared_ptr 과 아울러 Boost 스마트 포인터를 본따 모델링한 것입니다.
+
+| 유형 | 설명 |
+| --- | --- |
+| [](Programming/UnrealArchitecture/SmartPointerLibrary/SharedPointer) (`TSharedPtr`) | 레퍼런스가 카운트되는 비-침범형(non-intrusive) 권위적(authoritative) 스마트 포인터입니다. |
+| [](Programming/UnrealArchitecture/SmartPointerLibrary/SharedReference) (`TSharedRef`) | Null 가능하지 않은, 레퍼런스가 카운트되는 비-침범형 권위적 스마트 포인터입니다. |
+| [](Programming/UnrealArchitecture/SmartPointerLibrary/WeakPointer) (`TWeakPtr`) | 레퍼런스가 카운트되는 비-침범형 약 포인터 레퍼런스입니다. |
+[/EXCERPT:Overview]
+
+### 공유 레퍼런스와 포인터의 장점
+
+| 장점 | 설명 |
+| --- | --- |
+| 깔끔한 문법 | 일반 C++ 포인터처럼 공유 포인터를 복사하고 레퍼런스 해제하고 비교할 수 있습니다. |
+| 메모리 누수 방지 | 남아있는 공유 레퍼런스가 없으면 리소스가 자동 소멸됩니다. |
+| 약 레퍼런싱 | 약 포인터로 언제 오브젝트가 소멸되었는지를 안전하게 검사할 수 있습니다. |
+| 스레드 안전성 | 여러 스레드에서 안전하게 접근할 수 있는 "thread safe" 버전이 포함되어 있습니다. |
+| 보편성 | 사실상 **어떤** 유형의 오브젝트에도 공유 포인터를 만들 수 있습니다. |
+| 실행시간 안전성 | 공유 레퍼런스는 절대 null 이 아니며, 언제든 레퍼런스 해제시킬 수 있습니다. |
+| 레퍼런스 사이클 없음 | 레퍼런스 사이클을 깨려면 약 포인터를 사용하세요. |
+| 명확한 의도 | 오브젝트 **owner** 와 **observer** 를 쉽게 구분할 수 있습니다. |
+| 퍼포먼스 | 공유 포인터에 걸리는 부하는 최소한입니다. 모든 연산은 고정비(constant-time)입니다. |
+| 탄탄한 기능 | 'const', 불완전 유형에 대한 미리(forward) 선언, 형변환(type-casting) 등을 지원합니다. |
+| 메모리 | 64 비트의 C++ 포인터 크기에 비해 두 배밖에 되지 않습니다 (추가로 공유 16 바이트 레퍼런스 콘트롤러) |
+
+
+### 커스텀 라이브러리를 만든 이유
+
+* 아직 모든 플랫폼에 std::shared_ptr (그리고 tr1::shared_ptr 도) 사용할 수 없습니다.
+* 모든 컴파일러와 플랫폼에 좀 더 일관된 구현이 가능합니다.
+* 다른 언리얼 컨테이너와 유형과 매끄러운 작업이 가능합니다.
+* 스레딩이나 최적화를 포함해서 플랫폼 전용 특성에 대해 더 나은 제어가 가능합니다.
+* 스레드 안전성 기능을 (퍼포먼스를 위해) 선택적인 것으로 만들고 싶었습니다.
+* 자체적으로 개선시켰습니다 (MakeShareable, NULL 에 할당 등).
+* 저희 구현에 예외는 필요치도 바람직하지도 않았습니다.
+* 퍼포먼스에 대한 제어를 강화하고자 했습니다 (인라이닝, 메모리, virtuals 사용 등).
+* 잠재적으로 디버깅이 더 쉽습니다 (자유로운 코드 코멘트 등).
+* 가급적 써드 파티 종속성을 늘리고 싶지 않았습니다.
+
+
+### 헬퍼 클래스와 함수
+
+스마트 포인터를 더욱 쉽고 직관적으로 사용할 수 있도록, 클래스와 함수 형태의 헬퍼가 다수 라이브러리에 제공됩니다.
+
+| 헬퍼 | 설명 |
+| --- | --- |
+|[REGION:tablesection]클래스[/REGION]||
+| TSharedFromThis | "this" 에서 TSharedRef 를 구하려면 여기에서 클래스를 파생시키면 됩니다. |
+|[REGION:tablesection]함수[/REGION]||
+| MakeShareable() | C++ 포인터에서 공유 포인터를 초기화(init)시키는 데 사용됩니다 (묵시적 변환 허용). |
+| StaticCastSharedRef() | 정적인 형변환 유틸리티 함수로, 보통 파생 유형으로 내림변환(downcast)하는 데 사용됩니다. |
+| ConstCastSharedRef() | 'const' 레퍼런스를 'mutable' 스마트 레퍼런스로 변환합니다. |
+| DynamicCastSharedRef() | 동적인 형변환 유틸리티 함수로, 보통 파생 유형으로 내림변환하는 데 사용됩니다. |
+| StaticCastSharedPtr() | 정적인 형변환 유틸리티 함수로, 보통 파생 유형으로 내림변환하는 데 사용됩니다. |
+| ConstCastSharedPtr() | 'const' 스마트 포인터를 'mutable' 스마트 포인터로 변환합니다. |
+| DynamicCastSharedPtr() | 동적인 형변환 유틸리티 함수로, 보통 파생 유형으로 내림변환하는 데 사용됩니다. |
+
+## 스마트 포인터 구현 세부사항
+
+언리얼 스마트 포인터 라이브러리에 구현되어 있는 여러 유형의 스마트 포인터는 모두 퍼포먼스, 메모리 등의 측면에서 일반적인 특징을 공유합니다.
+
+### 퍼포먼스
+
+공유 포인터 사용을 고려할 때는 항상 퍼포먼스를 염두에 두세요. 일반적으로 꽤 빠릅니다만, 아무 데나 쓰라는 용도는 아닙니다. 특정 하이 레벨 시스템이나 툴 프로그래밍에는 좋지만, 로우 레벨 엔진/렌더링 패스에는 그다지 적합하지 않습니다.
+
+ 공유 포인터의 일반적인 퍼포먼스 장점:
+
+* 모든 연산이 고정비(constant-time) 입니다. 
+* 공유 포인터 레퍼런스 해제가 C++ 포인터만큼 빠릅니다.
+* 공유 포인터를 복사한다고 절대 메모리가 할당되지 않습니다.
+* Thread Safe 버전은 교착상태에 빠지지 않습니다(lock-free).
+* Boost 나 STL  에 비하면 구현이 빠릅니다.
+
+
+공유 포인터의 퍼포먼스 단점:
+
+* 포인터 생성과 복사에 부하가 걸립니다.
+* 레퍼런스 카운트 현황을 유지해야 합니다.
+* 공유 포인터는 C++ 포인터보다 메모리 사용량이 많습니다.
+* 레퍼런스 콘트롤러에 힙 메모리 할당량이 추가로 들어갑니다.
+* 공유 포인터가 몇이든 각 고유 오브젝트마다 하나씩 레퍼런스됩니다.
+* 약 포인터 접근은 공유 포인터 접근보다 약간 느립니다.
+
+
+### 메모리 사용량
+
+모든 공유 포인터 (`TSharedPtr`, `TSharedRef`, `TWeakPtr`) 는 (32 비트로 컴파일할 때) 8 바이트이며, 다음으로 구성됩니다:
+
+* C++ 포인터 (uint32)
+* 레퍼런스 콘트롤러 포인터 (uint32)
+
+
+[REGION:note]
+`TSharedFromThis` 역시 약 포인터를 포함하므로 8 바이트입니다.
+[/REGION]
+
+레퍼런스 콘트롤러 오브젝트는 (32 비트용으로 컴파일할 때) 12 바이트이며, 다음으로 구성됩니다:
+
+* C++ 포인터 (uint32)
+* 공유 레퍼런스 카운트 (uint32)
+* 약 레퍼런스 카운트 (uint32)
+
+
+[REGION:note]
+한 오브젝트를 가리키는 공유/약 포인터의 갯수와 상관없이, 레퍼런스 콘트롤러는 오브젝트마다 딱 하나씩만 생성됩니다.
+[/REGION]
+
+### 리플렉션
+
+공유 포인터는 비-침범형(non-intrusive), 즉 클래스 자체는 공유 포인터(나 레퍼런스)에 소유되는지 모른다는 뜻입니다. 일반적으로는 그래도 괜찮습니다만, 가끔은 현재 인스턴스를 꼭 공유 레퍼런스로 접근하고 싶을 때가 있습니다. 그에 대한 해법은 클래스를 `TSharedFromThis<>` 에서 파생시키는 것입니다.
+
+`TSharedFromThis<>` 에서 파생시킴으로써 `AsSharedRef()` 메소드를 사용하여 'this' 를 공유 레퍼런스로 변환시킬 수 있습니다. 이는 항상 공유 레퍼런스를 반환하는 클래스 팩토리에 매우 유용하게 쓸 수 있습니다.
+
+	class FAnimation : public TSharedFromThis<FMyClass>
+	{
+		void Register()
+		{
+			// Access a shared reference to 'this'
+			TSharedRef<FMyClass> SharedThis = AsSharedRef();
+
+			// Class a function that is expecting a shared reference
+			AnimationSystem::RegisterAnimation( SharedThis );
+		}
+	}
+
+### 형변환
+
+공유 포인터(와 레퍼런스)의 형변환(cast)은 쉽습니다. 올림변환(up-casting)은 C++ 포인터와 마찬가지로 묵시적입(지정하지 않아도 알아서 해 줍)니다.
+
+const 형변환 (가끔은 어쩔 수 없는 필요악입니다):
+
+	ConstCastSharedPtr<T>( ... )
+
+static 형변환 (종종 파생된 클래스 포인터로의 내림변환에 사용됩니다):
+
+	StaticCastSharedPtr<T>( ... )
+
+[REGION:note]
+dynamic 형변환은 지원되지 않습니다 (no RTTI). 대신 위의 static 형변환을 사용해야 합니다.
+[/REGION]
+
+### 스레드 안전성
+
+보통의 공유 포인터는 싱글 스레드에서만 안전하게 접근할 수 있습니다. 멀티 스레드에서 접근하도록 해야 한다면, Thread Safe 버전 포인터 클래스를 사용하세요:
+
+* `TThreadSafeSharedPtr<T>`
+* `TThreadSafeSharedRef<T>`
+* `TThreadSafeWeakPtr<T>`
+* `TThreadSafeSharedFromThis<>`
+
+
+이 버전은 레퍼런스 카운팅을 개별적으로(atomic) 하기 때문에 약간 느리지만, 일반 C++ 포인터와 작동하는 방식은 거의 같습니다:
+
+* 읽기와 복사는 항상 스레드 안전합니다.
+* 쓰기/리셋의 안전을 위해서는 반드시 동기화시켜야 합니다.
+
+
+[REGION:warning]
+포인터가 둘 이상의 스레드에서 접근될 일이 절대 없는 게 확실한 경우, Thread Safe 버전을 사용하지 마시기 바랍니다.
+[/REGION]
+
+## 세부사항
+
+(`[UE4RootLocation]/Engine/Source/Runtime/Core/Public/Templates/` 에 위치한) `SharedPointerTesting.h` 파일에는 공유 포인터와 레퍼런스의 여러가지 사용 예제가 들어 있습니다.
+
+### 팁
+
+* C++ 포인터를 새로운 공유 포인터로 전달할 때는 보통 "new 연산자"를 사용해야 합니다.
+* 스마트 포인터를 함수 파라미터로 전달할 때는 TWeakPtr 가 아닌, `TSharedRef` 나 `TSharedPtr` 를 사용하세요.
+* 스마트 포인터 "thread-safe" 버전은 약간 느립니다. 필요할 때만 사용하세요.
+* 불완전 유형으로의 공유 포인터는, 딱 원하는 대로 미리(forward) 선언할 수 있습니다!
+* 호환 유형의 공유 포인터는 묵시적으로 변환됩니다 (예로 upcasting)
+* 유형을 쉽게 만들려면 `TSharedRef< MyClass >` 에 대한 typedef 를 만들면 됩니다.
+* 최적의 퍼포먼스를 위해서는 `TWeakPtr::Pin` 로의 호출(이나 `TSharedRef`/`TSharedPtr` 로의 변환)을 최소화시키세요.
+* `TSharedFromThis` 에서 파생된 클래스는 자신을 공유 레퍼런스로 반환할 수 있습니다.
+* 포인터를 파생된 오브젝트 클래스로 내림변환하려면, `StaticCastSharedPtr()` 함수를 사용하세요.
+* `const` 오브젝트는 공유 포인터와 완벽 지원됩니다!
+* `ConstCastSharedPtr()` 함수를 사용하여 `const` 공유 포인터를 `mutable` 로 만들 수 있습니다.
+* 항상 깊은 스택 프레임의 C++ 레퍼런스로 변환하세요. 공유 포인터는 멤버 레퍼런스에나 최적이지, 임시 스택에는 아닙니다.
+* C++ 포인터와는 달리 공유 포인터는 `memcpy` 가 불가능하므로, 공유 포인터 배열을 사용할 때는 이 점을 고려하시기 바랍니다.
+
+
+### 한계
+
+* 공유 포인터는 Unreal 오브젝트(UObject 클래스)와 호환되지 않습니다!
+* 동적으로 할당되는 배열 (예로 (`MakeSharable( new in32[20] )` 같은 식)은 아직 지원되지 않습니다. 
+* `TSharedPtr`/`TSharedRef` 에서 Bool 로의 묵시적 변환은 지원되지 않습니다.
+
+
+### 다른 구현과의 차이점
+
+* 유형 이름과 메소드 이름 일관성은 언리얼측 코드베이스에 보다 가깝습니다.
+* 스레드 안전성 기능은 강제라기 보단 선택적입니다.
+* `TSharedFromThis` 가 반환하는 것은 공유 **레퍼런스** 지, 공유 **포인터** 가 아닙니다.
+* 일무 기능은 생략되어 있습니다 (예로 `use_count()`, `unique()`, 등.)
+* 예외는 허용되지 않습니다 (그에 관련된 모든 기능은 빠져 있습니다)
+* 저희 구현은 Null 가능하지 않은 스마트 포인터 (`TSharedRef`) 를 지원합니다. 
+* `MakeShareable`, `NULL` 할당과 같은 여러가지 신기능이 추가되었습니다.

@@ -1,0 +1,395 @@
+﻿INTSourceChangelist:3108692
+Availability:Public
+Title:디테일 패널 커스터마이징
+Crumbs:%ROOT%, Programming, Programming/Slate
+Description:언리얼 에디터의 디테일 패널 내 프로퍼티 표시 커스터마이징 안내서입니다.
+version: 4.9
+
+이제 디테일 패널은 완벽히 커스터마이징 가능합니다. 간단한 시스템을 통해 프로퍼티를 재배치하거나 [](Programming/Slate) 를 사용하여 완전히 커스터마이징 할 수도 있습니다. Slate 문법을 사용하여 디테일에 다른 UI 를 추가할 수도 있습니다.
+
+[TOC (start:2 end:3)]
+
+## 셋업 절차
+
+1. 프로퍼티를 커스터마이징해 넣을 클래스를 생성합니다. `ILayoutDetails` 를 상속해야 합니다.
+    
+	* 함수를 하나 구현합니다: `void LayoutDetails( IDetailLayoutBuilder& )`
+	* 이 클래스의 목적은 클래스 프로퍼티의 커스터마이징 내용을 캡슐화시키기 위해서입니다. 필요로 하는 디테일 패널마다 이 클래스의 인스턴스가 하나씩 생성됩니다.
+
+2. 디테일 패널이 특정 클래스의 프로퍼티를 인식할 때 호출되는 델리게이트를 셋업합니다.
+    
+	* 이 델리게이트의 유일한 목적은 프로퍼티를 가진 `UObject` 에 대한 커스텀 클래스의 인스턴스를 생성하는 것입니다. 기억할 것은, 디테일 뷰 각각과 그 인스턴스가 자체 커스텀 클래스 인스턴스를 갖는 시점에서 디테일 뷰가 여럿 떠 있는 상태가 잦다는 것입니다. 이를 통해 레이아웃 클래스상에 디테일 인스턴스 데이터 별로 저장할 수 있습니다.  
+	* 예제 (자세한 것은 `DetailCustomizations.cpp` 에):
+	
+			FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
+			PropertyModule.RegisterCustomPropertyLayout( ABrush::StaticClass(), FOnGetDetailLayoutInstance::CreateRaw( &FBrushDetails::MakeInstance ) );
+
+			...
+			static TSharedRef<ILayoutDetails> FBrushDetails::MakeInstance()
+			{
+				return MakeShareable( new FBrushDetails );
+			}
+
+3. 1 단계에서 만든 클래스의 LayoutDetails 함수에 자신의 커스텀을 구현합니다.
+    
+	* 엔진 클래스라면 자신의 커스텀 클래스를 (이미 존재하지 않는 경우) `DetailCustomizations` 모듈에 추가해야 합니다. 이 모듈은 에디터 재시작 없이도 다시 컴파일하여 로드할 수 있어, 빠른 프로퍼티 트윅 작업이 가능합니다.
+	* `FDetailCustomizationsModule.StartupModule` 에서 델리게이트를 바인딩, `FDetailCustomizationsModule.ShutdownModule` 에서 언바인딩합니다.
+	* 게임 전용 클래스는 게임 전용 모듈을 사용합니다.
+	* 이 문서와 `DetailCustomizations` 모듈에 있는 (`PrimitiveComponentDetails.cpp`, `StaticMeshComponentDetails.cpp` 같은) 예제를 확인해 보세요. 
+
+
+## 커스터마이징
+
+커스텀 클래스의 `LayoutDetails` 함수 안에서 모든 커스텀 처리를 합니다. 이 함수는 프로퍼티에 대한 인터페이스이자 커스텀 위젯을 되돌려주는 곳인 `IDetailLayoutBuilder` 를 받습니다.
+
+`IDetailLayoutBuilder` 는 프로퍼티와 다른 디테일이 들어가는 카테고리를 생성합니다. 이 클래스에는 이름만 봐도 알 수 있는 자잘한 함수가 몇 개 더 있습니다 (대부분 필요치는 않습니다). 그에 대한 문서는 `DetailLayoutBuilder.h` 에서 찾을 수 있습니다.
+
+커스터마이징 첫 단계는 카테고리를 수정하는 것입니다:
+
+	virtual void LayoutDetails( IDetailLayoutBuilder& DetailBuilder ) override
+	{
+		// 라이팅 카테고리 수정
+		IDetailCategory& LightingCategory = DetailBuilder.EditCategory("Lighting", TEXT("OptionalLocalizedDisplayName") );
+	}
+
+`EditCategory` 함수는 프로퍼티가 있게 될 카테고리의 `FName` 과 현지화된 표시명을 옵션으로 받습니다. 표시명이 지정되어 있으면 기존 표시명을 덮어씁니다. 카테고리 이름이 꼭 `UPROPERTY` 매크로에 지정된 카테고리 이름과 같을 필요는 없습니다. 물론, 이름이 같으면 `UPROPERTY` 카테고리를 재사용하기는 하지만 말입니다. 프로퍼티가 커스터마이징 되어있지 않고 트리 뷰에 있다면, 매크로 카테고리 이름이 기본 카테고리로 사용됩니다.
+
+`EditCategory` 는 `IDetailCategoryBuilder&` 를 반환하는데, 카테고리에 프로퍼티를 추가할 때 사용하는 것입니다. 그 방법은 두 가지입니다:
+
+* 단순한 [멀티박스 스타일 레이아웃](#멀티박스스타일레이아웃) 을 사용하는 방법으로, 프로퍼티 재배치에 빠릅니다.
+* [Slate 문법](#Slate레이아웃) 을 사용하는 방법으로, 가장 확실한 커스터마이징 옵션이 제공됩니다.
+
+
+### 멀티박스 스타일 레이아웃
+
+위에서 생성한 `LightingCategory` 를 사용하는 쉬운 예제입니다:
+		
+	// 프로퍼티를 카테고리에 추가합니다. 첫 파라미터는 프로퍼티의 이름, 둘째는 덮어쓰기 표시명 옵션입니다.
+	LightingCategory.AddProperty("bCastStaticShadow", TEXT("Static") );
+	LightingCategory.AddProperty("bCastDynamicShadow", TEXT("Dynamic") );
+	LightingCategory.AddProperty("bCastVolumetricTranslucentShadow", TEXT("Volumetric") );
+
+가장 기본적인 예제는 이렇습니다. 세로로 쌓인 프로퍼티 셋을 추가하며, 표시명을 덮어씁니다. (예제의 텍스트는 공간 절약을 위해 현지화되어 있지는 않으나, 실전에서는 항상 현지화되는 부분입니다.)
+
+[REGION:note]
+	참고로 커스터마이징된 프로퍼티와 카테고리는 항상 커스터마이징되지 않은 것 위에 나타납니다. 이 단순한 문법을 사용하면 자칫 묻혀버릴 수 있는 중요한 프로퍼티를 재배치할 수 있습니다.
+[/REGION]
+	
+결과:
+
+![](multibox_layout_vertical.png)
+        
+약간 고급 예제 (`PrimitiveComponentDetails.cpp` 에 위치):
+		
+	// "Shadows" 라는 표시명의 접히지 않는 그룹을 생성, CastShadow 프로퍼티가 켜졌을 때만 보입니다. 이 함수 이후 EndGroup 이나 다른 BeginGroup 호출 전까지의 모든 프로퍼티는 같은 그룹에 나타납니다.
+	LightingCategory.BeginGroup( TEXT("Shadows"), GroupImageName, "CastShadow" );
+        // 새 줄을 시작합니다. 이 함수 이후 EndLine() 이나 다른 BeginLine() 호출 전까지의 모든 프로퍼티는 같은 줄에 추가됩니다.
+        LightingCategory.BeginLine();
+                // 기본 모양을 사용하여 프로퍼티 추가
+                LightingCategory.AddProperty("bCastStaticShadow", TEXT("Static") );
+                LightingCategory.AddProperty("bCastDynamicShadow", TEXT("Dynamic") );
+                LightingCategory.AddProperty("bCastVolumetricTranslucentShadow", TEXT("Volumetric") );
+        LightingCategory.BeginLine();
+                LightingCategory.AddProperty("bCastInsetShadow", TEXT("Inset") );
+                LightingCategory.AddProperty("bCastHiddenShadow", TEXT("Hidden") );
+                LightingCategory.AddProperty("bCastShadowAsTwoSided", TEXT("Two Sided") );
+	LightingCategory.EndGroup();
+
+* `BeginGroup` 는 새 프로퍼티 그룹을 만드는 데 사용됩니다. 여기서 받는 것은 그룹에 표시할 이름과, 옵션으로는 그 이름 옆에 표시할 이미지(슬레이트 브러시) 이름, _False_ 가 되면 전체 그룹을 뷰에서 숨겨 프로퍼티를 변경하지 못하도록 하는 편집 조건 프로퍼티 입니다. 이 편집 조건은 하나가 아닌 다수의 프로퍼티 그룹에 쓸 수 있다는 점만 빼면 `UPROPERTY` 매크로 스타일 편집 조건과 똑같습니다. 앞으로 이런 것들이 더욱 추가될 수 있습니다!
+* `AddProperty` 는 기본 모양을 사용하여 프로퍼티를 추가합니다. 보통은 딱 하나의 파라미터, 프로퍼티 이름만 필요로 합니다. 구조체 안의 프로퍼티같은 좀 더 복잡한 프로퍼티는 부가 정보가 필요합니다. 이 기능이 필요한 경우 [고급 팁](#고급팁) 부분이나 `DetailCategoryBuilder.h` 의 문서를 참고해 주시기 바랍니다.
+* `BeginLine` 은 새로운 프로퍼티 줄을 만듭니다. `AddProperty` 를 통해 추가되는 모든 프로퍼티는 기본으로 새 줄에 생성됩니다. `BeginLine` 은 다음 `BeginLine` 이나 `EndLine` 이전에 나오는 모든 프로퍼티는 같은 줄에 나오도록 해 줍니다.
+
+
+결과:
+ 
+![](multibox_layout_horizontal.png)
+
+#### 멀티박스 스타일 레이아웃 참고사항
+
+* 그리 강력하지는 않지만 필요에 따라 추가적인 기능이 추가될 것입니다. 현재는 체계 재정비를 빠르게 하기 위한 용도입니다.
+* Slate 레이아웃은 프로퍼티, 구체적으로 고급 프로퍼티 핸들에 대한 접근을 요합니다. 특히나 모양을 바꾸고자 할 때 그렇습니다.
+
+
+### 프로퍼티 핸들
+
+프로퍼티 핸들의 두 가지 주요 기능은, 프로퍼티의 값을 읽고 쓰는 것과, 프로퍼티를 Slate 커스텀 위젯에 식별시키는 것입니다. 디테일 뷰나 프로퍼티 트리가 프로퍼티에 접근하는 방식은 약간 복잡하므로, 프로퍼티 핸들은 그 부분을 감춰주고 되돌리기/다시하기, 사전/사후 수정 변경, 패키지 더티 처리, 월드 전환 등을 대신 처리해 줍니다.
+
+프로퍼티 핸들을 구하기 위해서는 반드시 `IDetailCategory` 에게 커스터마이징하려는 곳을 물어야 합니다. `IDetailCategory::GetProperty` 를 호출해서 해 주고요. 보통은 다음과 같은 식으로 프로퍼티 이름을 전달해 줍니다:
+
+	IDetailCategoryBuilder& LightingCategory = DetailBuilder.EditCategory( "Lighting" );
+	// "bOverrideLightmapRes" 프로퍼티로의 핸들을 구합니다.
+	TSharedPtr<IPropertyHandle> OverrideLightmapRes = LightingCategory.GetProperty( "bOverrideLightmapRes" );
+
+이제 불리언 프로퍼티 `bOverrideLightmapRes` 에 대한 핸들이 생깁니다.
+
+여기서 그 프로퍼티 값을 읽고 쓰고/또는 그 값을 슬레이트 위젯에 전달하여 커스터마이징 합니다.
+
+**유용한 프로퍼티 핸들 함수** (전체 문서 목록은 `PropertyHandle.h` 참고):
+
+| 함수 | 설명 |
+| ---- | ---- |
+| `IPropertyHandle::SetValue(const ValueType& InValue)`, `IPropertyHandle::GetValue(ValueType& OutValue)` | 프로퍼티 값을 읽고 씁니다. 이 값은 vector 나 rotator 등 많은 내장 유형에 overload 됩니다. 이 문서 말미의 고급 팁 부분 참고. |
+| `ResetToDefault()` | 프로퍼티를 기본값으로 되돌립니다. |
+| `IsValidHandle()` | 유효 프로퍼티 핸들 소유 여부를 반환합니다. |
+| `AsArray()` | 특수 배열 프로퍼티 값입니다. 문서 하단 고급 팁 부분을 참고하세요. |
+
+기타 노트:
+
+* `GetProperty` 에서 반환된 핸들은 유효하지 않을 수가 있는데, 프로퍼티가 없거나 디테일 뷰에 나타나지 않을 예정인 경우가 그렇습니다. 확인을 위해서는 `IsValidHandle()` 를 점검해 보세요. 유효하지 않은 핸들에서 함수를 호출한다고 크래시가 나지는 않습니다.
+* 프로퍼티 핸들이 약 포인터가 아니고서야 레이아웃 클래스 밖에 보관해서는 안됩니다. 핸들이 내부적으로 접근하는 데이터는 약 포인터라 유효하지 않은 프로퍼티의 값을 설정한다거나 구해온다고 해서 크래시가 나지는 않지만, 저장을 한 뒤 정리를 하지 않으면 쓸모없는 오브젝트로의 레퍼런스를 얻게 됩니다.
+* 지원되지 않는 프로퍼티에 대한 값 유형(, 예로 `String` 프로퍼티에 `float` 유형)을 read / write / access 하려는 경우, 실패하게 되지만 데이터가 깨지지는 않습니다.
+
+
+[REGION:warning]
+	[REGION:largetitle]
+		값 접근시의 핸들링 실패 케이스입니다.
+	[/REGION]
+	
+	기억할 것은, 디테일 뷰는 한 번에 여러 개의 오브젝트를 볼 수도 있고, 사용자가 액터를 한 번에 수백 개씩 선택하는 일도 다반사라는 것입니다. 이런 경우에는 의심의 여지 없이 한 프로퍼티에 대해 값이 여럿 생기게 됩니다. GetValue, SetValue 는 값에 접근하는 데 성공했는지 결정을 돕기 위해 `FPropertyAccess::Result` 를 반환합니다. `FPropertyAccess::MultipleValues` 는 흔한 반환 값이 됩니다.
+
+		/**
+		* 프로퍼티 값에 접근하여 얻을 수도 있는 결과입니다.
+			*/
+		namespace FPropertyAccess
+		{
+				enum Result
+				{
+					/** 찾은 값이 여럿이라 읽을 수 없었습니다. */
+					MultipleValues,
+					/** 값을 설정하거나 구하는 데 실패했습니다 (대부분 프로퍼티가 더이상 유효하지 않거나, 호환되는 유형이 아니거나, edit const 거나 입니다). */
+					Fail,
+					/** 값을 설정하거나 구하는 데 성공했습니다. */
+					Success,
+				};
+		}
+
+	`int` 나 `float` 같은 로우 레벨 유형 프로퍼티를 커스터마이징하는 경우, 어떻게든 여러 값에 대한 처리를 해야 합니다.
+
+			INT MyInteger;
+			// 프로퍼티 값을 구합니다.
+			FPropertyAccess::Result MyResult = MyIntHandle->GetValue(MyInteger);
+
+	MyResult 가 `FPropertyAccess::MultipleValues` 라면, `MyInteger` 는 설정되지 않습니다. 그 값을 표시하는 위젯에 전송하면 쓰레기 값이 표시되며, 그 전에 초기화시키는 것 역시도 올바른 값이 아니니 별로 나을 것도 없습니다. 이걸 어떻게 처리할 것인지는 엿장수 마음입니다. 숫자 유형에 대해서는 `SNumericEntryBox` 를 추천하는데, 값 특성에 선택적으로 '무' 값을 반환했다가, 나중에 그 대신 표시할 라벨을 제공할 수 있습니다. `SNumericEntryBox.h` 참고.
+[/REGION]
+
+### Slate 레이아웃
+
+Slate 레이아웃으로 프로퍼티의 모양과 배치에 대한 완벽 커스터마이징이 가능합니다. Slate 에서 임의의 위젯을 받는 `IDetailCategoryBuilder::AddWidget` 를 통해 카테고리에 레이아웃을 되돌려 줍니다. 이 작업을 수월하게 해 주는 커스터마이제이션 위젯이 있습니다:
+
+#### SProperty
+
+이게 바로 그 커스터마이제이션 위젯입니다. 이 위젯을 사용하여 프로퍼티를 커스터마이징하고/또는 다른 Slate 선언형 문법으로 프로퍼티를 임베딩합니다. `SNew` 를 사용해서 `SProperty` 를 생성하나, 무엇을 빌드할 지 알 수 있도록 프로퍼티에 핸들을 제공해 주기도 합니다. 핸들은 `SNew`:  `SNew( SProperty, HandleToTheProperty )` 로의 선택적이지 않은 파라미터입니다.
+
+예: 
+
+	// 라이팅 카테고리 수정
+	IDetailCategoryBuilder& LightingCategory = DetailBuilder.EditCategory( "Lighting" );
+
+	// bOverrideLightmapRes 프로퍼티로의 핸들 구하기
+	TSharedPtr<IPropertyHandle> OverrideLightmapRes = LightingCategory.GetProperty( "bOverrideLightmapRes" );
+
+	LightingCategory.AddWidget()
+	[
+		SNew( SHorizontalBox )
+		+ SHorizontalBox::Slot()
+		[
+			// 새로운 SProperty 생성
+			SNew( SProperty, EnableOverrideLightmapRes )
+		]
+		+ SHorizontalBox::Slot()
+		.Padding( 4.0f, 0.0f )
+		.MaxWidth( 50 )
+		[
+			SNew( SProperty, LightingCategory.GetProperty("OverriddenLightMapRes") )
+			.NamePlacement( EPropertyNamePlacement::Hidden ) // Hide the name
+		]
+	];
+
+결과:
+                 
+![](sproperty.png)
+
+`SProperty` 는 기본적으로 프로퍼티에 대한 위젯을 생성합니다. `SProperty` 에는 기본적인 커스텀 특성이 약간 있어, (이름과 같은) 기본적인 모양을 커스터마이징 할 수 있습니다. 프로퍼티를 커스터마이징 하려거든 `CustomWidget` 슬롯을 사용합니다. `CustomWidget` 슬롯을 사용하면, `SProperty` 는 값을 설정하고 구하는 데 대해 더이상 아무것도 알지 못하게 되는데, 커스텀 위젯을 만들었기 때문입니다. 값을 구하고 설정하려면 프로퍼티 핸들을 사용해야 합니다.
+
+예:
+
+      // 텍스트와 스핀 박스를 표시하도록 OverridenLightMapRes 프로퍼티 커스터마이징
+      TSharedPtr<IPropertyHandle> LightMapResValue = LightingCategory.GetProperty("OverriddenLightMapRes")
+      SNew( SProperty, LightMapResValue )
+      .CustomWidget()
+      [
+            SNew( SHorizontalBox )
+            + SHorizontalBox::Slot()
+            .VAlign( VAlign_Center )
+            .Padding( 2.0f )
+            [
+                  SNew( STextBlock )
+                  .Text( TEXT("Lightmap Res") )
+            ]
+            + SHorizontalBox::Slot()
+            [
+                  SNew( SSpinBox )
+                  .MinSliderValue( 0 )
+                  .MaxSliderValue( 1024 )
+                  .OnValueCommitted( &SetValueOnProperty )  
+                  .Value( &GetValueFromProperty
+            ]
+      ]
+      ...
+      FLOAT GetValueFromProperty()
+      {
+            // 위에 생성한 프로퍼티 핸들을 사용하여 그 값을 구하고 스핀박스에 전송
+            INT Value; // 참고로 라이트맵 해상도는 정수이므로 접근도 정수로 해야 합니다.
+            LightMapResValue.GetValue( Value );
+            // 핸들 실패의 경우 참고
+            return Value;
+      }
+
+      void SetValueOnProperty( FLOAT NewValue )
+      {
+            // 프로퍼티 핸들을 사용하여 값 설정
+            LightMapResValue.SetValue( NewValue )
+      }
+
+##### SProperty 참고사항
+
+* `SProperty` 는 커스텀 위젯을 만들어도 항상 기본값으로 리셋됩니다. 이 기능을 토글하는 인수가 `SProperty` 에 있습니다. 예를 들어 다수의 프로퍼티로 된 열이 있는 경우, 하나마다 기본값 리셋 버튼을 달기 보다는 맨 밑에 큰 메뉴 하나를 만들고 싶을 수도 있습니다. 아래 [`SResetToDefaultMenu`](#SResetToDefaultMenu) 부분을 참고하세요.
+* `SProperty` 에 유효하지 않은 핸들을 전달하면, 그냥 표시되지 않습니다.
+
+
+`SProperty` 말고도 사용할 수 있는 커스터마이제이션 위젯이 조금 더 있습니다.
+
+#### SAssetProperty
+
+`SAssetProperty` 는 일종의 `SProperty` 로, 애셋 썸네일과 함께 애셋 변경을 위한 입력창을 표시합니다. 썸네일 크기도 바꿀 수 있습니다. 렌더링 가능한 썸네일이 있는 `UObject` 프로퍼티에 사용할 수 있습니다. 다른 유형에 사용한다면 아무것도 표시되지 않습니다.
+
+![](sassetproperty.png)
+
+#### SFilterableDetail
+
+`SFilterableDetail` 은 아무것도 그리지는 않으나 사용자가 디테일 뷰의 검색창에 입력할 때 자신의 콘텐츠 슬롯에 있는 모든 것을 필터링하는 위젯입니다. 이 위젯은 프로퍼티를 기반으로 하지 않은 디테일에 좋습니다. `SProperty` 는 이미 필터링이 되어 있어, 필터링 그룹을 따로 묶을 필요가 있지 않고서야 `SFilterableDetail` 을 셋업할 필요가 없습니다.
+
+	// "Create Blocking Volume" 이 사용자 검색어와 일치하지 않을 때 콘텐츠 슬롯의 모든 것을 걸러내는 위젯을 만듭니다.
+	// 주: 둘째 파라미터는 필터에 일치하는 현지화된 검색어이며, 셋째는 필터가 속할 카테고리 입니다.
+	SNew( SFilterableDetail, NSLOCTEXT("StaticMeshDetails", "BlockingVolumeMenu", "Create Blocking Volume").ToString(), &StaticMeshCategory )
+	.Content()
+	[
+		  // 블로킹 볼륨 메뉴 생성
+		  SNew( SComboButton )
+		  .ButtonContent()
+		  [
+				SNew( STextBlock )
+				.Text( NSLOCTEXT("StaticMeshDetails", "BlockingVolumeMenu", "Create Blocking Volume").ToString() ) 
+				.Font( IDetailLayoutBuilder::GetDetailFont() )
+		  ]
+		  .MenuContent()
+		  [
+				BlockingVolumeBuilder.MakeWidget()
+		  ]
+	]
+
+
+
+#### SResetToDefaultMenu
+
+`SResetToDefaultMenu` 은 기본 화살표에 노랑 리셋을 표시하는 메뉴입니다. 기본으로 `SProperty` 는 기본적으로 메뉴마다 리셋을 추가하지만, 가끔 (`Vector` 같은 프로퍼티는) 하나 이상의 프로퍼티를 같은 메뉴 그룹으로 묶는 것이 이치에 맞습니다. `SResetToDefaultMenu` 에 `SProperty` 위젯을 추가하여 이런 작업을 처리할 수 있습니다. 단순히 `SResetToDefaultMenu` 에서 `AddProperty` 를 호출한 다음 아무 선언형 문법으로 메뉴를 놓기만 하면 됩니다!
+
+#### SArrayProperty
+
+이 위젯으로 프로퍼티 배열을 커스터마이징 할 수 있습니다. `SProperty` 같은 것을 하나 만들고, 배열 요소에 위젯이 필요할 때마다 호출되는 델리게이트도 걸어주기만 하면 됩니다.
+
+예:
+
+	void FMeshComponentDetails::LayoutDetails( IDetailLayoutBuilder& DetailLayout )
+	{
+		  IDetailCategoryBuilder& DetailCategory = DetailLayout.EditCategory("Rendering");
+		  TSharedRef<IPropertyHandle> MaterialProperty = DetailCategory.GetProperty( "Materials" );
+
+		  DetailCategory.AddWidget()
+		  [
+				SNew( SArrayProperty, MaterialProperty )
+				// This delegate is called for each array element to generate a widget for it
+				.OnGenerateArrayElementWidget( this, &FMeshComponentDetails::OnGenerateElementForMaterials )
+		  ];
+	}
+	...
+	/**
+	* 머티리얼 요소에 대한 위젯 생성
+	* 
+	 * @param ElementProperty     생성해야 하는 배열 요소에 대한 핸들
+	* @param ElementIndex        생성하려는 요소의 인덱스
+	*/
+	TSharedRef<SWidget> FMeshComponentDetails::OnGenerateElementForMaterials( TSharedRef<IPropertyHandle> ElementProperty, INT ElementIndex )
+	{
+		  return 
+				SNew( SAssetProperty, ElementProperty )
+				.ThumbnailSize( FIntPoint(32,32) );
+	}
+
+결과:
+ 
+![](sarrayproperty.png)
+
+### 커스터마이제이션 실전 지침
+
+* 프로퍼티 커스터마이징과 값 읽고/쓰기를 할 때는 반드시 오류 확인을 하세요. 디테일 뷰에서는 오브젝트마다 값이 다른 여러 오브젝트를 한 번에 보는 일이 다반사라는 점, 기억하시구요. 커스터마이징된 프로퍼티는 일반적인 여러 값을 처리해 낼 수 있을 것입니다.
+* 선택에 관련된 정보는 커스텀 클래스에 저장하세요. 약간의 프로퍼티 이외 디테일은 커스터마이제이션에 선택된 액터가 필요합니다. 선택된 액터는 `IDetailLayoutBuilder` 에서 구할 수 있으며, 이 선택 세트나 선택에 민감한 무엇이든 커스텀 클래스에 저장하면 됩니다. 그러면 선택 내용이 디테일 뷰에 그대로 남아있는 한 확실히 유지됩니다.
+* `FActorIterator`, `FSelectedActorIterator`, `GEditor->GetSelectedActorIterator` 따위를 사용하지 마세요. 이런 것들은 전역 선택 세트나, 디테일 패널이 고정된 경우엔 선택된 것과 같은 액터를 대상으로 작동되지 않을 수가 있다는 점, 기억해 주시구요! 그렇게 되면 다른 데이터에 접근하게 됩니다. 적합한 선택 액터 목록은 `IDetailLayoutBuilder` 로 구합니다.
+* 레이아웃 클래스나 프로퍼티 핸들로의 강 레퍼런스를 보관하지 마세요. 어떻게든 필요할 일이 없습니다. 디테일 뷰는 (특히나 레벨 에디터에 있는 것들은) 사용자 선택에 따라 언제고 바뀔 수 있다는 점, 그래서 레이아웃 클래스로의 레퍼런스는 금새 못쓰게 된다는 점 기억해 주시기 바랍니다. 이런 문제를 방지하기 위해 레이아웃 클래스를 가리키는 공유 포인터는 디테일 커스터마이징시 고유성 검사를 합니다.
+
+
+## 고급 팁
+
+### 복잡한 프로퍼티 접근하기
+
+_복잡한 프로퍼티_ 란, 프로퍼티 이름만 가지고는 해석(resolve)이 불가능한 것을 말합니다. 보통 구조체 안의 프로퍼티를 말합니다.
+
+복잡한 프로퍼티에 접근하는 방법은 두 가지 있습니다:
+
+* 프로퍼티 핸들을 반환하거나, 프로퍼티 해석용 옵션 파라미터를 받는 카테고리에 프로퍼티를 추가하는 함수입니다.
+
+	예:
+
+		TSharedPtr<IPropertyHandle> IDetailCategoryBuilder::GetProperty(  FName PropertyPath, UClass* ClassOutermost , FName InstanceName) 
+	
+	| 파라미터 | 설명 |
+	| -------- | ---- | 
+	| Path | 프로퍼티 경로입니다. 그냥 프로퍼티 이름일 수도, `outer.outer.value[optional_index_for_static_arrays]` 포맷의 경로일 수도 있습니다. |
+	| ClassOutermost | 현재 커스터마이징 중인 클래스 밖의 프로퍼티에 접근할 경우, 옵션 outer 클래스입니다. |
+	| InstanceName | 같은 유형의 UProperty 가 여러 개 있을 경우의 인스턴스 이름 옵션입니다. 이를테면 똑같은 구조체가 둘 있는데, 인스턴스 이름은 구조체 변수명 중 하나일 때입니다. |
+
+	예:
+
+		struct MyStruct
+		{ 
+			INT StaticArray[3];
+			FLOAT FloatVar;
+		}
+
+		class MyActor
+		{ 
+            MyStruct Struct1;
+            MyStruct Struct2;
+            FLOAT MyFloat
+		}
+                                
+	* `MyActor` 내 `Struct2` 의 인덱스 `2` 번 `StaticArray` 에 접근하려면, 경로는 `"MyStruct.StaticArray[2]"` 가 되고, 인스턴스 이름은 `"Struct2"` 가 됩니다.
+	* `MyActor` 커스텀 함수 밖의 같은 `StaticArray` 에 접근하려면 위와 똑같이 해 주되 `ClassOutermost` 는 `MyActor::StaticClass()` 가 됩니다.
+	* `MyActor` 내 `MyFloat` 에 접근하려면, 프로퍼티 이름은 모호하지 않기 때문에 그냥 `"MyFloat"` 를 전해주면 됩니다.
+
+* 프로퍼티 핸들이 있는 경우 그 이름에서 자손 프로퍼티 핸들을 구할 수 있습니다:
+
+		TSharedPtr<IPropertyHandle> IPropertyHandle::GetChildHandle( FName ChildName )
+
+	| 파라미터 | 설명 |
+	| -------- | ---- |
+	| ChildName | 자손의 프로퍼티 이름입니다. 찾을 때까지 재귀됩니다. 경로는 지원되지 않으며, 배열의 자손은 이런 식으로 접근할 수 없습니다. |
+
+
+### 배열 접근하기
+
+배열의 접근은 `IPropertyHandle::AsArray` 를 통해 가능합니다. 프로퍼티 핸들이 배열이라면 이 함수는 `IPropertyHandleArray` 를 반환하며, 여기에는 배열을 _추가_, _제거_, _삽입_, _복제_ 하고 _요소의 갯수를 구하는_ 함수가 들어 있습니다.
+
+### 프로퍼티 숨기기
+
+`IDetailLayoutBuilder::HideProperty` 를 호출하면 프로퍼티를 통째로 숨길 수 있습니다. 이름/경로 또는 프로퍼티 핸들을 받습니다.

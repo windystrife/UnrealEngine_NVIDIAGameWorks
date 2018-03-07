@@ -1,0 +1,1 @@
+%ANDROID_HOME%\platform-tools\adb.exe push UE4CommandLine.txt /mnt/sdcard/UE4Game/UE4Game/UE4CommandLine.txt

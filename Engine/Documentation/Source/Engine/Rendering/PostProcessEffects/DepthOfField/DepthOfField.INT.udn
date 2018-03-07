@@ -1,0 +1,216 @@
+Availability: Public
+Crumbs: %ROOT%
+Title: Depth of Field
+Description: Simulating focus by blurring the scene depending on depth.
+Type: Overview
+SkillLevel:Beginner
+Version:4.16
+Parent:Engine/Rendering/PostProcessEffects
+Order:5
+Tags:Post Process
+Topic-image:DoF_topic.png
+
+
+
+
+[REGION:fullwidth]
+![Depth of Field](dof.png)
+[/REGION]
+
+[EXCERPT:DepthOfField_Desc]
+**Depth of Field** (DoF) applies a blur to the scene based on distance in front of or behind a focal point. This is to simulate what happens in real-world cameras. The effect can be used to draw the viewer's attention and to
+make the rendering appear more like a photograph or like a movie.
+[/EXCERPT:DepthOfField_Desc]
+
+## Depth of Field Types
+
+There are three methods available for performing depth of field effects in Unreal Engine 4: Bokeh, Gaussian and Circle.
+
+[REGION:imagetable]
+| ![Bokeh DoF](bokeh.png)(w:300) | ![Gaussian DoF](gaussian.png)(w:300) | ![Circle DoF](Circle.png)(w:300) |
+| :----: | :----: | :----: |
+| Bokeh DoF | Gaussian DoF | Circle DoF |
+[/REGION]
+
+
+### Gaussian Depth of Field
+
+[EXCERPT:DepthOfField_Gaussian]
+Gaussian DoF blurs the scene using a standard Guassian blur. The Guassian method is fast and generally well-suited for use in-game, where performance is critical.
+[/EXCERPT:DepthOfField_Gaussian]
+
+### Bokeh Depth of Field
+
+[EXCERPT:DepthOfField_Bokeh]
+Bokeh is the name of the shape that can be seen in photos or movies when objects are out of focus. Bokeh DoF is a method where a textured quad is rendered for each pixel using a texture to define the shape to reproduce the effect produced by camera lenses, which gives a filmic look to the scene. 
+The actual implementation does this performance intensive effect only in half resolution. It also tries to save render performance in areas where this is not that noticeable. See [Adaptive DOF](#adaptivedof) for more information.
+
+The Bokeh method is far more costly performance-wise, making cinematics and showcases prime candidates for the Bokeh method as the appealing visuals often outweigh any performance concerns in those situations.
+[/EXCERPT:DepthOfField_Bokeh]
+
+### Circle Depth of Field
+
+[EXCERPT:DepthOfField_Circle]
+The Circle DoF is the newest addition and matches real world cameras more closely. Simialar to the Bokeh DoF you can see circular shaped Bokeh with sharp HDR content. Very large Bokeh are a weakness of this
+algorithm, they appear noisy and not as clear as the BokehDOF can do them.
+The method has good performance (quite better than Bokeh DoF) and good quality, especially in the transition areas.
+
+The defaults of CircleDOF are intentionally weak to be more pleasant. To get the maximum effect you can tweak settings. Use a low Aperture for a large Bokeh, get close to an object and change the Field of View to be lower.
+Play with the focal distance to get some scene content in out of focus, ideally in front and behind the focal plane. Using showflag VisualizeDepthOfField might help to find the right settings.
+
+[/EXCERPT:DepthOfField_Circle]
+
+## Implementation
+
+Depth of Field is broken up into three layers - Near, Far, and the Focal Region - each of which are processed separately and then later composited together to achieve the final effect. Objects in the near and far layers - that is, objects not in the focal region - are always fully blurred. Then, these layers are blended with the non-blurred scene. 
+
+* Objects within the focal region use the non-blurred scene layer.
+* Objects in the near or far layers, but outside any transition regions, are fully blended to the blurred layer. 
+* Objects within a transition region are blended linearly between the non-blurred scene layer and their blurred layer based on their position within the transition region.
+
+
+These layers, including the transition regions, can be visualized using the **Depth of Field Layers** show flag ( under **Show > Visualize** ). The near layer is shown in green, the far layer in blue, and the focal region is black.
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Scene](dof_layers.png)(w:700)
+	[/PARAM]
+	[PARAM:after]
+	![Layer Visualization](dof_layers_visualize.png)(w:700)
+	[/PARAM]
+[/OBJECT]
+
+We further improved this visualization to also include a lot of interesting information:
+
+[REGION:imagetable]
+| ![Scene](NewVisualize.png) |
+| :----: |
+| VisualizeDOF |
+[/REGION]
+
+When using the CircleDOF you also can see a crosshair attached to the mouse cursor showing the computed circle of confusion (BokehSize) together with the depth and the pixel size in numbers.
+Note that the circle size might not always match to the actual effect as the implementation is not well suited / intended for large Bokeh shapes. We might want to improve on that in the future.
+
+## Properties
+
+| Property | Description |
+| -------- | ----------- |
+| **Method** | Selects the method, Bokeh, Gaussian or Circular, used for blurring the scene. |
+| **Depth Blur km for 50%** | todo |
+| **Depth Blur Radius** | Depth blur radius in pixels at 1920x |
+| **Aperture** | todo |
+| **Focal Distance** | The distance in Unreal Units from the camera that acts as the center of the region where the scene is perfectly in focus and no blurring occurs. [INCLUDE:#FocalDistance] |
+| **Focal Region** | The distance in Unreal Units beyond the focal distance where the scene is perfectly in focus and no blurring occurs. [INCLUDE:#FocalRegion] |
+| **Near Transition Range** | The distance in Unreal Units from the focal region on the side nearer to the camera over which the scene transitions from focused to blurred when using Gaussian-based DoF. [INCLUDE:#NearTransitionRange] |
+| **Far Transition Range** | The distance in Unreal Units from the focal region on the side farther from the camera over which the scene transitions from focused to blurred when using Gaussian-based DoF. [INCLUDE:#FarTransitionRange] |
+| **Scale** | An overall scaling factor for Bokeh-based blurring. [INCLUDE:#Scale] |
+| **Max Bokeh Size** | The maximum size (in percent of the view width) of the blur for Bokeh-based DoF (**Note:** performance cost scales with size*size). An approximate representation of the function used to calculate the size of the Bokeh at any distance is shown below: [INCLUDE:#MaxBokehSize] |
+| **Near Blur Size** | The maximum size (in percent of the view width) of the near blur for Gaussian-based DoF. (**Note:** performance cost scales with size) [INCLUDE:#NearBlurSize] |
+| **Far Blur Size** | The maximum size (in percent of the view width) of the far blur for Gaussian-based DoF. (**Note:** performance cost scales with size) [INCLUDE:#FarBlurSize] |
+| **Shape** | A texture that defines the shape of the Bokeh when objects get out of focus (cannot be blended). <!--TODO: show a few example images--> |
+| **Occlusion** | Controls how much the blurred geometry extends beyond its usual silhouette and its opacity. A value of 0.18 gives a fairly natural occlusion result. A value of 0.4 may be necessary to solve layer color leaking issues. Very small values (less than 0.18) generally result in negating the blur effect, though can work well when objects are very near to the camera. [INCLUDE:#Occlusion] |
+| **Color Threshold** | Controls the threshold where adaptive DoF switches to using full-resolution based on color. Smaller values cause more of the scene to use full-resolution processing. |
+| **Size Threshold** | Controls the threshold where adaptive DoF switches to using full-resolution based on size. Larger values cause more of the scene to use full-resolution processing. |
+| **Sky Distance** | Artificial distance to allow the skybox to be in focus (e.g. 200000), `<=0` to switch the feature off, only for GaussianDOF, can cost performance. |
+
+<!--
+[EXCERPT:FocalDistance]
+[REGION:imagetable]
+| ![DoF Focal Distance - Near](dof_focaldist_0.png)(w:240) | ![DoF Focal Distance - Mid](dof_focaldist_1.png)(w:240) | ![DoF Focal Distance - Far](dof_focaldist_2.png)(w:240) |
+| --- | --- | --- |
+| Focal Distance = 400.0 | Focal Distance = 1000.0 | Focal Distance = 2500.0 |
+[/REGION]
+[/EXCERPT:FocalDistance]
+
+[EXCERPT:FocalRegion]
+[REGION:imagetable]
+![Focal Region](dof_focalregion.png)
+[/REGION]
+[/EXCERPT:FocalRegion]
+
+[EXCERPT:NearTransitionRange]
+[REGION:imagetable]
+![Gaussian Near Layer](dof_gaussian_near.png)
+[/REGION]
+[/EXCERPT:NearTransitionRange]
+
+[EXCERPT:FarTransitionRange]
+[REGION:imagetable]
+![Gaussian Far Layer](dof_gaussian_far.png)
+[/REGION]
+[/EXCERPT:FarTransitionRange]
+
+[EXCERPT:MaxBokehSize]
+[REGION:imagetable]
+![Bokeh CoC](dof_bokeh_coc.png) 
+| ![DoF Bokeh Size - 2.5](dof_size_0.png)(w:240) | ![DoF Bokeh Size - 5.0](dof_size_1.png)(w:240) | ![DoF Bokeh Size - 10.0](dof_size_2.png)(w:240) |
+| --- | --- | --- |
+| Size = 2.5 | Size = 7.5 | Size = 15.0 |
+[/REGION]
+[/EXCERPT:MaxBokehSize]
+
+[EXCERPT:NearBlurSize]
+[REGION:imagetable]
+| ![DoF Near Blur Size - 2.5](dof_nearsize_0.png)(w:240) | ![DoF Near Blur Size - 5.0](dof_nearsize_1.png)(w:240) | ![DoF Near Blur Size - 10.0](dof_nearsize_2.png)(w:240) |
+| --- | --- | --- |
+| Size = 0.0 | Size = 0.25 | Size = 2.5 |
+[/REGION]
+[/EXCERPT:NearBlurSize]
+
+[EXCERPT:FarBlurSize]
+[REGION:imagetable]
+| ![DoF Far Blur Size - 2.5](dof_farsize_0.png)(w:240) | ![DoF Far Blur Size - 5.0](dof_farsize_1.png)(w:240) | ![DoF Far Blur Size - 10.0](dof_farsize_2.png)(w:240) |
+| --- | --- | --- |
+| Size = 0.0 | Size = 0.25 | Size = 2.5 |
+[/REGION]
+[/EXCERPT:FarBlurSize]
+
+[EXCERPT:Occlusion]
+[REGION:imagetable]
+| ![DoF Occlusion - 0.05](dof_occlusion_0.png)(w:240) | ![DoF Occlusion - 0.18](dof_occlusion_1.png)(w:240) | ![DoF Occlusion - 0.4](dof_occlusion_2.png)(w:240)
+| --- | --- | --- |
+| Occlusion = 0.05 | Occlusion = 0.18 | Occlusion = 0.4 |
+[/REGION]
+[/EXCERPT:Occlusion]
+
+[EXCERPT:Scale]
+[REGION:imagetable]
+| ![DoF Scale - 0.0](dof_scale_0.png)(w:240) | ![DoF Scale - 0.375](dof_scale_1.png)(w:240) | ![DoF Scale - 1.0](dof_scale_2.png)(w:240) |
+| --- | --- | --- |
+| Scale = 0.0 | Scale = 0.375 | Scale = 1.0 |
+[/REGION] 
+[/EXCERPT:Scale]
+-->
+
+## Adaptive DoF
+
+Bokeh depth of field is rendered at quarter-resolution (half-res in each direction) by default for performance reasons. In most cases, this downsampling is barely noticeable and is perfectly acceptable; however, it can lead to artifacting and unwanted results in some situations.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Adaptive Resolution - Off](dof_adaptive_0.png)(w:700)
+	[/PARAM]
+	[PARAM:after]
+	![Adaptive Reoslution - On](dof_adaptive_1.png)(w:700)
+	[/PARAM]
+[/OBJECT]
+
+
+You can see that the characters being blurred in the background appear blocky when using only the downsampled DoF technique. Also, there is some artifacting around the horns of the character in the foreground. The artifacting is eliminated by using the adaptive DoF, and the background characters have a much smoother appearance.
+
+The adaptive DoF can be visualized using the **Adaptive Depth of Field** show flag (under **Show > Visualize** ). When enabled, an overlay is displayed showing where the downsampled effect is being used (in green) and where the full-resolution effect is being used (in red). The regular scene color is shown where no blurring is being applied.
+
+[REGION:fullwidth]
+![Adaptive DoF Visualization](dof_adaptive_visualize.png)
+[/REGION]
+
+In general, you want this to display all green. The more red shown by the visualization, the more expensive the scene is to render each frame.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![Adaptive Resolution - Optimized](dof_adaptive_good.png)(w:700)
+	[/PARAM]
+	[PARAM:after]
+	![Adaptive Resolution - Expensive](dof_adaptive_bad.png)(w:700)
+	[/PARAM]
+[/OBJECT]
+

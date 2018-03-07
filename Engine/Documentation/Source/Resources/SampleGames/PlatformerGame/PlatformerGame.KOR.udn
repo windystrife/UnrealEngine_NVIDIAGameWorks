@@ -1,0 +1,185 @@
+﻿INTSourceChangelist:3108692
+Availability: Public
+Title:플랫포머 게임 샘플
+Crumbs:%ROOT%, Resources
+Description:UE4 로 횡스크롤 플랫포머 게임을 제작해 보는 예제입니다.
+Version: 4.9
+
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Resources/SampleGames/PlatformerGame:title%](Platformer_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%\anim_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/PlatformerGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/PlatformerGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/PlatformerGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Resources/SampleGames/PlatformerGame:title%](Platformer_Topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%\anim_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/SampleGames/PlatformerGame:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/SampleGames/PlatformerGame:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/SampleGames/PlatformerGame]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+[REGION:fullwidth]
+![](platformer_game.png)
+[/REGION]
+
+[TOC(start:2)]
+
+PlatformerGame 샘플은 PC/모바일용 멀티플레이어 횡스크롤 게임 예제입니다. 여러가지 동작 유형에 대한 기본적인 구현과 함께 
+간단한 프론트 엔드 메뉴 시스템도 포함되어 있습니다.
+
+특징적인 개념을 전부 나열해 보면 이렇습니다:
+
+* 강제 이동
+* 특수 이동: 슬라이딩 (PlatformerPlayerMovementComp)
+* 루트 모션 애니메이션 (차량 클라이밍)
+* 특정 지점에서의 애니메이션 재생을 위한 위치 조정 (턱 클라이밍)
+
+
+## 강제 이동
+
+플레이어의 이동 처리는 플레이어의 `CharacterMovementComponent` 를 통해 이루어지며, 여기서 이동 업데이트가 
+있을 때마다 `ScaleInputAcceleration()` 을 사용하여 가속도를 조정합니다. 이 함수를 `UPlatformerPlayerMovementComp` 에서 덮어써서 
+게임 진행중일 때는 X 축 가속도로만 제한시킵니다. 추가적으로 `APlatformerCharacter::SetupPlayerInputComponent()` 에서 
+모든 (시야와 이동) 축 바인딩을 제거시켜 플레이어 혼자 움직이지 못하도록 합니다.
+
+![](forced_movement.png)
+
+## 특수 이동
+
+_슬라이딩_ 특수 이동은 보통의 웅크리기와 비슷한 식으로 플레이어가 장애물 아래를 지날 수 있도록 합니다.
+
+![](slide_move.png)
+
+슬라이딩은 `PhysWalking()` 함수 내 `UPlatformerPlayerMovementComp` 의 걷기 모드의 일환으로 구현됩니다.
+`UPlatformerPlayerMovementComp::StartSlide()` 에서 플레이어가 슬라이딩을 시작하면, 
+`SetSlideCollisionHeight()` 함수를 통해 그 콜리전 캡슐의 높이를 감소시킵니다.
+
+[REGION:imagetable]
+| ![](collision_full.png) | ![](collision_slide.png) |
+| --- | --- |
+| 걷기 높이 | 슬라이딩 높이 |
+[/REGION]
+
+`CalcCurrentSlideVelocityReduction()`, `CalcSlideVelocity()` 에서 슬라이딩 중에는 매 틱마다 플레이어의 속력을 감소시키나,
+경사면을 미끄러져 내려갈 때는 증가되기도 합니다. 플레이어의 속력은 `MinSlideSpeed` 아래로는 내려가지 않는데,
+플레이어가 장애물 아래 갖히지 않도록 하기 위함입니다.
+
+플레이어는 점프를 하는 것으로 슬라이딩을 강제로 빠져나올 수도 있고, 
+속력이 낮을 때는 자동으로 빠져나오기도 합니다. 그러나 콜리전 캡슐 높이가 감소한 상태이므로 
+기본 높이에 맞는 공간이 나오기 전 그냥 튀어나올 수는 없는 노릇입니다. 
+`TryToEndSlide()` 함수가 `RestoreCollisionHeightAfterSlide()` 함수를 호출해서 
+기본 콜리전 캡슐 높이를 복원시키면 플레이어가 월드 지오메트리에 겹치지는 않을지 확인합니다.
+겹치지 않으면 플레이어는 슬라이딩에서 빠져나올 수 있습니다.
+
+## 루트 모션 애니메이션
+
+캐릭터가 점프에 실패하고 장애물에 부딪히면, 클라이밍 또는 맨틀(mantle) 동작을 자동으로 시도합니다. 이 동작은 
+**루트 모션** 애니메이션을 활용하는데, 여기서 애니메이션 시퀀스 자체적으로 스켈레톤의 루트 본 위치를 수정하고,
+그 모션을 Actor 에 전송하여 스켈레톤의 자손 본에만 영향을 끼치는 보통 애니메이션 시퀀스와는 달리 
+플레이어의 위치가 변하도록 합니다.
+
+플레이어가 벽에 부딪혔음을 무브먼트 컴포넌트가 감지하면 `APlatformerCharacter::MoveBlockedBy()` 가 호출됩니다.
+이 함수의 구현에서는 플레이어의 강제 이동을 정지시키고, _HitWallMontage_ '충돌 반응' 애님 몽타주를 재생합니다.
+애니메이션이 끝나면 `APlatformerCharacter::ClimbOverObstacle()` 를 실행하여 실제 클라이밍 작업을 합니다.
+
+높이가 다른 여러가지 장애물에 대한 클라이밍 애님 몽타주는 세 가지 있으며, 레벨의 모든 장애물은 그 세 가지 높이 중 
+하나에 맞아야 클라이밍이 작동합니다. 각 애님 몽타주에 있는 애니메이션 시퀀스는 루트 본에 모션을 작용합니다.
+애님 몽타주에서 플레이어의 캐릭터로 루트 모션을 전송하기 위해 `APlateformerCharacter::Tick()` 은 
+매 프레임마다 루트 본의 위치 변화를 계산한 다음 액터의 위치에 적용합니다.
+
+애니메이션 완료 직전에 `ResumeMovement()` 를 호출, 기본 강제 이동 스키마를 복원시킵니다.
+나머지 애니메이션은 캐릭터의 전방 이동과 함께 블렌딩 아웃 처리합니다.
+
+## 위치 조정된 애니메이션
+
+턱(ledge)은 그 위치가 플레이어의 세로 위치와 매번 다르다는 점에서 땅의 장애물과는 다릅니다.
+플레이어의 점프 어느 지점에서 턱에 걸렸는지에 따라 좌지우지되기 때문입니다.
+
+애니메이션 동기화를 더욱 쉽게 하기 위해서, 클라이밍은 하나의 특수한 Actor 클래스 `PlatformerClimbMarker` 하고만 작동합니다. 
+클라이밍 동작과 마찬가지로, 이 프로세스는 플레이어가 턱에 부딪혀 `APlatformerCharacter::MoveBlockedBy()` 호출시 시작됩니다. 이 함수는 
+플레이어가 (걷기중이 아닌) 낙하중인지, 플레이어가 충돌한 오브젝트가 특수한 `PlatformerClimbMarker` Actor 는 아닌지 확인합니다. 
+그렇다면 강제 이동을 끄고 `APlatformerCharacter::ClimbToLedge()` 를 실행시키되, 
+마커의 좌상단 구석 위치(, 즉 턱을 잡을 위치)를 전달합니다.
+
+턱 클라이밍 애니메이션은 항상 턱을 기준으로 항상 동일한 위치에서 시작해야 하는데, 플레이어가 근처 어디쯤 있을 수 있으므로,
+초기 충격 위치에서 애니메이션 시작 예상 위치로 캐릭터의 위치를 보간시킵니다.
+`ClimbToLedge()` 는 초기 위치를 `AnimPositionAdjustment` 로 저장한 다음 
+캐릭터를 클라이밍 애니메이션 종료 지점으로 즉시 순간이동시키고서 클라이밍 애님 몽타주를 
+재생 시작합니다. 그와 동시에 `APlateformerCharacter::Tick()` 은 캐릭터 `SkeletalMeshComponent` 의 상대 위치를 
+0 으로 빠르게 보간, 메시가 애니메이션을 부드럽게 따라잡을 수 있도록 합니다.
+
+## 메뉴 시스템
+
+메뉴 시스템 생성에는 [슬레이트 UI 프레임워크](Programming/Slate) 가 사용됩니다. **메뉴**, **메뉴 위젯**, **메뉴 아이템** 으로 구성됩니다.
+각 메뉴에는 모든 메뉴 아이템에 대한 애니메이션, 내부 이벤트 처리, 레이아웃을 담당하는 메뉴 위젯 (`SPlatformerMenuWidget`) 이 하나 있습니다. 
+메뉴 아이템 (`SPlatformerMenuItem`) 은 여러 동작을 수행하며 다른 메뉴 아이템을 몇이든 담을 수 있는 복합 오브젝트입니다.
+라벨이나 버튼 달랑 하나일 수도, 다른 메뉴 아이템들로 구성된 복잡한 서브메뉴가 들어있는 "탭" 일 수도 있습니다.
+이 메뉴 아이템의 조작은 키보드나 콘트롤러로 가능하며, 현재 마우스는 제한적으로만 지원됩니다.
+
+각 메뉴의 생성은 `Construct()` 함수를 통해 이루어지며, 필요한 메뉴 아이템을 세부 항목까지 포함해서 전부 추가시키고, 
+필요하다면 그에 대한 델리게이트까지 어태치합니다. 이 작업은 `AddMenuItem()`, `AddMenuItemSP()` 등의 헬퍼 메소드를 통해 이루어지는데, 
+이들은 `SPlatformerMenuWidget.h` 파일의 `MenuHelper` 네임스페이스에 정의되어 있습니다.
+
+예전 메뉴로의 이동은 메뉴로의 공유 포인터 배열을 통한 방식으로 처리되며, 이 배열은 메뉴 위젯의 `MenuHistory` 변수에 
+저장됩니다. `MenuHistory` 는 예전에 들어갔던 메뉴를 담는 스택 역할을 하여 뒤로 쉽게 돌아갈 수 있습니다. 이런 식으로
+메뉴 사이의 직접적인 상관관계가 생기지 않으며, 필요하다면 같은 메뉴를 여러 곳에서 재사용할 수도 있습니다.
+
+애니메이션은 `SPlatformerMenuWidget::SetupAnimations()` 에 정의된 인터폴레이션 커브를 사용해서 이루어집니다. 각 커브에는 시작 시간,
+기간, 인터폴레이션 메소드가 있습니다. 애니메이션은 정/역방향 재생이 가능하며, 특정 시간에서의 특성 애니메이션도 
+0.0f 에서 1.0f 사이 값을 반환하는 `GetLerp()` 를 통해 가능합니다. `SlateAnimation.h` 의 `ECurveEaseFunction::Type` 에는 
+여러가지 다양한 인터폴레이션 메소드가 정의되어 있습니다.
+
+### 메인 메뉴
+
+![](main_menu.png)
+
+기본 맵을 _PlatformerMenu_ 맵으로 지정하면 게임 시작시 메인 메뉴가 자동으로 열립니다. 여기서는 `APlatformerPlayerController_Menu` 클래스를 
+사용하는 특수한 GameMode `APlatformerGameMode` 를 로드하는데, `APlatformerPlayerController_Menu` 안의 `PostInitializeComponents()` 함수에서 
+`FPlatformerMainMenu` 클래스의 인스턴스를 새로 만드는 것으로 메인 메뉴를 엽니다.
+
+### 인게임 메뉴
+
+![](ingame_menu.png)
+
+인게임 메뉴의 생성은 `APlatformerPlayerController` 클래스의 `PostInitializeComponents()` 함수를 통해 이루어지며, `OnToggleInGameMenu()` 함수를 
+통해 열리고 닫힙니다.
+
+### 옵션 메뉴
+
+옵션 메뉴는 메인 메뉴와 인게임 메뉴 둘 다의 서브메뉴로 사용 가능합니다. 유일한 차이점은 변화 적용 방식입니다:
+
+* 메인 메뉴에서 열리는 것은, 플레이어가 게임을 시작할 때 변화가 적용됩니다.
+* 인게임 메뉴에서 열리는 것은, 메뉴가 닫히는 즉시 변화가 적용됩니다.
+
+
+옵션 메뉴의 세팅은 `GameUserSettings.ini` 에 저장되며, 시작시 자동으로 로드됩니다.

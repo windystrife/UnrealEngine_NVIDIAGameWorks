@@ -1,0 +1,212 @@
+Availability: Public
+Title:4. Configure Our Game Mode
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/UMG
+Description:Set up our Game Mode to use our Main Menu Widget.
+version:4.14
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[Previous Step](Programming\Tutorials\UMG\3 "%Programming\Tutorials\UMG\3:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[](Programming\Tutorials\UMG)
+	[/PARAM]
+	[PARAM:next]
+		[Next Step](Programming\Tutorials\UMG\5 "%Programming\Tutorials\UMG\5:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+
+1. In the **Content Browser**, we will add a **Blueprint Class** based on our project's **GameMode**. This makes it possible to set the exposed variables on those two classes to whatever values we want. To do this:
+
+	* Click the **Add** button in the **Content Browser**.
+
+	[![](AddNewBPClass.png)](AddNewBPClass.png)
+
+	* Pick **HowTo_UMGGameMode** as the parent class. It will be listed in the **All Classes** section.
+
+	[![](PickParentClassForGameModeBP.png)](PickParentClassForGameModeBP.png)
+
+	* Name the resulting Blueprint asset MenuGameMode.
+
+1. In order to see our mouse cursor in-game, we'll need to create a Blueprint of the **PlayerController** as we did with our GameMode.
+
+	* Click the **Add** button in the **Content Browser** again.
+	
+	* Select **Player Controller** from the **Common Classes** section.
+
+	* Name the Blueprint MenuPlayerController.
+
+1. Edit MenuPlayerController.
+
+	* Check the **Show Mouse Cursor** box.
+
+	[![](GamePlayerController.png)](GamePlayerController.png)
+
+1. Edit MenuGameMode.
+
+	* The **Starting Widget Class** must be set to the MainMenu asset in order to bring up our menu when the game begins.
+
+	* The **Default Pawn Class** should be set to **Pawn** instead of **DefaultPawn** so that our player will not be able to fly around while in the menu.
+
+	* The **Player Controller Class** should be set to the MenuPlayerController asset we created so that the mouse cursor will be shown in-game.
+
+	[![](ConfigureGameMode.png)](ConfigureGameMode.png)
+
+1. In order for our Blueprint to be used, we must return to the **Level Editor** window and change the **World Settings** for our current **Level** via the **Settings** button.
+
+	[![](WorldSettingsBar.png)](WorldSettingsBar.png)
+
+	[REGION:note]It is also possible to set the default GameMode in the **Project Settings** menu, under the **Maps and Modes** section. If you use this method, all of your levels will default to the GameMode you choose, unless overridden individually. Which method you use depends on how you prefer to set up your project.[/REGION]
+
+1. The **World Settings Panel** will open up. By default, it will be docked with the **Details Panel**, but it can be moved elsewhere. We need to set the **Game Mode Override** field to our MenuGameMode asset.
+
+	[![](WorldSettings.png)](WorldSettings.png)
+
+
+----
+
+Our custom GameMode asset is now in effect on our level, configured to load our Main Menu, and use our Player Controller that shows the mouse cursor. If we run the game now, our Quit button will work as expected, and our New Game button will take us to an empty menu screen. Our next step will be to set up the New Game menu.
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    code
+    [/PARAMLITERAL]
+    [PARAM:heading]
+    Finished Code
+    [/PARAM]
+    [PARAM:content]
+		**HowTo_UMG.Build.cs**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			using UnrealBuildTool;
+
+			public class HowTo_UMG : ModuleRules
+			{
+				public HowTo_UMG(TargetInfo Target)
+				{
+					PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "UMG" });
+
+					//PrivateDependencyModuleNames.AddRange(new string[] {  });
+
+					// Uncomment if you are using Slate UI
+					PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });
+		
+					// Uncomment if you are using online features
+					// PrivateDependencyModuleNames.Add("OnlineSubsystem");
+					// if ((Target.Platform == UnrealTargetPlatform.Win32) || (Target.Platform == UnrealTargetPlatform.Win64))
+					// {
+					//		if (UEBuildConfiguration.bCompileSteamOSS == true)
+					//		{
+					//			DynamicallyLoadedModuleNames.Add("OnlineSubsystemSteam");
+					//		}
+					// }
+				}
+			}
+
+		**HowTo_UMGGameMode.h**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "Blueprint/UserWidget.h"
+			#include "GameFramework/GameModeBase.h"
+			#include "HowTo_UMGGameMode.generated.h"
+
+			/**
+			 * 
+			 */
+			UCLASS()
+			class HOWTO_UMG_API AHowTo_UMGGameMode : public AGameModeBase
+			{
+				GENERATED_BODY()
+
+			public:
+				/** Remove the current menu widget and create a new one from the specified class, if provided. */
+				UFUNCTION(BlueprintCallable, Category = "UMG Game")
+				void ChangeMenuWidget(TSubclassOf<UUserWidget> NewWidgetClass);
+
+			protected:
+				/** Called when the game starts. */
+				virtual void BeginPlay() override;
+
+				/** The widget class we will use as our menu when the game starts. */
+				UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "UMG Game")
+				TSubclassOf<UUserWidget> StartingWidgetClass;
+
+				/** The widget instance that we are using as our menu. */
+				UPROPERTY()
+				UUserWidget* CurrentWidget;
+			};
+
+		**HowTo_UMGGameMode.cpp**
+			// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_UMG.h"
+			#include "HowTo_UMGGameMode.h"
+
+			void AHowTo_UMGGameMode::BeginPlay()
+			{
+				Super::BeginPlay();
+				ChangeMenuWidget(StartingWidgetClass);
+			}
+
+			void AHowTo_UMGGameMode::ChangeMenuWidget(TSubclassOf<UUserWidget> NewWidgetClass)
+			{
+				if (CurrentWidget != nullptr)
+				{
+					CurrentWidget->RemoveFromViewport();
+					CurrentWidget = nullptr;
+				}
+				if (NewWidgetClass != nullptr)
+				{
+					CurrentWidget = CreateWidget<UUserWidget>(GetWorld(), NewWidgetClass);
+					if (CurrentWidget != nullptr)
+					{
+						CurrentWidget->AddToViewport();
+					}
+				}
+			}
+			
+		**HowTo_UMGPlayerController.h**
+			// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
+
+			#pragma once
+
+			#include "GameFramework/PlayerController.h"
+			#include "HowTo_UMGPlayerController.generated.h"
+
+			/**
+			 * 
+			 */
+			UCLASS()
+			class HOWTO_UMG_API AHowTo_UMGPlayerController : public APlayerController
+			{
+				GENERATED_BODY()
+				
+			public:
+				virtual void BeginPlay() override;
+			};
+
+		**HowTo_UMGPlayerController.cpp**
+			// Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
+
+			#include "HowTo_UMG.h"
+			#include "HowTo_UMGPlayerController.h"
+
+			void AHowTo_UMGPlayerController::BeginPlay()
+			{
+				Super::BeginPlay();
+				SetInputMode(FInputModeGameAndUI());
+			}
+
+    [/PARAM]
+[/OBJECT]
+
+%Steps%

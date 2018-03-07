@@ -1,0 +1,77 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	PositionOnlyDepthOnlyVertexShader.hlsl: Depth-only vertex shader.
+=============================================================================*/
+
+#include "Common.ush"
+#include "/Engine/Generated/Material.ush"
+#include "/Engine/Generated/VertexFactory.ush"
+
+#if INSTANCED_STEREO
+bool bIsInstancedStereoEmulated;
+#endif
+
+void Main(
+	FPositionOnlyVertexFactoryInput Input,
+	out float4 OutPosition : SV_POSITION
+#if USE_GLOBAL_CLIP_PLANE
+	, out float OutGlobalClipPlaneDistance : SV_ClipDistance
+#endif
+#if INSTANCED_STEREO
+	, uint InstanceId : SV_InstanceID
+	#if !MULTI_VIEW
+		, out float OutClipDistance : SV_ClipDistance1
+	#else
+		, out uint ViewportIndex : SV_ViewPortArrayIndex
+	#endif
+#endif
+	)
+{
+#if INSTANCED_STEREO
+	uint EyeIndex;
+	BRANCH
+	if (bIsInstancedStereoEmulated)
+	{
+		EyeIndex = View.StereoPassIndex;
+	}
+	else
+	{
+		EyeIndex = VertexFactoryGetEyeIndex(InstanceId);
+	}
+
+	ResolvedView = ResolveView(EyeIndex);
+
+	#if !MULTI_VIEW
+		OutClipDistance = 0.0;
+	#else
+		ViewportIndex = EyeIndex;
+	#endif
+#else
+	ResolvedView = ResolveView();
+#endif
+
+	float4 WorldPos = VertexFactoryGetWorldPosition(Input);
+	ISOLATE
+	{
+		OutPosition = INVARIANT(mul(WorldPos, ResolvedView.TranslatedWorldToClip));
+	}
+
+	#if INSTANCED_STEREO && !MULTI_VIEW
+	BRANCH 
+	if (bIsInstancedStereo || bIsInstancedStereoEmulated)  
+	{
+		// Clip at the center of the screen
+		OutClipDistance = dot(OutPosition, EyeClipEdge[EyeIndex]);
+
+		// Scale to the width of a single eye viewport
+		OutPosition.x *= 0.5 * ResolvedView.HMDEyePaddingOffset;
+
+		// Shift to the eye viewport
+		OutPosition.x += (EyeOffsetScale[EyeIndex] * OutPosition.w) * (1.0f - 0.5 * ResolvedView.HMDEyePaddingOffset);
+	}
+	#endif
+#if USE_GLOBAL_CLIP_PLANE
+	OutGlobalClipPlaneDistance = dot(ResolvedView.GlobalClippingPlane, float4(WorldPos.xyz - ResolvedView.PreViewTranslation.xyz, 1));
+#endif
+}

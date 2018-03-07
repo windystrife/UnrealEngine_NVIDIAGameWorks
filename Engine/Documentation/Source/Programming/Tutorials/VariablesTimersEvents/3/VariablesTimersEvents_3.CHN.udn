@@ -1,0 +1,199 @@
+﻿INTSourceChangelist:2728592
+Availability:Public
+Title:3.用蓝图延展并覆写 C++
+Crumbs:%ROOT%, Programming, Programming/Tutorials, Programming/Tutorials/VariablesTimersEvents
+Description:使用蓝图补充或替代 C++ 功能
+version:4.9
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[Previous Step](Programming\Tutorials\VariablesTimersEvents\2 "%Programming\Tutorials\VariablesTimersEvents\2:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[](Programming\Tutorials\VariablesTimersEvents)
+	[/PARAM]
+	[PARAM:next]
+		[Next Step](Programming\Tutorials\VariablesTimersEvents\4 "%Programming\Tutorials\VariablesTimersEvents\4:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+[REGION:tip]教程的该部分讲述使用 **蓝图** 延展 C++ 类的功能。然而，C++ 代码的正确编写只作为测试，而并非作为蓝图教程。我们推荐阅读 [%Engine\Blueprints\QuickStart:title%](Engine\Blueprints\QuickStart) 来了解蓝图。[/REGION]
+
+1. 如需变更 ACountdown 实例（在编辑器中称为 Countdown1）的行为，我们必须首先制作一个可编辑版本的蓝图。完成此操作的方法：从 **World Outliner** 中选中，点击 **Details 面板** 中的 **Blueprint/Add Script** 按钮。
+
+	[![](AddScript.png)](AddScript.png)
+
+	借此我们可为包含修改后 ACountdown 类的蓝图资源提供路径和命名。
+
+	[![](SelectBlueprintPath.png)](SelectBlueprintPath.png)
+
+	这将创建一个代表蓝图版本 Countdown1 的新资源。还将用这个新蓝图的实例替代 Countdown1，使对蓝图进行的修改影响游戏中的 Countdown1。
+
+1. **虚幻编辑器** 将自动把我们带到 **内容浏览器** 里的新资源。在资源上 **单击右键** 并选择“Edit...”修改其 **蓝图图表**、**组件** 层级和 **默认值**。
+
+	[![](BlueprintInContentBrowser.png)](BlueprintInContentBrowser.png)
+
+	[![](EditBlueprint.png)](EditBlueprint.png)
+
+1. 在 **Event Graph** 标签中可找到函数和事件，因此首先进行选择。
+
+	[![](SelectEventGraph.png)](SelectEventGraph.png)
+
+	然后在 **Event Graph** 窗口中 **右键单击** 任意位置，即可将 **CountdownHasFinished** 函数作为事件节点添加，定义其行为。
+
+	[![](SelectEvent.png)](SelectEvent.png)
+
+1. 现在可添加所需的额外功能 - 左键单击并拖动新节点右边的白色（执行）引脚。
+
+	[![](DragExecPin.png)](DragExecPin.png)
+
+	松开鼠标左键后，我们将被询问希望执行的函数或事件。就此教程而言，需要在倒计时结束后生成一个 **粒子系统**。我们需要一个 **Spawn Emitter At Location** 节点，可从列表中进行选择。在搜索栏中输入部分短语（如 spawn loc）即可，可有效节约时间。随后，左键单击并拖动黄色的“Location”引脚，将其附着到 **Get Actor Location** 函数。
+
+	[![](GetActorLocation.png)](GetActorLocation.png)
+
+	现在即可选择希望拥有的特效。点击发射器模板下的 Select Asset 将出现适宜特效资源的列表。我们选择 P_Explosion。
+
+	[![](SelectParticle.png)](SelectParticle.png)
+
+1. 点击 **蓝图编辑器** 左上角的 **Compile** 按钮保存变更。
+
+1. 按下 **Play** 后倒计时便会开始，倒计时数字归零后将出现爆炸特效。
+
+	[![](Explosion_Zero.png)](Explosion_Zero.png)
+
+	然而，程序设定倒计时在最后说出 GO!，而并非在 0 时。这已不复存在，因为我们已使用 **蓝图** 可视化脚本完全替代 C++ 功能。在此例中这并非我们所希望执行的操作，因此需要在此函数的 C++ 版本上添加一个调用：右键单击 **Countdown Has Finished** 节点并从快捷菜单中选择 **Add call to parent function**。
+
+	[![](CallToParent_Menu.png)](CallToParent_Menu.png)
+
+	此操作完成后，一个带有 **Parent:Countdown Has Finished** 标签的节点将在 **事件图表** 中被替换。父节点通常会直接连接到事件节点，我们在此也执行相同操作。但这不是必须，因为父调用节点和其他节点相同，可随处调用，甚至多次调用。
+
+	[![](CallToParent_ConnectPins.png)](CallToParent_ConnectPins.png)
+
+	注意：这会代替到 **Spawn Emitter At Location** 的连接，因此我们需要将 **Parent:Countdown Has Finished** 节点右边（外行）的执行节点和它连接起来，否则它将不会运行。
+
+	[![](CallToParent_FixPins.png)](CallToParent_FixPins.png)
+
+	运行游戏时，倒计时结束后将出现单词 GO!（来自 C++ 代码）和爆炸特效（来自蓝图图表）。
+
+	[![](Explosion_Go.png)](Explosion_Go.png)
+
+----
+
+[OBJECT:Section]
+    [PARAMLITERAL:id]
+    code
+    [/PARAMLITERAL]
+    [PARAM:heading]
+	    完成代码
+    [/PARAM]
+    [PARAM:content]
+		**Countdown.h**
+			// 版权所有 1998-2017 Epic Games, Inc. 保留所有权利。
+
+			#pragma once
+
+			#include "GameFramework/Actor.h"
+			#include "Countdown.generated.h"
+
+			UCLASS()
+			class HOWTO_VTE_API ACountdown : public AActor
+			{
+				GENERATED_BODY()
+	
+			public:	
+				// 设置该 actor 属性的默认值
+				ACountdown();
+
+				// 游戏开始时或生成时调用
+				virtual void BeginPlay() override;
+	
+				// 每帧调用
+				virtual void Tick( float DeltaSeconds ) override;
+
+				//倒计时运行时长，按秒计
+				UPROPERTY(EditAnywhere)
+				int32 CountdownTime;
+
+				UTextRenderComponent* CountdownText;
+
+				void UpdateTimerDisplay();
+
+				void AdvanceTimer();
+
+				UFUNCTION(BlueprintNativeEvent)
+				void CountdownHasFinished();
+				virtual void CountdownHasFinished_Implementation();
+
+				FTimerHandle CountdownTimerHandle;
+			};
+
+
+		**Countdown.cpp**
+			// 版权所有 1998-2017 Epic Games, Inc. 保留所有权利。
+
+			#include "HowTo_VTE.h"
+			#include "Countdown.h"
+
+			// 设置默认值
+			ACountdown::ACountdown()
+			{
+ 				// 将此 actor 设为每帧调用 Tick()。不需要时可将此关闭，以提高性能。
+				PrimaryActorTick.bCanEverTick = false;
+	
+				CountdownText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("CountdownNumber"));
+				CountdownText->SetHorizontalAlignment(EHTA_Center);
+				CountdownText->SetWorldSize(150.0f);
+				RootComponent = CountdownText;
+
+				CountdownTime = 3;
+			}
+
+			// 游戏开始时或生成时调用
+			void ACountdown::BeginPlay()
+			{
+				Super::BeginPlay();
+	
+				UpdateTimerDisplay();
+				GetWorldTimerManager().SetTimer(CountdownTimerHandle, this, &ACountdown::AdvanceTimer, 1.0f, true);
+			}
+
+			// 每帧调用
+			void ACountdown::Tick( float DeltaTime )
+			{
+				Super::Tick( DeltaTime );
+
+			}
+
+			void ACountdown::UpdateTimerDisplay()
+			{
+				CountdownText->SetText(FString::FromInt(FMath::Max(CountdownTime, 0)));
+			}
+
+			void ACountdown::AdvanceTimer()
+			{
+				--CountdownTime;
+				UpdateTimerDisplay();
+				if (CountdownTime < 1)
+				{
+					// 倒计时结束，停止运行定时器。
+					GetWorldTimerManager().ClearTimer(CountdownTimerHandle);
+					//在定时器结束时按需要执行特殊操作。
+					CountdownHasFinished();
+				}
+			}
+
+			void ACountdown::CountdownHasFinished_Implementation()
+			{
+				//改为一个特殊的读出
+				CountdownText->SetText(TEXT("GO!"));
+			}
+
+    [/PARAM]
+[/OBJECT]
+
+%Steps%

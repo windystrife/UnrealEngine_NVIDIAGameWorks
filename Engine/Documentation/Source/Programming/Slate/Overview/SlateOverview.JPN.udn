@@ -1,0 +1,207 @@
+﻿INTSourceChangelist:2568528
+Availability:Public
+Title:スレートの概要
+Crumbs:%ROOT%, Programming, Programming/Slate
+Description:クロスプラットフォームに対応するスレートUIフレームワークの概要
+Version:4.4
+
+[REGION:fullwidth]
+![Slate UI](editor.png)
+[/REGION]
+
+[TOC (start:2)]
+
+## 概要
+
+[EXCERPT:Intro]
+**スレート** はカスタム仕様のプラットフォームに依存しない UI フレームワークで、例えばアンリアルエディタやインゲーム UI の独自の楽しみや効率性など、ツールやアプリケーションのユーザーインターフェースの構築にあわせた設計となっています。スレートは宣言記法を簡単にデザイン、レイアウト、及びスタイルコンポーネントを作成する機能と組み合わせることによって、 UI の作成や UI 上でのイタレーションが簡単にできます。
+[/EXCERPT:Intro]
+
+スレート UI ソリューションが、ツールやアプリケーションのグラフィックユーザーインターフェースをとても簡単に統合し、これらをすばやく相互作用させます。 
+
+## 宣言記法
+
+スレートの **宣言記法** は、間接レイヤーを追加せずに、プログラマーが構築した UI へアクセス可能な状態にします。宣言のプロセスと新規ウィジェットの作成を単純化するためにマクロ一式が提供されます。
+
+	SLATE_BEGIN_ARGS( SSubMenuButton )
+		: _ShouldAppearHovered( false )
+		{}
+		/** The label to display on the button */
+		SLATE_ATTRIBUTE( FString, Label )
+		/** Called when the button is clicked */
+		SLATE_EVENT( FOnClicked, OnClicked )
+		/** Content to put in the button */
+		SLATE_NAMED_SLOT( FArguments, FSimpleSlot, Content )
+		/** Whether or not the button should appear in the hovered state */
+		SLATE_ATTRIBUTE( bool, ShouldAppearHovered )
+	SLATE_END_ARGS()
+
+
+##構成
+
+スレートの構成フレームワークは、プロトタイピングやイタレーションの際に UI コンポーネントの再配置を単純化します。
+
+以下は構成中の UI の事例です。
+
+	// Add a new section for static meshes
+	ContextualEditingWidget->AddSlot()
+	.Padding( 2.0f )
+	[
+		SNew( SDetailSection )
+		.SectionName("StaticMeshSection")
+		.SectionTitle( LOCTEXT("StaticMeshSection", "Static Mesh").ToString() )
+		.Content()
+		[
+			SNew( SVerticalBox )
+			+ SVerticalBox::Slot()
+			.Padding( 3.0f, 1.0f )
+			[
+				SNew( SHorizontalBox )
+				+ SHorizontalBox::Slot()
+				.Padding( 2.0f )
+				[
+					SNew( SComboButton )
+					.ButtonContent()
+					[
+						SNew( STextBlock )
+						.Text( LOCTEXT("BlockingVolumeMenu", "Create Blocking Volume") ) 
+						.Font( FontInfo )
+					]
+					.MenuContent()
+					[
+						BlockingVolumeBuilder.MakeWidget()
+					]
+				]
+			]
+					]
+
+	];
+
+上記の構成は、以下の UI コンポーネントを作成します。
+
+![Rendered UI](Slate_composition.png)
+
+## スタイル
+
+ウィジェットのさまざまな部分へスタイルを作成および適用することができます。これにより UI でコンポーネントの外観をイタレートしたり、スタイルの共有や再利用が簡単にできます。
+
+	// Tool bar
+	{
+		Set( "ToolBar.Background", FSlateBoxBrush( TEXT("Common/GroupBorder"), FMargin(4.0f/16.0f) ) );
+
+		Set( "ToolBarButton.Normal", FSlateNoResource() );		// Note:Intentionally transparent background
+		Set( "ToolBarButton.Pressed", FSlateBoxBrush( TEXT("Old/MenuItemButton_Pressed"), 4.0f/32.0f ) );
+		Set( "ToolBarButton.Hovered", FSlateBoxBrush( TEXT("Old/MenuItemButton_Hovered"), 4.0f/32.0f ) );
+
+		// Tool bar buttons are sometimes toggle buttons, so they need styles for "checked" state
+		Set( "ToolBarButton.Checked", FSlateBoxBrush( TEXT("Old/MenuItemButton_Pressed"),  4.0f/32.0f, FLinearColor( 0.3f, 0.3f, 0.3f ) ) );
+		Set( "ToolBarButton.Checked_Hovered", FSlateBoxBrush( TEXT("Old/MenuItemButton_Hovered"),  4.0f/32.0f ) );
+		Set( "ToolBarButton.Checked_Pressed", FSlateBoxBrush( TEXT("Old/MenuItemButton_Pressed"),  4.0f/32.0f, FLinearColor( 0.5f, 0.5f, 0.5f ) ) );
+
+		// Tool bar button label font
+		Set( "ToolBarButton.LabelFont", FSlateFontInfo( TEXT("Roboto-Regular"), 8 ) );
+	}
+
+構成に使用したスタイル：
+
+	SNew( SBorder )
+	.BorderImage( FEditorStyle::GetBrush( "ToolBar.Background" ) )
+	.Content()
+	[
+		SNew(SHorizontalBox)
+
+		// Compile button (faked to look like a multibox button)
+		+SHorizontalBox::Slot()
+		[
+			SNew(SButton)
+			.Style(TEXT("ToolBarButton"))
+			.OnClicked( InKismet2.ToSharedRef(), &FKismet::Compile_OnClicked )
+			.IsEnabled( InKismet2.ToSharedRef(), &FKismet::InEditingMode )
+			.Content()
+			[
+				SNew(SVerticalBox)
+				+SVerticalBox::Slot()
+				.Padding( 1.0f )
+				.HAlign(HAlign_Center)
+				[
+					SNew(SImage)
+					.Image(this, &SBlueprintEditorToolbar::GetStatusImage)
+					.ToolTipText(this, &SBlueprintEditorToolbar::GetStatusTooltip)
+				]
+				+SVerticalBox::Slot()
+				.Padding( 1.0f )
+				.HAlign(HAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("CompileButton", "Compile"))
+					.Font( FEditorStyle::GetFontStyle( FName( "ToolBarButton.LabelFont" ) ) )
+					.ToolTipText(LOCTEXT("CompileButton_Tooltip", "Recompile the blueprint"))
+				]
+			]
+		]
+	]
+
+##入力
+
+スレートはマウスやキーボードからの入力をサポートします。任意のキーの組み合わせとコマンドのバインドを可能にする柔軟性のあるキーバインディングシステムを提供します。これらのバインディングを動的に修正する機能も含みます。
+
+## 出力
+
+スレートは、ターゲットに依存しないレンダリングプリミティブを使用して、あらゆるプラットフォーム上で実行が可能です。現在はアンリアル・エンジン 4 RHI を対象に、アンリアル・エンジン 4 が実行できる全てのプラットフォームで実行することができます。
+
+## レイアウトプリミティブ
+
+レイアウトプリミティブによって静的および動的レイアウトの構築が簡単に出来ます。
+
+	FString DefaultLayout =
+					TEXT( "	{" )
+					TEXT( "		\"type\": \"tabstack\"," )
+					TEXT( "		\"sizecoeff\":1," )
+					TEXT( "		{" )
+					TEXT( "		[" )
+					TEXT( "			{" )
+					TEXT( "				\"type\": \"tab\"," )
+					TEXT( "				\"content\": \"Widget Inspector Tab\"" )
+					TEXT( "			}," )
+					TEXT( "			{" )
+					TEXT( "				\"type\": \"tab\"," )
+					TEXT( "				\"content\": \"Plugin Manager Tab\"" )
+					TEXT( "			}," )
+					TEXT( "			{" )
+					TEXT( "				\"type\": \"tab\"," )
+					TEXT( "				\"content\": \"Debug Tools\"" )
+					TEXT( "			}" )
+					TEXT( "		]" )
+					TEXT( "	}" );
+
+上記の構成は、以下の UI を作成します。
+
+![UI Layout](Slate_layout.png)
+
+## ユーザー主導型のレイアウト
+
+ユーザーはスレートの **docking framework** を利用して、タブ表示されているパネルをほとんどのレイアウトへ再配置および再固定することができます。自身の環境下へカスタマイズが可能になることにより、作業したいツールを使用して自身の方法による作業が可能になります。
+
+**浮動タブ**
+
+![Docking](docking_before.png)
+
+**浮動タブをターゲット領域へ固定します**
+
+![Drag to Docking Area](docking_place.png)
+
+**固定されたタブ**
+
+![Docked](docking_after.png)
+
+##デベロッパー ツール
+
+ **Slate Widget Inspector** はデバッグ作業と UI および関連コードを分析する手段を提供します。バグや不適切な挙動の追跡に加え、ユーザーインターフェースのプロファイル化や最適化を支援します。
+
+[REGION:fullwidth]
+![Widget Inspector](widget_inspector.png)
+[/REGION]
+
+## エンジンへのアクセス
+
+スレート UI システムによって、プログラマーはエンジンとエディタへ直接アクセスすることができます。開発チームのワークフローやプロジェクトの必要最低条件に対応する新機能やツールの実装がとても簡単に出来ます。

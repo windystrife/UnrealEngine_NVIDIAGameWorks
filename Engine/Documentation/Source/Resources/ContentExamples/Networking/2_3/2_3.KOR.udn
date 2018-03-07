@@ -1,0 +1,79 @@
+﻿INTSourceChangelist:3108692
+Availability: Public
+Title:2.3 - 네트워크 연관성 [3 부 - 변수 리플리케이션 솔루션 시도]
+Crumbs:%ROOT%, Resources, Resources/ContentExamples, Resources/ContentExamples/Networking
+Description:Network Feature 예제 레벨에 대한 개요로, 예제 2.3: Network Relevancy, Part 3 - Variable Replication Solution Attempt 입니다.
+Related: Gameplay/Networking
+Related: Gameplay/Networking/Actors/Components
+Related: Gameplay/Networking/Actors
+Related: Gameplay/Networking/Actors/RPCs
+Related: Engine/UI/LevelEditor/InEditorTesting/NetworkedPlayInEditor
+Version: 4.9
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[예전 예제](Resources/ContentExamples/Networking/2_2 "%Resources/ContentExamples/Networking/2_2:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[네트워킹 홈](Resources/ContentExamples/Networking)
+	[/PARAM]
+	[PARAM:next]
+		[다음 예제](Resources/ContentExamples/Networking/2_4 "%Resources/ContentExamples/Networking/2_4:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Resources/ContentExamples\Networking\2_3:title%](2_3.png)
+	[/PARAM]
+	[PARAM:title]
+		%Resources/ContentExamples\Networking\2_3:title%
+	[/PARAM]
+	[PARAM:description]
+		%Resources/ContentExamples\Networking\2_3:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Resources/ContentExamples\Networking\2_3]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+[REGION:fullwidth]
+![](2_3.png)
+[/REGION]
+
+[REGION:tip]
+**서버** 와 **클라이언트** 시점 모두를 확인하기 위해서는, **Play** (플레이) 드롭다운 아래 **Number of Clients** (클라이언트 수) 칸을 2 로 설정합니다.
+[/REGION]
+
+
+
+예제 2.2 가 실패한 이유는, 리플리케이트된 멀티캐스트 함수가 지난 번 실행되었을 때의 상자 상태를 보존 처리를 못했기 때문입니다. 그러한 경우, 리플리케이티드 변수를 사용하여 이 문제를 해결하는 것이 자연스러운 솔루션이 될 것입니다.
+
+이 예제에서, RepNotify 불리언은 상자가 열렸는지 아닌지를 저장하는 데 사용됩니다. 다시 한 번, 클라이언트를 파랑 고리 밖에 새워두고 서버에서 상자를 작동시킵니다. 클라이언트가 바로 걸어 들어가면 어떠한 일이 벌어질까요? 클라이언트에서 상자가 열린 것이 보이지만, 골드 이펙트 재생까지도 보입니다. 서버에서 이미 아까 전에 벌어진 일인데도 말입니다!
+
+상자가 다시 클라이언트에 연관성이 생겼을 때, 클라이언트는 리플리케이트된 변수로 변경되어 그에 해당하는 RepNotify 함수가 호출됩니다. 아쉽게도 클라이언트에는 변수가 실제로 잘 변경되었는지 알 수 있는 방법이 없으며, 그냥 변했다는 것만 알기에 이 경우에는 전해주기에 충분치 않습니다.
+
+## 블루프린트 분석
+**BP_Relevancy_Replication_RepNotify** 블루프린트의 이벤트 그래프에서, 아래 코멘트 부분에서 볼 수 있듯이, OnChestTouch 를 덮어써서 RepNotify 변수를 설정, 상자 열기의 비주얼 처리를 담당하는 OnRep 함수를 갖습니다.
+
+[REGION:fullwidth]
+![](2_3_Eventgraph.png)
+[/REGION]
+
+아래는 **bChestOpened** 변수 업데이트시 호출되는 OnRep 함수입니다.
+
+**클릭하면 크게 볼 수 있습니다.**
+[REGION:lightbox]
+	[![](Resources/ContentExamples/Networking/2_3/2_3_OnRep_bChestOpened.png)(w:640)](Resources/ContentExamples/Networking/2_3/2_3_OnRep_bChestOpened.png)
+[/REGION]
+
+이렇게 하면 클라이언트에서 상자가 연관성이 생길 때 업데이트된 값을 구하도록 할 수 있으나, 서버에서는 오래 전에 완료되어 버린 골드 파티클 이펙트도 재생되어 버립니다. 바람직하지 않은 일입니다.

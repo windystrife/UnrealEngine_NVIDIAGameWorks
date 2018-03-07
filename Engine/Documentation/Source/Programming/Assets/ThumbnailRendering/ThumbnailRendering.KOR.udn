@@ -1,0 +1,79 @@
+﻿INTSourceChangelist:3108692
+Availability:Docs
+Title:썸네일 렌더링 테크니컬 가이드
+Crumbs: %ROOT%, Engine, Engine/UI, Programming
+Description:콘텐츠 브라우저에서 애셋 유형별로 썸네일을 렌더링하는 법에 대한 프로그래머용 안내서입니다.
+Version: 4.9
+
+[REGION:todo]
+	언리얼 엔진 3 에서 이식해 온 문서로 현재 검토중에 있습니다. 정보가 맞지 않을 수 있습니다.
+[/REGION]
+
+[TOC(start:2)]
+
+이전 렌더링 시스템은 문제가 있는 객체의 일부였습니다. 이것은 썸네일을 렌더하는데 필요한 렌더링 인터페이스로의 액세스가 없는 Core에서 정의되었습니다. 따라서 썸네일 뷰를 제공할 방법이 없었던 Archetype과 같은 객체에 문제가 되었습니다. 또한 이 에디터 전용 함수가 공간만을 차지하는 콘솔에 포함되어 있었습니다. 이 시스템의 또 다른 문제는 동일한 접근 방법(즉, 썸네일용 아이콘)을 사용하여 썸네일을 렌더하는 항목에 대한 알맞은 재사용이 부족한 것이었습니다.
+
+코드의 중복을 완화시키고, 코드가 에디터에서만 존재하도록 하고, 시스템을 late bound(지연 바인딩)하게 만들기 위해 ThumbnailManager 및 지원 인터페이스인 ThumbnailRenderer와 ThumbnailLabelRenderer를 만들었습니다. ThumbnailManager는 주어진 리소스 유형에 대해 적절한 렌더링 구성 요소를 일치시키기 위해 객체 등록 시스템을 사용합니다. 이것은 native 클래스 검색 보다는 MyGameEditor.ini 파일에서 모든 관련 정보를 검색한다는 것을 제외하고는 GenericBrowserTypes와 유사합니다. ThumbnailRenderers는 관련된 객체를 썸네일 영역에서 렌더링합니다. ThumbnailLabelRenderers는 썸네일 아래에 표시되는 텍스트를 빌드 및 렌더링합니다. 이러한 것들은 유연성과 재사용성을 극대화하기 위한 별도의 객체입니다. 대부분의 객체는 동일한 레이블 렌더러를 사용하고 고유한 썸네일 렌더링 객체와 공유된 라벨 렌더링 객체를 허용하기 위해 인터페이스를 분리시킵니다. 또한 이렇게 하면 런타임 시 제안된 라벨 렌더러를 메모리를 계산하는 것으로 재정의하는 것처럼 흥미로운 몇 가지 옵션을 사용할 수 있습니다.
+
+
+
+## ThumbnailRenderer 만들기
+
+고유 썸네일 렌더러를 만들려면 ThumbnailRenderer를 하위클래스로 만들고 다음의 3가지 함수를 구현합니다. GetThumbnailSize(), Draw(), SupportThumbnailRendering(). 마지막 함수는 예를 들어 특정 속성 설정을 가진 객체의 썸네일만을 렌더하는 경우와 같이 리소스 유형이 객체별 선택을 필요로 하는 경우에만 필요합니다. 
+의문의 객체가 RF_ArchetypeObject 플래그 설정을 가진 경우에만 썸네일을 렌더하는 아키타입 썸네일 렌더러가 이 경우에 해당합니다. 대상 항목의 위치 설정을 조정할 수 있도록 GetThumbnailSize()는 인터페이스의 소비자에 의해 사용됩니다. 마지막으로, Draw()는 여러분께서 예상할 수 있는 기능을 수행합니다.
+
+
+### 기존 렌더러
+
+다음 ThumbnailRenderers는 새 형식을 만들 필요없이 사용할 수 있습니다. 또는 여러분 작업 전용으로 사용할 수 있는 편리한 기본 클래스가 될 수도 있습니다. 
+
+IconThumbnailRenderer - 썸네일의 "아이콘"으로 지정된 텍스처를 렌더하는 구현을 제공합니다.
+
+DefaultSizedThumbnailRenderer -- 특정 크기(입자, 재질 인스턴스 등)를 갖지 않는 객체의 렌더링을 위한 일반적인 데이터를 제공합니다. 
+
+TextureThumbnailRenderer -- UTexture 인터페이스를 지원하는 모든 객체에 대한 기본 클래스로 사용됩니다.
+
+
+### ThumbnailHelpers.h
+
+이 헤더 파일은 스태틱 메시, 재질 등을 렌더링하는데 필요한 몇 가지 도우미 클래스를 포함합니다. 이들은 Draw() 메소드의 구현을 통해 또는 고유의 도우미 클래스를 만들기 위한 기초로 사용될 수 있습니다.
+
+
+
+## ThumbnailLabelRenderer 만들기
+
+사용자 지정 라벨 렌더러 만들기도 마찬가지로 간단합니다. ThumbnailLabelRenderer에서 파생시키고 BuildLabelList() 메소드를 재정의해야 합니다. 전달되는 배열에 추가되는 각 문자열은 라벨로 렌더링됩니다. 기본 클래스가 나머지 작업을 처리합니다.
+
+
+### 기존 라벨 렌더러
+
+GenericThumbnailLabelRenderer -- 객체의 이름을 추가하여 그 GetDesc() 함수를 호출 라벨 목록을 작성합니다. 가장 일반적으로 사용되는 렌더러입니다.
+
+MemCountThumbnailLableRenderer -- 객체에 사용되는 메모리를 계산하고 객체 이름 아래에 해당 정보를 표시합니다.
+
+
+
+## ThumbnailManager를 사용하여 렌더러 등록하기
+
+ThumbnailManager는 UObject 구성 시스템을 사용하여 썸네일 렌더링용으로 지원되는 클래스를 등록합니다. 모든 클래스는 패키지 종속성을 피하고 라이센스 사용자가 Epic 코드를 변경하기 보다는 MyGameUnrealEd 패키지에 자신 고유의 코드를 작성할 수 있도록 하기 위해 이름별로 등록됩니다. 다음 스니펫 코드는 사용자 지정 렌더러를 추가하는 방법을 보여줍니다. 2번째 항목은 사용자 지정 렌더러를 제공하기 보다는 기존 아이콘 렌더러를 사용하는 방법을 보여줍니다. 참고: 줄바꿈은 가독성을 위해서만 사용되며 사용자 지정할 시에는 DefaultEditor.ini에서 사용되지 말아야 합니다.
+
+
+    
+    [UnrealEd.ThumbnailManager]
+    +RenderableThumbnailTypes=
+       (ClassNeedingThumbnailName="MyGame.CustomResource",
+       RendererClassName="MyGameUnrealEd.CustomResourceThumbnailRenderer")
+    +RenderableThumbnailTypes=
+       (ClassNeedingThumbnailName="MyGame.CustomResourceEx",
+       RendererClassName="UnrealEd.IconThumbnailRenderer")
+    
+
+
+
+ClassNeedingThumbnailName은 썸네일 렌더러를 필요로 하는 클래스의 이름입니다. RendererClassName은 썸네일을 렌더링할 시 사용할 객체를 지정합니다. LabelRendererClassName은 사용할 라벨 렌더러를 지정합니다. GetDesc() 함수에 없는 특정 데이터를 갖고 있지 않는 한 일반적인 것으로 충분할 것입니다. BorderColor는 썸네일 테두리에 사용할 색상입니다. GenericBrowserType 클래스에서 이전에 존재했던 것은 사용 금지되었습니다. IconName은 IconThumbnailRenderer에서 사용하는 아이콘을 지정하는데 사용됩니다. 렌더러를 사용하지 않을 경우 이것은 비어 있을 수 있습니다. 시작할 때 ThumbnailManager는 이러한 항목에 따라 객체의 모든 인스턴스를 만듭니다. 이것은 더 빠른 조회를 위해 맵에서의 모든 연관을 캐시화합니다. 맵은 사용하지 않은 UClass 포인터가 액세스되는 것을 방지하기 위해 GC가 발생할 때마다 유효화되지 않습니다.
+
+ 
+
+
+
+

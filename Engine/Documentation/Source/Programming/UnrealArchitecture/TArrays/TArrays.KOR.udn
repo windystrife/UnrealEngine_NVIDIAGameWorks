@@ -1,0 +1,605 @@
+﻿INTSourceChangelist:3599948
+Title: TArray: 언리얼 엔진의 배열
+Crumbs:
+Description:
+Availability:Public
+Version:4.9
+
+주된 go-to 컨테이너 클래스는 TArray 입니다. TArray 는 유형이 같은 다른 오브젝트(, 소위 엘리먼트)를 순서대로 정리하여 소속시키는 것을 담당하는 클래스입니다. TArray 는 시퀀스이므로, 그 엘리먼트는 잘 정의된 순서를 갖으며, 그 함수를 사용해서 해당 오브젝트와 순서를 결정론적으로 조작하게 됩니다.
+
+## TArray
+
+TArray 는 언리얼 엔진에서 가장 자주 쓰이는 컨테이너 클래스로, 신속성, 메모리 효율성, 안전성을 염두에 두고 디자인되었습니다. TArray 유형은 두 가지 프로퍼티로 정의되는데, 주로 그 엘리먼트 유형, 부로 할당기(allocator) 입니다.
+
+엘리먼트 유형은 배열에 저장되는 오브젝트 유형입니다. TArray 는 소위 동질성 컨테이너로, 그 엘리먼트 전부 엄격히 같은 유형입니다. 유형이 다른 엘리먼트를 섞을 수 없습니다.
+
+할당기는 꽤 자주 생략되나 기본값은 1 로, 대부분의 경우 적합한 값입니다. 메모리에 오브젝트가 레이아웃되는 방식과 배열에 엘리먼트를 추가하기 위해 배열을 키울 방식을 정의합니다. 할당기를 사용하는 방식은 여러가지 있는데, 기본 작동방식이 적합하지 않은 경우 직접 작성하면 됩니다. 이에 대해서는 나중에 자세히 다룹니다.
+
+TArray 는 값 유형으로, int32 나 float 처럼 다른 내장형과 비슷하게 취급되어야 한다는 뜻입니다. 상속을 염두에 두지는 않았기에, 힙(heap)에서 TArray 를 생성/소멸시키는 것은 일반적이지 않습니다. 엘리먼트는 값 유형이기도 하며 컨테이너에 소유되어 있어, 배열 자체가 소멸될 때 같이 소멸됩니다. 다른 TArray 변수에서 TArray 변수를 만들면 그 엘리먼트를 새 변수에 복사하며, 공유되는 상태는 없습니다.
+
+## 배열 만들고 채우기
+
+배열을 만들려면 다음과 같이 정의합니다:
+
+	TArray<int32> IntArray;
+
+정수 시퀀스를 저장하도록 디자인된 공백 배열을 만듭니다. 엘리먼트 유형은 int32, FString, TSharedPtr 등과 같이 보통의 C++ 값 규칙에 따라 복사 및 소멸 가능한 값 유형은 어떤 것이든 가능합니다. 할당기가 지정되지 않으면 TArray 는 일반적인 힙 기반 할당이 됩니다. 이 시점에서는 아직 할당된 메모리가 없습니다.
+
+TArray 채우기는 여러가지 방식으로 가능합니다. 그 중 한 가지는 Init 함수로, 배열을 엘리먼트 사본 여러 개로 채우는 것입니다:
+
+	IntArray.Init(10, 5);
+	// IntArray == [10,10,10,10,10]
+
+Add 와 Emplace 함수를 사용해서 배열 끝에 새 오브젝트를 만들 수 있습니다:
+
+	TArray<FString> StrArr;
+	StrArr.Add    (TEXT("Hello"));
+	StrArr.Emplace(TEXT("World"));
+	// StrArr == ["Hello","World"]
+
+엘리먼트가 추가됨에 따라 할당기에서 메모리가 할당됩니다. Add 와 Emplace 는 거의 같은 일을 하지만 미묘한 차이점이 있습니다:
+
+* Add 는 엘리먼트 유형의 인스턴스를 배열에 복사 (또는 이동)합니다.
+* Emplace 는 지정한 인수를 사용하여 엘리먼트 유형의 인스턴스를 새로 생성합니다.
+
+즉 우리 `TArray<FString>` 의 경우, Add 는 스트링 리터럴에서 임시 FString 을 생성한 다음, 그 임시 내용물을 컨테이너 안의 새로운 FString 으로 이동합니다. 반면 Emplace 는 스트링 리터럴을 사용해서 FString 을 직접 만듭니다. 최종 결과는 같지만, Emplace 는 임시 생성을 하지 않습니다. FString 처럼 복잡한 값 유형은 임시 생성을 하면 퍼포먼스상 바람직하지 않은 경우가 많지요. Add 의 동의어로 Push 를 사용할 수도 있습니다.
+
+일반적으로 호출되는 곳에 임시 생성 후 컨테이너에 복사 내지 이동하는 불필요한 절차를 피할 수 있다는 점에서 Emplace 가 Add 보다 낫습니다. 일반적인 경험 법칙으로는, 사소한 유형에는 Add 를, 그 외에는 Emplace 를 사용하면 됩니다. Emplace 가 Add 보다 효율이 떨어질 일은 절대 없지만, 가끔은 Add 의 가독성이 나을 수도 있습니다.
+
+Append 는 다른 TArray 나 포인터+크기 에서 다수의 엘리먼트를 일반 C 배열에 한꺼번에 추가시킬 수 있습니다:
+
+	FString Arr[] = { TEXT("of"), TEXT("Tomorrow") };
+	StrArr.Append(Arr, ARRAY_COUNT(Arr));
+	// StrArr == ["Hello","World","of","Tomorrow"]
+
+AddUnique 는 기존 컨테이너에 동일한 엘리먼트가 이미 존재하지 않는 경우 새 엘리먼트만 추가합니다. 존재 여부는 엘리먼트 유형의 연산자 == 를 사용해서 검사합니다:
+
+	StrArr.AddUnique(TEXT("!"));
+	// StrArr == ["Hello","World","of","Tomorrow","!"]
+	
+	StrArr.AddUnique(TEXT("!"));
+	// StrArr is unchanged as "!" is already an element
+
+Insert 는 Add, Emplace, Append 처럼 주어진 인덱스에 엘리먼트 배열 사본이나 단일 엘리먼트를 추가시킵니다:
+
+	StrArr.Insert(TEXT("Brave"), 1);
+	// StrArr == ["Hello","Brave","World","of","Tomorrow","!"]
+
+SetNum 함수는 배열 엘리먼트 번호를 직접 설정할 수 있는데, 설정된 번호가 현재 배열 번호보다 큰 경우 기본 생성자의 엘리먼트 유형을 사용해서 엘리먼트를 새로 만듭니다:
+
+	StrArr.SetNum(8);
+	// StrArr == ["Hello","Brave","World","of","Tomorrow","!","",""]
+
+SetNum 의 번호가 현재 배열 번호보다 작은 경우 엘리먼트를 제거하기도 합니다. 엘리먼트 제거 관련 상세 정보는 추후 다루도록 하겠습니다:
+
+	StrArr.SetNum(6);
+	// StrArr == ["Hello","Brave","World","of","Tomorrow","!"]
+
+## 반복처리
+
+배열의 엘리먼트에 대한 반복처리(iterate)를 하는 방법은 여러가지 있으나, C++ 의 범위 for 기능을 사용하는 것을 추천합니다:
+
+	FString JoinedStr;
+	for (auto& Str : StrArr)
+	{
+		JoinedStr += Str;
+		JoinedStr += TEXT(" ");
+	}
+	// JoinedStr == "Hello Brave World of Tomorrow ! "
+
+물론 일반 인덱스 기반 반복처리 역시도 가능합니다:
+
+	for (int32 Index = 0; Index != StrArr.Num(); ++Index)
+	{
+		JoinedStr += StrArr[Index];
+		JoinedStr += TEXT(" ");
+	}
+
+마지막으로 배열에는 반복처리에 대한 보다 세밀한 제어가 가능하도록 별도의 반복처리 유형이 있기도 합니다. CreateIterator / CreateConstIterator 라는 함수가 두 개 있는데, 각각 엘리먼트에 대한 읽고쓰기 / 읽기전용 접근이 가능한 것입니다:
+
+	for (auto It = StrArr.CreateConstIterator(); It; ++It)
+	{
+		JoinedStr += *It;
+		JoinedStr += TEXT(" ");
+	}
+
+##소팅
+
+배열은 Sort 함수를 호출하는 것으로 간단히 소팅 가능합니다:
+
+	StrArr.Sort();
+	// StrArr == ["!","Brave","Hello","of","Tomorrow","World"]
+
+여기서 엘리먼트 유형 연산자 < 를 사용해서 값을 소팅합니다. FString 의 경우 대소문자 구분 없이 사전식 비교를 합니다. 2항 술부를 제공해서 다른 순서 의미론을 제공하는 것도 가능합니다. 예:
+
+	StrArr.Sort([](const FString& A, const FString& B) {
+		return A.Len() < B.Len();
+	});
+	// StrArr == ["!","of","Hello","Brave","World","Tomorrow"]
+
+이제 스트링이 길이 별로 소팅됩니다. 참고로 길이가 같은 "Hello", "Brave", "World" 스트링 셋의 상대 순서가 기존에 비해 바뀐 것을 볼 수 있습니다. 왜냐면 Sort 는 동등한(, 즉 길이가 같은) 엘리먼트의 상대 순서를 동일하게 보장하지 않는 비안정적인 것이기 때문입니다. Sort 는 일종의 간단 소팅 기능으로 구현된 것입니다.
+
+HeapSort 함수는 2항 술부가 있든 없든, 힙 소팅에 사용 가능합니다. 이것의 사용 여부는 데이터의 종류와 Sort 함수에 비할 때 소팅의 효율성에 따라 달라집니다. Sort 처럼 HeapSort 도 안정적이지 못합니다. 위에서 Sort 대신 HeapSort 를 사용한 결과는 이렇습니다 (이 경우, 같습니다):
+
+	StrArr.HeapSort([](const FString& A, const FString& B) {
+		return A.Len() < B.Len();
+	});
+	// StrArr == ["!","of","Hello","Brave","World","Tomorrow"]
+
+마지막으로 StableSort 는 소팅 이후 동등한 엘리먼트의 상대 순서를 유지하는 데 사용됩니다. 위에서 Sort 나 HeapSort 대신 StableSort 를 사용했다면, 그 결과는 다음과 같습니다:
+
+	StrArr.StableSort([](const FString& A, const FString& B) {
+		return A.Len() < B.Len();
+	});
+	// StrArr == ["!","of","Brave","Hello","World","Tomorrow"]
+
+즉 "Brave", "Hello", "World" 의 기존 사전식 소팅 이후 상대 순서가 유지됩니다. StableSort 는 병합 소트로 구현되었습니다.
+
+## 쿼리
+
+Num 함수를 사용해서 배열에 엘리먼트가 몇 개인지 확인할 수 있습니다:
+
+	int32 Count = StrArr.Num();
+	// Count == 6
+
+C 스타일 API 같은 것과의 상호 정보 교환을 위해 배열 메모리에 직접 접근할 필요가 있는 경우, GetData() 함수를 사용해서 배열 내 엘리먼트에 대한 포인터를 반환시킬 수 있습니다. 이 포인터는 배열이 존재하는 한에서, 그리고 배열에 대한 변형 연산이 적용되기 전에만 유효합니다. 오직 StrPtr 에서의 Num() 인덱스만이 레퍼런스 해제 가능합니다:
+
+	FString* StrPtr = StrArr.GetData();
+	// StrPtr[0] == "!"
+	// StrPtr[1] == "of"
+	// ...
+	// StrPtr[5] == "Tomorrow"
+	// StrPtr[6] - undefined behavior
+
+컨테이너가 const 인 경우, 반환되는 포인터 역시 const 입니다.
+
+컨테이너의 엘리먼트가 얼마나 큰지 물어볼 수도 있습니다:
+
+	uint32 ElementSize = StrArr.GetTypeSize();
+	// ElementSize == sizeof(FString)
+
+엘리먼트 값을 구하려면, 인덱스 연산자 [] 에 원하는 엘리먼트에 대한 0 시작 인덱스 값을 전해주면 됩니다:
+
+	FString Elem1 = StrArr[1];
+	// Elem1 == "of"
+
+유효하지 않은 인덱스, 즉 0 미만이나 Num() 이상 값을 전해주면, 실행시간 오류가 생깁니다. 컨테이너에 특정 인덱스가 유효한지 IsValidIndex 함수를 통해 물어볼 수 있습니다:
+
+	bool bValidM1 = StrArr.IsValidIndex(-1);
+	bool bValid0  = StrArr.IsValidIndex(0);
+	bool bValid5  = StrArr.IsValidIndex(5);
+	bool bValid6  = StrArr.IsValidIndex(6);
+	// bValidM1 == false
+	// bValid0  == true
+	// bValid5  == true
+	// bValid6  == false
+
+[] 연산자는 레퍼런스를 반환하므로, 배열이 const 가 아니라는 가정하에 배열 내 엘리먼트를 변형시키는 데 사용할 수도 있습니다:
+
+	StrArr[3] = StrArr[3].ToUpper();
+	// StrArr == ["!","of","Brave","HELLO","World","Tomorrow"]
+
+GetData 함수처럼 [] 연산자도 배열이 const 인 경우 const 레퍼런스를 반환합니다. Last 함수를 사용하여 배열 끝에서부터 역순으로 인덱스를 사용할 수도 있습니다. 인덱스 기본값은 0 입니다. Top 함수는 Last 의 동의어로, 인덱스를 받지 않는다는 점이 다릅니다:
+
+	FString ElemEnd  = StrArr.Last();
+	FString ElemEnd0 = StrArr.Last(0);
+	FString ElemEnd1 = StrArr.Last(1);
+	FString ElemTop  = StrArr.Top();
+	// ElemEnd  == "Tomorrow"
+	// ElemEnd0 == "Tomorrow"
+	// ElemEnd1 == "World"
+	// ElemTop  == "Tomorrow"
+
+배열에 특정 엘리먼트가 들어있는지 물어볼 수 있습니다:
+
+	bool bHello   = StrArr.Contains(TEXT("Hello"));
+	bool bGoodbye = StrArr.Contains(TEXT("Goodbye"));
+	// bHello   == true
+	// bGoodbye == false
+
+또는 배열에 지정된 술부와 일치하는 엘리먼트가 있는지 물어볼 수도 있습니다:
+
+	bool bLen5 = StrArr.ContainsByPredicate([](const FString& Str){
+		return Str.Len() == 5;
+	});
+	bool bLen6 = StrArr.ContainsByPredicate([](const FString& Str){
+		return Str.Len() == 6;
+	});
+	// bLen5 == true
+	// bLen6 == false
+
+Find 함수 패밀리를 사용하여 엘리먼트를 찾을 수 있습니다. 엘리먼트가 존재하는지 검사해서 있으면 인덱스를 반환할 때는, Find 를 사용합니다:
+
+	int32 Index;
+	if (StrArr.Find(TEXT("Hello"), Index))
+	{
+		// Index == 3
+	}
+
+Index 가 처음 찾은 엘리먼트의 인덱스로 설정됩니다. 중복된 엘리먼트가 있는 상태에서 마지막 엘리먼트의 인덱스를 찾고자 하는 경우, FindLast 함수를 대신 사용하면 됩니다:
+
+	int32 IndexLast;
+	if (StrArr.FindLast(TEXT("Hello"), IndexLast))
+	{
+		// IndexLast == 3, because there aren't any duplicates
+	}
+
+이 두 함수 모두 엘리먼트를 찾았는지 여부를 나타내는 불리언 값을 반환하면서, 찾았을 경우 그 엘리먼트의 인덱스 값을 변수에 쓰기도 합니다.
+
+Find 와 FindLast 는 엘리먼트 인덱스를 직접 반환할 수도 있습니다. 인덱스를 명시적 인수로 전달하지 않으면 그렇게 하는데요. 위의 함수보다 간결할 수 있으며, 어떤 함수를 사용할지 여부는 필요성과 스타일에 따라 달라집니다.
+
+엘리먼트를 찾지 못했으면, 특수 INDEX_NONE 값이 반환됩니다:
+
+	int32 Index2     = StrArr.Find(TEXT("Hello"));
+	int32 IndexLast2 = StrArr.FindLast(TEXT("Hello"));
+	int32 IndexNone  = StrArr.Find(TEXT("None"));
+	// Index2     == 3
+	// IndexLast2 == 3
+	// IndexNone  == INDEX_NONE
+
+IndexOfByKey 도 비슷하게 작동합니다만, 엘리먼트와 임의 오브젝트의 비교가 가능합니다. Find 함수로는 검색 시작 전 인수를 엘리먼트 유형(이 경우 FString)으로 실제 변환합니다. IndexOfByKey 함수로는 키 비교를 바로 하여, 키 유형을 엘리먼트 유형으로 직접 변환할 수 없을 때에도 검색이 가능합니다.
+
+IndexOfByKey 는 ==(ElementType, KeyType) 연산자가 존재하는 키 유형에 대해 작동하며, 이것이 비교에 사용됩니다. IndexOfByKey 는 처음 찾은 엘리먼트의 인덱스 또는 찾은 것이 없으면 INDEX_NONE 을 반환합니다:
+
+	int32 Index = StrArr.IndexOfByKey(TEXT("Hello"));
+	// Index == 3
+
+IndexOfByPredicate 함수는 지정된 술부에 일치하는 첫 엘리먼트 인덱스를 찾는 데 사용할 수 있으며, 찾은 것이 없으면 마찬가지로 특수 INDEX_NONE 값을 반환합니다.
+
+	int32 Index = StrArr.IndexOfByPredicate([](const FString& Str){
+		return Str.Contains(TEXT("r"));
+	});
+	// Index == 2
+
+인덱스 반환 대신, 찾은 엘리먼트로의 포인터를 구할 수도 있습니다. FindByKey 는 엘리먼트를 임의 오브젝트에 비교하는 식으로 IndexOfByKey 처럼 작동하나, 찾은 엘리먼트의 포인터를 반환합니다. 찾은 것이 없으면 nullptr 가 반환됩니다.
+
+	auto* OfPtr  = StrArr.FindByKey(TEXT("of")));
+	auto* ThePtr = StrArr.FindByKey(TEXT("the")));
+	// OfPtr  == &StrArr[1]
+	// ThePtr == nullptr
+
+마찬가지로 FindByPredicate 역시 IndexOfByPredicate 처럼 사용하되, 인덱스의 포인터가 반환됩니다:
+
+	auto* Len5Ptr = StrArr.FindByPredicate([](const FString& Str){
+		return Str.Len() == 5;
+	});
+	auto* Len6Ptr = StrArr.FindByPredicate([](const FString& Str){
+		return Str.Len() == 6;
+	});
+	// Len5Ptr == &StrArr[2]
+	// Len6Ptr == nullptr
+
+마지막, FilterByPredicate 함수는 특정 술부에 일치하는 엘리먼트의 배열을 반환시킵니다:
+
+	auto Filter = StrArray.FilterByPredicate([](const FString& Str){
+		return !Str.IsEmpty() && Str[0] < TEXT('M');
+	});
+
+##제거
+
+Remove 함수 군으로 배열에서 엘리먼트를 지울 수 있습니다. Remove 함수는 전달하는 것과 동일한 엘리먼트를 모두 지웁니다:
+
+	StrArr.Remove(TEXT("hello"));
+	// StrArr == ["!","of","Brave","World","Tomorrow"]
+	
+	StrArr.Remove(TEXT("goodbye"));
+	// StrArr is unchanged, as it doesn't contain "goodbye"
+
+참고로 "hello" 를 지우라 했는데도 "HELLO" 가 지워진 것이 보입니다. 동등성 여부는 엘리먼트 유형 연산자 == 를 통해 이루어지며, FString 의 경우 대소문자 구분 없이 비교된다는 점 기억하시기 바랍니다.
+
+배열의 마지막 엘리먼트 제거는 Pop 함수입니다:
+
+	StrArr.Pop();
+
+	// StrArr == ["!", "of", "Brave", "World"]
+
+Remove 는 동등 비교 결과 모든 인스턴스를 제거합니다. 예:
+
+	TArray<int32> ValArr;
+	int32 Temp[] = { 10, 20, 30, 5, 10, 15, 20, 25, 30 };
+	ValArr.Append(Temp, ARRAY_COUNT(Temp));
+	// ValArr == [10,20,30,5,10,15,20,25,30]
+	
+	ValArr.Remove(20);
+	// ValArr == [10,30,5,10,15,25,30]
+
+RemoveSingle 로 배열 처음에 가장 가까운 엘리먼트를 지울 수도 있습니다. 배열에 중복된 것이 있는데 하나만 지우고자 한다거나, 배열에 해당 엘리먼트가 딱 하나만 있는 것이 확실한 경우 최적화 차원에서 유용하기도 한데, 찾아 지운 후에는 검색을 멈추기 때문입니다:
+
+	ValArr.RemoveSingle(30);
+	// ValArr == [10,5,10,15,25,30]
+
+RemoveAt 함수로 지정된 인덱스의 엘리먼트를 제거하는 것도 가능합니다. 인덱스는 반드시 존재해야 하며, 그렇지 않으면 실행시간 오류가 발생합니다. 인덱스는 0 부터 시작된다는 점, 기억하세요:
+
+	ValArr.RemoveAt(2); // Removes the element at index 2
+	// ValArr == [10,5,15,25,30]
+	
+	ValArr.RemoveAt(99); // This will cause a runtime error as
+	                       // there is no element at index 99
+
+RemoveAll 함수로 술부에 일치하는 모든 엘리먼트를 제거할 수도 있습니다. 예로, 3 의 배수인 값을 전부 제거하려면:
+
+	ValArr.RemoveAll([](int32 Val) {
+		return Val % 3 == 0;
+	});
+	// ValArr == [10,5,25]
+
+[REGION:note]
+위에서 엘리먼트가 제거되는 모든 경우, 그 뒤의 엘리먼트가 낮은 인덱스로 정리되므로, 배열에는 절대 '구멍'이 생길 수 없습니다.
+[/REGION]
+
+정리 프로세스에는 비용이 따릅니다. 나머지 엘리먼트가 어떤 순서로 남아있든 신경쓰지 않는다면, RemoveSwap, RemoveAtSwap, RemoveAllSwap 함수를 사용해서 부하를 줄일 수 있습니다. Swap 없는 버전과의 차이점은 나머지 엘리먼트의 순서를 정리하지 않는다는 점 뿐으로, 보다 효율적인 구현이 가능합니다:
+
+	TArray<int32> ValArr2;
+	for (int32 i = 0; i != 10; ++i)
+		ValArr2.Add(i % 5);
+	// ValArr2 == [0,1,2,3,4,0,1,2,3,4]
+	
+	ValArr2.RemoveSwap(2);
+	// ValArr2 == [0,1,4,3,4,0,1,3]
+	
+	ValArr2.RemoveAtSwap(1);
+	// ValArr2 == [0,3,4,3,4,0,1]
+	
+	ValArr2.RemoveAllSwap([](int32 Val) {
+		return Val % 3 == 0;
+	});
+	// ValArr2 == [1,4,4]
+
+마지막으로 Empty 함수를 사용해서 모든 엘리먼트를 비울 수 있습니다:
+
+	ValArr2.Empty();
+	// ValArr2 == []
+
+##연산자
+
+배열은 일반적인 값 유형으로, 일반적인 생성자 복사나 할당 연산자를 통해 복사할 수 있습니다. 배열은 엘리먼트를 엄격히 소유하기에, 배열을 복사하면 '깊이'가 있어, 새 배열에는 자체적인 엘리먼트 사본이 생깁니다:
+
+	TArray<int32> ValArr3;
+	ValArr3.Add(1);
+	ValArr3.Add(2);
+	ValArr3.Add(3);
+	
+	auto ValArr4 = ValArr3;
+	// ValArr4 == [1,2,3];
+	ValArr4[0] = 5;
+	// ValArr3 == [1,2,3];
+	// ValArr4 == [5,2,3];
+
+Append 함수의 대안으로, += 연산자를 통해 배열을 연결시킬 수 있습니다:
+
+	ValArr4 += ValArr3;
+	// ValArr4 == [5,2,3,1,2,3]
+
+TArray 에는 MoveTemp 함수를 사용해서 부를 수 있는 이동 의미론도 지원됩니다. 이동 이후 원본 배열은 공백으로 남습니다:
+
+	ValArr3 = MoveTemp(ValArr4);
+	// ValArr3 == [5,2,3,1,2,3]
+	// ValArr4 == []
+
+배열은 == 연산자나 != 연산자를 사용해서 비교할 수 있습니다. 엘리먼트의 순서가 중요한데, 두 배열이 동등한 경우는 엘리먼트의 수와 순서가 같을 경우만입니다. 엘리먼트는 별도의 == 연산자를 사용해서 비교합니다:
+
+	TArray<FString> FlavorArr1;
+	FlavorArr1.Emplace(TEXT("Chocolate"));
+	FlavorArr1.Emplace(TEXT("Vanilla"));
+	// FlavorArr1 == ["Chocolate","Vanilla"]
+	
+	auto FlavorArr2 = Str1Array;
+	// FlavorArr2 == ["Chocolate","Vanilla"]
+	
+	bool bComparison1 = FlavorArr1 == FlavorArr2;
+	// bComparison1 == true
+	
+	for (auto& Str : FlavorArr2)
+	{
+		Str = Str.ToUpper();
+	}
+	// FlavorArr2 == ["CHOCOLATE","VANILLA"]
+	
+	bool bComparison2 = FlavorArr1 == FlavorArr2;
+	// bComparison2 == true, because FString comparison ignores case
+	
+	Exchange(FlavorArr2[0], FlavorArr2[1]);
+	// FlavorArr2 == ["VANILLA","CHOCOLATE"]
+	
+	bool bComparison3 = FlavorArr1 == FlavorArr2;
+	// bComparison3 == false, because the order has changed
+
+## 힙
+
+TArray 에는 이진 힙(heap) 데이터 구조체를 지원하는 함수가 있습니다. 힙은 부모 노드가 그 자손 노드 전부의 이전 또는 동등한 위치에 있는 이진 트리 유형입니다. 배열로 구현되면, 트리의 루트 노드는 엘리먼트 0 이며, N 인덱스 노드의 좌우 자손 인덱스는 각각 2N+1 과 2N+2 입니다. 자손은 서로에 대해 특정 순서가 있지는 않습니다.
+
+Heapify 함수를 사용하여 기존 배열을 힙으로 변환시킬 수 있습니다. 술부가 있을 수도 없을 수도 있는데, 술부가 없는 버전은 순서 결정에 엘리먼트 유형의 < 연산자를 사용합니다:
+
+	TArray<int32> HeapArr;
+	for (int32 Val = 10; Val != 0; --Val)
+		HeapArr.Add(Val);
+	// HeapArr == [10,9,8,7,6,5,4,3,2,1]
+	HeapArr.Heapify();
+	// HeapArr == [1,2,4,3,6,5,8,10,7,9]
+
+트리를 시각화시킨 모습입니다:
+
+[REGION:raw] 
+![image alt text](image_0.png)
+[/REGION]
+
+힙화된 배열의 엘리먼트 순서대로 트리의 노드는 왼쪽에서 오른쪽, 위에서 아래로 읽을 수 있습니다. 참고로 배열은 힙으로 변환시킨 이후 반드시 소팅할 필요가 없습니다. 소팅된 배열 역시 유효한 힙이 될 수는 있지만, 힙 구조체 정의는 공간이 충분해서 똑같은 엘리먼트 세트에 대해 다수의 유효한 힙이 가능합니다.
+
+HeapPush 함수로 힙에 새로운 엘리먼트를 추가할 수 있으며, 힙 유지를 위해 다른 노드 순서를 변경합니다:
+
+	HeapArr.HeapPush(4);
+	// HeapArr == [1,2,4,3,4,5,8,10,7,9,6]
+
+[REGION:raw] 
+![image alt text](image_1.png)
+[/REGION]
+
+HeapPop 과 HeapPopDiscard 함수는 힙의 맨 위 노드를 제거하는 데 사용됩니다. 그 둘의 차이점은, 전자는 엘리먼트 유형으로의 레퍼런스를 받아 맨 위 엘리먼트 사본을 반환하는 반면, 후자는 어떤 식으로든 반환 없이 맨 위 노드를 그냥 제거합니다. 두 함수 모두 배열에 가하는 변화는 같으며, 힙의 순서 역시 다른 엘리먼트를 적절히 변경하여 유지됩니다:
+
+	int32 TopNode;
+	HeapArr.HeapPop(TopNode);
+	// TopNode == 1
+	// HeapArr == [2,3,4,6,4,5,8,10,7,9]
+
+[REGION:raw] 
+![image alt text](image_2.png)
+[/REGION]
+
+HeapRemoveAt 은 배열에서 주어진 인덱스의 엘리먼트를 제거한 뒤, 엘리먼트 순서를 변경하여 힙을 유지시킵니다:
+
+	HeapArr.HeapRemoveAt(1);
+	// HeapArr == [2,4,4,6,9,5,8,10,7]
+
+[REGION:raw] 
+![image alt text](image_3.png)
+[/REGION]
+
+참고로 HeapPush, HeapPop, HeapPopDiscard, HeapRemoveAt 은 구조체가 이미 유효한 힙일 경우, 즉 Heapify() 호출이나 다른 힙 연산이나 배열을 힙속에 수동 조작한 이후에만 호출해야 합니다.
+
+또한, Heapify 를 포함한 이 함수 각각은, 힙 내 노드 엘리먼트의 순서 결정을 위한 2항 술부를 옵션으로 받을 수 있습니다. 술부를 사용할 때, 모든 힙 연산에 걸쳐 동일한 술부를 사용해야 올바른 구조체가 유지됩니다. 술부가 지정되지 않으면, 힙 연산은 엘리먼트 유형의 < 연산자를 사용하여 순서를 결정합니다.
+
+마지막으로, HeapTop 을 사용해서 힙의 맨 위 노드를 조사할 수 있으며, 배열은 변경되지 않습니다:
+
+	int32 Top = HeapArr.HeapTop();
+	// Top == 2
+
+## 슬랙
+
+배열은 크기변경이 가능하므로, 메모리 사용량이 가변적입니다. 배열이 추가될 때마다 매번 재할당을 피하기 위해, 할당기는 보통 요청한 것보다 넉넉한 메모리를 제공하여 앞으로의 Add 호출시 재할당에 드는 퍼포먼스 비용을 물지 않도록 합니다. 마찬가지로 엘리먼트를 삭제한다고 메모리가 해제되지는 않습니다. 현재 컨테이너에 있는 엘리먼트의 수와, 엘리먼트를 몇 개나 더 추가하면 다음 할당이 일어나는지에 대한 차이를 일컬어 'slack', 슬랙이라 합니다.
+
+기본 생성된 배열은 메모리 할당이 없으므로, 초기 슬랙은 0 이 됩니다. GetSlack 함수를 사용하면 배열의 슬랙 크기가 얼마나 되는지 알아낼 수 있습니다. 다른 방법으로, Max 함수를 사용하면 재할당이 일어나기 전까지 배열에 저장할 수 있는 엘리먼트 최대 갯수를 구할 수 있습니다. GetSlack() 은 Max() - Num() 과 같습니다:
+
+	TArray<int32> SlackArray;
+	// SlackArray.GetSlack() == 0
+	// SlackArray.Num()      == 0
+	// SlackArray.Max()      == 0
+	
+	SlackArray.Add(1);
+	// SlackArray.GetSlack() == 3
+	// SlackArray.Num()      == 1
+	// SlackArray.Max()      == 4
+	
+	SlackArray.Add(2);
+	SlackArray.Add(3);
+	SlackArray.Add(4);
+	SlackArray.Add(5);
+	// SlackArray.GetSlack() == 17
+	// SlackArray.Num()      == 5
+	// SlackArray.Max()      == 22
+
+재할당 이후 컨테이너의 슬랙 양은 할당기에 의해 결정되므로, 배열 사용자가 의존할 수 있는 부분은 아닙니다.
+
+대부분의 경우 슬랙을 걱정할 필요는 없습니다. 하지만 알아 두면 배열 최적화 힌트를 얻는 데 도움이 될 수는 있습니다. 예를 들어 배열에 엘리먼트를 100 개쯤 추가해야 겠다고 알고 있는 상황에서, 슬랙이 최소 100 이상은 되는 것으로 알고있다면 그냥 추가해도 할당이 새로 일어나지는 않을 것입니다. 위에 언급한 Empty 함수는 옵션으로 슬랙 인수를 받습니다:
+
+	SlackArray.Empty();
+	// SlackArray.GetSlack() == 0
+	// SlackArray.Num()      == 0
+	// SlackArray.Max()      == 0
+	SlackArray.Empty(3);
+	// SlackArray.GetSlack() == 3
+	// SlackArray.Num()      == 0
+	// SlackArray.Max()      == 3
+	SlackArray.Add(1);
+	SlackArray.Add(2);
+	SlackArray.Add(3);
+	// SlackArray.GetSlack() == 0
+	// SlackArray.Num()      == 3
+	// SlackArray.Max()      == 3
+
+Empty 와 비슷한 방식으로 작동하는 Reset 함수가 있는데, 요청된 슬랙이 현재 할당으로 충분한 경우 메모리를 해제하지 않는다는 차이점이 있습니다. 하지만 요청된 슬랙이 더 크다면, 메모리를 추가로 할당합니다.
+
+	SlackArray.Reset(0);
+	// SlackArray.GetSlack() == 3
+	// SlackArray.Num()      == 0
+	// SlackArray.Max()      == 3
+	SlackArray.Reset(10);
+	// SlackArray.GetSlack() == 10
+	// SlackArray.Num()      == 0
+	// SlackArray.Max()      == 10
+
+마지막으로 낭비된 슬랙은 Shrink 함수로 제거할 수 있는데, 현재 엘리먼트 시퀀스를 딱 저장할 만큼만 할당 크기를 조절하고, 엘리먼트 자체를 실제 제거하지는 않습니다:
+
+	SlackArray.Add(5);
+	SlackArray.Add(10);
+	SlackArray.Add(15);
+	SlackArray.Add(20);
+	// SlackArray.GetSlack() == 6
+	// SlackArray.Num()      == 4
+	// SlackArray.Max()      == 10
+	SlackArray.Shrink();
+	// SlackArray.GetSlack() == 0
+	// SlackArray.Num()      == 4
+	// SlackArray.Max()      == 4
+
+## Raw 메모리
+
+TArray 는 궁극적으로 할당된 메모리를 둘러싼 포장 단위일 뿐입니다. 그렇기에 할당된 바이트를 직접 변경하거나 엘리먼트를 직접 만드는 것과 같이 처리해 주면 유용할 때가 있습니다. 물론 TArray 는 항상 그 안의 정보를 가지고 할 수 있는 최선을 다하도록 노력하지만, 가끔은 조금 더 낮은 레벨로 내려갈 필요도 있습니다.
+
+하지만 다음의 함수 사용에 실수가 있는 경우 컨테이너의 유효성이 훼손되고 알 수 없는 동작을 일으키는 경우가 생길 수 있다는 점을 양지해야 합니다. 이러한 함수 호출 이후 다른 일반 함수 호출 전 컨테이너 유효성을 회복하는 것은 여러분께 달린 일입니다.
+
+AddUninitialized 와 InsertUninitialized 함수는 배열에 초기화되지 않은 공간에 추가합니다. 각각 Add 와 Insert 처럼 작동은 하되, 해당 엘리먼트 유형의 생성자를 호출하지는 않습니다. 안전성이나 편의성 차원에서 생성자가 있기는 하지만, (Memcpy 호출 등으로) 어떤 식으로든 전체 상태를 덮어쓰면서 생성 비용을 물지 않으려는 경우에 유용할 수 있습니다:
+
+	int32 SrcInts[] = { 2, 3, 5, 7 };
+	TArray<int32> UninitInts;
+	UninitInts.AddUninitialized(4);
+	FMemory::Memcpy(UninitInts.GetData(), SrcInts, 4*sizeof(int32));
+	// UninitInts == [2,3,5,7]
+
+직접 명시적으로 생성하려는 오브젝트용 메모리를 약간 확보하거나, 생성 프로세스를 직접 제어할 필요가 있는 경우에도 유용하게 쓰일 수 있습니다.
+
+	TArray<FString> UninitStrs;
+	UninitStrs.Emplace(TEXT("A"));
+	UninitStrs.Emplace(TEXT("D"));
+	UninitStrs.InsertUninitialized(1, 2);
+	new ((void*)(UninitStrs.GetData() + 1)) FString(TEXT("B"));
+	new ((void*)(UninitStrs.GetData() + 2)) FString(TEXT("C"));
+	// UninitStrs == ["A","B","C","D"]
+
+AddZeroed 과 InsertZeroed 역시도 Add/Insert 되는 공간의 바이트를 0 으로 채운다는 점만 제외하고는 비슷합니다. 비트단위 0 으로 유효한 상태를 삽입하고자 하는 유형이 있는 경우 유용하게 쓰일 수 있습니다.
+
+	struct S
+	{
+		S(int32 InInt, void* InPtr, float InFlt)
+			: Int(InInt)
+			, Ptr(InPtr)
+			, Flt(InFlt)
+		{
+		}
+		int32 Int;
+		void* Ptr;
+		float Flt;
+	};
+	TArray<S> SArr;
+	SArr.AddZeroed();
+	// SArr == [{ Int: 0, Ptr: nullptr, Flt: 0.0f }]
+
+SetNumUninitialized 와 SetNumZeroed 함수는 SetNum 과 비슷하나, 지정한 수치가 현재 수치보다 큰 경우, 새로운 엘리먼트의 공간을 각각 초기화시키지 않은 상태로 놔두거나 비트단위로 0 으로 만듭니다. AddUninitialized 와 InsertUninitialized 함수와 마찬가지로, 필요한 경우 새로 만들어지는 엘리먼트가 새로운 공간에 제대로 생성되도록 해 줘야 합니다:
+
+	SArr.SetNumUninitialized(3);
+	new ((void*)(SArr.GetData() + 1)) S(5, (void*)0x12345678, 3.14);
+	new ((void*)(SArr.GetData() + 2)) S(2, (void*)0x87654321, 2.72);
+	// SArr == [
+	//   { Int: 0, Ptr: nullptr,    Flt: 0.0f  },
+	//   { Int: 5, Ptr: 0x12345678, Flt: 3.14f },
+	//   { Int: 2, Ptr: 0x87654321, Flt: 2.72f }
+	// ]
+	
+	SArr.SetNumZeroed(5);
+	// SArr == [
+	//   { Int: 0, Ptr: nullptr,    Flt: 0.0f  },
+	//   { Int: 5, Ptr: 0x12345678, Flt: 3.14f },
+	//   { Int: 2, Ptr: 0x87654321, Flt: 2.72f },
+	//   { Int: 0, Ptr: nullptr,    Flt: 0.0f  },
+	//   { Int: 0, Ptr: nullptr,    Flt: 0.0f  }
+	// ]
+
+*Uninitialized 나 *Zeroed 함수 종류를 사용할 때는 주의해야 합니다. 엘리먼트 유형 하나가 제대로 된 생성을 요하는 멤버를 포함하도록 변경되는 경우, 또는 비트단위 0 으로 된 유효 상태가 있지 않는 경우, 배열 엘리먼트의 유효성이 훼손되거나 예상치못한 결과가 날 수 있습니다. 이러한 함수는 FMatrix 나 FVector 처럼 변할 일이 거의 없는 배열 유형에 가장 유용합니다.
+
+## 기타
+
+BulkSerialize 함수는 배열 serialize 작업을 엘리먼트 단위가 아닌 raw 바이트 블록 단위로 하기 위해서 << 대체 연산자로 사용할 수 있는 serialize 함수입니다. 엘리먼트 유형이 내장된 유형 또는 평이한 데이터 구조체처럼 사소한 경우에는 퍼포먼스상 이득이 될 수 있습니다.
+
+CountBytes 와 GetAllocatedSize 함수는 배열이 현재 활용중인 메모리 양을 측정하는 데 사용됩니다. CountBytes 는 FArchive 를 받으며, GetAllocatedSize 는 직접 호출 가능합니다. 보통 통계 보고에 사용됩니다.
+
+Swap 과 SwapMemory 함수 둘 다 인덱스를 두 개 받아서 해당 인덱스의 엘리먼트 값을 맞바꿉니다. 둘 다 역할은 동일하지만, Swap 은 인덱스에 오류 검사를 해서 범위 밖이면 어서트가 발생한다는 차이가 있습니다.
+

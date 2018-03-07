@@ -1,0 +1,186 @@
+﻿INTSourceChangelist:3075225
+Availability:Public
+Title:使用 C++ 加载和卸载关卡
+Crumbs:%ROOT%, Engine, Engine/UI/LevelEditor
+Description:如何使用 C++ 中创建的自定义流送 Actor 进行关卡流送。
+parent:Engine/LevelStreaming/HowTo
+type:howto
+order:3
+tags:Level Streaming
+
+[TOC]
+
+[INCLUDE:Engine/LevelStreaming/HowTo#levelstreamscenario]
+
+
+## 使用 C++ 流入关卡
+
+1. 打开 **Content Browser**，新建一个 **C++ 类**。此类将基于 **Actor**，因此选择 **Actor** 并点击 **Next**。
+
+1. 将新建的 **C++ 类** 命名为“LevelStreamerActor”，然后点击 **Create Class**。新建类将在 VisualStudio 或 XCode 中打开。
+
+在此情况下，**角色** 在 LevelStreamerActor 中与名为 OverlapVolume 的方块组件重叠时需立即流入第二个关卡。 
+
+1. 在 `LevelStreamerActor.h` 中，声明随处可见（VisibleAnywhere）、蓝图只读（BlueprintReadOnly），并拥有允许私有访问（AllowPrivateAccess）元标记的 OverlapVolume。
+		private:
+		// 重叠体积域触发关卡流送
+		UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
+		UBoxComponent* OverlapVolume;
+
+1. 在 `LevelStreamerActor.cpp` 里的 LevelStreamerActor 构造函数中创建 OverlapVolume 并将其设为根组件（RootComponent）。
+		OverlapVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("OverlapVolume"));
+		RootComponent = OverlapVolume;
+
+1. 返回 `LevelStreamerActor.h` 中，声明一个受保护的 OverlapBegins 函数，其将被绑定到 BoxComponent 的 OnComponentBeginOverlap 函数。此绑定意味着 OverlapBegins 必须被 UFUNCTION 宏标记，且必须拥有和 OnComponentBeginOverlap 相同的签名。
+		protected:
+	
+		UFUNCTION()
+		void OverlapBegins(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult & SweepResult);
+
+1. 在 `LevelStreamerActor.h` 中创建一个名为 LevelToLoad 受保护的 FName 变量，属性为 EditAnywhere。它可以每个实例为基础变更 LevelToLoad。
+
+		UPROPERTY(EditAnywhere)
+		FName LevelToLoad;
+
+1. 我们将使用来自 GameplayStatics 库的几个函数，因此将其包含在 `LevelStreamerActor.cpp` 顶部。
+
+		#include "Kismet/GameplayStatics.h"
+		
+1. 现在即可开始创建 OverlapBegins 功能。在 `LevelStreamerActor.cpp` 中开始定义函数。添加一个 if 语句确定是否拥有一个世界场景，以便我们获取并检查角色。可使用 GameplayStatics 函数 `GetPlayerCharacter` 获得索引 0 处的角色。 
+
+		void ALevelStreamerActor::OverlapBegins(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult & SweepResult)
+		{
+			if(GWorld)
+			{
+				ACharacter* MyCharacter = UGameplayStatics::GetPlayerCharacter(this, 0);			
+			}
+		}
+
+1. 获得 MyCharacter 后，将其针对和 BoxComponent 发生重叠的 OtherActor 进行检查。并确认 LevelToLoad 不为空，然后调用 LoadStreamLevel。 
+
+		if (OtherActor == MyCharacter && LevelToLoad != "")
+		{
+			FLatentActionInfo LatentInfo;
+			UGameplayStatics::LoadStreamLevel(this, LevelToLoad, true, true, LatentInfo);
+		}
+
+1. 在 LevelStreamerActor 构造函数中，将 OverlapBegins 绑定到 BoxComponent 的 OnComponentBeginOverlap。
+
+		OverlapVolume->OnComponentBeginOverlap.AddUniqueDynamic(this, &ALevelStreamerActor::OverlapBegins);
+		
+	最终的 `LevelStreamerActor.h` 如下：
+
+		#pragma once
+
+		#include "GameFramework/Actor.h"
+		#include "LevelStreamerActor.generated.h"
+
+		UCLASS()
+		class LEVELS_API ALevelStreamerActor : public AActor
+		{
+			GENERATED_BODY()
+			
+		public:	
+			// 设置该 actor 属性的默认值
+			ALevelStreamerActor();
+
+			// 游戏开始时或生成时调用
+			virtual void BeginPlay() override;
+			
+			// 每帧调用
+			virtual void Tick( float DeltaSeconds ) override;
+
+		protected:
+			
+			UFUNCTION()
+			void OverlapBegins(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult & SweepResult);
+			
+			UPROPERTY(EditAnywhere)
+			FName LevelToLoad;
+
+		private:
+			// 重叠体积域触发关卡流送
+			UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
+			UBoxComponent* OverlapVolume;
+			
+		};
+		
+	最终的 `LevelStreamerActor.cpp` 如下：
+	
+		#include "Levels.h"
+		#include "Kismet/GameplayStatics.h"
+		#include "LevelStreamerActor.h"
+
+		// 设置默认值
+		ALevelStreamerActor::ALevelStreamerActor()
+		{
+			// 将此 actor 设为每帧调用 Tick()。不需要时可将此关闭，以提高性能。
+			PrimaryActorTick.bCanEverTick = true;
+
+			OverlapVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("OverlapVolume"));
+			RootComponent = OverlapVolume;
+
+			OverlapVolume->OnComponentBeginOverlap.AddUniqueDynamic(this, &ALevelStreamerActor::OverlapBegins);
+		}
+		// 游戏开始时或生成时调用
+		void ALevelStreamerActor::BeginPlay()
+		{
+			Super::BeginPlay();
+
+		}
+
+		// 每帧调用
+		void ALevelStreamerActor::Tick( float DeltaTime )
+		{
+			Super::Tick( DeltaTime );
+
+		}
+
+		void ALevelStreamerActor::OverlapBegins(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult & SweepResult)
+		{
+			if(GWorld)
+			{
+				ACharacter* MyCharacter = UGameplayStatics::GetPlayerCharacter(this, 0);
+				if (OtherActor == MyCharacter && LevelToLoad != "")
+				{
+					FLatentActionInfo LatentInfo;
+					UGameplayStatics::LoadStreamLevel(this, LevelToLoad, true, true, LatentInfo);
+				}
+			}
+		}
+1. 编译代码，然后切回编辑器。
+
+1. 将 **LevelStreamer** Actor 放入关卡，调整其放置和大小，直到它将固定关卡中 **角色** 进入即开始流送的部分，以及流送关卡所在的整个可行走体积域包含在内。
+
+1. 将 **SunTemple_Streaming** 设为 **流送关卡（Level to Stream）**。 
+
+1. 使用 Play In Editor 测试流送关卡。
+		
+## 使用 C++ 卸载关卡
+
+如要在 _角色_ 退出 BoxComponent 时卸载关卡，需要创建一个调用 `UGameplayStatics::UnloadStreamLevel` 的 `OverlapEnds` 函数，并将其绑定到 `OnComponentEndOverlap`。将以下代码片段添加到 LevelStreamerActor：
+
+在 LevelStreamerActor.h 中：
+
+	UFUNCTION()
+	void OverlapEnds(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+
+
+
+在 LevelStreamerActor.cpp 中：
+
+	void ALevelStreamerActor::OverlapEnds(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+	{
+		if (GWorld)
+		{
+			ACharacter* MyCharacter = UGameplayStatics::GetPlayerCharacter(this, 0);
+			if (OtherActor == MyCharacter && LevelToLoad != "")
+			{
+				FLatentActionInfo LatentInfo;
+				UGameplayStatics::UnloadStreamLevel(this, LevelToLoad, LatentInfo);
+			}
+		}
+	}
+
+在构造函数中：
+	OverlapVolume->OnComponentEndOverlap.AddUniqueDynamic(this, &ALevelStreamerActor::OverlapEnds);

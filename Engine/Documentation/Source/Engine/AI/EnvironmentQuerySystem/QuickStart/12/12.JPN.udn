@@ -1,0 +1,137 @@
+﻿INTSourceChangelist:2654627
+Availability:Public
+Title:12.FindHidingSpot EQS を作成する
+Crumbs:%ROOT%, Engine, Gameplay/AI, Engine/AI/EnvironmentQuerySystem, Engine/AI/EnvironmentQuerySystem/QuickStart
+Description:プレイヤーの TopDownCharacter から隠れるためのグリッド上の一番良いポイントを見つける EQS を作成します。
+バージョン：4.9
+
+[VAR:Steps]
+[OBJECT:Navigation]
+	[PARAM:previous]
+		[前のステップ](Engine/AI/EnvironmentQuerySystem/QuickStart/11 "%Engine/AI/EnvironmentQuerySystem/QuickStart/11:title%")
+	[/PARAM]
+	[PARAM:current]
+	[/PARAM]
+	[PARAM:home]
+		[クイックスタート ホーム](Engine/AI/EnvironmentQuerySystem/QuickStart)
+	[/PARAM]
+	[PARAM:next]
+		[次のステップ](Engine/AI/EnvironmentQuerySystem/QuickStart/13 "%Engine/AI/EnvironmentQuerySystem/QuickStart/13:title%")
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+%Steps%
+
+このステップでは、さらに複雑な Environment Query を作成します。ポイントのグリッドを作成し、NavMesh 上に投影します。次に、一連のテストを実行し、隠れるための「一番良い」ポイントを見つけます。あるテストでは、例えば、プレイヤーのキャラクターから見えるものなど完全に不適切な位置を選別します (Trace)。他のテストでは、NavMesh (PathFinding) で到達可能かどうかに基づき隠れるスポット候補にウェイトをかける、またはプレイヤー キャラクターの前にどれくらいポイントがあるか (Dot Product (内積)) に基づきウェイトをかけます。
+
+以下は簡単な覚書です。
+
+* Generator は、Context に関連して Items を作成します。
+* Items は多くの場合、 Context (Item X は Context Y からどれくらい離れているか) に関連して Tests で使用されます。
+* Items は Tests 結果に基づき選別またはスコアリングされます。
+
+## ステップ
+
+1. はじめに、**コンテンツ ブラウザ** で FindHidingSpot Environment Query アセットを **ダブルクリック** します。
+
+	![](findHide.png)
+
+1. **Simple Grid** Generator を作成し、それを **Root** ノードに接続します。
+
+	![](simpleGrid.png)
+
+1. **Simple Grid** Generator を選択し、その **[Details (詳細)]** パネルで以下のプロパティを設定します。
+
+	 ![](gridProp.png)
+
+	[INCLUDE:#eqsqs121]
+
+	こうした Grid Generator の設定では、かなりの数であるものの管理可能な Query のテスト対象のアイテムを作成します。**Project Down**、**Project Up**、**Post Projection Vertical Offset** のプロパティの変更は、それよりも上または下にある何かを見つける必要がある AI を持っている場合に特に役立ちます。
+
+1. [REGION:raw] **Simple Grid** ノードを **右クリック** して、 **Tests** %arrow% **Distance** を選択して 2 つの **Distance** テストを追加します。[/REGION]
+
+	![](addDistance.png)
+
+1. 1 つめを選択して **[Details]** パネルで以下のプロパティを調整します。
+
+	![](distanceProps.png)
+
+	[INCLUDE:#eqsqs122]
+
+	この Distance テストは、プレイヤーから _より遠い_ Items により高いスコアを与えます。
+
+1. 2 つめを選択し、 **[Details]** パネルで、以下のプロパティを調整します。
+
+	![](distanceProps2.png)
+
+	[INCLUDE:#eqsqs123]
+
+	この Distance テストは、AI により近いアイテムにより高いスコアを与えるものです。このテストは、この前の **Distance Test** よりも大きなウェイトを持ちます。つまり、AI により近い方を優先するもののプレイヤーから離れたものを選択します。
+
+1. [REGION:raw] **Simple Grid** ノードを **右クリック** して **Tests** %arrow% **Trace** を選択して 2 つの **Trace** テストを追加します。[/REGION]
+
+	![](addTrace.png)
+
+1. Trace テストのひとつを選択し、その **[Details]** パネルで、**Context** を PlayerContext に変更します (このクイックスタートの前の方で作成したContext)。
+
+	![](traceProps.png)	
+
+	ここではプレイヤーのポーンまたは AI のポーンが視線を持つアイテムがあれば取り除きます。このテストが多くの **Distance** テストの後に行われることに懸念を抱かれるかもしれませんが大丈夫です。Environment Query はここでの順序に関係なく **Trace** テストを実行するからです。もうひとつの Trace では、追加のセットアップは不要です。
+
+1. [REGION:raw] **Simple Grid** ノードを **右クリック** して **Tests** %arrow% **Dot** を選択して **Dot** テストを追加します。[/REGION]
+
+	![](addDot.png)
+
+1. **Dot** テストを選択し、 **[Details]** パネルで、以下のプロパティを調整します。 
+
+	![](dotProps.png)
+
+	[INCLUDE:#eqsqs125]
+
+	これからは少し難しくなります。大まかにいうと、「プレイヤーのポーンの横にあるアイテムを優先する」ということですが、その仕組みは少々変わっています。Dot Product (内積) 関数は、1.0 (全く同じ) から -1.0 (完全に逆) のスケールで2 つのベクターがどれくらい「似ている」かを戻します。従って、プレイヤーの回転ベクターとプレイヤーからアイテムまでのベクターとの間の Dot Product の **Absolute Value (絶対値)** を取得すると、プレイヤーの前または後ろのポイントを優先します。しかし、 **Scoring Factor** を -1.0 に設定すると、プレイヤーの側面を優先します。
+
+1. [REGION:raw] **Simple Grid** ノードを **右クリック** し、**Tests** %arrow% **PathFinding** を選択して、 **PathFinding** テストを追加します。[/REGION]
+
+	![](addPath.png)
+
+1. **PathFinding** テストを選択し、 **[Details]** パネルで、**Test Purpose (テスト目的)** を Score Only に調整します。
+
+	![](pathProps.png)
+
+	編集に関してはこれで終わりです。最終的に Environment Query はこのような感じになっているはずです。
+
+	![](final.png)
+
+%Steps%
+
+[VAR:arrow]![](Engine\AI\EnvironmentQuerySystem\QuickStart\arrow_button.png)[/VAR]
+
+<!--
+[EXCERPT:eqsqs125]
+* **Line A - Rotation** = PlayerContext
+* **Line B - Line From** = PlayerContext
+* **Absolute Value** = True
+* **Test Purpose** = Score Only
+* **Scoring Factor** = -1.0
+[/EXCERPT]
+
+[EXCERPT:eqsqs121]
+* **Grid Size** = 2000.0
+* **Space Between** = 150.0
+* **Navigation Filer** = RecastFilter_UseDefaultArea
+* **Project Down** = 2048.0
+* **Post Projection Vertical Offset** = 32.0
+[/EXCERPT]
+
+[EXCERPT:eqsqs122]
+* **Distance To** = Player Context
+* **Test Purpose** = Score Only
+[/EXCERPT]
+
+[EXCERPT:eqsqs123]
+* **Test Purpose** = Score Only
+* **Scoring Equation** = Inverse Linear
+* **Scoring Factor** = 2.0
+[/EXCERPT]
+-->

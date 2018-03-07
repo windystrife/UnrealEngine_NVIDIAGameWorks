@@ -1,0 +1,1159 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	DistanceFieldGlobalIllumination.usf
+=============================================================================*/
+
+#include "Common.ush"
+#include "DeferredShadingCommon.ush"
+#include "DistanceFieldLightingShared.ush"
+#include "DistanceFieldAOShared.ush"
+#include "DynamicLightingCommon.ush"
+#include "DistanceFieldShadowingShared.ush"
+
+#define USE_SHADOW_CULLING_FOR_VPL_PLACEMENT 1
+
+void RayTraceThroughLightTileCulledObjectsFirstHit(
+	float3 RayStartPosition, 
+	float3 RayDirection, 
+	float RayLength, 
+	uint NumIntersectingObjects, 
+	uint CulledDataStart, 
+	out float OutMinRayTime, 
+	out float OutMinRayVisibility,
+	out uint OutObjectIndex)
+{
+	float MinSphereRadius = .1f;
+	float MaxSphereRadius = .1f;
+
+	float3 WorldRayStart = RayStartPosition;
+	float3 WorldRayEnd = RayStartPosition + RayDirection * RayLength;
+	float MaxRayTime = RayLength;
+	float TanLightAngle = 0;
+
+	float MinRayTime = MaxRayTime;
+	float MinVisibility = 1;
+
+	LOOP
+	for (uint ListObjectIndex = 0; ListObjectIndex < NumIntersectingObjects; ListObjectIndex++)
+	{
+		#if USE_SHADOW_CULLING_FOR_VPL_PLACEMENT
+			uint ObjectIndex = ShadowTileArrayData.Load(ListObjectIndex * ShadowTileListGroupSize.x * ShadowTileListGroupSize.y + CulledDataStart);
+		#else
+			uint ObjectIndex = ListObjectIndex;
+		#endif
+
+		float3 LocalPositionExtent = LoadObjectLocalPositionExtent(ObjectIndex);
+		float4x4 WorldToVolume = LoadObjectWorldToVolume(ObjectIndex);
+		float4 UVScaleAndVolumeScale = LoadObjectUVScale(ObjectIndex);
+		float3 UVAdd = LoadObjectUVAddAndSelfShadowBias(ObjectIndex).xyz;
+		float2 DistanceFieldMAD = LoadObjectDistanceFieldMAD(ObjectIndex);
+
+		float3 VolumeRayStart = mul(float4(WorldRayStart, 1), WorldToVolume).xyz;
+		float3 VolumeRayEnd = mul(float4(WorldRayEnd, 1), WorldToVolume).xyz;
+		float3 VolumeRayDirection = VolumeRayEnd - VolumeRayStart;
+		float VolumeRayLength = length(VolumeRayDirection);
+		VolumeRayDirection /= VolumeRayLength;
+		float VolumeMinSphereRadius = MinSphereRadius / UVScaleAndVolumeScale.w;
+		float VolumeMaxSphereRadius = MaxSphereRadius / UVScaleAndVolumeScale.w;
+
+		float4 SphereCenterAndRadius = LoadObjectPositionAndRadius(ObjectIndex);
+		float ObjectCenterDistanceAlongRay = max(dot(SphereCenterAndRadius.xyz - WorldRayStart, WorldRayEnd - WorldRayStart), 0);
+		// Expand the intersection box by the radius of the cone at the distance of the object along the cone
+		float LocalConeRadiusAtObject = min(TanLightAngle * ObjectCenterDistanceAlongRay / UVScaleAndVolumeScale.w, VolumeMaxSphereRadius);
+
+		float2 IntersectionTimes = LineBoxIntersect(VolumeRayStart, VolumeRayEnd, -LocalPositionExtent - LocalConeRadiusAtObject, LocalPositionExtent + LocalConeRadiusAtObject);
+
+		BRANCH
+		if (IntersectionTimes.x < IntersectionTimes.y && IntersectionTimes.x < 1)
+		{
+			float SampleRayTime = IntersectionTimes.x * VolumeRayLength;
+			uint MaxSteps = 64;
+			float MinStepSize = 1.0f / (4 * MaxSteps);
+
+			float MinDistance = 1000000;
+			float3 IntersectionPosition = float3(0, 0, 0);
+
+			uint StepIndex = 0;
+
+			LOOP
+			for (; StepIndex < MaxSteps; StepIndex++)
+			{
+				float3 SampleVolumePosition = VolumeRayStart + VolumeRayDirection * SampleRayTime;
+				float3 ClampedSamplePosition = clamp(SampleVolumePosition, -LocalPositionExtent, LocalPositionExtent);
+				float DistanceToClamped = length(ClampedSamplePosition - SampleVolumePosition);
+				float3 VolumeUV = DistanceFieldVolumePositionToUV(ClampedSamplePosition, UVScaleAndVolumeScale.xyz, UVAdd);
+				float DistanceField = SampleMeshDistanceField(VolumeUV, DistanceFieldMAD).x + DistanceToClamped;
+
+				MinDistance = min(MinDistance, DistanceField);
+				float SphereRadius = clamp(TanLightAngle * SampleRayTime, VolumeMinSphereRadius, VolumeMaxSphereRadius);
+
+				MinVisibility = min(MinVisibility, saturate(DistanceField / SphereRadius));
+				IntersectionPosition = SampleVolumePosition;
+
+				float StepDistance = max(DistanceField, MinStepSize);
+				
+				// Terminate the trace if we reached a negative area or went past the end of the ray
+				if (DistanceField <= 0 
+					|| SampleRayTime + StepDistance > IntersectionTimes.y * VolumeRayLength)
+				{
+					// Step back to the intersection point if we went inside
+					SampleRayTime += min(DistanceField, 0);
+					break;
+				}
+
+				SampleRayTime += StepDistance;
+			}
+
+			if (MinDistance < 0 || StepIndex == MaxSteps)
+			{
+				MinVisibility = 0;
+				//MinRayTime = min(MinRayTime, SampleRayTime * UVScaleAndVolumeScale.w);
+
+				if (SampleRayTime * UVScaleAndVolumeScale.w < MinRayTime)
+				{
+					MinRayTime = UVScaleAndVolumeScale.w * SampleRayTime;
+					OutObjectIndex = ObjectIndex;
+				}
+			}
+		}
+	}
+
+	OutMinRayVisibility = MinVisibility;
+	OutMinRayTime = MinRayTime;
+}
+
+float3 ComputeDistanceFieldNormal(float3 WorldPosition, uint ObjectIndex)
+{
+	float4x4 WorldToVolume = LoadObjectWorldToVolume(ObjectIndex);
+	float4 UVScaleAndVolumeScale = LoadObjectUVScale(ObjectIndex);
+	float3 UVAdd = LoadObjectUVAddAndSelfShadowBias(ObjectIndex).xyz;
+	float2 DistanceFieldMAD = LoadObjectDistanceFieldMAD(ObjectIndex);
+
+	float3x3 VolumeToWorld = LoadObjectVolumeToWorld(ObjectIndex);
+
+	float3 LocalPositionExtent = LoadObjectLocalPositionExtent(ObjectIndex);
+
+	float3 VolumeShadingPosition = mul(float4(WorldPosition, 1), WorldToVolume).xyz;
+	float3 ClampedSamplePosition = clamp(VolumeShadingPosition, -LocalPositionExtent, LocalPositionExtent);
+	float3 LocalShadingUV = DistanceFieldVolumePositionToUV(ClampedSamplePosition, UVScaleAndVolumeScale.xyz, UVAdd);
+
+	// Used to clamp UVs inside valid space of this object's distance field
+	float3 UVMin = DistanceFieldVolumePositionToUV(-LocalPositionExtent, UVScaleAndVolumeScale.xyz, UVAdd);
+	float3 UVMax = DistanceFieldVolumePositionToUV(LocalPositionExtent, UVScaleAndVolumeScale.xyz, UVAdd);
+		
+	float R = SampleMeshDistanceField(float3(min(LocalShadingUV.x + DistanceFieldAtlasTexelSize.x, UVMax.x), LocalShadingUV.y, LocalShadingUV.z), DistanceFieldMAD).x;
+	float L = SampleMeshDistanceField(float3(max(LocalShadingUV.x - DistanceFieldAtlasTexelSize.x, UVMin.x), LocalShadingUV.y, LocalShadingUV.z), DistanceFieldMAD).x;
+	float F = SampleMeshDistanceField(float3(LocalShadingUV.x, min(LocalShadingUV.y + DistanceFieldAtlasTexelSize.y, UVMax.y), LocalShadingUV.z), DistanceFieldMAD).x;
+	float B = SampleMeshDistanceField(float3(LocalShadingUV.x, max(LocalShadingUV.y - DistanceFieldAtlasTexelSize.y, UVMin.y), LocalShadingUV.z), DistanceFieldMAD).x;
+	float U = SampleMeshDistanceField(float3(LocalShadingUV.x, LocalShadingUV.y, min(LocalShadingUV.z + DistanceFieldAtlasTexelSize.z, UVMax.z)), DistanceFieldMAD).x;
+	float D = SampleMeshDistanceField(float3(LocalShadingUV.x, LocalShadingUV.y, max(LocalShadingUV.z - DistanceFieldAtlasTexelSize.z, UVMin.z)), DistanceFieldMAD).x;
+		
+	float3 Gradient = .5f * float3(R - L, F - B, U - D);
+	
+	if (dot(Gradient, Gradient) == 0)
+	{
+		Gradient = float3(0, 0, 1);
+	}
+
+	float3 LocalNormal = normalize(Gradient);
+	float3 WorldNormal = mul(LocalNormal, VolumeToWorld);
+	return normalize(WorldNormal);
+}
+
+/** From light source, into world. */
+float4 LightDirectionAndTraceDistance;
+float4 LightColor;
+float4x4 ShadowToWorld;
+float2 InvPlacementGridSize;
+float VPLPlacementCameraRadius;
+
+// In float4's, must match C++
+RWBuffer<uint> RWVPLParameterBuffer;
+RWBuffer<float4> RWVPLData;
+
+[numthreads(THREADGROUP_SIZEX, THREADGROUP_SIZEY, 1)]
+void VPLPlacementCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	{
+		// Distance for directional lights to trace
+		float TraceDistance = LightDirectionAndTraceDistance.w;
+		float3 LightDirection = LightDirectionAndTraceDistance.xyz;
+		uint2 ChildCoordinate = DispatchThreadId.xy;
+
+		if (all(ChildCoordinate * InvPlacementGridSize < 1))
+		{
+			float2 NormalizedCellPosition = ChildCoordinate * InvPlacementGridSize * 2 - 1;
+			float3 CellStartWorldPosition = mul(float4(NormalizedCellPosition.x, NormalizedCellPosition.y, 0, 1), ShadowToWorld).xyz;
+
+			uint NumIntersectingObjects = GetCulledNumObjects();
+			uint CulledDataStart = 0;
+
+		#if USE_SHADOW_CULLING_FOR_VPL_PLACEMENT
+
+			GetShadowTileCulledData(CellStartWorldPosition, CulledDataStart, NumIntersectingObjects);
+
+		#endif
+
+			float MinRayTime = 0;
+			float MinRayVisibility = 1;
+			uint ObjectIndex = 0;
+			RayTraceThroughLightTileCulledObjectsFirstHit(CellStartWorldPosition, LightDirection, TraceDistance, NumIntersectingObjects, CulledDataStart, MinRayTime, MinRayVisibility, ObjectIndex);
+
+			if (MinRayVisibility < 1)
+			{
+				float3 IntersectionPosition = CellStartWorldPosition + LightDirection * MinRayTime;
+				float3 IntersectionNormal = ComputeDistanceFieldNormal(IntersectionPosition, ObjectIndex);
+
+				uint VPLArrayStartIndex;
+				InterlockedAdd(RWVPLParameterBuffer[1], 1U, VPLArrayStartIndex);
+
+				float3 DiffuseColor = .5f;
+				float CellExtent = VPLPlacementCameraRadius * InvPlacementGridSize.x;
+				float CellRadius = sqrt(2.0) * CellExtent;
+
+				float3 Flux = DiffuseColor * LightColor.rgb * max(dot(IntersectionNormal, -LightDirection), 0) * PI * CellRadius * CellRadius;
+
+				uint VPLBaseIndex = (VPLArrayStartIndex + 0) * VPL_DATA_STRIDE;
+				RWVPLData[VPLBaseIndex + 0] = float4(IntersectionPosition, CellRadius);
+				RWVPLData[VPLBaseIndex + 1] = float4(IntersectionNormal, 0);
+				RWVPLData[VPLBaseIndex + 2] = float4(Flux, 0);
+			}
+		}
+	}
+}
+
+Buffer<uint> VPLParameterBuffer;
+RWBuffer<uint> RWDispatchParameters;
+
+[numthreads(1, 1, 1)]
+void SetupVPLCullndirectArgumentsCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint NumClusterVPLs = VPLParameterBuffer[1];
+
+	// One thread per record, divide and round up
+	RWDispatchParameters[0] = (NumClusterVPLs + THREADGROUP_TOTALSIZE - 1) / THREADGROUP_TOTALSIZE;
+	RWDispatchParameters[1] = 1;
+	RWDispatchParameters[2] = 1;
+}
+
+uint DebugId;
+RWBuffer<uint> RWDebugBuffer;
+
+[numthreads(1, 1, 1)]
+void TrackGPUProgressCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	RWDebugBuffer[0] = DebugId;
+}
+
+Buffer<float4> VPLData;
+
+RWBuffer<uint> RWCulledVPLParameterBuffer;
+RWBuffer<float4> RWCulledVPLData;
+
+[numthreads(THREADGROUP_TOTALSIZE, 1, 1)]
+void CullVPLsForViewCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint VPLIndex = DispatchThreadId.x;
+	uint NumVPLs = VPLParameterBuffer[1];
+
+	if (VPLIndex < NumVPLs)
+	{
+		uint SourceIndex = VPLIndex * VPL_DATA_STRIDE;
+		float4 BoundingSphere = VPLData[SourceIndex + 0];
+		float DistanceToViewSq = dot(View.WorldCameraOrigin - BoundingSphere.xyz, View.WorldCameraOrigin - BoundingSphere.xyz);
+
+		if (DistanceToViewSq < Square(AOMaxViewDistance + BoundingSphere.w)
+			&& ViewFrustumIntersectSphere(BoundingSphere.xyz, BoundingSphere.w + AOObjectMaxDistance))
+		{
+			uint DestStartVPLIndex;
+			InterlockedAdd(RWCulledVPLParameterBuffer[1], 1U, DestStartVPLIndex);
+
+			uint DestIndex = DestStartVPLIndex * VPL_DATA_STRIDE;
+			RWCulledVPLData[DestIndex + 0] = BoundingSphere;
+			RWCulledVPLData[DestIndex + 1] = VPLData[SourceIndex + 1];
+			RWCulledVPLData[DestIndex + 2] = VPLData[SourceIndex + 2];
+		}
+	}
+}
+
+#ifndef LIGHT_VPLS_THREADGROUP_SIZE
+#define LIGHT_VPLS_THREADGROUP_SIZE 1
+#endif
+
+uint ObjectProcessStride;
+
+[numthreads(1, 1, 1)]
+void SetupLightVPLsIndirectArgumentsCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint NumGroups = (GetCulledNumObjects() + ObjectProcessStride - 1) / ObjectProcessStride;
+
+	// One group per object
+	RWDispatchParameters[0] = NumGroups;
+	RWDispatchParameters[1] = 1;
+	RWDispatchParameters[2] = 1;
+}
+
+// From receiver to to light
+float3 LightDirection;
+float4 LightPositionAndInvRadius;
+float LightSourceRadius;
+float2 TanLightAngleAndNormalThreshold;
+
+StructuredBuffer<float4> ShadowCulledObjectBounds;
+StructuredBuffer<float4> ShadowCulledObjectData;
+
+float RayTraceThroughLightTileCulledObjects(
+	float3 WorldRayStart, 
+	float3 WorldRayEnd, 
+	float MaxRayTime,
+	float TanLightAngle,
+	uint NumIntersectingObjects, 
+	uint CulledDataStart)
+{
+	// Keeps result from going all the way sharp
+	float MinSphereRadius = .4f;
+	// Maintain reasonable culling bounds
+	float MaxSphereRadius = 100;
+
+	float MinRayTime = MaxRayTime;
+	float MinConeVisibility = 1;
+	float3 RayUnitDirection = normalize(WorldRayEnd - WorldRayStart);
+
+	LOOP
+	for (uint ListObjectIndex = 0; ListObjectIndex < NumIntersectingObjects && MinRayTime >= MaxRayTime; ListObjectIndex++)
+	{
+		#if USE_SHADOW_CULLING_FOR_VPL_PLACEMENT
+			uint ObjectIndex = ShadowTileArrayData.Load(ListObjectIndex * ShadowTileListGroupSize.x * ShadowTileListGroupSize.y + CulledDataStart);
+		#else
+			uint ObjectIndex = ListObjectIndex;
+		#endif
+
+		float4 SphereCenterAndRadius = LoadObjectPositionAndRadiusFromBuffer(ObjectIndex, ShadowCulledObjectBounds);
+		float ObjectCenterDistanceAlongRay = dot(SphereCenterAndRadius.xyz - WorldRayStart, RayUnitDirection);
+
+		BRANCH
+		if (ObjectCenterDistanceAlongRay > -SphereCenterAndRadius.w)
+		{
+			float3 LocalPositionExtent = LoadObjectLocalPositionExtentFromBuffer(ObjectIndex, ShadowCulledObjectData);
+			float4x4 WorldToVolume = LoadObjectWorldToVolumeFromBuffer(ObjectIndex, ShadowCulledObjectData);
+			bool bGeneratedAsTwoSided;
+			float4 UVScaleAndVolumeScale = LoadObjectUVScaleFromBuffer(ObjectIndex, ShadowCulledObjectData, bGeneratedAsTwoSided);
+			float3 UVAdd = LoadObjectUVAddAndSelfShadowBiasFromBuffer(ObjectIndex, ShadowCulledObjectData).xyz;
+			float2 DistanceFieldMAD = LoadObjectDistanceFieldMADFromBuffer(ObjectIndex, ShadowCulledObjectData);
+	
+			float3 VolumeRayStart = mul(float4(WorldRayStart, 1), WorldToVolume).xyz;
+			float3 VolumeRayEnd = mul(float4(WorldRayEnd, 1), WorldToVolume).xyz;
+			float3 VolumeRayDirection = VolumeRayEnd - VolumeRayStart;
+			float VolumeRayLength = length(VolumeRayDirection);
+			VolumeRayDirection /= VolumeRayLength;
+			float VolumeMinSphereRadius = MinSphereRadius / UVScaleAndVolumeScale.w;
+			float VolumeMaxSphereRadius = MaxSphereRadius / UVScaleAndVolumeScale.w;
+
+			// Expand the intersection box by the radius of the cone at the distance of the object along the cone
+			float LocalConeRadiusAtObject = min(TanLightAngle * max(ObjectCenterDistanceAlongRay, 0) / UVScaleAndVolumeScale.w, VolumeMaxSphereRadius);
+
+			float2 IntersectionTimes = LineBoxIntersect(VolumeRayStart, VolumeRayEnd, -LocalPositionExtent - LocalConeRadiusAtObject, LocalPositionExtent + LocalConeRadiusAtObject);
+
+			BRANCH
+			if (IntersectionTimes.x < IntersectionTimes.y && IntersectionTimes.x < 1)
+			{
+				float SampleRayTime = IntersectionTimes.x * VolumeRayLength;
+				uint MaxSteps = 64;
+				float MinStepSize = 1.0f / (4 * MaxSteps);
+
+				float MinDistance = 1000000;
+				float3 IntersectionPosition = float3(0, 0, 0);
+
+				uint StepIndex = 0;
+
+				LOOP
+				for (; StepIndex < MaxSteps; StepIndex++)
+				{
+					float3 SampleVolumePosition = VolumeRayStart + VolumeRayDirection * SampleRayTime;
+					float3 ClampedSamplePosition = clamp(SampleVolumePosition, -LocalPositionExtent, LocalPositionExtent);
+					float DistanceToClamped = length(ClampedSamplePosition - SampleVolumePosition);
+					float3 VolumeUV = DistanceFieldVolumePositionToUV(ClampedSamplePosition, UVScaleAndVolumeScale.xyz, UVAdd);
+					float DistanceField = SampleMeshDistanceField(VolumeUV, DistanceFieldMAD).x + DistanceToClamped;
+
+					MinDistance = min(MinDistance, DistanceField);
+					float SphereRadius = clamp(TanLightAngle * SampleRayTime, VolumeMinSphereRadius, VolumeMaxSphereRadius);
+
+					MinConeVisibility = min(MinConeVisibility, saturate(DistanceField / SphereRadius));
+					IntersectionPosition = SampleVolumePosition;
+
+					float StepDistance = max(DistanceField, MinStepSize);
+					SampleRayTime += StepDistance;
+
+					// Terminate the trace if we reached a negative area or went past the end of the ray
+					if (DistanceField < 0 
+						|| SampleRayTime > IntersectionTimes.y * VolumeRayLength)
+					{
+						break;
+					}
+				}
+
+				if (MinDistance < 0 || StepIndex == MaxSteps)
+				{
+					MinConeVisibility = 0;
+					MinRayTime = min(MinRayTime, SampleRayTime * UVScaleAndVolumeScale.w);
+				}
+
+				// Force to shadowed as we approach max steps
+				MinConeVisibility = min(MinConeVisibility, (1 - StepIndex / (float)MaxSteps));
+			}
+		}
+	}
+
+	return MinConeVisibility;
+}
+
+Buffer<uint> ShadowObjectIndirectArguments;
+
+uint GetShadowCulledNumObjects()
+{
+	// IndexCount, NumInstances, StartIndex, BaseVertexIndex, FirstInstance
+	return ShadowObjectIndirectArguments[1];
+}
+
+float3 ComputeVPLFlux(uint SurfelIndex, float4x4 InstanceToWorld)
+{
+	// Distance for directional lights to trace
+	float TraceDistance = 10000;
+	float4 PositionAndRadius = LoadSurfelPositionAndRadius(SurfelIndex);
+	PositionAndRadius.xyz = mul(float4(PositionAndRadius.xyz, 1), InstanceToWorld).xyz;
+	float3 SurfelNormal = LoadSurfelNormal(SurfelIndex);
+	SurfelNormal = mul(SurfelNormal, (float3x3)InstanceToWorld);
+
+	float3 AccumulatedLighting = 0;
+
+	{
+		float SurfelDotLight = dot(SurfelNormal, LightDirection);
+
+		BRANCH
+		if (SurfelDotLight > 0)
+		{
+			float Visibility = 1;
+			bool bIsPointLight = false;
+
+			BRANCH
+			if (bIsPointLight || SurfelDotLight > TanLightAngleAndNormalThreshold.y)
+			{
+				// World space offset along the start of the ray to avoid incorrect self-shadowing
+				float RayStartOffset = 2;
+
+				float3 WorldRayStart;
+				float3 WorldRayEnd;
+				float MaxRayTime;
+				float TanLightAngle;
+				uint NumIntersectingObjects = GetShadowCulledNumObjects();
+				uint CulledDataStart = 0;
+
+				if (bIsPointLight)
+				{
+					/*
+					float3 LightVector = LightPositionAndInvRadius.xyz - PositionAndRadius.xyz;
+					float LightVectorLength = length(LightVector);
+					WorldRayStart = PositionAndRadius.xyz + LightVector / LightVectorLength * RayStartOffset;
+					WorldRayEnd = LightPositionAndInvRadius.xyz;
+					MaxRayTime = LightVectorLength;
+					float MaxAngle = tan(10 * PI / 180.0f);
+					// Comparing tangents instead of angles, but tangent is always increasing in this range
+					TanLightAngle = min(LightSourceRadius / LightVectorLength, MaxAngle);
+					*/
+				}
+				else
+				{
+					WorldRayStart = PositionAndRadius.xyz + LightDirection * RayStartOffset;
+					WorldRayEnd = PositionAndRadius.xyz + LightDirection * TraceDistance;
+					MaxRayTime = TraceDistance;
+					TanLightAngle = TanLightAngleAndNormalThreshold.x;
+
+					#if USE_SHADOW_CULLING_FOR_VPL_PLACEMENT
+
+						GetShadowTileCulledData(WorldRayStart, CulledDataStart, NumIntersectingObjects);
+
+					#endif
+				}
+
+				Visibility = RayTraceThroughLightTileCulledObjects(WorldRayStart, WorldRayEnd, MaxRayTime, TanLightAngle, NumIntersectingObjects, CulledDataStart);
+			}
+
+			AccumulatedLighting += (max(SurfelDotLight, 0) * Visibility) * LightColor.rgb;
+		}
+	}
+
+	float3 Flux = 0;
+
+	BRANCH
+	if (any(AccumulatedLighting > 0))
+	{
+		float3 DiffuseColor = LoadSurfelDiffuseColor(SurfelIndex);
+		//float3 EmissiveColor = LoadSurfelEmissiveColor(SurfelIndex);
+
+		Flux = (DiffuseColor * AccumulatedLighting/* + EmissiveColor*/);
+	}
+
+	return Flux;
+}
+
+uint GetViewBasedSurfelLOD(float3 ObjectPosition)
+{
+	return length(ObjectPosition - View.WorldCameraOrigin) > .4f * AOMaxViewDistance ? 1 : 0;
+	//return 0;
+}
+
+uint2 GetSurfelOffsetAndNum(uint4 SurfelCoordinate, uint LODIndex, uniform bool bInstanced)
+{
+	uint2 OffsetAndNum = uint2(bInstanced ? SurfelCoordinate.w : SurfelCoordinate.x, SurfelCoordinate.y);
+	
+	if (LODIndex == 1)
+	{
+		OffsetAndNum.x += SurfelCoordinate.y;
+		OffsetAndNum.y = SurfelCoordinate.z - SurfelCoordinate.y;
+	}
+
+	return OffsetAndNum;
+}
+
+uint ObjectProcessStartIndex;
+RWBuffer<float4> RWVPLFlux;
+
+[numthreads(LIGHT_VPLS_THREADGROUP_SIZE, 1, 1)]
+void LightVPLsCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint ObjectIndex = ObjectProcessStartIndex + GroupId.x * ObjectProcessStride;
+	uint NumObjects = GetCulledNumObjects();
+	uint ThreadIndex = GroupThreadId.x;
+
+	if (ObjectIndex < NumObjects)
+	{
+		uint4 SurfelCoordinate = LoadObjectSurfelCoordinate(ObjectIndex);
+		float4 ObjectPositionAndRadius = LoadObjectPositionAndRadius(ObjectIndex);
+		float4x4 ObjectInstanceToWorld = LoadObjectLocalToWorld(ObjectIndex);
+		uint ViewBasedLOD = GetViewBasedSurfelLOD(ObjectPositionAndRadius.xyz);
+		
+		{
+			uint2 SurfelOffsetAndNum = GetSurfelOffsetAndNum(SurfelCoordinate, ViewBasedLOD, false);
+			uint2 InstancedSurfelOffsetAndNum = GetSurfelOffsetAndNum(SurfelCoordinate, ViewBasedLOD, true);
+			uint NumSurfels = SurfelOffsetAndNum.y;
+
+			LOOP
+			for (uint SurfelIndex = ThreadIndex; SurfelIndex < NumSurfels; SurfelIndex += LIGHT_VPLS_THREADGROUP_SIZE)
+			{
+				// Read surfel properties from a shared location for all instances
+				float3 Flux = ComputeVPLFlux(SurfelIndex + SurfelOffsetAndNum.x, ObjectInstanceToWorld);
+				// Write flux to the instance-specific location
+				RWVPLFlux[InstancedSurfelOffsetAndNum.x + SurfelIndex] = float4(Flux, 0);
+			}
+		}
+		/*
+		// Still need to light LOD1
+		if (ViewBasedLOD == 0)
+		{
+			uint2 SurfelOffsetAndNum = GetSurfelOffsetAndNum(SurfelCoordinate, 1);
+			uint NumSurfels = SurfelOffsetAndNum.y;
+
+			LOOP
+			for (uint SurfelIndex = ThreadIndex; SurfelIndex < NumSurfels; SurfelIndex += LIGHT_VPLS_THREADGROUP_SIZE)
+			{
+				float3 Flux = ComputeVPLFlux(SurfelIndex + SurfelOffsetAndNum.x);
+				RWVPLFlux[SurfelOffsetAndNum.x + SurfelIndex] = float4(Flux, 0);
+			}
+		}*/
+	}
+}
+
+RWBuffer<float4> RWSurfelIrradiance;
+RWBuffer<float4> RWHeightfieldIrradiance;
+
+/**  */
+[numthreads(FINAL_GATHER_THREADGROUP_SIZE, 1, 1)]
+void ClearIrradianceSamplesCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint RelativeRecordIndex = DispatchThreadId.x;
+
+	RWSurfelIrradiance[RelativeRecordIndex] = 0;
+	RWHeightfieldIrradiance[RelativeRecordIndex] = 0;
+}
+
+float RayTraceThroughGlobalObjects(
+	float3 RayStartPosition, 
+	float3 RayDirection, 
+	float RayLength,
+	float TanConeAngle,
+	float ConeEndRayTime)
+{
+	float MaxSphereRadius = 100;
+
+	float3 WorldRayStart = RayStartPosition;
+	float3 WorldRayEnd = RayStartPosition + RayDirection * RayLength;
+	float MaxRayTime = RayLength;
+
+	float MinVisibility = 1;
+
+	LOOP
+	for (uint ObjectIndex = 0; ObjectIndex < NumSceneObjects && MinVisibility > 0; ObjectIndex++)
+	{
+		float3 LocalPositionExtent = LoadGlobalObjectLocalPositionExtent(ObjectIndex);
+		float4x4 WorldToVolume = LoadGlobalObjectWorldToVolume(ObjectIndex);
+		float4 UVScaleAndVolumeScale = LoadGlobalObjectUVScale(ObjectIndex);
+		float3 UVAdd = LoadGlobalObjectUVAdd(ObjectIndex);
+		float2 DistanceFieldMAD = LoadObjectDistanceFieldMAD(ObjectIndex);
+
+		float3 VolumeRayStart = mul(float4(WorldRayStart, 1), WorldToVolume).xyz;
+		float3 VolumeRayEnd = mul(float4(WorldRayEnd, 1), WorldToVolume).xyz;
+		float3 VolumeRayDirection = VolumeRayEnd - VolumeRayStart;
+		float VolumeRayLength = length(VolumeRayDirection);
+		VolumeRayDirection /= VolumeRayLength;
+		float VolumeMaxSphereRadius = MaxSphereRadius / UVScaleAndVolumeScale.w;
+		float VolumeConeEndRayTime = ConeEndRayTime / UVScaleAndVolumeScale.w;
+		float ConeEndNormalization = 1.0f / (VolumeRayLength - VolumeConeEndRayTime);
+
+		float4 SphereCenterAndRadius = LoadGlobalObjectPositionAndRadius(ObjectIndex);
+		float ObjectCenterDistanceAlongRay = max(dot(SphereCenterAndRadius.xyz - WorldRayStart, WorldRayEnd - WorldRayStart), 0);
+		// Expand the intersection box by the radius of the cone at the distance of the object along the cone
+		float LocalConeRadiusAtObject = min(TanConeAngle * ObjectCenterDistanceAlongRay / UVScaleAndVolumeScale.w, VolumeMaxSphereRadius);
+
+		float2 IntersectionTimes = LineBoxIntersect(VolumeRayStart, VolumeRayEnd, -LocalPositionExtent - LocalConeRadiusAtObject, LocalPositionExtent + LocalConeRadiusAtObject);
+
+		BRANCH
+		if (IntersectionTimes.x < IntersectionTimes.y && IntersectionTimes.x < 1)
+		{
+			float SampleRayTime = IntersectionTimes.x * VolumeRayLength;
+			uint MaxSteps = 32;
+			float MinStepSize = 1.0f / (4 * MaxSteps);
+
+			uint StepIndex = 0;
+
+			LOOP
+			for (; StepIndex < MaxSteps; StepIndex++)
+			{
+				float3 SampleVolumePosition = VolumeRayStart + VolumeRayDirection * SampleRayTime;
+				float3 ClampedSamplePosition = clamp(SampleVolumePosition, -LocalPositionExtent, LocalPositionExtent);
+				float DistanceToClamped = length(ClampedSamplePosition - SampleVolumePosition);
+				float3 VolumeUV = DistanceFieldVolumePositionToUV(ClampedSamplePosition, UVScaleAndVolumeScale.xyz, UVAdd);
+				float DistanceField = SampleMeshDistanceField(VolumeUV, DistanceFieldMAD).x + DistanceToClamped;
+
+				float SphereRadius = clamp(TanConeAngle * SampleRayTime, 0, VolumeMaxSphereRadius);
+
+				if (SampleRayTime > VolumeConeEndRayTime)
+				{
+					// 0 at VolumeRayLength, 1 at VolumeConeEndRayTime
+					float ConeEndAlpha = saturate((VolumeRayLength - SampleRayTime) * ConeEndNormalization);
+					// Reduce the intersection sphere radius to 0 at the end of the cone
+					SphereRadius = ConeEndAlpha * TanConeAngle * VolumeConeEndRayTime;
+				}
+
+				//SphereRadius = 0;
+
+				MinVisibility = min(MinVisibility, saturate(DistanceField / SphereRadius));
+
+				float StepDistance = max(DistanceField, MinStepSize);
+				SampleRayTime += StepDistance;
+
+				// Terminate the trace if we reached a negative area or went past the end of the ray
+				if (DistanceField <= 0 
+					|| SampleRayTime > IntersectionTimes.y * VolumeRayLength)
+				{
+					break;
+				}
+			}
+
+			if (StepIndex == MaxSteps)
+			{
+				MinVisibility = 0;
+			}
+		}
+	}
+
+	return MinVisibility;
+}
+
+Buffer<float> RecordConeData;
+RWBuffer<float4> RWStepBentNormal;
+
+/**  */
+[numthreads(FINAL_GATHER_THREADGROUP_SIZE, 1, 1)]
+void ComputeStepBentNormalCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint StartIndex = SavedStartIndex[0];
+	uint NumRecords = ScatterDrawParameters[1];
+
+	uint RecordIndex = StartIndex + DispatchThreadId.x;
+
+	float3 Irradiance = 0;
+
+	if (RecordIndex < NumRecords)
+	{
+		uint RelativeRecordIndex = DispatchThreadId.x;
+		float3 WorldNormal = IrradianceCacheNormal[RecordIndex].xyz;
+
+		float3 TangentX;
+		float3 TangentY;
+		FindBestAxisVectors2(WorldNormal, TangentX, TangentY);
+
+		for (uint StepIndex = 0; StepIndex < NUM_VISIBILITY_STEPS; StepIndex++)
+		{
+			float3 UnoccludedDirection = 0;
+
+			for (uint ConeIndex = 0; ConeIndex < NUM_CONE_DIRECTIONS; ConeIndex++)
+			{
+				float3 ConeDirection = AOSamples2.SampleDirections[ConeIndex].xyz;
+				float3 RotatedConeDirection = ConeDirection.x * TangentX + ConeDirection.y * TangentY + ConeDirection.z * WorldNormal;
+
+				uint RecordConeDataIndex = (RelativeRecordIndex * NUM_CONE_DIRECTIONS + ConeIndex) * RECORD_CONE_DATA_STRIDE;
+				float ConeVisibility = RecordConeData[RecordConeDataIndex + StepIndex];
+				UnoccludedDirection += ConeVisibility * RotatedConeDirection;
+			}
+
+			float InvNumSamples = 1.0f / (float)NUM_CONE_DIRECTIONS;
+			UnoccludedDirection = UnoccludedDirection * (BentNormalNormalizeFactor * InvNumSamples);
+
+			RWStepBentNormal[RelativeRecordIndex * NUM_VISIBILITY_STEPS + StepIndex] = float4(UnoccludedDirection, 0);
+		}
+	}
+}
+
+float VPLGatherRadius;
+
+Buffer<float4> StepBentNormalBuffer;
+
+float4 LoadVPLPositionAndRadius(uint VPLIndex, float4x4 InstanceToWorld)
+{
+#if IRRADIANCE_FROM_SURFELS
+	float4 PositionAndRadius = LoadSurfelPositionAndRadius(VPLIndex);
+	PositionAndRadius.xyz = mul(float4(PositionAndRadius.xyz, 1), InstanceToWorld).xyz;
+	return PositionAndRadius;
+#else
+	return VPLData[VPLIndex * VPL_DATA_STRIDE + 0];
+#endif
+}
+
+float3 LoadVPLNormal(uint VPLIndex, float4x4 InstanceToWorld)
+{
+#if IRRADIANCE_FROM_SURFELS
+	float3 SurfelNormal = LoadSurfelNormal(VPLIndex);
+	SurfelNormal = mul(SurfelNormal, (float3x3)InstanceToWorld);
+	return SurfelNormal;
+#else
+	return VPLData[VPLIndex * VPL_DATA_STRIDE + 1].xyz;
+#endif
+}
+
+Buffer<float4> VPLFlux;
+
+float3 LoadVPLFlux(uint VPLIndex)
+{
+#if IRRADIANCE_FROM_SURFELS
+	return VPLFlux[VPLIndex].xyz;
+#else
+	return VPLData[VPLIndex * VPL_DATA_STRIDE + 2].xyz;
+#endif
+}
+
+float3 ComputeVirtualPointLighting(uint VPLIndex, uint InstancedVPLIndex, uint RelativeRecordIndex, float3 WorldPosition, float3 WorldNormal, float4x4 InstanceToWorld)
+{ 
+	float3 Irradiance = 0;
+
+	float VisibilityStepSize = NUM_VISIBILITY_STEPS / AOObjectMaxDistance;
+	float MaxGatherDistanceSq = VPLGatherRadius * VPLGatherRadius;
+	float4 VPLPositionAndRadius = LoadVPLPositionAndRadius(VPLIndex, InstanceToWorld);
+
+	float3 VPLToGatherPoint = WorldPosition - VPLPositionAndRadius.xyz;
+	float DistanceSq = dot(VPLToGatherPoint, VPLToGatherPoint);
+	float DirectionDot = dot(-VPLToGatherPoint, WorldNormal);
+
+	// Hack
+	//VPLPositionAndRadius.w = 10;
+
+#define VISUALIZE_VPL_PLACEMENT 0
+#if VISUALIZE_VPL_PLACEMENT
+	//Irradiance += float3(.4f, .2f, .2f) * .1f * (DistanceSq < VPLPositionAndRadius.w * VPLPositionAndRadius.w);
+
+	//float3 DebugValue = LoadVPLFlux(VPLIndex) / 10000;
+	float3 DebugValue = LoadSurfelDiffuseColor(VPLIndex);
+	Irradiance += DebugValue * .1f * (DistanceSq < VPLPositionAndRadius.w * VPLPositionAndRadius.w);
+	//Irradiance += .00001f;
+#endif
+
+#define COMPUTE_VPL_LIGHTING 1
+#define VISUALIZE_VPL_SCENE 0
+
+#if COMPUTE_VPL_LIGHTING
+	BRANCH
+	if (DistanceSq < MaxGatherDistanceSq && DirectionDot > 0)
+	{
+		float3 VPLNormal = LoadVPLNormal(VPLIndex, InstanceToWorld);
+		float VPLNormalDot = dot(VPLNormal, VPLToGatherPoint);
+
+		BRANCH
+		if (VPLNormalDot > 0)
+		{
+			float3 VPLFlux = LoadVPLFlux(InstancedVPLIndex);
+
+			BRANCH
+			if (any(VPLFlux > .01f))
+			{
+				float Distance = sqrt(DistanceSq);
+				float3 VPLDirection = -VPLToGatherPoint / Distance;
+
+				#define USE_INVERSE_SQUARED_DISK_APPROX 1
+
+				#if USE_INVERSE_SQUARED_DISK_APPROX
+					float DiskRadiusSq = VPLPositionAndRadius.w * VPLPositionAndRadius.w;
+					float DistanceAttenuation = DiskRadiusSq / (DistanceSq + DiskRadiusSq);
+
+					float MinDistanceAttenuation = DiskRadiusSq / (VPLGatherRadius * VPLGatherRadius + DiskRadiusSq);
+					DistanceAttenuation = max(DistanceAttenuation - MinDistanceAttenuation, 0);
+
+					#define CONSERVE_ENERGY 0
+					#if CONSERVE_ENERGY 
+						float Integral = VPLPositionAndRadius.w * atan(VPLGatherRadius / VPLPositionAndRadius.w);
+						float EnergyConservationScale = Integral / (Integral - MinDistanceAttenuation * VPLGatherRadius);
+						DistanceAttenuation *= EnergyConservationScale;
+					#endif
+				#else
+					float DistanceAttenuation = RadialAttenuation(VPLToGatherPoint / VPLGatherRadius, 8);
+					DistanceAttenuation *= .0001f;
+				#endif
+
+				float CosTheta = DirectionDot / Distance;
+				float SinTheta = sqrt(1 - CosTheta * CosTheta);
+			
+				#define IRRADIANCE_FROM_AO_CONES 1
+				#if IRRADIANCE_FROM_AO_CONES
+
+					float ShadowDepthBias = 0;
+					float ShadowingDistance = Distance + ShadowDepthBias;
+					float NormalizedDistance = saturate(ShadowingDistance / AOObjectMaxDistance);
+					uint LowerStepIndex = (uint)min(NormalizedDistance * NUM_VISIBILITY_STEPS, NUM_VISIBILITY_STEPS - 1);
+					float LerpAlpha = ShadowingDistance - LowerStepIndex * VisibilityStepSize;
+
+					float3 InterpolatedBentNormal = lerp(
+						StepBentNormalBuffer[RelativeRecordIndex * NUM_VISIBILITY_STEPS + LowerStepIndex].xyz, 
+						StepBentNormalBuffer[RelativeRecordIndex * NUM_VISIBILITY_STEPS + LowerStepIndex + 1].xyz, 
+						saturate(LerpAlpha));
+					
+					float Shadow = GetVPLOcclusion(InterpolatedBentNormal, VPLDirection, .5f, 1);
+
+				#else
+
+					float StartOffset = 1;
+					float EndOffset = 10;
+					float RayLength = max(Distance - StartOffset - EndOffset, 0);
+					float ConeEndDistance = max(RayLength - SinTheta * VPLPositionAndRadius.w, 0);
+					float RadiusAtConeEnd = CosTheta * VPLPositionAndRadius.w;
+					// Clamp the cone angle so that it doesn't intersect the gather point surface
+					float TanConeAngle = min(RadiusAtConeEnd / ConeEndDistance, SinTheta / CosTheta);
+					float Shadow = RayTraceThroughGlobalObjects(WorldPosition + StartOffset * VPLDirection, VPLDirection, RayLength, TanConeAngle, ConeEndDistance);
+
+					if (ConeEndDistance == 0)
+					{
+						//Shadow = 10;
+					}
+
+				#endif
+
+				float VPLCosineLobe = saturate(VPLNormalDot / Distance);
+
+				Irradiance += (saturate(CosTheta) * VPLCosineLobe * DistanceAttenuation * Shadow) * VPLFlux;
+			}
+		}
+	}
+#elif VISUALIZE_VPL_SCENE
+
+	float DistanceWeight = (1 - saturate(DistanceSq / (VPLPositionAndRadius.w * VPLPositionAndRadius.w)));
+	float3 VPLNormal = LoadVPLNormal(VPLIndex, InstanceToWorld);
+	float DistanceBehindVPL = dot((WorldPosition - VPLPositionAndRadius.xyz), -VPLNormal);
+	float DistanceBehindMask = 1 - saturate(DistanceBehindVPL / (.5f * VPLPositionAndRadius.w));
+
+	float EffectiveDiskRadius = VPLPositionAndRadius.w * 1;
+	float DistanceAttenuation = VPLPositionAndRadius.w * VPLPositionAndRadius.w / (DistanceSq + EffectiveDiskRadius * EffectiveDiskRadius);
+	float3 VPLFlux = LoadVPLFlux(InstancedVPLIndex);
+	float NormalMask = saturate(dot(VPLNormal, WorldNormal));
+
+	Irradiance += DistanceWeight * VPLFlux * DistanceAttenuation * DistanceBehindMask * NormalMask;
+#endif
+
+	return Irradiance;
+}
+
+Buffer<float4> TileConeDepthRanges;
+
+float3 GatherIrradianceFromVPLs(float3 WorldPosition, float3 WorldNormal, uint RelativeRecordIndex, uint2 TileCoordinate, uint ThreadIndex)
+{
+	float3 Irradiance = 0;
+
+#if IRRADIANCE_FROM_SURFELS
+	/*
+	uint4 TileHead = GetTileHead(TileCoordinate);
+	uint TileIndex = TileCoordinate.y * TileListGroupSize.x + TileCoordinate.x;
+	float4 ConeAxisDepthRanges = TileConeDepthRanges.Load(TileIndex);
+	float SceneDepth = mul(float4(WorldPosition, 1), View.WorldToClip).w;
+	uint ListIndex = SceneDepth < ConeAxisDepthRanges.y ? 0 : 1;
+	uint NumObjectsAffectingTile = SceneDepth < ConeAxisDepthRanges.y ? TileHead.y : TileHead.z;
+
+	LOOP 
+	for (uint ListObjectIndex = 0; ListObjectIndex < NumObjectsAffectingTile; ListObjectIndex++)
+	{
+		uint ArrayIndex = ListObjectIndex;
+		uint ObjectIndex = TileArrayData.Load((ArrayIndex * TileListGroupSize.x * TileListGroupSize.y + TileHead.x) * NUM_CULLED_OBJECT_LISTS + ListIndex);
+		float4 ObjectPositionAndRadius = LoadObjectPositionAndRadius(ObjectIndex);
+		float ObjectDistance = length(ObjectPositionAndRadius.xyz - WorldPosition);
+		float BoundingRadius = ObjectPositionAndRadius.w + VPLGatherRadius;
+
+		BRANCH
+		if (ObjectDistance < BoundingRadius)
+		{
+			//float ObjectDistance = length(ObjectPositionAndRadius.xyz - WorldPosition) - ObjectPositionAndRadius.w;
+			//Irradiance += .0001f * (ObjectDistance > VPLGatherRadius / 2);
+
+			uint4 SurfelCoordinate = LoadObjectSurfelCoordinate(ObjectIndex);
+			uint ViewBasedLOD = GetViewBasedSurfelLOD(ObjectPositionAndRadius.xyz);
+			//uint DistanceBasedLOD = ObjectDistance - ObjectPositionAndRadius.w > .5f * VPLGatherRadius ? 1 : 0;
+			//uint FinalLOD = max(ViewBasedLOD, DistanceBasedLOD);
+			uint2 InstancedSurfelOffsetAndNum = GetSurfelOffsetAndNum(SurfelCoordinate, ViewBasedLOD, true);
+			uint2 SurfelOffsetAndNum = GetSurfelOffsetAndNum(SurfelCoordinate, ViewBasedLOD, false);
+
+			float4x4 ObjectInstanceToWorld = LoadObjectLocalToWorld(ObjectIndex);
+
+			LOOP
+			for (uint VPLIndex = ThreadIndex; VPLIndex < SurfelOffsetAndNum.y; VPLIndex += FINAL_GATHER_THREADGROUP_SIZE)
+			{
+				Irradiance += ComputeVirtualPointLighting(VPLIndex + SurfelOffsetAndNum.x, VPLIndex + InstancedSurfelOffsetAndNum.x, RelativeRecordIndex, WorldPosition, WorldNormal, ObjectInstanceToWorld);
+			}
+		}
+	}*/
+
+#else
+
+	uint NumVPLs = VPLParameterBuffer[1];
+	float4x4 Dummy = 0;
+
+	LOOP
+	for (uint VPLIndex = ThreadIndex; VPLIndex < NumVPLs; VPLIndex += FINAL_GATHER_THREADGROUP_SIZE)
+	{
+		Irradiance += ComputeVirtualPointLighting(VPLIndex, VPLIndex, RelativeRecordIndex, WorldPosition, WorldNormal, Dummy);
+	}
+
+#endif
+
+	//Irradiance = NumClusterVPLs / (float)MAX_VPLS_PER_TILE;
+
+	return Irradiance;
+}
+
+groupshared float3 SharedThreadIrradiance[FINAL_GATHER_THREADGROUP_SIZE];
+
+/**  */
+[numthreads(FINAL_GATHER_THREADGROUP_SIZE, 1, 1)]
+void ComputeIrradianceCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{ 
+	uint StartIndex = SavedStartIndex[0];
+	uint NumRecords = ScatterDrawParameters[1];
+
+	uint RecordIndex = StartIndex + GroupId.x;
+	uint RelativeRecordIndex = GroupId.x;
+	uint ThreadIndex = GroupThreadId.x;
+
+	float3 Irradiance = 0;
+
+	if (RecordIndex < NumRecords)
+	{
+		float3 RecordWorldNormal = IrradianceCacheNormal[RecordIndex].xyz;
+		float3 RecordWorldPosition = IrradianceCachePositionRadius[RecordIndex].xyz;
+		uint2 TileCoordinate = IrradianceCacheTileCoordinate[RecordIndex];
+		Irradiance = GatherIrradianceFromVPLs(RecordWorldPosition, RecordWorldNormal, RelativeRecordIndex, TileCoordinate, ThreadIndex);
+	}
+
+	SharedThreadIrradiance[ThreadIndex] = Irradiance;
+
+	GroupMemoryBarrierWithGroupSync();
+
+	if (ThreadIndex == 0)
+	{
+		float3 Irradiance = 0;
+
+		for (uint i = 0; i < FINAL_GATHER_THREADGROUP_SIZE; i++)
+		{
+			Irradiance += SharedThreadIrradiance[i];
+		}
+
+		RWSurfelIrradiance[RelativeRecordIndex] = float4(Irradiance, 0);
+	}
+}
+
+RWBuffer<float4> RWIrradianceCacheIrradiance;
+Buffer<float4> SurfelIrradiance;
+Buffer<float4> HeightfieldIrradiance;
+
+/**  */
+[numthreads(FINAL_GATHER_THREADGROUP_SIZE, 1, 1)]
+void CombineIrradianceSamplesCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint StartIndex = SavedStartIndex[0];
+	uint NumRecords = ScatterDrawParameters[1];
+
+	uint RecordIndex = StartIndex + DispatchThreadId.x;
+	uint RelativeRecordIndex = DispatchThreadId.x;
+
+	if (RecordIndex < NumRecords)
+	{
+		RWIrradianceCacheIrradiance[RecordIndex] = SurfelIrradiance[RelativeRecordIndex] + HeightfieldIrradiance[RelativeRecordIndex];
+	}
+}
+
+#ifndef SCREEN_GRID_IRRADIANCE_THREADGROUP_SIZE_X
+#define SCREEN_GRID_IRRADIANCE_THREADGROUP_SIZE_X 1
+#endif
+
+Buffer<float> ConeDepthVisibilityFunction;
+
+/**  */
+[numthreads(SCREEN_GRID_IRRADIANCE_THREADGROUP_SIZE_X, SCREEN_GRID_IRRADIANCE_THREADGROUP_SIZE_X, 1)]
+void ComputeStepBentNormalScreenGridCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint2 OutputCoordinate = DispatchThreadId.xy;
+	float2 BaseLevelScreenUV = GetBaseLevelScreenUVFromScreenGrid(OutputCoordinate);
+
+	float3 WorldNormal;
+	float SceneDepth;
+	bool bHasDistanceFieldRepresentation;
+	bool bLit;
+	GetDownsampledGBuffer(BaseLevelScreenUV, WorldNormal, SceneDepth, bHasDistanceFieldRepresentation, bLit);
+
+	float3 TangentX;
+	float3 TangentY;
+	FindBestAxisVectors2(WorldNormal, TangentX, TangentY);
+
+	uint OutputBaseIndex = OutputCoordinate.y * ScreenGridConeVisibilitySize.x + OutputCoordinate.x;
+	uint InputBaseIndex = OutputBaseIndex * NUM_CONE_DIRECTIONS;
+
+	//@todo - more threads
+	for (uint StepIndex = 0; StepIndex < NUM_VISIBILITY_STEPS; StepIndex++)
+	{
+		float3 UnoccludedDirection = 0;
+
+		for (uint ConeIndex = 0; ConeIndex < NUM_CONE_DIRECTIONS; ConeIndex++)
+		{
+			float ConeVisibility = ConeDepthVisibilityFunction[(InputBaseIndex + ConeIndex) * NUM_VISIBILITY_STEPS + StepIndex];
+			float3 ConeDirection = AOSamples2.SampleDirections[ConeIndex].xyz;
+			float3 RotatedConeDirection = ConeDirection.x * TangentX + ConeDirection.y * TangentY + ConeDirection.z * WorldNormal;
+			UnoccludedDirection += ConeVisibility * RotatedConeDirection;
+		}
+
+		float InvNumSamples = 1.0f / (float)NUM_CONE_DIRECTIONS;
+		UnoccludedDirection = UnoccludedDirection * (BentNormalNormalizeFactor * InvNumSamples);
+
+		RWStepBentNormal[OutputBaseIndex * NUM_VISIBILITY_STEPS + StepIndex] = float4(UnoccludedDirection, 0);
+	}
+}
+
+/**  */
+[numthreads(FINAL_GATHER_THREADGROUP_SIZE, 1, 1)]
+void ComputeIrradianceScreenGridCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint2 OutputCoordinate = GroupId.xy;
+	float2 BaseLevelScreenUV = GetBaseLevelScreenUVFromScreenGrid(OutputCoordinate);
+	uint ThreadIndex = GroupThreadId.x;
+
+	float3 Irradiance = 0;
+
+	if (all(OutputCoordinate < ScreenGridConeVisibilitySize))
+	{
+		float3 WorldNormal;
+		float SceneDepth;
+		bool bHasDistanceFieldRepresentation;
+		bool bLit;
+		GetDownsampledGBuffer(BaseLevelScreenUV, WorldNormal, SceneDepth, bHasDistanceFieldRepresentation, bLit);
+
+		float3 TangentX;
+		float3 TangentY;
+		FindBestAxisVectors2(WorldNormal, TangentX, TangentY);
+
+		uint StepBentNormalBaseIndex = OutputCoordinate.y * ScreenGridConeVisibilitySize.x + OutputCoordinate.x;
+
+		float2 ScreenUV = GetScreenUVFromScreenGrid(OutputCoordinate);
+		float2 ScreenPosition = (ScreenUV.xy - View.ScreenPositionScaleBias.wz) / View.ScreenPositionScaleBias.xy;
+		
+		float4 HomogeneousWorldPosition = mul(float4(ScreenPosition * SceneDepth, SceneDepth, 1), View.ScreenToWorld);
+		float3 OpaqueWorldPosition = HomogeneousWorldPosition.xyz / HomogeneousWorldPosition.w;
+		uint2 TileCoordinate = ComputeTileCoordinateFromScreenGrid(OutputCoordinate);
+
+		Irradiance = GatherIrradianceFromVPLs(OpaqueWorldPosition, WorldNormal, StepBentNormalBaseIndex, TileCoordinate, ThreadIndex);
+	}
+
+	SharedThreadIrradiance[ThreadIndex] = Irradiance;
+
+	GroupMemoryBarrierWithGroupSync();
+
+	if (ThreadIndex == 0)
+	{
+		float3 Irradiance = 0;
+
+		for (uint i = 0; i < FINAL_GATHER_THREADGROUP_SIZE; i++)
+		{
+			Irradiance += SharedThreadIrradiance[i];
+		}
+
+		//float3 Irradiance = SharedThreadIrradiance[0];
+
+		if (all(OutputCoordinate < ScreenGridConeVisibilitySize))
+		{
+			uint OutputIndex = OutputCoordinate.y * ScreenGridConeVisibilitySize.x + OutputCoordinate.x;
+			RWSurfelIrradiance[OutputIndex] = float4(Irradiance, 0);
+		}
+	}
+}
+
+RWTexture2D<float4> RWIrradianceTexture;
+
+/**  */
+[numthreads(SCREEN_GRID_IRRADIANCE_THREADGROUP_SIZE_X, SCREEN_GRID_IRRADIANCE_THREADGROUP_SIZE_X, 1)]
+void CombineIrradianceScreenGridCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+    uint3 GroupThreadId : SV_GroupThreadID) 
+{
+	uint2 OutputCoordinate = DispatchThreadId.xy;
+	uint InputBaseIndex = OutputCoordinate.y * ScreenGridConeVisibilitySize.x + OutputCoordinate.x;
+
+	RWIrradianceTexture[OutputCoordinate] = SurfelIrradiance[InputBaseIndex] + HeightfieldIrradiance[InputBaseIndex];
+}

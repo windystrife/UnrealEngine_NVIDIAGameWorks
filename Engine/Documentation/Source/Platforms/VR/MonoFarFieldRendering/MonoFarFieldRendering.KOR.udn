@@ -1,0 +1,288 @@
+﻿INTSourceChangelist:3571159
+Availability: Public
+Crumbs: %ROOT%
+Title: 모노스코픽 파 필드 렌더링
+Description: 언리얼 엔진 4 의 VR 모바일 어플리케이션용 고급 렌더링 피처인 모노스코픽 파 필드 렌더링에 대해 배워봅니다.
+Type: Overview
+SkillLevel: Advanced
+Version: 4.16
+Parent: Platforms/VR
+Order:
+Tags: Rendering
+Tags: Performance and Profiling
+Topic-Image:hybMonRend_topicImage.png
+related: Engine/Performance
+related: Engine/Performance/GPU
+related: Engine/Rendering
+related: Engine/Performance/StatCommands
+related: Platforms/VR/Profiling
+related: Platforms/VR/Profiling/Considerations
+related: Platforms/VR/Profiling/Overview
+Contributor: Oculus
+
+[TOC(start:2 end:3)]
+
+**Monoscopic Far Field** (모노스코픽 파 필드) 렌더링(, 보다 정확하게는 하이브리드 모노스코픽 렌더링)은 언리얼 엔진 4 (UE4) 로 제작되는 VR 모바일 어플리케이션용 고급 렌더링 피처입니다. 일반적으로 모노스코픽 파 필드 렌더링이란 
+원거리 콘텐츠가 상당히 많이 포함된 레벨의 퍼포먼스를 향상시켜주는 기법입니다. 그 원리는, 원거리의 오브젝트들은 양쪽 눈에 대해 한 번만 렌더링하기 때문입니다.
+이런 식으로 원거리 오브젝트를 렌더링한 것을 저희 에픽에서 관찰한 결과, VR 모바일 어플리케이션에 상당한 퍼포먼스 향상이 있었습니다.
+
+[OBJECT:EmbeddedVideo]
+	[PARAMLITERAL:videoid]
+	bAyqVgv-MqA
+	[/PARAMLITERAL]
+	[PARAMLITERAL:width]
+	100
+	[/PARAMLITERAL]
+	[PARAMLITERAL:height]
+	56.25
+	[/PARAMLITERAL]
+	[PARAMLITERAL:units]
+	%
+	[/PARAMLITERAL]
+	[PARAMLITERAL:type]
+	simple
+	[/PARAMLITERAL]
+[/OBJECT]
+
+UE4 버전 4.16 릴리즈 이후, 멀티뷰 기능이 있는 GearVR 디바이스에 모노스코픽 파 필드 렌더링을 활성화시켜, 씬의 스테레오스코픽 니어 필드 렌더링 부분을 최적화시켰습니다.
+
+## 파 필드 모노스코픽 렌더링 활성화
+
+[REGION:note]
+UE4 의 모노스코픽 파 필드 렌더링 세팅 활성화 전 Mobile HDR (모바일 HDR) 옵션이 꺼졌는지 확인하세요.
+[/REGION]
+
+새 프로젝트를 만들면 모노스코픽 파 필드 렌더링은 기본으로 꺼져있습니다. 이 세팅은 언리얼 에디터의 **프로젝트 세팅** 메뉴에서 사이드 바의 **렌더링** 을 선택하면 찾을 수 있습니다.
+**프로젝트-설명** 메뉴 안 **VR** 드롭다운 메뉴도 보일 것입니다.
+
+[REGION:lightbox]
+	[![](uncheckedUI.png)(w:600)](uncheckedUI.png)
+[/REGION]
+
+[REGION:caption]
+	클릭하면 이미지 원본을 확인합니다.
+[/REGION]
+
+모노스코픽 파 필드 렌더링 활성화 방법은, **Monoscopic Far Field** 렌더링 라벨 옆 박스를 체크하면 됩니다.
+
+![](checkedUI.png)
+
+**Monoscopic Far Field** 세팅 활성화 이후, UE4 를 재시작하라는 창이 뜹니다. 준비가 되면 UE4 를 재시작하여 프로젝트에 **모노스코픽 파 필드** 렌더링 세팅을 적용합니다.
+
+![](restartWarning.png)  
+
+### 모노스코픽 카메라 추가
+
+모노스코픽 파 필드 렌더링이 꺼진 상태에서 프로젝트에는 각 눈에 하나씩 스테레오스코픽 카메라가 둘 있습니다.
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	![꺼짐](Disabled.png)
+	[/PARAM]
+	[PARAM:after]
+	![켜짐](Enabled.png)
+	[/PARAM]
+[/OBJECT]
+
+모노스코픽 파 필드 렌더링을 켜면, UE4 는 기존 스테레오스코픽 카메라 사이에 세 번째 카메라를 추가합니다. 이 카메라가 모노스코픽 카메라로, 하이브리드 모노스코픽 (및 스테레오스코픽) 렌더링 파이프라인을 활성화시킵니다.
+
+### 스테레오스코픽 카메라 프러스텀 대칭
+
+디바이스의 플랫폼에 따라, 스테레오스코픽 카메라 프러스텀의 면 지오메트리가 다를 수 있습니다. GearVR 디바이스의 경우, 스테레오스코픽 및 모노스코픽 카메라 프러스텀은 대칭입니다. 하지만 Rift 디바이스의 경우, 스테레오스코픽 및 모노스코픽 카메라 프러스텀은 비대칭입니다.
+GearVR 과 Rift 디바이스 사에이 카메라 프러스텀이 어떻게 다른지는 다음 도표를 통해 참고해 주세요.
+
+[REGION:imagetable]
+| ![FrustaGeometryGear.png](FrustaGeometryGear.png)(w:542) | ![FrustaGeometryRift.png](FrustaGeometryRift.png)(w:542) |
+| --- | --- |
+| GearVR (대칭형 프러스텀) | Rift (비대칭형 프러스텀) |
+[/REGION]
+
+왼쪽에 보이듯, GearVR 스테레오스코픽 카메라는 프러스텀이 대칭이라, 모노스코픽 카메라가 스테레오스코픽 카메라와 같은 투영 행렬을 공유한다는 뜻입니다.
+하지만 Rift 디바이스에서 스테레오스코픽 카메라는 비대칭이라, (즉 코 쪽 내향 각도가 외향 각도보다 작으므로) 모노스코픽 카메라의 프러스텀이 좌우 프러스텀의 합집합이 되어, 
+모노스코픽 렌더 타겟이 스트레오스코픽 렌더 타겟보다 살짝 커지게 됩니다.
+
+### 분할 면 프로퍼티
+
+UE4 가 모노스코픽 카메라를 구성할 때, 렌더러는 분할 (컬링) 면을 추가합니다.
+
+![](AddingSplitPlane.png)
+
+[REGION:caption]
+초록 색 분할 면이 모노스코픽 카메라 근거리 면 역할을 합니다.
+[/REGION]
+
+프로젝트에 추가되는 분할 면에 적용되는 프로퍼티는 다음과 같습니다:
+
+*	분할 면은 프로젝트의 Z 축에 평행입니다.
+*	분할 면의 **Mono Culling Distance** (모노 컬링 거리) 기본값은 `750.0` 센티미터 (7.5 미터) 입니다.
+*	면 보다 먼 쪽에 있는 오브젝트는 모노스코픽 카메라로 렌더링합니다.
+*	컬링 면 양 쪽에 걸친 오브젝트는 두 (모노스코픽 및 스테레오스코픽) 카메라 유형 모두 렌더링합니다.
+
+다음 이미지에서 음영 (초록) 부분은 분할 면의 먼 쪽을 나타내며, 이 부분의 오브젝트는 모노스코픽 카메라의 뎁스 버퍼에 렌더링됩니다.
+분할 면의 가까운 쪽에 해당되는 오브젝트는 스테레오스코픽 카메라의 뎁스 버퍼에 렌더링됩니다.
+
+![](MonoRenderArea.png)
+
+다음 이미지 비교는 실제 분할 면을 나타냅니다:
+
+[REGION:imagetable]
+| ![StereoBuffer_banner.png](StereoBuffer_banner.png)(w:542) | ![MonoBuffer_banner.png](MonoBuffer_banner.png)(w:542) |
+| --- | --- |
+| 스테레오스코픽 뎁스 버퍼 | 모노스코픽 뎁스 버퍼 |
+[/REGION]
+
+## 퍼포먼스 고려사항
+
+지금까지 UE4 가 스테레오스코픽 카메라 또는 모노스코픽 카메라를 통해 별도의 콘텐츠를 그리는 뎁스 버퍼 렌더링 기법을 활용한다는 것을 배웠습니다. 일반적인 관점에서 UE4 모바일 포워드 렌더러는 
+뎁스 버퍼를 사용하도록 [수정](#Bookmark1), 스테레오스코픽 픽셀이 모노스코픽 픽셀보다 픽셀 수가 적은지 비교하고 있습니다. 오브젝트 기반 렌더링 기법에 비교하면, 
+픽셀 기반 분할 (컬링) 면을 활용하는 것은 퍼포먼스상 이득이 있을 수 있지만, 오브젝트가 분할 면에 걸친 경우 모노스코픽 또는 (오브젝트의 픽셀이 충분히 멀어 모노스코픽 방식으로 그릴 수 있어도) 
+스테레오스코픽 방식으로만 그려야 합니다. 이렇게 추가되는 드로 콜은 보통 불필요한 대역폭을 생성하여, GPU 및 CPU 버텍스 비용이 늘어납니다.
+
+다음 이미지에서 이 퍼포먼스 악영향의 예를 살펴볼 수 있습니다. 절벽의 바운딩 구체가 분할 면과 충돌하면서, (절벽의 픽셀은 모노스코픽 파 필드 카메라로만 렌더링해야 함에도) 
+스테레오스코픽 니어 필드 카메라가 절벽을 렌더링하고 있습니다.
+
+![](StereoNoCull.png)
+
+## 퍼포먼스 최적화
+
+프로젝트의 퍼포먼스를 측정하기 위해서는, **렌더링 하드웨어 인터페이스 (RHI)** 가 생성하는 통계 출력을 참고하세요. RHI 생성 통계를 확인하는 방법은 다음과 같습니다:
+
+1.	에디터에서 **뷰포트 옵션** 버튼을 클릭합니다.
+
+	[REGION:lightbox]
+	[![](RHIStat_Step1.png)(w:600)](RHIStat_Step1.png)
+	[/REGION]
+	
+	[REGION:caption]
+		클릭하면 이미지 원본을 확인합니다.
+	[/REGION]
+
+1.	마우스 커서를 **통계** 옵션 위에 올려 통계 메뉴를 엽니다.
+
+	[REGION:lightbox]
+	[![](RHIStat_Step2.png)(w:600)](RHIStat_Step2.png)
+	[/REGION]
+	
+	[REGION:caption]
+		클릭하면 이미지 원본을 확인합니다.
+	[/REGION]
+
+1.	**시작 > 고급** 으로 이동합니다.
+
+	[REGION:lightbox]
+	[![](RHIStat_Step3.png)(w:600)](RHIStat_Step3.png)
+	[/REGION]
+	
+	[REGION:caption]
+		클릭하면 이미지 원본을 확인합니다.
+	[/REGION]
+
+1.	마지막으로 **RHI** 옵션을 선택하면 프로젝트의 RHI [통계](Engine/Performance/StatCommands) 가 표시됩니다.
+
+	[REGION:lightbox]
+	[![](RHIStat_Step4.png)(w:600)](RHIStat_Step4.png)
+	[/REGION]
+	
+	[REGION:caption]
+		클릭하면 이미지 원본을 확인합니다.
+	[/REGION]
+
+#### 최종 결과
+
+이 시점에서 프로젝트의 [통계](Engine/Performance/StatCommands) 확인이 가능할 것입니다.
+
+[REGION:lightbox]
+[![](RHIStat_Profiling.png)(w:600)](RHIStat_Profiling.png)
+[/REGION]
+
+[REGION:caption]
+	클릭하면 이미지 원본을 확인합니다.
+[/REGION]
+
+프로젝트의 RHI 프로파일 확인 결과가 허용할 수 있는 수준이 아니라면, 프로젝트의 퍼포먼스 최적화를 위해 취할 수 있는 전략이 몇 가지 있는데, 다음과 같습니다:
+
+*	**Split Plane Distance (분할 면 거리)를 변경합니다**. 분할 면 거리를 수정하여 렌더링 영역을 크게 (또는 작게) 해야 하는 씬이 있을 수 있습니다.
+*	**Monoscopic Rendering Mode (모노스코픽 렌더링 모드)를 변경합니다**. 모노스코픽 렌더링 모드를 변경하면 특정 오브젝트가 강제로 모노 렌더링되도록 설정할 수 있습니다.
+*	**원거리 오브젝트를 강제로 모노 렌더링되도록 합니다**. 어쩔 수 없이 (스카이박스 또는 배경 메시같은) 특정 오브젝트는 강제로 모노 렌더링되도록 해야 하는 경우가 있습니다.
+
+### 분할 면 거리 변경
+
+분할 면 거리를 변경하고자 하는 경우, 에디터에서 프로젝트의 **월드 세팅** 을 열고 **VR** 메뉴를 찾은 다음 **Mono Culling Distance** (모노 컬링 거리)를 원하는 거리로 설정합니다.
+
+![](MonoCullingDistance.png)
+
+### 모노스코픽 렌더링 모드 변경
+
+모노스코픽 렌더링 옵션을 켠 이후, 프로젝트의 모노스코픽 렌더링 모드를 변경하고 싶을 수 있습니다. 씬을 다른 모드로 렌더링하면 프로젝트에 발생할 수 있는 퍼포먼스 이슈 디버깅에 도움이 될 수 있습니다.
+어플리케이션의 모노스코픽 렌더링 모드를 변경하려면, 에디터 콘솔 명령 `vr.MonoscopicFarFieldMode [0-4]` 를 입력합니다.
+
+![](UpdateMonoMode_console.png)
+
+기본적으로 `vr.MonoscopicFarFieldMode` 는 `1` 로 설정되나, 기본값을 변경하려면 다음 표를 참고하세요.
+
+|값|모드|
+|-----|---|
+|**0**| (하이브리드) 모노스코픽 파 필드 렌더링을 끕니다. |
+|**1**| (하이브리드) 모노스코픽 파 필드 렌더링을 켭니다. 이 모드는 모노스코픽 파 필드 렌더링을 켜면 기본으로 설정됩니다. |
+|**2**| 스테레오스코픽 니어 필드 렌더링만 켭니다. |
+|**3**| 스테레오스코픽 니어 필드 렌더링을 켜면서 파 필드 픽셀 뎁스 테스트도 끕니다. 기본적으로 이 옵션은 분할 (컬링) 면을 끄는 것입니다. |
+|**4**| 모노스코픽 파 필드 렌더링만 켭니다. |
+
+### 원거리 오브젝트를 강제로 모노 렌더링
+
+다음과 같은 씬 작업을 한다 칩시다.
+
+![](DebugScene.png)
+
+여기서 `vr.MonoscopicFarFieldMode 3` 콘솔 명령을 입력하면 스테레오스코픽 파 필드 렌더링을 켜면서 분할 면을 끕니다.
+
+![](StereoNoCull.png)
+
+[REGION:caption]
+절벽이 컬링되기를 기대하겠지만, 스테레오스코픽 카메라에 절벽 메시가 여전히 렌더링되어 퍼포먼스에 악영향을 끼칠 수 있습니다.
+[/REGION]
+
+(씬을 관찰한 후) 절벽 메시를 모노스코픽 파 필드 모드로 강제 렌더링시켜야겠다 결정했다면, **블루프린트 에디터** 를 사용하여 메시를 열고 **디테일** 패널의 **Rendering** (렌더링) 메뉴 아래 **Render in Mono** (모노 렌더링) 옵션을 선택합니다.
+
+[REGION:lightbox]
+	[![](ForceRenderMono.png)(w:600)](ForceRenderMono.png)
+[/REGION]
+
+[REGION:caption]
+	클릭하면 이미지 원본을 확인합니다.
+[/REGION]
+
+[REGION:tip]
+**Render in Mono** (모노 렌더링) 옵션을 true 로 설정하면, 머리 장착 디스플레이(HMD)가 연결되고 프로젝틍데 **Monoscopic Far Field** (모노스코픽 파 필드) 렌더링 옵션이 켜진 경우 절벽 컴포넌트는 모노스코픽 니어 필드 카메라로만 렌더링됩니다.
+[/REGION]
+
+## 입체시
+
+하이브리드 모노스코픽 렌더링에 영감을 준 것은 입체시(stereopsis)의 시각(ocular) 프로세스입니다. [미국 안과 학회](https://www.aao.org/eye-health/ask-ophthalmologist-q/stereopsis) 에 의하면, 입체시는 깊이 지각(depth perception)과 동의어입니다.
+사물을 볼 때, 양쪽 눈은 사물을 살짝 다른 각도에서 바라보며, 각 눈이 그 이미지를 뇌로 전송한 뒤, 뇌에서는 그 이미지를 하나의 이미지로 "합성"합니다. 각 눈에서 전송된 이미지의 차이로 
+양안 부등(binocular disparity) 현상이 발생하고, 뇌에서는 이를 통해 깊이 정보를 추출해 냅니다.
+
+[REGION:note]
+오브젝트가 멀 수록, 뇌에서 오브젝트의 깊이 정보를 추출하기가 힘들어집니다.
+[/REGION]
+
+(#Bookmark1)
+###양안 부등 현상 이용
+
+멀리 있는 오브젝트에서는 뇌가 깊이 정보를 추출해 내기 힘들다는 사실에 착안하여, UE4 모바일 포워드 렌더러를 다음과 같이 (순서대로) 수정했습니다:
+
+1.	스테레오스코픽 카메라로 불투명 오브젝트를 렌더링합니다.
+
+	![](Stereo.png)
+
+1.	결과물을 이동(shift) 및 결합하여 모노스코픽 오클루전 마스크를 생성, 모노스코픽 뎁스 버퍼를 미리 채웁니다.
+
+1.	모노스코픽 카메라로 불투명 오브젝트를 렌더링합니다.
+
+	![](MonoOnly.png)
+
+1.	모노스코픽 카메라의 결과를 스테레오 뎁스 버퍼속에 합성합니다.
+
+	![](MonoStereo.png)
+
+1.	스테레오스코픽 카메라로 모든 투명 콘텐츠를 렌더링하고 모든 포스트 프로세싱을 처리합니다.

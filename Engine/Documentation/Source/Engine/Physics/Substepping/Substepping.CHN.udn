@@ -1,0 +1,92 @@
+﻿INTSourceChangelist:2277863
+Availability:Public
+Title:物理分步
+Crumbs: %ROOT%, Engine
+Description:解释物理分步，以及其在何时使用。 
+Version:4.9
+
+[VAR:Topic]
+[OBJECT:Topic]
+	[PARAM:image]
+		![%Engine/Physics:title%](Engine/Physics/physics_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/physics_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Physics:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Physics:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Physics]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+[VAR:TopicCompact]
+[OBJECT:TopicCompact]
+	[PARAM:image]
+		![%Engine/Physics:title%](Engine/Physics/physics_topic.png)
+	[/PARAM]
+	[PARAM:icon]
+		![](%ROOT%/physics_icon.png)(convert:false)
+	[/PARAM]
+	[PARAM:title]
+		%Engine/Physics:title%
+	[/PARAM]
+	[PARAM:description]
+		%Engine/Physics:description%
+	[/PARAM]
+	[PARAM:path]
+		[RELATIVE:Engine/Physics]
+	[/PARAM]
+[/OBJECT]
+[/VAR]
+
+
+
+利用物理 **分步** 可获得更加准确和稳定的物理模拟，然而它将加重性能的负担。最明显的增强是“布偶颤抖”和其他复杂的物理资源。
+
+## 启用分步
+
+在  **Project Setting** -> **Physics** 标签下可开启分步：
+
+[REGION:raw]
+![](SS_Enabled.png)(w:940)
+[/REGION]
+
+[REGION:note]
+此功能尚在完善中，无法得到 APEX Destruction 的全部支持。当前不支持移动设备使用。我们正努力将此功能实现，因为它可以极大地提升观感。
+[/REGION]
+
+[REGION:raw]
+| 属性 | %spacer% | 描述 |
+| --- | :---:| :--- |
+| **Substepping** || 在当前项目中启用或停用分步。|
+| **Substepping Async** || 是否对不同步物理模拟进行分步。|
+| **Max Substep Delta Time** || 一个分步所允许进行的最长时间（以秒为单位）。因此，如一个整步进行时间为 .05 秒，**Max Substep Delta Time** 被设为 .025，整步将被分为两个分步。如果整步将进行较长时间，如 2 秒整，则将基于 **Max Substeps** 的数值对步进行均分，并非为 **80** `(2.0/0.025=80)` 分步。值得注意的是 **Max Physics Delta Time** 对物理步长有所限制。|
+| **Max Substeps** || 一个整步被允许划分的最大分步数。|
+[/REGION]
+
+[VAR:spacer]![](%ROOT%/spacer.png)(w:150 convert:false)[/VAR]
+
+[VAR:spacer2]![](%ROOT%/spacer.png)(w:40 convert:false)[/VAR]
+
+## 技术细节
+
+虚幻引擎 4 中的帧率十分多变。虽然有利于硬件的可伸缩性，但它为物理引擎带来了挑战。因为物理引擎的最佳工作方式是小幅固定时间步。分步过程将获取总帧长并将其划分为分步。物理模拟将在每帧中出现多次标记。执行的分步数量取决于设置的最大分步增量时间数值大小。最大分步时间越小，模拟越稳定，但 CPU 的消耗将更高。
+
+分步过程对玩家为隐藏状态，意味着须对物理引擎的一些调用进行插值或维护。例如，用户在一个单帧中对 Actor 施加了一个力量，帧被内部分步了 N 次，则需要连续施加 N 次模拟步的力量，以达到相同的加速度。同样，如用户设置 Actor 的目标位置，则须在多个分步上内插目标位置，以维持所需的速度。所有的这些细节已被 UE4 内部处理，但必需的信息记录将产生一定的 CPU 和内存消耗。
+
+需要注意的另一个技术细节是分步过程中碰撞回呼的方式。UE4 在一个单独的物理线程中运行物理分步过程，使游戏线程能继续工作。为获得最佳的性能，我们将延迟碰撞回呼，直到最终的分步完成。这意味着一个碰撞可能获得多个回呼。例如 A 和 B 发生碰撞并弹开，可能获得 A 和 B 重叠的回呼，以及在同一帧中 A 和 B 不再重叠的回呼。所有回呼将被推入一个队列，因此来自分步 1 的回呼将在分步 2 的回呼之前被处理。
+
+
+## 使用
+
+分步将大幅提升复杂物理资源（如用于布偶的资源）的质量。然而需根据游戏的实际情况平衡质量提高和 CPU 消耗。
+
+
+
+
+

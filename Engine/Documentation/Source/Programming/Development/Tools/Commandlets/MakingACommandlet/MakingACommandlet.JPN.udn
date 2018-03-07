@@ -1,0 +1,238 @@
+﻿INTSourceChangelist:2638745
+Availability:Docs
+Title:コマンドレットの作成方法
+Crumbs:%ROOT%, Programming, Programming/Development, Programming/Development/Tools
+Description:ゲームで使用するコンテンツを分析、変更するための全く新しいカスタムのコマンドレットを作成する方法
+
+[REGION:todo]
+	このページはアンリアル エンジン 3 のドキュメントから転載され現在見直しがされています。古い情報が含まれる場合もありますので予めご了承ください。
+[/REGION]
+
+[TOC(start:2)]
+
+コマンドレットは、アンリアル エンジン環境で動作するコマンドライン プログラムです。ほとんどの場合、コンテンツの大量変更、情報を取得するためのコンテンツのイタレーション、または単体テストのメカニズムとして利用されます。
+
+基本的には、これらはエンジンにより初期化された小さなアプレットですが、そのほとんどは Windows のコンソール出力の範囲にとどめられています。
+
+エンジンは、コマンドラインで渡されたコマンドがコマンドレットかどうかを自動的に判断し、コマンドレットに一致する場合は関連コードを実行します。
+
+UContentCommandlets.cpp と UnPackageUtilities にあるコマンドレットのサンプルを参照してください。
+
+
+
+## スクリプトでコマンドレットを作成する方法
+
+以下のようにコマンドレットのスクリプト クラスを作成します。
+
+
+    
+    class HelloWorldCommandlet extends Commandlet;
+    
+    event int Main( string Params )
+    {
+       log( " hello world " );
+    
+       return 0;
+    }
+    
+
+
+
+または、ネイティブ コマンドレットの場合は以下のようになります。
+
+
+    
+    class HelloWorldCommandlet extends Commandlet
+    native;
+    
+    cpptext
+    {
+    int32 Main(const FString& CmdLine)
+    {
+       warnf(TEXT("hello world"));
+       return 0;
+    }
+    }
+    
+    native event int Main( string Params );
+    
+
+
+
+Main() 関数はコマンドレットのエントリ ポイントです。コマンドレットは実行時に文字列を一つ受け取りますが、ここにはパラメータがすべて含まれています。次の行をご覧ください。
+
+
+    
+    gamename.exe helloworld param1 param2 param3 に対して、
+    
+
+
+
+この場合、コマンドレットでは、`param1 param2 param3` をコマンドライン パラメータとしてみなします。
+
+
+
+## ネイティブ コードでコマンドレットを作成する方法
+
+ほとんどのコマンドレットは、ネイティブ コードのイントリンシック クラスとして実装されています。この方法によるコマンドレットの作成手順はまったく異なります。ほとんどのコマンドレット宣言は `EditorCommandlets.h` に保存されています。
+
+最初に、ヘッダーファイルで `EditorCommandlets.h` のようにクラス宣言をします。
+
+    
+    BEGIN_COMMANDLET(Name,Package)
+      // ここで他のメソッドを宣言します。
+    END_COMMANDLET
+    
+
+
+コマンドレットにはクラス名 "UNameCommandlet" が与えられ、指定パッケージ内 (Editor など) に格納されます。
+
+次に、.cpp ファイルで (`UContentCommandlets.cpp` など)、作成するコマンドレットの `Main()` 関数を実装します。必要に応じて、`virtual !CreateCustomEngine()` 関数をオーバーライドすることもできます。詳細については、UCommandlet ソースを参照してください。
+
+    
+    int32 UNameCommandlet::Main(const FString& Params)
+    {
+        // do yer stuff here...
+        return 0;
+    }
+    
+
+
+
+これで完成、ではありません。これは intrinsic クラスなので、スクリプト システムにその存在を伝えなければなりません。そのために `UnrealEdClasses.h` ファイルの AUTO_INITIALIZE_REGISTRANTS_UNREALED #define を手動で編集する必要があります。このリストに、作成したコマンドレットの `StaticClass()` 関数呼び出しを追加します。
+
+    
+    #define AUTO_INITIALIZE_REGISTRANTS_UNREALED \
+        UNameCommandlet::StaticClass(); \
+    
+
+
+
+スクリプトを次回再ビルドするときに、コンパイラはリストに追加されたコマンドレット クラスを使用して、アルファベット順にこのファイルをオーバーライドしていきます。
+
+
+
+## 便利なヘルプ情報
+
+コマンドレットにはヘルプ情報機能が組み込まれているので、ユーザーはその機能やオプション内容を把握することができます。コマンドレットに関するヘルプ情報を作成するには、そのコマンドレットが含まれているローカライズ テキスト ファイルに、エントリを追加する必要があります。パッケージが Core にある場合は、Core.int を修正するとヘルプ情報が表示されるようになります。以下に Core に属する 「hello world」 のコマンドレット設定例を示します。
+
+
+    
+    [HelloWorldCommandlet]
+    HelpDescription="This commandlet displays hello world" HelpUsage="gamename.exe helloworld"
+    HelpWebLink="https://udn.epicgames.com/bin/view/Three/MakingACommandlet"
+    HelpParamNames[0]="param1"
+    HelpParamDescriptions[0]="Ignored since helloworld doesn't need params"
+    
+
+
+
+セクション名にはクラス名の一部として _commandlet_ が含まれていなければなりません。これがない場合、コマンドレットは検出されません。この情報の扱いについては、次のコマンドを実行していただくとお分かり頂けます。
+
+
+    
+    game.exe help help
+    game.exe help list
+    game.exe help webhelp help
+    
+
+
+
+
+
+## コマンドレットの作成方法
+
+コマンドレットを実行するには、実行したいコマンドレット名を使用してゲームを実行します。例：
+
+
+    
+    examplegame make -full
+    
+
+
+
+ExampleGame 内の make commandlet (メイク コマンドレット) が起動します。ネイティブなコマンドレットについてはパッケージ名を指定する必要はありません。make commandlet がスクリプトのみのものなら、以下を使用して呼び出します。
+
+
+    
+    examplegame editor.make -full
+    
+
+
+
+として実行されて、スタートアップ時には起動されません。名前の一部に _commandlet _ を入れておく必要はありません。指定のコマンドレットを検出する際、スタートアップのコードによって、_commandlet= が自動的に付加されます。
+
+
+
+## 共通のコマンドレット タスク
+
+日常的なタスクには、パッケージ上を反復的に移動し、そのデータを処理するタスクがあります。以下のコードを利用してこれを書き始めることができます (同じコードは `UContentCommandlets.cpp` の冒頭にもコメントとして挿入されています)。
+
+
+    
+    // 以下のテンプレート コマンドレットは、すべてのパッケージに対して操作を実行する必要があるときに利用できます。
+    int32 UPerformAnOperationOnEveryPackage::Main(const FString& Params)
+    {
+        // コマンドライン引数を解析。
+        TArray<FString> Tokens;
+        TArray<FString> Switches;
+    
+        const TCHAR* Parms = *Params;
+        ParseCommandLine(Parms, Tokens, Switches);
+    
+        // パッケージ ファイルのリストを作成。
+        const TArray<FString> FilesInPath( GPackageFileCache->GetPackageFileList() );
+        if( FilesInPath.Num() == 0 )
+        {
+            warnf( NAME_Warning, TEXT("No packages found") );
+            return 1;
+        }
+    
+        // すべてのファイルを反復処理。
+        for( int32 FileIndex = 0 ; FileIndex < FilesInPath.Num() ; ++FileIndex )
+        {
+            const FString& Filename = FilesInPath(FileIndex);
+            warnf( NAME_Log, TEXT("Loading %s"), *Filename );
+    
+            UPackage* Package = UObject::LoadPackage( NULL, *Filename, LOAD_None );
+            if( Package == NULL )
+            {
+                warnf( NAME_Error, TEXT("Error loading %s!"), *Filename );
+            }
+    
+            /////////////////
+            //
+            //  ここに自分のコードを追加。
+            //
+            /////////////////
+    
+            TObjectIterator<UStaticMesh> It;...
+    
+            UStaticMesh* StaticMesh = *It;
+            if( StaticMesh->IsIn( Package )
+    
+    
+    
+    
+            UObject::CollectGarbage( RF_Native );
+        }
+    
+        return 0;
+    }
+    
+
+
+
+さらに、`PackageHelperFunctions.h` の `NormalizePackageNames()` を参照することをお勧めします (これは QA_APPROVED_BUILD_JUNE_2007 (2007 年 6 月 QA 承認ビルド) で登場しました)。この関数は、反復処理するパッケージのフィルタリストを作成することができ、`GPackageFileCache` の単純な反復処理以上の細かい操作を実行できます (詳細はコードを参照)。
+
+
+
+## コマンドレットのリスト
+
+[コマンドレット リスト](Engine/Commandlets/CommandletList) ページを参照してください。
+
+ 
+
+
+
+

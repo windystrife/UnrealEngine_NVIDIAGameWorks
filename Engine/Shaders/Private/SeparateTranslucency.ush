@@ -1,0 +1,92 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	SeparateTranslucency.usf: 
+=============================================================================*/
+
+Texture2D<float> LowResDepthTexture;
+SamplerState BilinearClampedSampler;
+SamplerState PointClampedSampler;
+
+void UpdateNearestSample(float Z, float2 UV, float FullResZ, inout float MinDist, inout float2 NearestUV)
+{
+    float DepthDelta = abs(Z - FullResZ);
+
+	FLATTEN
+    if (DepthDelta < MinDist)
+    {
+        MinDist = DepthDelta;
+        NearestUV = UV;
+    }
+}
+
+float4 BilinearUpsampling(float2 UV, Texture2D LowResTex)
+{
+	return Texture2DSample(LowResTex, BilinearClampedSampler, UV);
+}
+
+float4 NearestDepthNeighborUpsampling(float2 Position, float2 UV, Texture2D LowResTex, float2 LowResTexelSize)
+{
+//@todo - support for all platforms, just skip the GatherRed optimization where not supported
+#if (SM5_PROFILE && !(METAL_SM5_PROFILE ||  METAL_MRT_PROFILE || PS4_PROFILE))
+
+	// The relative depth comparison breaks down at larger distances and incorrectly causes point sampling on the skybox pixels
+	float MaxOperationDepth = 2000000.0f;
+
+	// Note: this upsample is specialized for half res to full res
+    float4 LowResDepthBuffer = LowResDepthTexture.GatherRed(BilinearClampedSampler, UV);
+    float4 LowResDepth = min(float4(ConvertFromDeviceZ(LowResDepthBuffer.x), ConvertFromDeviceZ(LowResDepthBuffer.y), ConvertFromDeviceZ(LowResDepthBuffer.z), ConvertFromDeviceZ(LowResDepthBuffer.w)), MaxOperationDepth.xxxx);
+	float FullResDepth = min(ConvertFromDeviceZ(SceneDepthTexture[uint2(Position.xy)].x), MaxOperationDepth);
+
+	float RelativeDepthThreshold = .1f;
+
+	// Search for the UV of the low res neighbor whose depth is closest to the full res depth
+    float MinDist = 1.e8f;
+
+    float2 UV00 = UV - 0.5f * LowResTexelSize;
+    float2 NearestUV = UV00;
+    UpdateNearestSample(LowResDepth.w, UV00, FullResDepth, MinDist, NearestUV);
+
+    float2 UV10 = float2(UV00.x + LowResTexelSize.x, UV00.y);
+    UpdateNearestSample(LowResDepth.z, UV10, FullResDepth, MinDist, NearestUV);
+
+    float2 UV01 = float2(UV00.x, UV00.y + LowResTexelSize.y);
+    UpdateNearestSample(LowResDepth.x, UV01, FullResDepth, MinDist, NearestUV);
+
+    float2 UV11 = float2(UV00.x + LowResTexelSize.x, UV00.y + LowResTexelSize.y);
+    UpdateNearestSample(LowResDepth.y, UV11, FullResDepth, MinDist, NearestUV);
+	 
+    float4 Output = 0.0f;
+	float InvFullResDepth = 1.0f / FullResDepth;
+
+    BRANCH
+    if (abs(LowResDepth.w - FullResDepth) * InvFullResDepth < RelativeDepthThreshold 
+		&& abs(LowResDepth.z - FullResDepth) * InvFullResDepth < RelativeDepthThreshold 
+		&& abs(LowResDepth.x - FullResDepth) * InvFullResDepth < RelativeDepthThreshold
+		&& abs(LowResDepth.y - FullResDepth) * InvFullResDepth < RelativeDepthThreshold)
+    {
+        Output = Texture2DSampleLevel(LowResTex, BilinearClampedSampler, UV, 0);
+    }
+    else
+    {
+        Output = Texture2DSampleLevel(LowResTex, PointClampedSampler, NearestUV, 0);
+    }
+	
+	return Output;
+
+#else
+
+	return Texture2DSample(LowResTex, BilinearClampedSampler, UV);
+
+#endif
+}
+
+
+float4 UpsampleSeparateTranslucency(float2 Position, float2 UV, Texture2D LowResTex, float2 LowResTexelSize)
+{
+#if NEAREST_DEPTH_NEIGHBOR_UPSAMPLE
+	return NearestDepthNeighborUpsampling(Position, UV, LowResTex, LowResTexelSize);
+#else
+	return BilinearUpsampling(UV, LowResTex);
+#endif
+}

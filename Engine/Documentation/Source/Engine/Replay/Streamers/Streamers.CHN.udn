@@ -1,0 +1,62 @@
+﻿INTSourceChangelist:3260683
+Availability:Public
+Title:DemoNetDriver 和流送器
+Crumbs: %ROOT%, Engine, Engine/Replay
+Description:录制和播放游戏进程的回放系统总览
+Version:4.14
+parent:Engine/Replay
+order:17
+topic-image:replay_topic.png
+tags:Replays
+
+[TOC (start:2 end:3)]
+
+## DemoNetDriver 功能
+* DemoNetDriver 默认使用 NULL 流送器，但接收设为不同流送器厂商模块名称的 URL 选项“ReplayStreamerOverride”（如“InMemoryNetworkReplayStreaming”或“HttpNetworkReplayStreaming”）后即可覆盖。在项目 `DefaultEngine.Ini` 文件的“NetworkReplayStreaming”部分设置“DefaultFactoryName”变量即可修改默认值“NullNetworkReplayStreaming”。调用 `InitBase` 并将正确的 URL 作为参数也可实现相同效果。
+* DemoNetDrivers 可将“demo.CheckpointSaveMaxMSPerFrame”CVar 设为正值，分摊录制回放数据的时间开销。在每帧时间限制前未录制进回放的 `Actor` 将排入队列，在下一帧进行录制。此功能的优点是会限制检查点录制和捕捉的时间量，使游戏不存在卡顿。而缺点则是播放中可能出现细微的视觉错误。出现这类错误的原因是检查点包含从不同帧上获取的 Actor 的数据。只有在游戏录制检查点的时间超过指定时间限制时，此功能才会被启用。这意味着此功能将被主要应用至低端设备，或应用到性能开销较大的游戏上。
+* 如 `bPrioritizeActors` 设为 true，被存入回放的 Actor 将按照录制顺序的优先级进行预排序（基于虚拟函数 `GetReplayPriority`）。通过 `MaxDesiredRecordTimeMS` 与分摊录制结合时十分实用。
+* 修改 CVar `demo.CVarCheckpointUploadDelayInSeconds` 即可调整检查点录制频率。默认为 30 秒。增加检查点之间的时间长度将使向后播放或跳过回放的速度变慢，但会使回放文件的容量变小。
+* 录制 demo 时变量 `bPauseRecording` 可被设为 true，以暂停录制。将其设回 false 即可继续录制。
+* 查看回放时，**Game Mode** 将使用一个不同的 **Player Controller** 类（指定为 `ReplaySpectatorPlayerControllerClass`）。
+* 使用 `SetViewerOverride`，`DemoNetDriver` 可通过创建一个用于录制的 **Player Controller**，变更 Actor 网络关联、剔除和优化的确定方式。这在带有大地图的游戏中尤为实用（如 Paragon）。在这些游戏中，玩家无法确切了解实时游戏中之后会发生的情况（处于效率和防作弊两方面的原因），但会希望能够查看回放。
+* DemoNetDrivers 能与 Slate 同时进行运算。为完成此操作，“tick.DoAsyncEndOfFrameTasks”和“demo.ClientRecordAsyncEndOfFrame”CVars 不能为零。
+
+[REGION:note]
+回放生成的 Actor 将使函数调用和即时游戏进程 Actor 的作用相似。这将导致函数调用的作用和带最小回放数据的即时 Actor 相似。但这也意味着影响共享对象（如 `GameInstance`、`GameState` 或 `GameMode`）将仍能被回放 Actor 使用，并能以多种非计划中的方式影响游戏状态。以内存流送器为例则尤为明显（该流送器可在即时游戏进行仍在运行时观看回放）。为防止 Actor 产生不应有的影响，建议首先对这些操作进行检查，确定 Actor 是否为即时或或回放关卡的一部分，并使其拥有正确的作用。这是每个游戏特定的问题，必须基于每个项目的不同情况进行处理。举例而言，一个特定的游戏可能需要在回放中更新玩家的体力条或全屏伤害覆层，但不调整玩家的得分。
+[/REGION:note]
+
+## 回放数据格式
+在数据方面，回放包含三种游戏状态信息，以及部分额外的文字数据。开始时描述游戏世界开始状态的基线数据。作为游戏世界净变（从基线发生）快照的检查点将以玩家定义的固定间隔出现。各个检查点之间的空间由游戏世界中单独物体的增量变化所填充。游戏中的任意时刻均可被引擎快速而准确地重建：将世界场景初始化到开始状态，在选定时间前执行上个检查点中描述的变化，然后在检查点到达所需要的时间点后应用每个增量变化。回放中包含的文本数据由显示名（可在制作面向玩家的列表时使用）和用户定义文本标记（仅限 HTTP 流送器，可在搜索或过滤游戏列表时使用）组成。
+
+## NULL 流送器
+NULL 流送器是录制回放的默认方式。该流送器将把回放数据写入硬盘（如本地硬盘）。它适用于进行本地录制，尤其适合单机游戏。录制的内容用途十分广泛，可制作游戏预告片或游戏中的过场动画，或使玩家只能在游戏中查看并分享快速通关或教学视频。回放数据文件将被保存至项目中的 Saved/Demos/（回放名称）文件夹。
+
+## 内存流送器
+内存流送器可将把本机内存中的回放数据设为用户可调的长度（如 10 秒、3 分钟等）。这类流送最适合最近精彩瞬间的即时回放，如体育比赛中的得分、射击游戏中的击杀，或动作游戏中 boss 战的最后瞬间。
+
+### 内存流送器用法详情
+内存流送器的特别之处在于它在单一会话中进行录制、回放和继续游戏进程。玩家观看回放时实时游戏进程可以隐式和无声地继续进行，因此回放结束后即可无缝继续游戏。加载时，引擎将把关卡收集到 3 个组中：静态关卡（Static Levels）、动态源关卡（Dynamic Source Levels）和动态复制关卡（Dynamic Duplicate Levels）。这些群组决定关卡和实时游戏进程以及回放之间的交互方式，如下：
+
+| 关卡集合 | 添加到此集合的关卡 | 行为 |
+| -------- | ----- | --- |
+| 静态关卡 | 并非为固定关卡，且拥有 `IsStatic` 标记的关卡。| 不受游戏进程影响，将在实时播放和回放中显示。|
+| 动态源关卡 | `IsStatic` 布尔变量设为 false 的固定关卡和所有子关卡。| 受实时游戏进程影响。在回放时隐藏，但游戏进程仍然正常运行。|
+| 动态复制关卡 | 加载时从动态源关卡制作的拷贝。不存在于专用服务器上或编辑器模式中。| 在实时游戏进程中隐藏。回放发生在这些关卡中，然后将被清空。|
+
+在 Window 菜单中打开 Levels 视图便可找到“Is Static”设置，然后在选中子关卡的情况下点击 Level Details 按钮。
+![](Sublevel.png)
+之后，“Is Static”选项将出现在 Level Details 窗口中。固定关卡的此窗口为空，因此必须选择子关卡。
+![](IsStatic.png)
+
+[REGION:note]
+这些关卡集合为关卡流送进程的一部分，与回放系统并非特定相关。
+[/REGION:note]
+
+将此系统纳入考虑后，可为动态源关卡创建一个 `DemoNetDriver`，再为动态复制关卡创建一个 `DemoNetDriver`。该操作便于在动态源关卡中录制实时游戏进程，并在动态复制关卡中播放数据。隐藏动态源关卡并在回放中显示动态复制关卡，游戏可继续进行并接受不受回放影响的网络更新。第三个群组静态关卡可随时启用并显示。包含不受实时游戏进程影响内容——静态世界场景几何体、环境背景声效、粒子和动画，因此不需要参与回放过程。回放完成后，动态复制关卡的内容将被销毁，然后进入垃圾回收流程。然后动态源关卡将再次变为拥有声音/显示。动态源关卡不会被销毁或暂停（只会被隐藏），因此查看回放时游戏将正常进行，可随时切回游戏画面显示（不会有卡顿）。此外，开发者可利用该系统将关卡标记为静态，以便将其从回放录制和播放中剔除，节约内存和时间、提高效率。
+
+## HTTP 流送器
+HTTP 流送器将把回放数据发送至另一个服务器，可以是 LAN 或网络上的其他地方。这适用于即时流送比赛，或保存比赛记录以便随时查看。在专属服务器游戏中，只有服务器知晓游戏中随时随地的情况，卸载回放数据处理将增加单个服务器上可创建的同步游戏数量。因此 HTTP 流送器尤其适用于这类游戏。该工具可以从游戏运行方完全控制的电脑中获取数据，因此也可用作调解或反作弊工具。
+
+### HTTP 流送器用法详情
+
+HTTP 流送器将通过 [](Engine/Replay/Streamers/HTTPRESTAPI) 与自定义写入回放服务器进行通信，使用 GET 和 POST 法将数据作为二进制或 JSON 格式字符串发送。如要设置自己的回放服务器，必须首先创建 URL。项目 DefaultEngine.Ini 文件中的 `[HttpNetworkReplayStreaming]` 部分下包含回放服务器的 URL（在变量 `ServerURL` 中）。`ServerURL` 的格式为“http://replay.yourgame.com/”。最后的“/”十分重要，因为 HTTP 流送器不会自行假设 URL 格式需要修改。

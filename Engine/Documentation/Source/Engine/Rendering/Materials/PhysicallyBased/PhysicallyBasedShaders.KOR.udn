@@ -1,0 +1,393 @@
+﻿INTSourceChangelist:3242329
+Availability:Public
+Title:물리 기반 머티리얼
+Crumbs: %ROOT%, Engine
+Description:주요 머티리얼 입력에 대한 개요 및 그 최적 사용법입니다.
+Version: 4.9
+parent:Engine/Rendering/Materials
+order:13
+topic-image:physically_based_topic.png
+type:overview
+tags:Physically Based Shading
+tags:PBR
+tags:Materials
+
+[REGION:fullwidth]
+![](PhysMatHeader.png)
+[/REGION]
+
+
+이 글은 언리얼 엔진 4 의 물리 기반 머티리얼 시스템을 빠르게 익히고자 하는 이를 돕기 위해 디자인된 문서입니다. 최소한 언리얼 엔진 3 이상, 언리얼 엔진에서의 머티리얼 생성에 
+어느정도는 익숙한 분들을 대상으로 합니다. 언리얼에서의 머티리얼이 완전 처음이신 경우,
+[](Engine/Rendering/Materials\IntroductionToMaterials) 문서부터 먼저 참고해 보시는 편이 나을 것입니다.
+
+여기서의 목표는 이 시스템을 사용하여 표준 머티리얼을 제작하는 방식을 "평이한 언어로 요점정리" 해 드리기 위함으로, 기존 버전의 언리얼 엔진 작업방식에 
+익숙한 분들에게도 헛갈릴 수 있기 때문입니다. 물리 기반 접근법에 관련해서 오직 머티리얼 관련된 부분에만 
+초점을 맞춰 보겠습니다. 사용가능한 입력 전체에 대한 설명은, [](Engine/Rendering/Materials\MaterialInputs) 문서를 참고해 주세요.
+
+## 물리 기반이란?
+
+Physically based, 물리 기반 셰이딩이란, 빛의 작용이 이래야 할 것이다 하고 직관적으로 추정하기 보다는, 실제로 어떠한 작용을 
+하는지 추정하는 것을 뜻합니다. 그 결과 좀 더 정확하고 자연스러운 외양을 얻을 수 있습니다. 물리 
+기반 머티리얼은 라이팅 환경에서도 똑같이 잘 작동합니다. 게다가 머티리얼 값도 
+덜 복잡해지고 상호의존적이 되어, 좀 더 직관적인 인터페이스가 가능해 졌습니다. 이러한 장점은 픽사와 [[4]](#Smits) 디즈니의 [[3]](#Burley) 최근작에서 
+명확히 볼 수 있듯이, 비실사 렌더링에도 적용 가능합니다.
+
+이런 저런 이유로 인해, 언리얼 엔진 4 에서는 새로운 물리 기반 머티리얼 및 셰이딩 모델을 채택했습니다. UE4 의 물리 기반 
+머티리얼 및 셰이딩 모델 관련해서 기술적으로 자세한 내용은, 시그래프 프리젠테이션을 [[2]](#Karis) 참고해 주시기 바랍니다.
+
+## 머티리얼 파라미터
+
+머티리얼 시스템의 "물리 기반" 측면에서 볼 때, 익혀둘 필요가 있는 속성은 딱 네 가지입니다:
+
+
+
+* **Base Color** 베이스 컬러, 바탕색
+* **Roughness** 러프니스, 거칠기
+* **Metallic** 메탈릭, 금속성
+* **Specular** 스페큘러, 반사성
+
+
+[REGION:note]
+이러한 입력 **모두** 0 에서 1 사이의 값을 받도록 디자인되었습니다. _베이스 컬러_ 의 경우, RGB 포함 컬러 값이 0 과 1 사이의 값에 속한다는 뜻입니다.
+[/REGION]
+
+물리 기반 값은 현실에서의 재질을 측정한 값이 될 수 있습니다. 아래에 약간의 예시가 있습니다.
+
+### 베이스 컬러
+
+[EXCERPT:BaseColor] 
+**Base Color** (베이스 컬러)는 머티리얼의 전체적인 색을 정의합니다. Vector3 (RGB) 값을 받으며, 각 채널은 자동으로 0 과 1 사이로 제한(clamp)됩니다.
+
+현실에서 취한 경우, 편광 필터를 사용하여 찍었을 때의 색입니다.
+(편광은 평행 상태에서 논메탈의 스페큘러를 제거합니다).
+
+[REGION:fullwidth]
+![](BaseColor_QS.png)
+[/REGION]
+[/EXCERPT:BaseColor]
+
+[EXCERPT:MeasuredBaseColor] 
+**논메탈 베이스 컬러 측정값 (강도만):**
+
+| 재질           | 베이스 컬러 강도      |
+| -------------- | ------------------- |
+| 숯             | 0.02                |
+| 새 아스팔트    | 0.02                |
+| 헌 아스팔트    | 0.08                |
+| 맨땅           | 0.13                |
+| 풀밭           | 0.21                |
+| 모래사막       | 0.36                |
+| 새 콘크리트    | 0.51                |
+| 빙하           | 0.56                |
+| 갓 내린 눈     | 0.81                |
+
+**메탈 베이스 컬러 측정값:**
+
+| 재질     | 베이스 컬러 (R, G, B)   |
+| -------- | --------------------- |
+| 철       | (0.560, 0.570, 0.580) |
+| 은       | (0.972, 0.960, 0.915) |
+| 알루미늄 | (0.913, 0.921, 0.925) |
+| 금       | (1.000, 0.766, 0.336) |
+| 구리     | (0.955, 0.637, 0.538) |
+| 크롬     | (0.550, 0.556, 0.554) |
+| 니켈     | (0.660, 0.609, 0.526) |
+| 티타늄   | (0.542, 0.497, 0.449) |
+| 코발트   | (0.662, 0.655, 0.634) |
+| 백금     | (0.672, 0.637, 0.585) |
+[/EXCERPT:MeasuredBaseColor] 
+
+### 러프니스
+
+[EXCERPT:Roughness]
+**Roughness** (러프니스) 입력은 말 그대로 재질의 거칠기를 제어합니다. 거친 재질은 부드러운 재질보다 좀 더 여러 방향으로 반사(reflection)광을 산란시킵니다.
+이는 리플렉션이 얼마나 희미하거나 선명한지, 아니면 스페큘러 하이라이트가 얼마나 퍼져있는지 모여있는지로 확인됩니다.
+러프니스가 0 인(부드러운) 경우 거울 반사이며, 1 인(거친) 경우 완전히 무광 또는 디퓨즈(확산)입니다.
+[/EXCERPT:Roughness]
+
+![](roughness_nonmetal.png)(convert:false)
+![](roughness_metal.png)(convert:false)
+[REGION:caption]
+러프니스 0 에서 1 까지, 위는 논메탈, 아래는 메탈입니다.
+[/REGION]
+
+[INCLUDE:Engine/Rendering/Materials\PhysicallyBased#RoughnessSlider]
+
+
+#### 러프니스 매핑
+
+[EXCERPT:RoughnessMap]
+러프니스는 표면에 최대한의 물리적 변형을 가하기 위해서, 오브젝트에 자주 매핑되는 속성입니다. 여기서는 텍스처를 통해 러프니스 값 결과를 편향시키고 있는데, 직접 시도해 보시려면 아래에서 내려받을 수 있습니다.
+[/EXCERPT:RoughnessMap]
+
+[REGION:fullwidth]
+[INCLUDE:Engine/Rendering/Materials\PhysicallyBased#RoughBiasSlider]
+[/REGION]
+
+[EXCERPT:RoughnessTip]
+[REGION:tip]
+기존 버전의 언리얼 엔진에서 머티리얼 작업을 하는 와중에 물리 기반 머티리얼이 익숙치 않은 경우, 대부분의 스페큘러 텍스처 작업을 처리하는 곳이 러프니스 맵이라는 점을 염두에 두시기 바랍니다.
+[/REGION]
+[/EXCERPT:RoughnessTip]
+
+
+### 메탈릭
+
+[EXCERPT:Metallic]
+**Metallic** (메탈릭) 입력은 말 그대로 표면의 "금속성" 을 제어합니다. 논메탈은 메탈릭 값이 0 이며, 
+메탈은 1 입니다. 순수한 금속이나 돌, 플라스틱과 같은 순수 표면의 경우,
+이 값은 0 **또는** 1 이며, 그 중간 값은 아닙니다. 부식되었거나 먼지 또는 녹이 낀 메탈같은 혼합 표면을 만들 때는, 
+0 과 1 _사이_ 값이 필요할 수도 있습니다.
+[/EXCERPT:Metallic]
+
+![](metallic.png)(convert:false)
+[REGION:caption]
+메탈릭 0 에서 1 까지
+[/REGION]
+
+[REGION:tip]
+처음에는 완벽한 금속성의 머티리얼을 만들고 싶을 수도 있겠지만, 참으세요!
+[/REGION]
+
+이 예제에서는 약간의 러프니스를 준 것을 볼 수 있습니다. 순전히 미적인 선택이었습니다.
+
+[INCLUDE:Engine/Rendering/Materials\PhysicallyBased#MetallicSlider]
+
+
+### 스페큘러
+
+[EXCERPT:Specular]
+**Specular** (스페큘러) 입력은 대부분의 경우 기본값 0.5 이므로, 연결하지 않은 채 놔둬야 할 것입니다.
+
+그 값은 0 에서 1 사이로, _논메탈_ 표면의 현재 반사성(specularity) 양 스케일을 조절하는 데 사용됩니다. 메탈에는 효과가 없습니다.
+[/EXCERPT:Specular]
+
+[REGION:tip]
+매우 확산된 머티리얼의 경우 이 값을 0 으로 설정하고 싶겠지만, 참으세요! 모든 머티리얼에는 
+스페큘러가 있습니다. 예제로 [[5]](#Hable) 게시물을 참고해 보세요. 매우 확산된 머티리얼에 맞는 것은,
+실제로는 러프니스를 올리는 것입니다.
+[/REGION]
+
+흔히 스페큘러를 변경한다 하면, 미세한 차폐 또는 소규모 섀도잉, 말하자면 노멀맵에 나타나는 균열을 추가해서 그렇게 합니다. 이들은 가끔 캐버티(cavity, 구멍)이라 불리기도 합니다.
+소규모 지오메트리, 특히 디테일이 하이 폴리곤에만 있고 노멀 맵에 구워지는 것들은, 렌더러의 실시간 그림자에 선택되지 않습니다. 이 그림자를 캡처하기 위해 캐버티 맵을 생성합니다.
+캐비티 맵이란 보통 거리가 매우 짧은 트레이스로 된 AO 맵입니다. 출력 전 여기에 최종 베이스 컬러를 곱한 다음 (스페큘러 기본값인) 0.5 를 곱한 값을 스페큘러 출력으로 합니다.
+명확히 하자면, BaseColor = Cavity*OldBaseColor, Specular = Cavity*0.5 입니다.
+
+고급 사용의 경우, 이 값은 굴절률(IOR) 제어에 사용될 수 있습니다. 99% 의 재질의 경우 꼭 필요한 부분은 아니었습니다. 아래는 IOR 측정값을 기준으로 한 스페큘러 값입니다.
+
+**스페큘러 측정값:**
+
+| 재질 | 스페큘러 |
+| -------- | -------- |
+| 유리 | 0.5      |
+| 플라스틱 | 0.5      |
+| 석영 | 0.570    |
+| 얼음 | 0.224    |
+| 물 | 0.255    |
+| 우유 | 0.277    |
+| 피부 | 0.35     |
+
+
+[INCLUDE:Engine/Rendering/Materials\PhysicallyBased#SpecularSlider]
+
+
+
+![](measured_materials.png)(convert:false)
+[REGION:caption]
+측정된 재질 예제입니다. 위: 석탄, 새 아스팔트, 헌 아스팔트. 아래: 구리, 철, 금, 백금, 은, 니켈, 티타늄
+[/REGION]
+
+
+## 참고
+
+(#Lagarde)
+**1**. Lagarde, [Feeding a physically based shading model](http://seblagarde.wordpress.com/2011/08/17/feeding-a-physical-based-lighting-mode/)
+(#Karis)
+**2**. Karis, [Real Shading in Unreal Engine 4](https://de45xmedrsdbp.cloudfront.net/Resources/files/2013SiggraphPresentationsNotes-26915738.pdf)
+(#Burley)
+**3**. Burley, [Physically-Based Shading at Disney](http://blog.selfshadow.com/publications/s2012-shading-course/burley/s2012_pbs_disney_brdf_slides_v2.pdf)
+(#Smits)
+**4**. Smits, [Reflection Model Design for WALL-E and Up](http://blog.selfshadow.com/publications/s2012-shading-course/smits/s2012_pbs_pixar_model_slides_v2.pdf)
+(#Hable)
+**5**. Hable, [Everything is Shiny](http://filmicgames.com/archives/547)
+
+
+
+
+<!-------------
+
+* **Base Color** - The color of your object. Similar to Diffuse in other Material systems, including UE3.
+* **Metallic** - Literally, this controls how metal-like your surface will be. For pure surfaces, such as pure metal, pure stone, pure plastic, etc. this will be 0 _or_ 1, not anything in between. When creating surfaces like corroded or rusty metals, you may find that you need some value _between_ 0 and 1.
+* **Roughness** - This controls how rough the surface is at the microscopic level. Surfaces such as mirrors or shiny plastic would have a very low Roughness value, very near 0. As you approach more matte-shaded objects, such as chalk or dull rubber, your Roughness increases. For believable realism, it is important to note that very rarely will a surface actually achieve Roughness values all the way to the extents of 0 and 1. Usually, they'll be something in between.
+
+
+
+
+[EXCERPT:MetallicSlider]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:max]
+	21
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	Metallic
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	**슬라이더를 드래그하면 메탈릭 값 업데이트를 확인할 수 있습니다.** 
+	[/PARAM]
+	[PARAM:image_list]
+	![](Metallic_1.png)
+	![](Metallic_2.png)
+	![](Metallic_3.png)
+	![](Metallic_4.png)
+	![](Metallic_5.png)
+	![](Metallic_6.png)
+	![](Metallic_7.png)
+	![](Metallic_8.png)
+	![](Metallic_9.png)
+	![](Metallic_10.png)
+	![](Metallic_11.png)
+	![](Metallic_12.png)
+	![](Metallic_13.png)
+	![](Metallic_14.png)
+	![](Metallic_15.png)
+	![](Metallic_16.png)
+	![](Metallic_17.png)
+	![](Metallic_18.png)
+	![](Metallic_19.png)
+	![](Metallic_20.png)
+	![](Metallic_21.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:MetallicSlider]
+
+
+
+
+[EXCERPT:RoughnessSlider]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:max]
+	21
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	Roughness
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	**슬라이더를 드래그하면 러프니스 값 업데이트를 확인할 수 있습니다.**
+	[/PARAM]
+	[PARAM:image_list]
+	![](Roughness_1.png)
+	![](Roughness_2.png)
+	![](Roughness_3.png)
+	![](Roughness_4.png)
+	![](Roughness_5.png)
+	![](Roughness_6.png)
+	![](Roughness_7.png)
+	![](Roughness_8.png)
+	![](Roughness_9.png)
+	![](Roughness_10.png)
+	![](Roughness_11.png)
+	![](Roughness_12.png)
+	![](Roughness_13.png)
+	![](Roughness_14.png)
+	![](Roughness_15.png)
+	![](Roughness_16.png)
+	![](Roughness_17.png)
+	![](Roughness_18.png)
+	![](Roughness_19.png)
+	![](Roughness_20.png)
+	![](Roughness_21.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:RoughnessSlider]
+
+
+
+[EXCERPT:RoughBiasSlider]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:max]
+	21
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	RoughBias
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	**슬라이더를 드래그하면 러프니스 값 업데이트가 텍스처를 통해 투과되는 것을 확인할 수 있습니다. 0.5 근처에 가장 흥미로운 결과가 납니다.**
+	[/PARAM]
+	[PARAM:image_list]
+	![](RoughBias_1.png)
+	![](RoughBias_2.png)
+	![](RoughBias_3.png)
+	![](RoughBias_4.png)
+	![](RoughBias_5.png)
+	![](RoughBias_6.png)
+	![](RoughBias_7.png)
+	![](RoughBias_8.png)
+	![](RoughBias_9.png)
+	![](RoughBias_10.png)
+	![](RoughBias_11.png)
+	![](RoughBias_12.png)
+	![](RoughBias_13.png)
+	![](RoughBias_14.png)
+	![](RoughBias_15.png)
+	![](RoughBias_16.png)
+	![](RoughBias_17.png)
+	![](RoughBias_18.png)
+	![](RoughBias_19.png)
+	![](RoughBias_20.png)
+	![](RoughBias_21.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:RoughBiasSlider]
+
+
+[EXCERPT:SpecularSlider]
+[OBJECT:SliderSequence]
+	[PARAMLITERAL:max]
+	21
+	[/PARAMLITERAL]
+	[PARAMLITERAL:ext]
+	jpg
+	[/PARAMLITERAL]
+	[PARAMLITERAL:id]
+	Specular
+	[/PARAMLITERAL]
+	[PARAM:caption]
+	**슬라이더를 드래그하면 스페큘러 값 업데이트를 확인할 수 있습니다.**
+	[/PARAM]
+	[PARAM:image_list]
+	![](Specular_1.png)
+	![](Specular_2.png)
+	![](Specular_3.png)
+	![](Specular_4.png)
+	![](Specular_5.png)
+	![](Specular_6.png)
+	![](Specular_7.png)
+	![](Specular_8.png)
+	![](Specular_9.png)
+	![](Specular_10.png)
+	![](Specular_11.png)
+	![](Specular_12.png)
+	![](Specular_13.png)
+	![](Specular_14.png)
+	![](Specular_15.png)
+	![](Specular_16.png)
+	![](Specular_17.png)
+	![](Specular_18.png)
+	![](Specular_19.png)
+	![](Specular_20.png)
+	![](Specular_21.png)
+	[/PARAM]
+[/OBJECT]
+[/EXCERPT:SpecularSlider]
+
+-->

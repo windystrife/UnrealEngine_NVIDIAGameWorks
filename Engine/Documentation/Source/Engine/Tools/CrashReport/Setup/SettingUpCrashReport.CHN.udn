@@ -1,0 +1,204 @@
+Availability:Docs
+Title:设置崩溃报告
+Crumbs:%ROOT%, Engine
+Description:设置虚幻引擎 4 的崩溃报告内的联网应用程序。
+
+[TOC (start:2 end:3)]
+
+
+崩溃报告是一个内联网应用程序，它允许用户查看和管理崩溃现象。 崩溃报告使用 Callstack（调用栈）对这些崩溃现象进行分类，崩溃报告在其中可以调用 Buggs。 Buggs 是 2 个或更多崩溃现象的组群，它们可以帮助用户更好地辨别代码中真正的 bug。 该文档会显示如何在您的内联网上创建崩溃报告的详细说明。
+
+用户通过亲身经历认识到 CrashReport 工具是一个独立的网络应用程序，但是该工具有一些不同的元素，需要使用这些元素才能正常工作。 引擎崩溃时，它会调用 `AutoReporter.exe` 程序，它会收集所有崩溃数据并将它们发送到 Web Service http://AutoReportService，它将报告寄存在 CrashReport Database 中，然后上传记录并将文件转存到 http://AutoReportFiles 中，只是将文件存储在这里以便供以后查看。 
+
+## 要求
+
+* Visual Studio 2008
+* Internal Web Server 
+    * IIS 7 + 随附 .Net 3.5+
+    * ASP MVC 2.0
+* Internal SQL Server
+* Sql Management Studio
+* Visual Web Developer 2008 或 2010
+
+
+## 安装
+
+* 可以将该工具的源代码放置在位于 /UnrealEngine3/Development/Tools/CrashReport/ 的 Perforce 中
+
+
+### 创建数据库
+
+* 创建数据库的用户（可能需要与您的 IT 部门联系）。
+* **右击** 数据库 -> 新建数据库。
+    * 在向导中填写数据库名称以及您的数据库的任何其他选项，然后点击确定。
+* 从 SQL Manager 中打开 `<Project Root>Crashreport/Models/CreateDatabase.sql`
+    * 将数据库名称更改为您刚刚创建的数据库的名称。
+    * 点击“! 执行脚本”按钮。
+* 保证用户具有访问（或最好拥有）该数据库的权限。 
+
+
+### 创建网站
+
+为使该服务能运行，我们将创建 3 个网站
+
+* http://CrashReport.yourdomain.com
+    * 您的用户将使用的主要内联网应用程序
+* http://AutoReportService.yourdomain.com
+    * 网络服务可以处理引擎发送的崩溃现象
+* http://AutoReportFiles.yourdomain.com
+    * 一个包含每个崩溃现象的日志和最小转存的库
+
+
+#### http://CrashReport.yourdomain.com
+
+* 打开 IIS 管理器
+* **右击** 应用程序池 -> 添加应用程序池  
+	![](AddApplicationPool.JPG)
+    * 名称： CrashReport 
+    * .Net Framework 版本： 2.0 或更高  
+		![](AddApplicationPoolWizard.JPG)
+* **右击** 站点 -> 添加网站
+	![](AddSite.JPG)
+    * 站点名称： CrashReport
+    * 应用程序池： CrashReport  
+		![](AddSiteWizard.JPG)
+    * 物理路径： Share `<Web Root>/CrashReport`  
+		![](AddSiteCreateDirectory.JPG)
+* 共享 `<Web Root>/CrashReport` 到本地网络可以进行简单的部署
+    * 在 IIS 中，您只需 **右击** 网站名称 -> 查看
+    * **右击** 一个文件夹，然后点击属性
+        * 您可以按照自己的需要设置许可，至少可以允许个人部署站点访问
+        * 点击 **确定** ，然后记下文件路径供以后进行部署
+
+
+#### http://AutoReportService.yourdomain.com
+
+* 打开 IIS 管理器
+* **右击** 应用程序池 -> 添加应用程序池
+    * 名称： AutoReportService
+    * .Net Framework 版本： 2.0 或更高
+* **右击** 站点 -> 添加网站
+    * 站点名称： AutoReportService
+    * 应用程序池： AutoReportService
+    * 物理路径： <Web Root>/AutoReportService
+* 在文件系统中，为网站根目录外部的 Log 文件创建一个文件夹
+    * 例如，C:\AutoReportLog\
+* 共享 <Web Root>/AutoReportService 到本地网络可以进行简单的部署
+    * 在 IIS 中，您只需 **右击** 网站名称 -> 查看
+    * **右击** 文件夹，然后点击属性
+        * 您可以按照自己的需要设置许可，至少可以允许个人部署站点访问
+        * 点击 **确定** ，然后记下文件路径供以后进行部署
+
+
+#### http://AutoReportFiles.yourdomain.com
+
+* 打开 IIS 管理器
+* **右击** 应用程序池 -> 添加应用程序池
+    * 名称： AutoReportFiles
+    * .Net Framework 版本： 2.0 或更高
+* **右击** 站点 -> 添加网站
+    * 站点名称： AutoReportFiles
+    * 应用程序池： AutoReportFiles
+    * 物理路径： `<Web Root>/AutoReportFiles`
+* 为您的 ReportFile 创建目录
+* `<Web Root>/AutoReportFiles/ReportFiles/`
+* 为 Log 和 Dump 添加 MIME 类型
+    * 选择 AutoReportFiles 站点
+    * **双击** MIME 类型
+    * 在右上角点击“添加”
+        * 文件扩展名： ".log"
+        * MIME 类型： "application/octet-stream"  
+			![](AddMimeTypes.JPG)
+    * 再次点击“添加”
+        * 文件扩展名： ".dmp"
+        * MIME 类型： "application/octet-stream"
+
+
+## 部署服务
+
+在 VS 2008 中打开位于 /UnrealEngine3/Development/Tools/CrashReport/ 的 CrashReport 解决方案
+
+### http://CrashReport.yourdomain.com
+
+* 编辑 Web.config
+    * 找到 <connectionStrings> 下以 `<add name="CrashReportConnectionString"` 开头的代码行
+    * 编辑您的连接设置的数据源、用户 ID 和密码
+* 编辑 Settings.settings（或者 属性->设置）
+    * 记下您为 `http://AutoReportFiles.yourdomain.com` 设置的 url，然后在此输入该 url。
+* 发布站点
+    * **右击** CrashReport 项目 -> 发布  
+		![](PublishProject.JPG)
+    * 保证设置适用于您的设置  
+		![](PublishProjectWizard.JPG)
+    * 点击 **确定** 
+
+
+### http://AutoReportService.yourdomain.com
+
+* 编辑 Web.Config
+    * 编辑以  `<add key="LogFileName" value=` 开头的代码行
+        * 将这个值设置为网站服务器上的 AutoReportLog 目录的路径
+    * 编辑以 `<add key="SaveFilesPath"` 开头的代码行
+        * 将这个值设置为网站服务器上的  AutoReportFile 目录的路径
+        * 例如，`<Web Root>/AutoReportFiles/ReportFiles/`
+    * 从您的崩溃报告 Web.Config 中复制连接字符串 
+        * 或者编辑当前字符串，使它与服务器相匹配，同时认证设置也相符
+        * 必需进行这项操作，因为该项目可以使用崩溃报告 dll 更新文件，而在它进行更新的时候传送它自己的连接字符串。  
+* 发布站点
+    * **右击** 项目名称 -> 发布
+    * 保证设置适用于您的设置
+    * 点击 **确定** 
+
+
+### AutoReporter.exe
+
+* 编辑 Settings.setting 
+    * 保证所有 url 都指向您的生产系统中的 url。
+    * 默认情况下，它们可以使用该文档中的 url。
+* 同步网络服务参数
+    * 扩展“网络参数”
+    * **右击** "ReportService" -> 更新网络参数
+    * 这可以保证网络参数适用于您发布的 AutoReportService/RegisterReport.asmx 网络服务
+* **右击** 项目名称 -> 构建 
+
+
+### http://AutoReportFiles.yourdomain.com
+
+这是一个非常简单的网站，只是收集和显示文件。 要测试确保该站点可以正常运行，只需添加一个崩溃现象，访问该 url，然后确保在您点击 Log 和 Dump 文件时它们可以进行下载。
+
+
+## 测试
+
+### http://CrashReport.yourdomain.com
+
+* 访问 `http://CrashReport.yourdomain.com`，然后您应该会看到空白页面
+	[REGION:fullwidth]
+	![](WorkingWebsiteEmptyDatabase.JPG)
+	[/REGION]
+
+
+### AutoReporter.exe
+
+#### 创建崩溃   
+
+* 打开编辑器的一个实例
+    * 进行该项操作的快捷方式是运行 ExampleGame.exe
+    * 发布一个崩溃现象： "~" -> “调试崩溃现象”
+* 您会看到对话框弹出
+    * 输入测试概要和描述
+    * 点击 **确定** 
+* 如果一切顺利，您将会看到另一个显示指向您的 Crash 的链接的窗口弹出
+    * 点击该 url，同时确保已经将您的崩溃现象输入到崩溃报告中
+* 在崩溃报告中点击您的崩溃现象的 Id
+    * 点击 Log 超链接
+        * 如果一切正常，将会提示您下载 1_Launch.log
+
+
+#### 创建Bugg
+
+* 再创建一个崩溃现象
+    * 重复上述步骤
+* 访问该 url `http://CrashReport.yourdomain.com/Buggs`
+    * 在这里面您应该会发现一个 Bugg 
+        * 点击它的 Id 后将会显示一个新画面，其中会列出您刚刚创建的两个测试崩溃现象。
+

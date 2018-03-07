@@ -1,0 +1,186 @@
+﻿INTSourceChangelist:2707641
+Availability:Public
+Title:マテリアル エディタ - 人間の皮膚の設定方法 
+Crumbs: %ROOT%, Engine, Engine/Rendering/Materials
+Description:人間の皮膚を設定する操作手順 
+Related:Resources/Showcases/RealisticRendering
+Related:Engine/Rendering/Materials
+Related:Engine/Rendering/Materials/HowTo/Subsurface_Scattering
+Related:Engine/Rendering/Materials/LightingModels/SubSurfaceProfile
+Related:Engine/Rendering/Materials/LightingModels/SubSurface
+Related:Resources/ContentExamples/MaterialNodes/1_7
+Version:4.9
+SkillLevel:Advanced
+
+[TOC(start:2)]
+
+
+[OBJECT:ComparisonSlider]
+	[PARAM:before]
+	[![Not using SubsurfaceProfile](Engine\Rendering\Materials\LightingModels\SubSurfaceProfile\Results_1.png)(w:700 convert:false)](Engine\Rendering\Materials\LightingModels\SubSurfaceProfile\Results_1.png)
+	[/PARAM]
+	[PARAM:after]
+	[![Using SubsurfaceProfile](Engine\Rendering\Materials\LightingModels\SubSurfaceProfile\Results_2.png)(w:700 convert:false)](Engine\Rendering\Materials\LightingModels\SubSurfaceProfile\Results_2.png)
+	[/PARAM]
+[/OBJECT]
+
+<!---
+[REGION:lightbox]
+[![](Engine\Rendering\Materials\LightingModels\SubSurfaceProfile\Results.png)(w:920 convert:false)](Engine\Rendering\Materials\LightingModels\SubSurfaceProfile\Results.png)
+[/REGION]
+--->
+
+
+レンダリングされた人間の皮膚を本物のように見せることは非常に難しいトピックで、これなら実現できるという方法はありません。 
+本物らしく見せるためには沢山のステップが必要になります。まずは次の情報を作業の _始めの一歩_ と考えてみてください。 
+人間の目は、顔のわずかな詳細を感じるように十分に訓練されているためです。 
+適切に行うのは難しいですが、ツールを習得すると、いろいろなものへの応用が可能です。
+
+## 設定
+マテリアルを作成する前に、リファレンスを収集します。 
+光源処理環境を複数含む写真を数枚参照すると、異なるライティング状況でのマテリアルの見え方を検証できるので、通常うまく行くことが多いからです。 
+可能であれば、ソースデータをスキャンしキャリブレーションしておくと、確認しながら可能な限り本物に近づくように作業しやすくなります。 
+エディタ内のコンテンツを表示する際は、環境をより制御するために、以下の操作で **[Editor Eye Adaptation (明暗順応)]** を必ず無効にしてください： _[Edit Menu (編集メニュー)] > [Project Settings (プロジェクト設定)] > [Rendering (レンダリング)] > [Default Post Processing Settings (デフォルト ポストプロセス設定)] > [Auto Exposure (自動露光)]_
+
+[region:tip]
+ 環境をキャリブレーションしておくと色が正しいか確認できるので便利ですが、必須ではありません。
+[/region]
+
+次の例では、スキン レンダリング コンテンツの例を使って作業していきます。 
+コンテンツ サンプルをマーケットプレイスからダウンロードがまだお済みでない場合はダウンロードをして、スキン レンダリング マップを開いてください。 
+ここでの画像は明らかに低解像度であり、ソースとして使用することは意図していないことに留意してください。
+
+[region:note]
+アンリアル エンジン用に法線マップを必ず正しく設定してください。非常に重要になります。一部のエンジンでは、緑チャンネルを反転させて法線マップを使います。以下の画像の色と比較することで、法線マップの緑チャンネルが反転しているかどうかを確認できます。
+
+![](Engine\Rendering\Materials\LightingModels\SubSurfaceProfile\NormalSetup.png)
+[/region]
+
+以下は、スキン テクスチャとスキン マテリアルの作成を開始する前に必要な事のリストです。
+* テクスチャの作成は、解像度がかなり高いテクスチャから始めるのが理想的です。ベストな結果が得られます。 
+* イタレーションを速くするには、マテリアル インスタンスを作成し、スカラー パラメータとベクター パラメータをエクスポーズするのが最適です。 
+* アセットは、正しいことを確認するため複数のライティング条件で検証します。 
+  Post Process Volume で明暗順応を有効にしても、最終的には物の見え方には大きな違いが生じます。 
+* シャドウ アーティファクトを回避するためには、シャドウ バイアスなどを調整する必要があったり、よりフォーカスされたスポットライト コーンを使ってライティングの解像度を改善したりするので、作業工数が余分にかかります。
+* ジオメトリではクリッピングがなく歪みも少ないので、エディタの FOV を調整してズームインして調整すると便利です。 
+* エディタ FOV は、Perspective と表示されているアイコンの隣のドロップダウンの矢印をクリックし、マウスで FOV 値を変えて調整することができます。 
+
+	![](HS_Change_FOV.png)
+
+* 作業を表示する場合、ストリーミング システムはズームを考慮しないので、望まない場所でテクスチャがぼやけてしまう可能性があります。これは 3D ゲームに対して国際的に決定された設計ですが、今後変更される可能性があります。こうしたことが起こらないように、メッシュ インスタンス上でテクスチャ Streaming Distance Multiplier を変更することができます。
+
+## マテリアル 
+
+以下は、Content Example マップのマテリアル全体の画像になります。 
+このマテリアルは複雑に見えますが、次のセクションでマテリアルの各セクションが行っていることを細かく見ていきます。 
+
+[REGION:lightbox]
+[![](HS_Skin_Parent_Material.png)(w:920 convert:false)](HS_Skin_Parent_Material.png)
+[/REGION]
+### Base Color (基本色)  
+
+![](HS_Base_Color.png)
+
+かなり遠いところでは、サブサーフェス スキャタリング エフェクトを認識することは難しくなるということをまず理解してください。 
+つまり、遠く離れた場所では、基本色の見た目を適切にすることが最善です。 
+皮膚の全体的な外観をよくするために基本色および (オクルージョンで生じた) スペキュラを暗くするためにグレースケール テクスチャを使うこともできます。 
+求めている外見に近づける調整をしやすくするために、ベクター制御とスカラー制御を追加して皮膚の色とパワーを調整することもできます。
+
+
+
+### Roughness (ラフネス) 
+![](HS_Roughness.png)
+
+皮膚の場合、定数 Roughness の値は 0.4 前後から始めて調整するのがベストです。 
+実際の値は、スケール / 距離、年齢、シミュレーション対象の皮膚の乾き具合により異なることに留意してください。 
+ 他のテクスチャとは異なり、ミップマップを明らかに異なる外観にします。こうしたミップ チェーンは以下のように見えます。
+
+![](Engine\Rendering\Materials\LightingModels\SubSurfaceProfile\DetailRoughness.png)
+
+ミップマップが小さいほど、グレイスケールは明るくなります。つまり、マテリアルはよりラフなマテリアルに移行します。 
+このテクスチャを別のテクスチャのチャンネルに入れること (テクスチャ参照とテクスチャ メモリを節約) ができることを覚えておいてください。 
+テクスチャの解像度は、法線マップと同じだと理想的です。
+
+
+### Specular (スペキュラ)
+![](HS_Spec.png)
+
+皮膚のスペキュラ値は **0.35** に設定されます。 
+測定値を実際の使用範囲に変換した現実世界のスペキュラ値から得られた、この 0.35 という数値が使用されています。 
+
+
+### Normal (法線)
+![](HS_Normal.png)
+
+法線マップが皮膚に合った動作をするように、法線マップが次の基準を満たしていることを確認してください。 
+* 顔に使う法線マップは、皺に関する情報のみを含みます。この方法でうまくいった場合に、タイリング テクスチャで毛穴の詳細を処理します。
+* オブジェクトの法線マップをディテール法線マップと組み合わせる場合、良い結果を出すためにマテリアル関数 BlendAngleCorrectedNormals を必ず使用してください。 
+   法線マップの調和を調整するためにパラメータをエクスポーズすると非常に便利です。ディテール法線マップ値でいくつかのスカラー値を z コンポーネントに追加し、ノーマライズします。 
+   この方法で、通常のものからフラットなディテール法線マップに移行できます。 
+皮膚は様々なエリアで異なるシェーディング プロパティを持つため、オブジェクトがマッピングされた (タイリングなしの) テクスチャにラフネスを結合するのが最適です。 
+  * ディテール法線マップは、離れた場所でラフネスを大きくさせるため、補正する必要があります。どの距離でもカメラから綺麗に見えるように、複数のスケール / ビューでシェーディングを確認する必要もあります。
+* 最近のリアルタイム レンダリングでは、ピクセル毎のライティングでシェーディングを実装しています。通常、これは非常に高品質な結果が得られますが、非常に詳細な法線マップ用です。ミップマップを使用することでちらつきを回避し、パフォーマンスは高くなります。しかし、ミップが低いと詳細は存在せず、表面は実際よりもかなり輝いて見えてしまうので、ミップマップは法線マップではうまく処理できません。このエフェクトには、ラフネスを適宜調整して対処します。アニソトロピック (異方性) の詳細はキャプチャしませんが、無方向の特性に対しては良い近似値を与えます。 
+
+
+### オパシティ (不透明)
+![](HS_Opacity.png)
+
+Opacity 入力は、サブサーフェス スキャタリングの発生量を制御します。 
+ 値 1 または白は、サブサーフェス スキャタリングが最大限で発生することを意味します。
+ 値 0 または黒は、サブサーフェス スキャタリングが発生していないことを意味します。 
+
+### Pores (毛穴)
+
+![](HS_Pores.png)
+
+皮膚の毛穴は、皮膚をリアルに見せる決め手となる重要な詳細です。 
+ただし、毛穴の詳細は非常に繊細なので、基本となる法線マップに単に毛穴を追加するだけでは、十分な質感を出すことはかなり難しいです。 
+毛穴をタイル化が可能な別のテクスチャとして追加すれば、はっきり表示され調整もしやすくなります。  
+このシェーダーにおける毛穴のタイリングの詳細なバリエーションの場合、テクスチャ座標マテリアル式をスカラー パラメータで乗算します。マテリアル インスタンス内で必要に応じ毛穴をタイル化することができるようになります。 
+
+毛穴マスクと法線テクスチャ マップに近づいて表示してみると、以下のようになります。 
+
+![](Engine\Rendering\Materials\LightingModels\SubSurfaceProfile\DetailSpec.png)
+![](Engine\Rendering\Materials\LightingModels\SubSurfaceProfile\DetailNormal.png)
+
+毛穴は少し沈んだエリアなので、グレージング角から見ると実際には目立たなくなります。 
+表面が見える角度に基いて、毛穴の影響が消える様子を真似することができます。
+この計算はフレネルと類似しており、 SkinMaster マテリアルのように実装されました。 
+
+![](Engine\Rendering\Materials\LightingModels\SubSurfaceProfile\FresnelMask.png)
+
+## サブサーフェス プロファイルの使用
+
+サブサーフェス プロファイルは、皮膚を本物のように見せるためのものです。 
+マテリアル内でサブサーフェス プロファイルを使用するために必要なことは、マテリアルまたはマテリアル インスタンスに使用したいサブサーフェス プロファイルを設定することです。 
+
+
+マテリアル内で変更するには、マテリアル エディタの **[Details (詳細)]** パネルで使いたいサブサーフェス プロファイルを設定します。
+
+![](Engine\Rendering\Materials\HowTo\Subsurface_Profile\SSP_Apply_SSP.png)
+
+マテリアル インスタンス内でサブサーフェス プロファイルの使用対象を変更するには、まず **[Override Subsurface Profile (サブサーフェス プロファイルをオーバーライド)]** にチェックを入れて、マテリアル インスタンスの **[Subsurface Profile]** セクションで使用したいサブサーフェス プロファイルを設定します。 
+
+[REGION:lightbox]
+[![](Engine\Rendering\Materials\HowTo\Subsurface_Profile\SSP_SSP_In_Material_Instance.png)(w:920 convert:false)](Engine\Rendering\Materials\HowTo\Subsurface_Profile\SSP_SSP_In_Material_Instance.png)
+[/REGION]
+
+
+## 便利なリンク
+以下の外部リンクでは、ゲームキャラクターの外見をかなりリアルにするために役立つ情報が提供されています。 
+
+[Next Generation Character Rendering]( http://www.iryoku.com/stare-into-the-future)
+
+## まとめ
+
+皮膚を正しくレンダリングするための適切な設定には、長く複雑なプロセスが必要です。 
+本ガイドは、皮膚の設定の正しい方向性を示す補助であることを覚えておいてください。 
+結果が求めていたものであれば、ここで紹介した設定方法と若干異っても構いません。 
+繰り返しますが、ここで紹介した情報はガイドラインです。皮膚の設定を行う際に絶対に従うべき情報ではありません。 
+
+
+
+
+
+
+

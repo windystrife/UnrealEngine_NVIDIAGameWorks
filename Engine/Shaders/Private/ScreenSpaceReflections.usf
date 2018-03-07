@@ -1,0 +1,283 @@
+// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	ScreenSpaceReflections.usf: To generate screen space reflections as a postprocess
+=============================================================================*/
+
+#include "Common.ush"	
+#include "PostProcessCommon.ush"				
+#include "DeferredShadingCommon.ush"
+#include "Random.ush"
+#include "BRDF.ush"
+#include "MonteCarlo.ush"
+#include "ScreenSpaceRayCast.ush"
+
+// 0:old for reference / 1:new optimized (fewer ALU instructions, minor performance difference on NV Titan)
+// define can be removed or used to judge the quality difference or profile on different platforms
+#define RANDOM_OPTIMZATION 1
+
+// .r:Intensity in 0..1 range .g:RoughnessMaskMul, b:EnableDiscard for FPostProcessScreenSpaceReflectionsStencilPS, a:(bTemporalAAIsOn?TemporalAAIndex:StateFrameIndexMod8)*1551
+float4 SSRParams;
+
+uint MortonCode( uint x )
+{
+	//x = (x ^ (x <<  8)) & 0x00ff00ff;
+	//x = (x ^ (x <<  4)) & 0x0f0f0f0f;
+	x = (x ^ (x <<  2)) & 0x33333333;
+	x = (x ^ (x <<  1)) & 0x55555555;
+	return x;
+}
+
+uint ReverseUIntBits( uint bits )
+{
+	//bits = ( bits << 16) | ( bits >> 16);
+	//bits = ( (bits & 0x00ff00ff) << 8 ) | ( (bits & 0xff00ff00) >> 8 );
+	//bits = ( (bits & 0x0f0f0f0f) << 4 ) | ( (bits & 0xf0f0f0f0) >> 4 );
+	bits = ( (bits & 0x33333333) << 2 ) | ( (bits & 0xcccccccc) >> 2 );
+	bits = ( (bits & 0x55555555) << 1 ) | ( (bits & 0xaaaaaaaa) >> 1 );
+	return bits;
+}
+
+float GetRoughness(const in FGBufferData GBuffer)
+{
+	float Roughness = GBuffer.Roughness;
+
+	BRANCH
+	if( GBuffer.ShadingModelID == SHADINGMODELID_CLEAR_COAT )
+	{
+		const float ClearCoat			= GBuffer.CustomData.x;
+		const float ClearCoatRoughness	= GBuffer.CustomData.y;
+
+		Roughness = lerp( Roughness, ClearCoatRoughness, ClearCoat );
+	}
+
+	return Roughness;
+}
+
+float GetRoughnessFade(in float Roughness)
+{
+	// mask SSR to reduce noise and for better performance, roughness of 0 should have SSR, at MaxRoughness we fade to 0
+	return min(Roughness * SSRParams.y + 2, 1.0);
+}
+
+// Used only if r.SSR.Stencil = 1
+//
+// This shader generate the stencil buffer according to if a pixel needs to
+// compute SSR. If it doesn't, it initializes the pixel's color.
+//
+// This optimization use the stencil to test to prunes out the pixel
+// that dones't need to compute SSR, before pixel shader invocation are
+// packed into front lines.
+void ScreenSpaceReflectionsStencilPS(in float4 UVAndScreenPos : TEXCOORD0, out float4 OutColor : SV_Target0)
+{
+	const float2 UV = UVAndScreenPos.xy;
+	
+	const FScreenSpaceData ScreenSpaceData = GetScreenSpaceData(UV);
+	const FGBufferData GBuffer = ScreenSpaceData.GBuffer;
+	
+	const float Roughness = GetRoughness(GBuffer);
+	const float RoughnessFade = GetRoughnessFade(Roughness);
+	
+	if (RoughnessFade > 0.0 && GBuffer.ShadingModelID != 0)
+	{
+		// we are going to compute SSR for this pixel, so we discard this
+		// pixel shader invocation to not overwrite the stencil buffer and
+		// tehrefore execute ScreenSpaceReflectionsPS() for this pixel. 
+		discard;
+	}
+	
+	// we are not going to compute SSR for this pixel, so we clear the color
+	// since ScreenSpaceReflectionsPS() won't be executed in this pixel.
+	OutColor = 0;
+}
+
+
+void ScreenSpaceReflectionsPS(in noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
+{
+	float2 UV = UVAndScreenPos.xy;
+	float2 ScreenPos = UVAndScreenPos.zw;
+	int2 PixelPos = (int2)SvPosition.xy;
+
+	OutColor = 0;
+
+	FScreenSpaceData ScreenSpaceData = GetScreenSpaceData(UV);
+	FGBufferData GBuffer = ScreenSpaceData.GBuffer;
+	
+	float Roughness = GetRoughness(GBuffer);
+	float RoughnessFade = GetRoughnessFade(Roughness);
+
+	// Early out. Useless if using the stencil prepass.
+	BRANCH if( RoughnessFade <= 0.0 || GBuffer.ShadingModelID == 0 )
+	{
+		return;
+	}
+
+#if SSR_QUALITY == 0
+	// visualize SSR
+
+	float PatternMask = ((PixelPos.x / 2 + PixelPos.y / 2) % 2) * 0.7f;
+
+	OutColor = lerp(float4(1, 0, 0, 1), float4(1, 1 ,0, 1), PatternMask) * 0.3f;
+	return;
+#endif
+
+	const float3 N = GBuffer.WorldNormal;
+	const float SceneDepth = CalcSceneDepth(UV);
+	const float3 PositionTranslatedWorld = mul( float4( ScreenPos * SceneDepth, SceneDepth, 1 ), View.ScreenToTranslatedWorld ).xyz;
+	const float3 V = normalize(View.TranslatedWorldCameraOrigin - PositionTranslatedWorld);
+
+	float FrameRandom = SSRParams.a;
+
+#if SSR_QUALITY == SSR_CONE_QUALITY
+	const int NumSteps = 16;
+	
+	{
+		const float2 PixelPos = SvPosition.xy;
+		const float2 E = float2(PseudoRandom(PixelPos + float2(FrameRandom, 0)), PseudoRandom(PixelPos + float2(0, FrameRandom)));
+		const float StepOffset = PseudoRandom(PixelPos + FrameRandom);
+
+		const float4 HNAndPDF = ImportanceSampleBlinn( E, Roughness );
+		const float3 H = TangentToWorld( HNAndPDF.xyz, N );
+		const float3 R = 2 * dot( V, H ) * H - V;
+
+		const float ReflectPDF = HNAndPDF.w / (4 * saturate(dot(V, H)));
+		const float TotalSamples = View.TemporalAAParams.g;
+		const float SolidAngleSample = 1.0 / ( TotalSamples * ReflectPDF );
+		const float ConeAngleWorld = acos( 1 - SolidAngleSample / (2*PI) );
+
+		float4 HitUVzTime;
+		float HCBLevel;
+		
+		RayCast(
+			PostprocessInput1, PostprocessInput1Sampler, PostprocessInput1Size.xy,
+			PositionTranslatedWorld, R, Roughness, ConeAngleWorld, SceneDepth,
+			NumSteps, StepOffset,
+			HitUVzTime, HCBLevel
+		);
+
+		// if there was a hit
+		BRANCH if( HitUVzTime.w < 1 )
+		{
+			OutColor = SampleHCBLevel( PostprocessInput2, PostprocessInput2Sampler, HitUVzTime.xyz, HCBLevel );
+		}
+	}
+#else //SSR_QUALITY != SSR_CONE_QUALITY
+#if SSR_QUALITY == 1
+	const int NumSteps = 8;
+	const int NumRays = 1;
+#elif SSR_QUALITY == 2
+	const int NumSteps = 16;
+	const int NumRays = 1;
+#elif SSR_QUALITY == 3
+	const int NumSteps = 8;
+	const int NumRays = 4;
+#else // SSR_QUALITY == 4
+	const int NumSteps = 12;
+	const int NumRays = 12;
+#endif
+	
+	if( NumRays > 1 )
+	{
+#if RANDOM_OPTIMZATION
+		// magic numbers are found by experimentation
+//		uint2 Random = PseudoRandom(SvPosition.xy + View.StateFrameIndexMod8 * float2(97, 71)) * uint2(12, 25);	// SSR_QUALITY=3 instructions=253 but looks bad
+		uint2 Random = PseudoRandom(SvPosition.xy + View.StateFrameIndexMod8 * float2(97, 71)) * uint2(0x3127352, 0x11229256);		// doesn't compile with external HLSL with obscure error message but the line above does
+#else
+		uint2 Random = Rand3DPCG16(uint3(PixelPos, View.StateFrameIndexMod8)).xy;	// reference, SSR_QUALITY=3
+#endif
+		if( Roughness > 0.1 )
+		{
+			// Sample set dithered over 4x4 pixels
+			uint Morton = MortonCode( PixelPos.x & 3 ) | ( MortonCode( PixelPos.y & 3 ) * 2 );
+			uint PixelIndex = ReverseUIntBits( Morton );
+
+			// Shoot multiple rays
+			LOOP for( int i = 0; i < NumRays; i++ )
+			{
+				// TODO better per ray offset?
+				uint Offset = ( PixelIndex + ReverseUIntBits( FrameRandom + i * 117 ) ) & 15;
+				float StepOffset = Offset / 15.0;
+				StepOffset -= 0.5;
+			
+				float2 E = Hammersley( i, NumRays, Random );
+				float3 H = TangentToWorld( ImportanceSampleBlinn( E, Roughness ).xyz, N );
+				float3 R = 2 * dot( V, H ) * H - V;
+
+				float4 HitUVzTime;
+				float HCBLevel;
+
+				RayCast(
+					PostprocessInput1, PostprocessInput1Sampler, PostprocessInput1Size.xy,
+					PositionTranslatedWorld, R, Roughness, 0.001, SceneDepth,
+					NumSteps, StepOffset,
+					HitUVzTime, HCBLevel
+				);
+
+				// if there was a hit
+				BRANCH if( HitUVzTime.w < 1 )
+				{
+					float2 SampleUV = ReprojectHit( PostprocessInput3, PostprocessInput3Sampler, HitUVzTime.xyz );
+					float4 SampleColor = SampleScreenColor( PostprocessInput0, PostprocessInput0Sampler, SampleUV );
+				
+					SampleColor.rgb /= 1 + Luminance(SampleColor.rgb);
+					OutColor += SampleColor;
+				}
+			}
+
+			OutColor /= NumRays;
+			OutColor.rgb /= 1 - Luminance(OutColor.rgb);
+		}
+		else
+		{
+			float StepOffset = InterleavedGradientNoise(SvPosition.xy, View.StateFrameIndexMod8);
+			StepOffset -= 0.5;
+		
+			float3 R = reflect( -V, N );
+		
+			float4 HitUVzTime;
+			float HCBLevel;
+
+			RayCast(
+				PostprocessInput1, PostprocessInput1Sampler, PostprocessInput1Size.xy,
+				PositionTranslatedWorld, R, Roughness, 0.001, SceneDepth,
+				16, StepOffset,
+				HitUVzTime, HCBLevel
+			);
+
+			// if there was a hit
+			BRANCH if( HitUVzTime.w < 1 )
+			{
+				float2 SampleUV = ReprojectHit( PostprocessInput3, PostprocessInput3Sampler, HitUVzTime.xyz );
+				OutColor = SampleScreenColor( PostprocessInput0, PostprocessInput0Sampler, SampleUV );
+			}
+		}
+	}
+	else
+	{
+		float StepOffset = InterleavedGradientNoise(SvPosition.xy, View.StateFrameIndexMod8);
+		StepOffset -= 0.5;
+		
+		float3 R = reflect( -V, N );
+		
+		float4 HitUVzTime;
+		float HCBLevel;
+
+		RayCast(
+			PostprocessInput1, PostprocessInput1Sampler, PostprocessInput1Size.xy,
+			PositionTranslatedWorld, R, Roughness, 0.001, SceneDepth,
+			NumSteps, StepOffset,
+			HitUVzTime, HCBLevel
+		);
+
+		// if there was a hit
+		BRANCH if( HitUVzTime.w < 1 )
+		{
+			float2 SampleUV = ReprojectHit( PostprocessInput3, PostprocessInput3Sampler, HitUVzTime.xyz );
+			OutColor = SampleScreenColor( PostprocessInput0, PostprocessInput0Sampler, SampleUV );
+		}
+	}
+#endif //SSR_QUALITY  != SSR_CONE_QUALITY
+	
+	OutColor *= RoughnessFade;
+	OutColor *= SSRParams.r;
+}
