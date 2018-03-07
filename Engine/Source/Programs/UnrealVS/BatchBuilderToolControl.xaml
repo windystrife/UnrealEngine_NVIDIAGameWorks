@@ -1,0 +1,268 @@
+﻿<!--Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.-->
+	
+<UserControl x:Class="UnrealVS.BatchBuilderToolControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:UnrealVS="clr-namespace:UnrealVS"
+             mc:Ignorable="d" d:DesignHeight="250" d:DesignWidth="800"
+             MinHeight="200" MinWidth="600" Name="ThisBatchBuilderToolCtrl"
+						 DataContext="{Binding RelativeSource={RelativeSource Self}}"
+						 IsEnabled="{Binding Path=IsSolutionOpen}">
+
+	<UserControl.CommandBindings>
+		<CommandBinding Command="Open" Executed="OpenItemOutputCommandExecuted"/>
+	</UserControl.CommandBindings>
+
+	<UserControl.Resources>
+		
+		<!-- Style for all ListBoxItems -->
+		<Style TargetType="ListBoxItem">
+			<Setter Property="Template">
+				<Setter.Value>
+					<ControlTemplate TargetType="ListBoxItem">
+						<Border Name="Border">
+							<ContentPresenter />
+						</Border>
+						<ControlTemplate.Triggers>
+							<MultiTrigger>
+								<MultiTrigger.Conditions>
+									<Condition Property="IsSelected" Value="false"/>
+									<Condition Property="IsEnabled" Value="true"/>
+								</MultiTrigger.Conditions>
+								<Setter Property="Foreground" Value="{x:Static SystemColors.WindowTextBrush}" />
+								<Setter TargetName="Border" Property="Background" Value="{x:Static SystemColors.WindowBrush}" />								
+							</MultiTrigger>				
+							<Trigger Property="IsSelected" Value="true">
+								<Setter Property="Foreground" Value="{x:Static SystemColors.HighlightTextBrush}" />
+								<Setter TargetName="Border" Property="Background"
+								        Value="{x:Static SystemColors.HighlightBrush}" />
+							</Trigger>
+						</ControlTemplate.Triggers>
+					</ControlTemplate>
+				</Setter.Value>
+			</Setter>
+		</Style>
+
+		<!-- DataTemplate ProjectListItemTemplate -->
+		<DataTemplate x:Key="ProjectListItemTemplate">
+			<TextBlock Text="{Binding}" />
+		</DataTemplate>
+
+		<!-- DataTemplate BuildListItemTemplate -->
+		<DataTemplate x:Key="BuildListItemTemplate">
+			<ContentControl MouseDoubleClick="OnDblClickBuildListItem" ToolTip="Double-click to switch the active solution config and the startup project to match this item.">
+				<TextBlock Text="{Binding Path=DisplayString}"/>
+			</ContentControl>
+		</DataTemplate>
+
+		<!-- DataTemplate BuildingListItemTemplate -->
+		<DataTemplate x:Key="BuildingListItemTemplate">
+			<ContentControl MouseDoubleClick="OnDblClickBuildingListItem">
+				<StackPanel Orientation="Horizontal">
+					<StackPanel.Style>
+						<Style>
+							<Style.Triggers>
+								<DataTrigger Binding="{Binding Path=HasOutputText}" Value="True">
+									<Setter Property="FrameworkElement.ContextMenu">
+										<Setter.Value>
+											<ContextMenu>
+												<MenuItem Header="Show Output" Command="Open" CommandParameter="{Binding}"/>
+											</ContextMenu>
+										</Setter.Value>
+									</Setter>
+								</DataTrigger>
+							</Style.Triggers>
+						</Style>
+					</StackPanel.Style>
+					<UnrealVS:BuildStatusIcon Margin="0,2"  Width="15" Height="15" BuildStatus="{Binding Path=JobStatus}" ToolTip="{Binding Path=JobStatusDisplayString}"/>
+					<TextBlock VerticalAlignment="Center" Margin="5,0,0,0" Text="{Binding Path=DisplayString}" ToolTip="{Binding Path=DisplayString}">
+						<TextBlock.Style>
+							<Style>
+								<Style.Triggers>
+									<DataTrigger Binding="{Binding Path=JobStatus}" Value="Executing">
+										<Setter Property="TextBlock.FontWeight" Value="Bold"/>
+									</DataTrigger>
+								</Style.Triggers>
+								<Setter Property="TextBlock.FontWeight" Value="Normal"/>
+							</Style>
+						</TextBlock.Style>
+					</TextBlock>
+				</StackPanel>
+			</ContentControl>
+		</DataTemplate>
+
+		<!-- Style DisabledOnBusy -->
+		<Style x:Key="DisabledOnBusy">
+			<Style.Triggers>
+				<DataTrigger Binding="{Binding Path=IsBusy}" Value="True">
+					<Setter Property="UIElement.IsEnabled" Value="False"/>
+				</DataTrigger>
+			</Style.Triggers>
+			<Setter Property="UIElement.IsEnabled" Value="True"/>
+		</Style>
+		
+		<!-- Style ShowOnBusy -->
+		<Style x:Key="ShowOnBusy">
+			<Style.Triggers>
+				<DataTrigger Binding="{Binding Path=IsBusy}" Value="False">
+					<Setter Property="UIElement.Visibility" Value="Collapsed"/>
+				</DataTrigger>
+			</Style.Triggers>
+			<Setter Property="UIElement.Visibility" Value="Visible"/>
+		</Style>
+
+		<!-- Style BuildJobsListStyle -->
+		<Style x:Key="BuildJobsListStyle">
+			<Style.Triggers>
+				<DataTrigger Binding="{Binding Path=IsBusy}" Value="True">
+					<!--<Setter Property="ListBox.ItemTemplate" Value="{StaticResource NullItemTemplate}"/>-->
+					<Setter Property="ListBox.IsEnabled" Value="False"/>
+				</DataTrigger>
+			</Style.Triggers>
+			<Setter Property="ListBox.IsEnabled" Value="True"/>
+			<Setter Property="ListBox.ItemTemplate" Value="{DynamicResource BuildListItemTemplate}"/>
+			<Setter Property="ListBox.SelectionMode" Value="Extended"/>
+			<EventSetter Event="ListBox.SelectionChanged" Handler="OnBuildJobsSelectionChanged"/>
+		</Style>
+
+		<!-- Style BuildingJobsListStyle -->
+		<Style x:Key="BuildingJobsListStyle">
+			<Setter Property="ItemsControl.Background" Value="Transparent"/>
+			<Setter Property="ItemsControl.ItemTemplate" Value="{DynamicResource BuildingListItemTemplate}"/>
+			<Setter Property="ItemsControl.Margin" Value="3"/>
+		</Style>
+
+		<!-- Style OutputTabStyle -->
+		<Style x:Key="OutputTabStyle">
+			<Style.Triggers>
+				<DataTrigger Binding="{Binding Path=HasOutput}" Value="True">
+					<Setter Property="TabItem.Visibility" Value="Visible"/>
+				</DataTrigger>
+				<DataTrigger Binding="{Binding Path=HasOutput}" Value="False">
+					<Setter Property="TabItem.Visibility" Value="Collapsed"/>
+				</DataTrigger>				
+			</Style.Triggers>
+		</Style>
+
+		<!-- Style StartButtonStyle -->
+		<Style x:Key="StartButtonStyle" TargetType="{x:Type Button}">
+			<Style.Triggers>
+				<DataTrigger Binding="{Binding Path=IsBusy}" Value="True">
+					<Setter Property="Content" Value="Stop"/>
+				</DataTrigger>
+			</Style.Triggers>
+			<Setter Property="Content" Value="Start"/>
+			<Setter Property="Margin" Value="0, 5, 0, 0"/>
+			<Setter Property="Width" Value="45"/>
+			<Setter Property="ToolTip" Value="Start/Stop build jobs in the list"/>
+			<EventSetter Event="Click" Handler="OnStartStopButtonClick"/>
+		</Style>
+
+		<!-- Style StopButtonStyle -->
+		<Style x:Key="StopButtonStyle" TargetType="{x:Type Button}">
+			<Style.Triggers>
+				<DataTrigger Binding="{Binding Path=IsBusy}" Value="False">
+					<Setter Property="IsEnabled" Value="False"/>
+				</DataTrigger>
+			</Style.Triggers>
+			<Setter Property="IsEnabled" Value="True"/>
+			<Setter Property="Content" Value="Stop"/>
+			<Setter Property="Margin" Value="0, 5, 0, 0"/>
+			<Setter Property="Width" Value="45"/>
+			<Setter Property="ToolTip" Value="Stop/cancel running build jobs"/>
+			<EventSetter Event="Click" Handler="OnStartStopButtonClick"/>
+		</Style>
+		
+	</UserControl.Resources>
+
+	<!-- CONTENT -->
+	
+	<Grid Margin="3">
+		<Grid.ColumnDefinitions>
+			<ColumnDefinition Width="4*" />
+			<ColumnDefinition Width="3*" />
+			<ColumnDefinition Width="3*" />
+			<ColumnDefinition Width="Auto"/>
+			<ColumnDefinition Width="7*" />
+		</Grid.ColumnDefinitions>
+		<DockPanel Margin="3" Grid.Column="0">
+			<TextBlock Margin="3,0,3,3" DockPanel.Dock="Top">Project</TextBlock>
+			<ListBox Name="ProjectsList" ItemsSource="{Binding Path=Projects}"
+			         SelectionMode="Extended" ItemTemplate="{DynamicResource ProjectListItemTemplate}" />
+		</DockPanel>
+		<DockPanel Margin="3" Grid.Column="1">
+			<TextBlock Margin="3,0,3,3" DockPanel.Dock="Top">Config</TextBlock>
+			<ListBox Name="ConfigsList" ItemsSource="{Binding Path=Configs}"
+			         SelectionMode="Extended" />
+		</DockPanel>
+		<Image Margin="20,0,0,-28" Height="150" Width="150" HorizontalAlignment="Left" VerticalAlignment="Bottom" Grid.Column="2" Grid.ColumnSpan="3" Source="Resources/BatchBuilderBackground.png">
+			<Image.BitmapEffect>
+				<BlurBitmapEffect Radius="7.5"/>
+			</Image.BitmapEffect>
+		</Image>
+		<DockPanel Margin="3" Grid.Column="2">
+			<TextBlock Margin="3,0,3,3" DockPanel.Dock="Top">Platform</TextBlock>
+			<StackPanel DockPanel.Dock="Bottom" HorizontalAlignment="Left" Background="#70ffffff" Margin="5,10,3,10">
+				<RadioButton Margin="3,3,15,3" Name="BuildRadioButton">Build</RadioButton>
+				<RadioButton Margin="3,3,15,3" Name="RebuildRadioButton">Rebuild</RadioButton>
+				<RadioButton Margin="3,3,15,3" Name="CleanRadioButton">Clean</RadioButton>
+			</StackPanel>
+			<ListBox Name="PlatformsList" ItemsSource="{Binding Path=Platforms}"
+			         SelectionMode="Extended" />
+		</DockPanel>
+		<StackPanel VerticalAlignment="Center" Grid.Column="3" Background="#70ffffff" >
+			<Button Style="{StaticResource DisabledOnBusy}" Margin="3,10,3,3" Width="32" FontSize="20" Click="AddButtonClick" ToolTip="Adds Selected Projects, Configs and Platforms to the Build Jobs List">&gt;</Button>
+			<Button Style="{StaticResource DisabledOnBusy}" Margin="3,3,3,10" Width="32" FontSize="20" Click="RemoveButtonClick" ToolTip="Removes Selected Build Jobs from the Build Jobs List">&lt;</Button>
+		</StackPanel>
+		<TabControl Margin="3" Grid.Column="4">
+			<TabItem Name="JobsListTab" Header="{Binding BuildJobsPanelTitle}">
+				<DockPanel>
+					<DockPanel Margin="3,0,0,6.5" DockPanel.Dock="Right">
+						<StackPanel Style="{StaticResource DisabledOnBusy}" DockPanel.Dock="Top" Width="25" HorizontalAlignment="Left">
+							<Button Margin="0, 2.5" FontSize="15" Name="UpButton" ToolTip="Move Up" Click="UpButtonClick" IsEnabled="{Binding Path=IsSingleBuildJobSelected}">&#x2191;</Button>
+							<Button Margin="0, 2.5" FontSize="15" Name="DownButton" ToolTip="Move Down" Click="DownButtonClick" IsEnabled="{Binding Path=IsSingleBuildJobSelected}">&#x2193;</Button>
+						</StackPanel>
+						<StackPanel DockPanel.Dock="Bottom" VerticalAlignment="Bottom">
+							<ProgressBar Style="{StaticResource ShowOnBusy}" Height="10" Margin="0, 5, 0, 0" IsIndeterminate="True" Foreground="#FF007ACC"/>
+							<Button Name="StartStopButton" Style="{StaticResource StartButtonStyle}"/>
+						</StackPanel>
+					</DockPanel>
+					<GroupBox Style="{StaticResource DisabledOnBusy}" DockPanel.Dock="Bottom" Header="Job Set:">
+						<DockPanel>
+							<StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+								<Button Margin="5,0,0,0" Name="DeleteButton" Click="OnDeleteButtonClick" IsEnabled="{Binding IsDeletableSetSelected}" ToolTip="Deletes the selected Job Set">Delete</Button>
+							</StackPanel>
+							<ComboBox Name="SetCombo" IsEditable="True" Text="{Binding Path=SelectedBuildJobSetName, Mode=OneWayToSource, UpdateSourceTrigger=LostFocus}" ItemsSource="{Binding Path=BuildJobSets}" SelectionChanged="OnSetComboSelectionChanged" KeyDown="OnSetComboKeyDown"/>
+						</DockPanel>
+					</GroupBox>
+					<ListBox Name="BuildJobsList" Style="{StaticResource BuildJobsListStyle}">
+						<ListBox.ItemsSource>
+							<Binding Path="BuildJobs" />
+						</ListBox.ItemsSource>
+					</ListBox>
+				</DockPanel>
+			</TabItem>
+			<TabItem Name="OutputTab" Header="{Binding OutputPanelTitle}" Style="{StaticResource OutputTabStyle}">
+				<DockPanel>
+					<DockPanel DockPanel.Dock="Bottom">
+						<StackPanel DockPanel.Dock="Bottom" HorizontalAlignment="Right">
+							<ProgressBar Style="{StaticResource ShowOnBusy}" Height="10" Margin="0, 5, 0, 0" IsIndeterminate="True" Foreground="#FF007ACC"/>
+							<Button Name="StopButton" Style="{StaticResource StopButtonStyle}"/>
+						</StackPanel>
+					</DockPanel>
+					<ScrollViewer VerticalScrollBarVisibility="Auto">
+						<ItemsControl Name="BuildingJobsList" Style="{StaticResource BuildingJobsListStyle}">
+							<ItemsControl.ItemsSource>
+								<Binding Path="LastBuildJobsQueued" />
+							</ItemsControl.ItemsSource>
+						</ItemsControl>
+					</ScrollViewer>
+				</DockPanel>
+			</TabItem>
+		</TabControl>
+	</Grid>
+
+	<!-- END CONTENT -->
+	
+</UserControl>

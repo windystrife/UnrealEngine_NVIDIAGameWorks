@@ -1,0 +1,73 @@
+
+# use build_html.sh to set/build the following variables
+#	OPTIMIZATION=
+#	LIB=
+
+
+CC=emcc
+CFLAGS= $(CFLAGS_EXTRA) $(OPTIMIZATION) -c -Wall
+LDFLAGS= $(CFLAGS_EXTRA) $(OPTIMIZATION)
+
+MKDIR=mkdir -p
+RM=rm -f
+CP=cp -vf
+
+# ----------------------------------------
+
+INTERMEDIATE=Intermediate
+
+$(INTERMEDIATE):
+	$(MKDIR) $(INTERMEDIATE)
+
+# ----------------------------------------
+
+SOURCES= adler32.c \
+		crc32.c \
+		gzlib.c \
+		gzwrite.c \
+		inffast.c \
+		inftrees.c \
+		trees.c \
+		zutil.c \
+		compress.c \
+		deflate.c \
+		gzclose.c \
+		gzread.c \
+		infback.c \
+		inflate.c \
+		uncompr.c \
+
+# ----------------------------------------
+
+OBJECTS=$(SOURCES:%.c=$(INTERMEDIATE)/%.bc)
+
+$(INTERMEDIATE)/%.bc : %.c
+	$(CC) $(CFLAGS) $< -o $@
+
+TARGET=$(INTERMEDIATE)/$(LIB)
+
+$(TARGET): $(INTERMEDIATE) $(OBJECTS)
+	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
+
+all: $(SOURCES) $(TARGET)
+
+install: all
+	$(CP) $(TARGET) ../Lib/HTML5/.
+
+uninstall:
+	$(RM) ../Lib/HTML5/$(LIB)
+
+clean:
+	$(RM) $(OBJECTS) $(TARGET)
+
+# ----------------------------------------
+
+example: $(INTERMEDIATE)/example.bc $(TARGET)
+	$(CC) $(OPTIMIZATION) -o $(INTERMEDIATE)/example.js $(INTERMEDIATE)/example.bc $(TARGET)
+	
+minigzip: minigzip.bc $(TARGET)
+	$(CC) $(OPTIMIZATION) -o $(INTERMEDIATE)/minigzip.js $(INTERMEDIATE)/minigzip.bc $(TARGET)
+
+test: example minigzip
+	node $(INTERMEDIATE)/example.js
+

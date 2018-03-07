@@ -1,0 +1,378 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--AndroidAdvertising optional additions-->
+<root xmlns:android="http://schemas.android.com/apk/res/android">
+	<!-- init section is always evaluated once per architecture -->
+	<init>
+		<log text="AndroidAdvertising init"/>
+
+		<!-- get packaging with ad support -->
+		<setBoolFromProperty result="bSupportAdMob" ini="Engine" section="/Script/AndroidRuntimeSettings.AndroidRuntimeSettings" property="bSupportAdMob" default="true"/>
+		<if condition="bSupportAdMob">
+			<true>
+				<log text="Including AdMob support. Disable in Android project settings if you do not need to use it."/>
+			</true>
+			<false>
+				<log text="Not including AdMob support. Enable in Android project settings if you need to use it."/>
+			</false>
+		</if>
+	</init>
+
+	<!-- AAR dependencies -->
+	<AARImports>
+		<if condition="bSupportAdMob">
+			<true>
+				<insertValue value="com.google.android.gms,play-services-ads,11.0.4"/>
+				<insertNewline/>
+			</true>
+		</if>
+	</AARImports>
+
+	<!-- optional updates applied to AndroidManifest.xml -->
+	<androidManifestUpdates>
+		<if condition="bSupportAdMob">
+			<true>
+				<addPermission android:name="android.permission.INTERNET"/>
+				<addPermission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+			</true>
+		</if>
+	</androidManifestUpdates>
+
+	<!-- optional additions to the GameActivity imports in GameActivity.java -->
+	<gameActivityImportAdditions>
+		<if condition="bSupportAdMob">
+			<true>
+				<insert>
+import com.google.android.gms.ads.AdRequest;
+import com.google.android.gms.ads.AdView;
+import com.google.android.gms.ads.AdSize;
+import com.google.android.gms.ads.AdListener;
+import com.google.android.gms.ads.InterstitialAd;
+import com.google.android.gms.ads.identifier.AdvertisingIdClient;
+import com.google.android.gms.ads.identifier.AdvertisingIdClient.Info;				
+				</insert>
+			</true>
+		</if>
+	</gameActivityImportAdditions>
+
+	<!-- optional additions to the GameActivity class in GameActivity.java -->
+	<gameActivityClassAdditions>
+		<if condition="bSupportAdMob">
+			<true>
+				<insert>
+<![CDATA[
+    /** AdMob support */
+    private PopupWindow adPopupWindow;
+    private AdView adView;
+    private boolean adInit = false;
+    private LinearLayout adLayout;
+    private int adGravity = Gravity.TOP;
+    private InterstitialAd interstitialAd;
+    private boolean isInterstitialAdLoaded = false;
+    private boolean isInterstitialAdRequested = false;
+    private AdRequest interstitialAdRequest;
+
+	/** true when the application has requested that an ad be displayed */
+	private boolean adWantsToBeShown = false;
+
+	/** true when an ad is available to be displayed */
+	private boolean adIsAvailable = false;
+
+	/** true when an ad request is in flight */
+	private boolean adIsRequested = false;
+
+	// handle ad popup visibility and requests
+	private void updateAdVisibility(boolean loadIfNeeded)
+	{
+		if (!adInit || (adPopupWindow == null))
+		{
+			return;
+		}
+
+		// request an ad if we don't have one available or requested, but would like one
+		if (adWantsToBeShown && !adIsAvailable && !adIsRequested && loadIfNeeded)
+		{
+			AdRequest adRequest = new AdRequest.Builder().build();		// add test devices here
+			_activity.adView.loadAd(adRequest);
+
+			adIsRequested = true;
+		}
+
+		if (adIsAvailable && adWantsToBeShown)
+		{
+			if (adPopupWindow.isShowing())
+			{
+				return;
+			}
+
+			adPopupWindow.showAtLocation(activityLayout, adGravity, 0, 0);
+			// don't call update on 7.0 to work around this issue: https://code.google.com/p/android/issues/detail?id=221001
+			if (ANDROID_BUILD_VERSION != 24) {
+				adPopupWindow.update();
+			}
+		}
+		else
+		{
+			if (!adPopupWindow.isShowing())
+			{
+				return;
+			}
+
+			adPopupWindow.dismiss();
+			adPopupWindow.update();
+		}
+	}
+
+	public void AndroidThunkJava_ShowAdBanner(String AdMobAdUnitID, boolean bShowOnBottonOfScreen)
+	{
+		Log.debug("In AndroidThunkJava_ShowAdBanner");
+		Log.debug("AdID: " + AdMobAdUnitID);
+
+		adGravity = bShowOnBottonOfScreen ? Gravity.BOTTOM : Gravity.TOP;
+
+		if (adInit)
+		{
+			// already created, make it visible
+			_activity.runOnUiThread(new Runnable()
+			{
+				@Override
+				public void run()
+				{
+					if ((adPopupWindow == null) || adPopupWindow.isShowing())
+					{
+						return;
+					}
+
+					adWantsToBeShown = true;
+					updateAdVisibility(true);
+				}
+			});
+
+			return;
+		}
+
+		// init our AdMob window
+		adView = new AdView(this);
+		adView.setAdUnitId(AdMobAdUnitID);
+		adView.setAdSize(AdSize.BANNER);
+
+		if (adView != null)
+		{
+			_activity.runOnUiThread(new Runnable()
+			{
+				@Override
+				public void run()
+				{
+					adInit = true;
+
+					final DisplayMetrics dm = getResources().getDisplayMetrics();
+					final float scale = dm.density;
+					adPopupWindow = new PopupWindow(_activity);
+					adPopupWindow.setWidth((int)(320*scale));
+					adPopupWindow.setHeight((int)(50*scale));
+					adPopupWindow.setClippingEnabled(false);
+
+					adLayout = new LinearLayout(_activity);
+
+					final int padding = (int)(-5*scale);
+					adLayout.setPadding(padding,padding,padding,padding);
+
+					MarginLayoutParams params = new MarginLayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);;
+
+					params.setMargins(0,0,0,0);
+
+					adLayout.setOrientation(LinearLayout.VERTICAL);
+					adLayout.addView(adView, params);
+					adPopupWindow.setContentView(adLayout);
+
+					// set up our ad callbacks
+					_activity.adView.setAdListener(new AdListener()
+					{
+						 @Override
+						public void onAdLoaded()
+						{
+							adIsAvailable = true;
+							adIsRequested = false;
+
+							updateAdVisibility(true);
+						}
+
+						 @Override
+						public void onAdFailedToLoad(int errorCode)
+						{
+							adIsAvailable = false;
+							adIsRequested = false;
+
+							// don't immediately request a new ad on failure, wait until the next show
+							updateAdVisibility(false);
+						}
+					});
+
+					adWantsToBeShown = true;
+					updateAdVisibility(true);
+				}
+			});
+		}
+	}
+
+	public void AndroidThunkJava_HideAdBanner()
+	{
+		Log.debug("In AndroidThunkJava_HideAdBanner");
+
+		if (!adInit)
+		{
+			return;
+		}
+
+		_activity.runOnUiThread(new Runnable()
+		{
+			@Override
+			public void run()
+			{
+				adWantsToBeShown = false;
+				updateAdVisibility(true);
+			}
+		});
+	}
+
+	public void AndroidThunkJava_CloseAdBanner()
+	{
+		Log.debug("In AndroidThunkJava_CloseAdBanner");
+
+		if (!adInit)
+		{
+			return;
+		}
+
+		// currently the same as hide.  should we do a full teardown?
+		_activity.runOnUiThread(new Runnable()
+		{
+			@Override
+			public void run()
+			{
+				adWantsToBeShown = false;
+				updateAdVisibility(true);
+			}
+		});
+	}
+	
+	public void AndroidThunkJava_LoadInterstitialAd(String AdMobAdUnitID)
+	{
+		interstitialAdRequest = new AdRequest.Builder().build();
+
+		interstitialAd = new InterstitialAd(this);
+		isInterstitialAdLoaded = false;
+		isInterstitialAdRequested = true;
+		interstitialAd.setAdUnitId(AdMobAdUnitID);
+
+		_activity.runOnUiThread(new Runnable()
+		{
+			@Override
+			public void run()
+			{
+				interstitialAd.loadAd(interstitialAdRequest);				
+			}
+		});
+		
+		interstitialAd.setAdListener(new AdListener()
+		{
+			@Override
+			public void onAdFailedToLoad(int errorCode) 
+			{
+				Log.debug("Interstitial Ad failed to load, errocode: " + errorCode);
+				isInterstitialAdLoaded = false;
+				isInterstitialAdRequested = false;
+			}
+			@Override
+			public void onAdLoaded() 
+			{
+				//track if the ad is loaded since we can only called interstitialAd.isLoaded() from the uiThread				
+				isInterstitialAdLoaded = true;
+				isInterstitialAdRequested = false;
+			}    
+		});
+	}
+
+	public boolean AndroidThunkJava_IsInterstitialAdAvailable()
+	{
+		return interstitialAd != null && isInterstitialAdLoaded;
+	}
+
+	public boolean AndroidThunkJava_IsInterstitialAdRequested()
+	{
+		return interstitialAd != null && isInterstitialAdRequested;
+	}
+
+	public void AndroidThunkJava_ShowInterstitialAd()
+	{
+		if(isInterstitialAdLoaded)
+		{
+			_activity.runOnUiThread(new Runnable()
+			{
+				@Override
+				public void run()
+				{					
+					interstitialAd.show();
+				}
+			});
+		}
+		else
+		{
+			Log.debug("Interstitial Ad is not available to show - call LoadInterstitialAd or wait for it to finish loading");
+		}
+	}
+
+	public String AndroidThunkJava_GetAdvertisingId()
+	{
+		try {
+	        AdvertisingIdClient.Info adInfo = AdvertisingIdClient.getAdvertisingIdInfo(getApplicationContext());
+		    return adInfo.getId();
+		} catch (Exception e) {
+			Log.debug("GetAdvertisingId failed: " + e.getMessage());
+		}
+		return null;
+	}
+]]>
+				</insert>
+			</true>
+			<false>
+				<insert>
+	public void AndroidThunkJava_ShowAdBanner(String AdMobAdUnitID, boolean bShowOnBottonOfScreen)
+	{
+	}
+
+	public void AndroidThunkJava_HideAdBanner()
+	{
+	}
+
+	public void AndroidThunkJava_CloseAdBanner()
+	{
+	}
+
+	public void AndroidThunkJava_LoadInterstitialAd(String AdMobAdUnitID)
+	{
+	}
+
+	public boolean AndroidThunkJava_IsInterstitialAdAvailable()
+	{
+		return true;
+	}
+
+	public boolean AndroidThunkJava_IsInterstitialAdRequested()
+	{
+		return false;
+	}
+
+	public void AndroidThunkJava_ShowInterstitialAd()
+	{
+	}
+
+	public String AndroidThunkJava_GetAdvertisingId()
+	{
+		return null;
+    }
+				</insert>
+			</false>
+		</if>
+	</gameActivityClassAdditions>
+
+</root>

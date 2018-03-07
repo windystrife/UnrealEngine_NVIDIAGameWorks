@@ -1,0 +1,167 @@
+# main rc file for setting up emscripten toolchain paths
+
+
+return
+
+
+# ================================================================================
+# *** THIS FILE HAS BEEN DECOMISSIONED ***
+#       USE: emsdk's emsdk_set_env.sh
+#
+#
+# the following are notes for reference
+# ================================================================================
+
+
+# ----- WINDOWS NOTES -----
+#
+# TL;DR;
+#
+# WARNING: DO NOT USE CYGWIN - but, you can use Git-Bash (mingw64)
+#     - https://stackoverflow.com/questions/25019057/how-are-msys-msys2-and-msysgit-related-to-each-other
+#     - https://sourceforge.net/p/msys2/wiki/How%20does%20MSYS2%20differ%20from%20Cygwin/
+#
+# essentially, "builds" on cygwin targets POSIX-compatible environments
+#        while "builds" on MSYS2 targets native windows executables
+#
+#
+# Long Form:
+#
+# "unix path" vs "drive:"
+#     "windows python" version does not play nice within Cygwin environment
+#
+#     meaning, even if you tried using "cygwin python" from the cygwin environment
+#     the build tools from this setup will not work from the windows command line
+#
+#
+# WARNING: emscripten does not work if running "configure" in Windows (no "shell
+#          program" available) -- also, even with Mingw64, "configure" errors on
+#          compile tests (still thinks it's a unix environment)
+#          (e.g. ICU uses ./configure to build the Makefiles)
+#
+#
+# WARNING: shell scripts on some projects will still be broken if path contains spaces
+#           (e.g. harfbuzz) -- will try to fix them in the near future
+
+
+# basically, build all libs on OSX or Linux
+# but, UE4 HTML5 projects can still be built on windows afterwards
+
+
+
+
+	HOST=$(uname)
+	if [ $HOST == 'Darwin' ]; then
+		HOST='Mac'
+	fi
+
+	if [ $HOST == 'Mac' ] || [ $HOST == 'Linux' ]; then
+		# emscripten uses "python2" explicitly
+		# symlink link to python2.x bin
+		if [ -e "/usr/bin/python" ]; then
+			if [ ! -e "/usr/bin/python2" ]; then
+				cp "/usr/bin/python" "/usr/bin/python2"
+			fi
+		elif [ -e "/usr/local/bin/python" ]; then
+			if [ ! -e "/usr/local/bin/python2" ]; then
+				cp "/usr/local/bin/python" "/usr/local/bin/python2"
+			fi
+		else
+			echo ERROR: python not found
+			exit
+		fi
+
+	else
+		HOST=Win64
+		PYTHON_ROOT="$EMSDK/$HOST/python/2.7.5.3_64bit"
+		if [ ! -e "$PYTHON_ROOT/python2.exe" ]; then
+			cp "$PYTHON_ROOT/python.exe" "$PYTHON_ROOT/python2.exe"
+		fi
+
+		CMAKEPATH='/c/Program Files (x86)/CMake/bin'
+		if [ ! -d "$CMAKEPATH" ]; then
+			echo ERROR: cmake not found
+			exit
+		fi
+	fi
+
+
+
+
+# upgrading emsdk - REMEMBER TO DO THE FOLLOWING:
+#
+# - edit Engine/Source/Programs/UnrealBuildTool/HTML5/HTML5SDKInfo.cs
+#   + update version (paths)
+#   + NOTE: requires UBT rebuild !!!
+#
+# - edit Engine/Extras/ThirdPartyNotUE/emsdk/emscripten/<version>/tools/file_packager.py
+#   + scan for "data_target" -> ensure these are "escape_for_js_string(data_target)" where needed
+#
+# - path: Engine/Extras/ThirdPartyNotUE/emsdk/emscripten/<version>/tools/shared.py
+#   + scan for "logging.warning" -> ensure these are "logging.info" where needed
+#     -- i.e. java & closure
+#     -- "source tree above" can also be marked as info = these have not been checked into perforce
+#     CIS marks these and will SPAM developers -- doing this will reduce the noise
+
+
+
+
+# optimization flags used in emscripten and their UE4 equivalents:
+#     -03 release: shipping (higher compile time)
+#     -02 release: development
+#     -0z release: for size (at the cost of performance)
+#     -00 debug
+# for details, see: .../Engine/Source/Programs/UnrealBuildTool/HTML5/HTML5ToolChain.cs
+#     GetCLArguments_Global() & GetLinkArguments()
+
+
+# CMakefile projects - the following will prove to be useful:
+#
+# while using one of these:
+#     export LIB_SUFFIX=
+#     export LIB_SUFFIX=_Oz
+#     export LIB_SUFFIX=_O2
+#     export LIB_SUFFIX=_O3
+#
+# double check CMake files for either:
+#     sed -e "s/\(add_library(libprojectname\)/\1$LIB_SUFFIX/" ../CMakeLists.txt.save > ../CMakeLists.txt
+# - or -
+#     SET(CMAKE_DEBUG_POSTFIX $ENV{LIB_SUFFIX})
+#     SET(CMAKE_PROFILE_POSTFIX $ENV{LIB_SUFFIX})
+#     SET(CMAKE_CHECKED_POSTFIX $ENV{LIB_SUFFIX})
+#     SET(CMAKE_RELEASE_POSTFIX $ENV{LIB_SUFFIX})
+#
+# then, i try to always build: -DCMAKE_BUILD_TYPE="Release"
+# - and because of that, while the following could have been used:
+#     SET(CMAKE_CXX_FLAGS_DEBUG "-O0 -g")
+#     SET(CMAKE_CXX_FLAGS_CHECKED "-O2")
+#     SET(CMAKE_CXX_FLAGS_PROFILE "-O2")
+#     SET(CMAKE_CXX_FLAGS_RELEASE "-O3")
+# - but, Emscripten.cmake always uses -O2 -- which needs to be modified on the fly:
+#	sed -e "s/\(EPIC_BUILD_FLAGS\} \).*-O2\"/\1$OPTIMIZATION\"/" "$EMSCRIPTEN/cmake/Modules/Platform/Emscripten.cmake" > $MAKE_PATH$OPTIMIZATION/Emscripten.cmake
+
+
+
+
+# ================================================================================
+# hacks no longer needed
+# left here for reference
+# ================================================================================
+
+# - edit Engine/Extras/ThirdPartyNotUE/emsdk/emscripten/<version>/cmake/Modules/Platform/Emscripten.cmake
+#   + uncomment:
+#     SET(CMAKE_STATIC_LIBRARY_SUFFIX ".bc")
+#     SET(CMAKE_SHARED_LIBRARY_SUFFIX ".bc")
+#   + add:
+#     SET(EPIC_BUILD_FLAGS "-msse -msse2 -s FULL_ES2=1 -s SIMD=1 -s USE_PTHREADS=1")
+#
+# - path: Engine/Extras/ThirdPartyNotUE/emsdk/emscripten/<version>/system/include/emscripten
+#   + copy: vector.h to em_vector.h
+#   + edit: xmmintrin.h and change:
+#     -- from: #include <vector.h>
+#     -- to:   #include <em_vector.h>
+#
+#     this is because on case-insensitive filesystems (i.e. windows)
+#     it is getting lost with:
+#     -- Engine/Source/Runtime/Core/Public/Math/Vector.h
+
