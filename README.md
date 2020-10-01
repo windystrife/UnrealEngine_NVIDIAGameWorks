@@ -2,7 +2,7 @@
 
 Welcome to Unreal Engine 4 with Nvidia Gameworks integration repository!
 
-Here are combined all possible Nvidia Gameworks technologies in one Unreal Engine 4 repository.
+Here are combined all possible Nvidia Gameworks technologies in one Unreal Engine 4 repository to help improve the grphics of your game.
 
 1. [Blast](#nvidia-blast)
 2. [Flex](#nvidia-flex)
