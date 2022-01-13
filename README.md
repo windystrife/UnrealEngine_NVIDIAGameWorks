@@ -14,9 +14,7 @@ Here are combined all possible Nvidia Gameworks technologies in one Unreal Engin
  
 **[Bulding and running](#building-and-running)**
  1. [Windows](#windows)
- 2. [Mac](#mac)
- 3. [Linux](#linux)
- 4. [Additional platforms](#additional-target-platforms)
+
 
 ### NVIDIA Blast
 
